@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.registry;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -61,12 +61,12 @@ class AgentRecordTest {
     @Test
     void recordRejectsInvalidRegistrationAndCredentialMetadata() {
         assertThatIllegalArgumentException().isThrownBy(
-                () -> new AgentRecord(new AgentId("agent-1"), " ", Optional.empty(), Optional.empty()));
+                () -> new AgentRecord(new AgentLabel("agent-1"), " ", Optional.empty(), Optional.empty(), Optional.empty()));
         assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord(
-                new AgentId("agent-1"),
+                new AgentLabel("agent-1"),
                 "x".repeat(AgentRecord.MAX_DISPLAY_NAME_BYTES + 1),
                 Optional.empty(),
-                Optional.empty()));
+                Optional.empty(), Optional.empty()));
         assertThatIllegalArgumentException().isThrownBy(
                 () -> new AgentRecord.CredentialDigest(new byte[31]));
         assertThatIllegalArgumentException().isThrownBy(
@@ -118,23 +118,24 @@ class AgentRecordTest {
 
     @Test
     void recordRejectsContradictoryOptionalState() {
-        AgentRecord.Credential credential = credential();
-        assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord.Launch(
-                new AgentGeneration(1),
-                new AgentLaunchId(UUID.fromString("e735b99d-9ebf-40b4-ad7f-cd12da8945c6")),
-                AgentRecord.LaunchState.ONLINE,
-                Optional.of(credential),
-                Optional.of(credential)));
+        AgentRecord record = completeRecord();
+        AgentRecord.Launch launch = record.launch().orElseThrow();
         assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord(
-                new AgentId("agent-1"), "Build agent", Optional.empty(), Optional.of(observation(Map.of()))));
+                record.agentLabel(), record.displayName(), Optional.empty(), Optional.empty(), record.registration()));
+        assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord(
+                record.agentLabel(), record.displayName(),
+                Optional.of(new AgentRecord.Launch(launch.generation(), launch.launchId(), launch.state(),
+                        Optional.of(credential()))), record.observation(), record.registration()));
+        assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord(
+                new AgentLabel("agent-1"), "Build agent", Optional.empty(), Optional.of(observation(Map.of())), Optional.empty()));
     }
 
     @Test
     void recordRejectsNullOptionalContainers() {
         assertThatNullPointerException().isThrownBy(
-                () -> new AgentRecord(new AgentId("agent-1"), "Build agent", null, Optional.empty()));
+                () -> new AgentRecord(new AgentLabel("agent-1"), "Build agent", null, Optional.empty(), Optional.empty()));
         assertThatNullPointerException().isThrownBy(
-                () -> new AgentRecord(new AgentId("agent-1"), "Build agent", Optional.empty(), null));
+                () -> new AgentRecord(new AgentLabel("agent-1"), "Build agent", Optional.empty(), null, Optional.empty()));
     }
 
     private static AgentRecord completeRecord() {
@@ -142,13 +143,14 @@ class AgentRecordTest {
                 new AgentGeneration(7),
                 new AgentLaunchId(UUID.fromString("662d904d-6aac-4383-b9a7-eb955d18bd4b")),
                 AgentRecord.LaunchState.ONLINE,
-                Optional.empty(),
-                Optional.of(credential()));
+                Optional.empty());
         return new AgentRecord(
-                new AgentId("agent-1"),
+                new AgentLabel("agent-1"),
                 "Build agent",
                 Optional.of(launch),
-                Optional.of(observation(Map.of("pty", "true", "journal", "v1"))));
+                Optional.of(observation(Map.of("pty", "true", "journal", "v1"))),
+                Optional.of(new AgentRecord.Registration(launch.generation(), launch.launchId(),
+                        observation(Map.of()).instanceId(), credential())));
     }
 
     private static AgentRecord.Credential credential() {

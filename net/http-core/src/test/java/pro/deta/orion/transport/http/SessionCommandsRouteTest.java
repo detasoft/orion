@@ -12,7 +12,7 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentAuthentication;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SessionCommandsRouteTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final SessionId SESSION = new SessionId("terminal-session");
-    private static final AgentId AGENT = new AgentId("terminal-agent");
+    private static final AgentLabel AGENT = new AgentLabel("terminal-agent");
     private static final String INPUT = """
             {"commandId":"input-1","operation":"input","bytes":"AP8="}
             """;
@@ -89,7 +89,8 @@ class SessionCommandsRouteTest {
 
             SessionEventCodec events = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
             byte[] envelope = new AgentProtocolCodec(AgentProtocolLimits.defaults()).encode(input);
-            peer.sessions.replicationService().append(SESSION, List.of(events.decode(events.encode(
+            peer.sessions.replicationService().append(
+                    peer.sessions.activeAgentContext(AGENT).orElseThrow(), SESSION, List.of(events.decode(events.encode(
                     new EventId(1), new SessionEventPayload.CommandResult(SessionCommandSource.SERVER, 1,
                             ProtocolBytes.copyOf(envelope), SessionCommandOutcome.SUCCEEDED, "")))));
             JsonNode confirmed = json(peer.request("GET", "?commandId=input-1", null, true));

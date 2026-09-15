@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
@@ -95,7 +95,7 @@ public final class SessionCommandsRoute extends BaseAdminRoute {
             return OrionHttpResponse.text(400, "Invalid terminal command");
         }
         try {
-            AgentId owner = server.sessionOwner(sessionId).orElse(null);
+            AgentLabel owner = server.sessionOwner(sessionId).orElse(null);
             if (owner == null) {
                 return OrionHttpResponse.text(404, "Session not found");
             }

@@ -737,7 +737,7 @@ public final class RemoteAgentdProvisioner {
         return List.of(
                 "--server", request.serverUri().toASCIIString(),
                 "--state-dir", request.stateDirectory(),
-                "--agent-id", request.agentId().value(),
+                "--agent-label", request.agentLabel().value(),
                 "--generation", Long.toString(request.generation().value()),
                 "--launch-id", request.launchId().value().toString(),
                 "--max-frame-bytes", Integer.toString(request.maxFrameBytes()),

@@ -1,7 +1,7 @@
 package pro.deta.orion.agent.server.auth;
 
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.server.registry.AgentRecord;
 import pro.deta.orion.agent.server.registry.AgentRegistryException;
@@ -22,7 +22,7 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
     private final FileSystemAgentRegistry registry;
     private final AgentControlAuthenticator authenticator;
     private final AuthenticatedAgentConnections connections;
-    private final AgentId agentId;
+    private final AgentLabel agentLabel;
     private final URI serverUri;
     private final String stateDirectory;
     private final int maxFrameBytes;
@@ -32,7 +32,7 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
             FileSystemAgentRegistry registry,
             AgentControlAuthenticator authenticator,
             AuthenticatedAgentConnections connections,
-            AgentId agentId,
+            AgentLabel agentLabel,
             URI serverUri,
             String stateDirectory,
             int maxFrameBytes,
@@ -43,12 +43,12 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
         AgentdLaunchRequest validated = new AgentdLaunchRequest(
                 serverUri,
                 stateDirectory,
-                agentId,
+                agentLabel,
                 new AgentGeneration(1),
                 new AgentLaunchId(new UUID(0, 0)),
                 maxFrameBytes,
                 agentVersion);
-        this.agentId = validated.agentId();
+        this.agentLabel = validated.agentLabel();
         this.serverUri = validated.serverUri();
         this.stateDirectory = validated.stateDirectory();
         this.maxFrameBytes = validated.maxFrameBytes();
@@ -59,25 +59,22 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
     public AgentdLaunchAttempt nextAttempt() throws ProvisioningException {
         AgentRecord allocated;
         try {
-            allocated = registry.allocateLaunch(agentId);
+            allocated = registry.allocateLaunch(agentLabel, registry.find(agentLabel)
+                    .flatMap(record -> record.registration().map(AgentRecord.Registration::instanceId)));
         } catch (AgentRegistryException failure) {
             throw failure("Could not durably allocate an AgentD launch", failure);
         }
         AgentRecord.Launch launch = allocated.launch().orElseThrow();
-        long previousGeneration = launch.generation().value() - 1;
-        if (previousGeneration > 0) {
-            connections.revokeGeneration(agentId, new AgentGeneration(previousGeneration));
-        }
         AgentdLaunchRequest request = new AgentdLaunchRequest(
                 serverUri,
                 stateDirectory,
-                agentId,
+                agentLabel,
                 launch.generation(),
                 launch.launchId(),
                 maxFrameBytes,
                 agentVersion);
         AgentControlAuthenticator.PermitIssueResult result = authenticator.issueLaunchPermit(
-                agentId, launch.generation(), launch.launchId());
+                agentLabel, launch.generation(), launch.launchId());
         if (result instanceof AgentControlAuthenticator.PermitIssueResult.Issued issued) {
             return new AgentdLaunchAttempt(request, issued.permit());
         }
@@ -89,12 +86,12 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
 
     @Override
     public boolean awaitSustainedOffline(Duration timeout) throws InterruptedException {
-        return connections.awaitSustainedOffline(agentId, timeout);
+        return connections.awaitSustainedOffline(agentLabel, timeout);
     }
 
     @Override
     public boolean awaitOnline(AgentLaunchId launchId, Duration timeout) throws InterruptedException {
-        return connections.awaitOnline(agentId, launchId, timeout);
+        return connections.awaitOnline(agentLabel, launchId, timeout);
     }
 
     private static ProvisioningException failure(String message, AgentRegistryException cause) {

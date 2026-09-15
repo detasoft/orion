@@ -1,5 +1,6 @@
 package pro.deta.orion.agentd;
 
+import java.io.IOException;
 import pro.deta.orion.agentd.core.Agent;
 import pro.deta.orion.agentd.core.AgentConfiguration;
 import pro.deta.orion.agentd.core.AgentLaunchContext;
@@ -20,7 +21,7 @@ public final class AgentdMain {
 
             Options:
               --state-dir PATH       persistent AgentD state directory
-              --agent-id ID          server-assigned stable agent identity
+              --agent-label LABEL     unique stable agent label
               --generation N         server-assigned positive launch generation
               --launch-id UUID       server-assigned launch identity
               --max-frame-bytes N    maximum Agent protocol frame size
@@ -78,7 +79,7 @@ public final class AgentdMain {
              AgentLaunchContext context = AgentLaunchContext.create(configuration, permit)) {
             launcher.launch(configuration, context);
             return 0;
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             errors.println("Invalid AgentD launch permit");
             return 2;
         } catch (RuntimeException e) {

@@ -20,7 +20,7 @@ class AgentConfigurationTest {
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.example.test/control",
                 "--state-dir", "target/agent-state",
-                "--agent-id", "agent-01KABC",
+                "--agent-label", "agent-01KABC",
                 "--generation", "7",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--max-frame-bytes", "65536",
@@ -34,7 +34,7 @@ class AgentConfigurationTest {
                 Path.of("target/agent-state/sessions").toAbsolutePath());
         assertThat(configuration.processLockFile()).isEqualTo(
                 Path.of("target/agent-state/agentd.lock").toAbsolutePath());
-        assertThat(configuration.agentId().value()).isEqualTo("agent-01KABC");
+        assertThat(configuration.agentLabel().value()).isEqualTo("agent-01KABC");
         assertThat(configuration.generation().value()).isEqualTo(7);
         assertThat(configuration.launchId().value()).isEqualTo(
                 UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f"));
@@ -80,7 +80,7 @@ class AgentConfigurationTest {
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", state.toString(),
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0"
@@ -99,7 +99,7 @@ class AgentConfigurationTest {
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", state.toString(),
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0",
@@ -115,19 +115,19 @@ class AgentConfigurationTest {
         assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", "target/state",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1"
         })).withMessageContaining("--launch-id");
         assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f"
         })).withMessageContaining("--state-dir");
         assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", "target/state",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f"
         })).withMessageContaining("--agent-version");
@@ -147,7 +147,7 @@ class AgentConfigurationTest {
         return new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", "target/state",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0",

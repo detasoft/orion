@@ -3,7 +3,7 @@ package pro.deta.orion.agent.server.registry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -21,13 +22,13 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.agent.server.registry.AgentRecord.LaunchState.RECOVERING;
+import static pro.deta.orion.agent.server.registry.AgentRecord.LaunchState.STARTING;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.CONFLICT;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.INVALID_STATE;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.NOT_FOUND;
 
 class AgentRegistryObservationTest {
-    private static final AgentId AGENT = new AgentId("agent-1");
+    private static final AgentLabel AGENT = new AgentLabel("agent-1");
     private static final Instant NOW = Instant.parse("2026-09-10T12:00:00Z");
 
     @TempDir
@@ -39,20 +40,20 @@ class AgentRegistryObservationTest {
         AgentRecord.Observation first;
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
             registry.register(AGENT, "Build agent");
-            AgentRecord.Launch launch = registry.allocateLaunch(AGENT).launch().orElseThrow();
+            AgentRecord.Launch launch = registerInstance(registry).launch().orElseThrow();
             first = observation(launch, 1, NOW);
 
             firstObserved = registry.recordObservation(AGENT, first);
 
             assertThat(firstObserved.launch()).contains(launch);
             assertThat(firstObserved.observation()).contains(first);
-            assertThat(firstObserved.launch().orElseThrow().state()).isEqualTo(RECOVERING);
+            assertThat(firstObserved.launch().orElseThrow().state()).isEqualTo(STARTING);
         }
 
         AgentRecord replacementObserved;
         try (FileSystemAgentRegistry reopened = new FileSystemAgentRegistry(root)) {
             assertThat(reopened.find(AGENT)).contains(firstObserved);
-            AgentRecord replacement = reopened.allocateLaunch(AGENT);
+            AgentRecord replacement = registerInstance(reopened);
             assertThat(replacement.observation()).contains(first);
             AgentRecord.Launch launch = replacement.launch().orElseThrow();
             AgentRecord.Observation second = observation(launch, 2, NOW.plusSeconds(1));
@@ -61,13 +62,13 @@ class AgentRegistryObservationTest {
 
             assertThat(replacementObserved.launch()).contains(launch);
             assertThat(replacementObserved.observation()).contains(second);
-            assertThat(replacementObserved.launch().orElseThrow().state()).isEqualTo(RECOVERING);
+            assertThat(replacementObserved.launch().orElseThrow().state()).isEqualTo(STARTING);
         }
 
         try (FileSystemAgentRegistry reopened = new FileSystemAgentRegistry(root)) {
             assertThat(reopened.find(AGENT)).contains(replacementObserved);
             assertThat(reopened.find(AGENT).orElseThrow().launch().orElseThrow().state())
-                    .isEqualTo(RECOVERING);
+                    .isEqualTo(STARTING);
         }
     }
 
@@ -83,7 +84,7 @@ class AgentRegistryObservationTest {
                     AGENT, observation(generation, launchId, 1, NOW)), INVALID_STATE);
             assertThat(registry.find(AGENT)).contains(registered);
 
-            AgentRecord.Launch first = registry.allocateLaunch(AGENT).launch().orElseThrow();
+            AgentRecord.Launch first = registerInstance(registry).launch().orElseThrow();
             assertFailure(() -> registry.recordObservation(AGENT, observation(
                     new AgentGeneration(2), first.launchId(), 1, NOW)), CONFLICT);
             assertFailure(() -> registry.recordObservation(AGENT, observation(
@@ -91,7 +92,7 @@ class AgentRegistryObservationTest {
             AgentRecord.Observation historical = observation(first, 1, NOW);
             registry.recordObservation(AGENT, historical);
 
-            AgentRecord replacement = registry.allocateLaunch(AGENT);
+            AgentRecord replacement = registerInstance(registry);
             assertFailure(() -> registry.recordObservation(AGENT, observation(first, 2, NOW.plusSeconds(1))),
                     CONFLICT);
             assertThat(registry.find(AGENT)).contains(replacement);
@@ -106,7 +107,7 @@ class AgentRegistryObservationTest {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root);
                 var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             registry.register(AGENT, "Build agent");
-            AgentRecord.Launch launch = registry.allocateLaunch(AGENT).launch().orElseThrow();
+            AgentRecord.Launch launch = registerInstance(registry).launch().orElseThrow();
             CountDownLatch start = new CountDownLatch(1);
             List<Future<AgentRecord>> futures = new ArrayList<>();
             for (int index = 0; index < 16; index++) {
@@ -133,6 +134,17 @@ class AgentRegistryObservationTest {
         }
     }
 
+    private static AgentRecord registerInstance(FileSystemAgentRegistry registry) throws AgentRegistryException {
+        AgentRecord.Launch launch = registry.allocateLaunch(AGENT, registry.find(AGENT)
+                .flatMap(record -> record.registration().map(AgentRecord.Registration::instanceId)))
+                .launch().orElseThrow();
+        AgentRecord.Credential credential = new AgentRecord.Credential(
+                new AgentRecord.CredentialDigest(new byte[32]), NOW.plusSeconds(600));
+        registry.installLaunchPermit(AGENT, launch.generation(), launch.launchId(), credential, NOW);
+        return registry.consumeLaunchPermit(AGENT, launch.generation(), launch.launchId(),
+                new AgentInstanceId(new UUID(0, launch.generation().value())), credential.digest(), credential, NOW);
+    }
+
     private static AgentRecord.Observation observation(
             AgentRecord.Launch launch,
             int sequence,
@@ -148,7 +160,7 @@ class AgentRegistryObservationTest {
         return new AgentRecord.Observation(
                 generation,
                 launchId,
-                new AgentInstanceId(new UUID(0, sequence + 1L)),
+                new AgentInstanceId(new UUID(0, generation.value())),
                 "1.2." + sequence,
                 new MachineInfo("worker-" + sequence, "linux", "aarch64"),
                 Map.of("sequence", Integer.toString(sequence)),

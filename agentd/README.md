@@ -10,12 +10,20 @@ If startup fails, already-started services are closed in reverse order; normal
 shutdown likewise stops reconnect and heartbeat work, closes the transport and
 discovery monitor, and only then releases the process lock.
 
+Each process launch creates a fresh in-memory instance UUID. `--agent-label` names
+one unique logical agent on the server; the label remains stable across restarts.
+The server/provisioner allocates startup authorization for either an unregistered
+label or the exact current instance to replace. Issuance leaves that instance
+active until a replacement successfully registers.
+
 The initial connection authenticates with the launch permit. After the server
 accepts it, AgentD keeps the returned reconnect token only in process memory and
 uses it for bounded-backoff reconnects and periodic heartbeats. A rejected
 initial credential fails startup. A rejected or revoked reconnect remains
 offline and retries until AgentD is closed or replaced by a newly launched
-generation.
+generation. Reconnect keeps the same instance UUID, and a new process requires a
+fresh startup permit. If the first WELCOME is lost after registration committed,
+the provisioner requests a fresh authorized launch; the consumed permit stays unusable.
 
 Session discovery continues while the server is unavailable. After reconnect,
 the server requests a full session list and AgentD responds from the latest

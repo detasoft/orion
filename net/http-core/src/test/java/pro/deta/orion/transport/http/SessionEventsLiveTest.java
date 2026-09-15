@@ -1,5 +1,10 @@
 package pro.deta.orion.transport.http;
 
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
+import java.util.Base64;
+import java.util.UUID;
+import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +23,15 @@ import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.AgentSessionServer;
+import pro.deta.orion.agent.server.connection.AgentControlHandler;
+import pro.deta.orion.agent.protocol.AgentLabel;
+import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentAuthentication;
+import pro.deta.orion.agent.protocol.AgentProtocolVersion;
+import pro.deta.orion.agent.protocol.JournalFormatVersion;
+import pro.deta.orion.agent.protocol.AgentInstanceId;
+import pro.deta.orion.agent.protocol.MachineInfo;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -35,6 +49,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -190,6 +205,7 @@ class SessionEventsLiveTest {
     }
 
     private static final class Peer implements AutoCloseable {
+        private static final AgentLabel AGENT = new AgentLabel("events-agent");
         private final AgentSessionServer sessions;
         private final Server http = new Server();
         private final ServerConnector connector = new ServerConnector(http);
@@ -201,6 +217,27 @@ class SessionEventsLiveTest {
         private Peer(Path root, Duration writeTimeout) throws Exception {
             sessions = new AgentSessionServer(root);
             sessions.onStart();
+            sessions.registerAgent(AGENT, "events agent");
+            AgentControlHandler.Session control = sessions.open(new AgentControlHandler.Connection() {
+                public CompletionStage<Void> send(AgentMessage message) {
+                    return CompletableFuture.completedFuture(null);
+                }
+                public void handshakeComplete() { }
+                public void close() { }
+            });
+            try (var attempt = sessions.provisioningControl(AGENT,
+                    URI.create("https://orion.example/agent/control"), "/tmp/agent", 65536, "test")
+                    .nextAttempt()) {
+                control.onMessage(new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
+                        AGENT, new AgentInstanceId(UUID.randomUUID()), "test",
+                        new MachineInfo("test", "linux", "aarch64"), Map.of(),
+                        Optional.of(new AgentAuthentication(attempt.request().generation(),
+                                attempt.request().launchId(), AgentAuthentication.Kind.LAUNCH_PERMIT,
+                                ProtocolBytes.copyOf(Base64.getUrlDecoder()
+                                        .decode(attempt.permit().copyBytes()))))));
+            }
+            control.onMessage(new AgentMessage.SessionList(List.of(new SessionDescriptor(
+                    SESSION, AgentMessage.SessionState.RUNNING, Optional.empty(), Optional.empty(), "running"))));
             connector.setHost("127.0.0.1");
             connector.setPort(0);
             http.addConnector(connector);
@@ -244,7 +281,7 @@ class SessionEventsLiveTest {
         }
 
         private void append(SessionEventRecord event) throws Exception {
-            sessions.replicationService().append(SESSION, List.of(event));
+            sessions.replicationService().append(sessions.activeAgentContext(AGENT).orElseThrow(), SESSION, List.of(event));
         }
 
         @Override

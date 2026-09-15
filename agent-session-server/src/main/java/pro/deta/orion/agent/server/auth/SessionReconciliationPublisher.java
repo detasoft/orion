@@ -81,7 +81,7 @@ public final class SessionReconciliationPublisher {
                 }
                 if (reported != null) {
                     try {
-                        registry.reconcile(context.agentId(), reported);
+                        registry.reconcile(context.agentLabel(), reported);
                     } catch (SessionRegistryException failure) {
                         acceptingMessages = false;
                         failed = true;

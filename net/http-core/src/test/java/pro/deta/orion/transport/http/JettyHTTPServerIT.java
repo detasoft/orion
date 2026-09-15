@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentAuthentication;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -139,7 +139,7 @@ class JettyHTTPServerIT {
 
     @Test
     void realAgentdReconnectsToRestartedServerAndReportsOfflineDiscovery() throws Exception {
-        AgentId agentId = new AgentId("live-agent");
+        AgentLabel agentLabel = new AgentLabel("live-agent");
         AgentInstanceId instanceId = new AgentInstanceId(UUID.randomUUID());
         MutableClock clock = new MutableClock(Instant.parse("2026-09-10T12:00:00Z"));
         AgentSessionServer agentServer =
@@ -153,7 +153,7 @@ class JettyHTTPServerIT {
 
         try (MaterialFixture material = material()) {
             agentServer.onStart();
-            agentServer.registerAgent(agentId, "Live worker");
+            agentServer.registerAgent(agentLabel, "Live worker");
             JettyHTTPServer firstServer = startHttps(
                     material,
                     false,
@@ -163,11 +163,11 @@ class JettyHTTPServerIT {
             try {
                 URI endpoint = URI.create(firstServer.relativiseHttps("").toString());
                 var control = agentServer.provisioningControl(
-                        agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                        agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
                 try (var attempt = control.nextAttempt()) {
                     byte[] permit = Base64.getUrlDecoder().decode(attempt.permit().copyBytes());
                     AgentLaunchContext context = new AgentLaunchContext(
-                            agentId,
+                            agentLabel,
                             attempt.request().generation(),
                             attempt.request().launchId(),
                             instanceId,
@@ -208,7 +208,7 @@ class JettyHTTPServerIT {
                                 new AgentControlRoute(observed));
                         try {
                             var restartedControl = agentServer.provisioningControl(
-                                    agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                                    agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
                             assertThat(restartedControl.awaitOnline(launchId, Duration.ofSeconds(10))).isTrue();
                             observed.awaitSessionList("live-session", "offline-session");
 
@@ -228,7 +228,7 @@ class JettyHTTPServerIT {
 
         try (FileSystemSessionRegistry sessions =
                      new FileSystemSessionRegistry(agentServerRoot.resolve("sessions"))) {
-            assertThat(sessions.ownedBy(agentId))
+            assertThat(sessions.ownedBy(agentLabel))
                     .extracting(record -> record.reported().sessionId().value())
                     .containsExactly("live-session", "offline-session");
         }
@@ -788,7 +788,7 @@ class JettyHTTPServerIT {
     }
 
     private static AgentMessage.Hello hello(
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentGeneration generation,
             AgentLaunchId launchId,
             AgentInstanceId instanceId,
@@ -797,7 +797,7 @@ class JettyHTTPServerIT {
         return new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                agentId,
+                agentLabel,
                 instanceId,
                 "1.0.0",
                 new MachineInfo("worker-1", "linux", "aarch64"),

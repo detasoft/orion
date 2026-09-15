@@ -12,9 +12,9 @@ the structural failure is terminal for that control or session response stream;
 any valid prefix is still delivered first. Receivers do not scan for a
 plausible later item or rely on an outer length marker to resynchronize.
 
-HTTP/2 stream IDs are transport details. `AgentId`, `AgentInstanceId`,
-`SessionId`, `EventId`, and `CommandId` are the stable logical identities used
-after reconnects and server restarts.
+HTTP/2 stream IDs are transport details. `AgentLabel`, `AgentInstanceId`,
+`SessionId`, `EventId`, and `CommandId` identify the logical participants and data.
+An instance ID survives transport reconnects and changes on every AgentD process launch.
 
 ## Encoding Rules
 
@@ -38,8 +38,8 @@ decoding and is distinct from semantic recovery within the sequence decoder.
 
 | ID | Direction | Message | Array positions after type |
 | ---: | --- | --- | --- |
-| `0x0001` | agent to server | `HELLO` | versions, AgentId, instance, agent version, machine, capabilities, optional authentication tail |
-| `0x0002` | agent to server | `HEARTBEAT` | AgentId, AgentInstanceId, epoch milliseconds |
+| `0x0001` | agent to server | `HELLO` | versions, AgentLabel, instance, agent version, machine, capabilities, optional authentication tail |
+| `0x0002` | agent to server | `HEARTBEAT` | AgentLabel, AgentInstanceId, epoch milliseconds |
 | `0x0003` | agent to server | `AGENT_STATUS` | IDs, version, machine, session count, metrics, capabilities |
 | `0x0004` | agent to server | `SESSION_STATUS` | session descriptor |
 | `0x0005` | agent to server | `COMMAND_RESULT` | CommandId, optional SessionId, outcome, detail |
@@ -78,8 +78,8 @@ The frozen eight-field `HELLO` prefix may append `[generation, launchId,
 credentialKind, credentialBytes]`, where generation is positive, launch ID is
 a UUID, kind `1` is a launch permit, kind `2` is a reconnect token, and the
 credential contains 32 through 512 bytes. A partial authentication tail is
-invalid. The generic codec retains legacy readability, but the server control
-endpoint must reject an unauthenticated `HELLO`. The frozen five-field
+invalid. The codec can represent an unauthenticated message, but the server control
+endpoint rejects an unauthenticated `HELLO`. The frozen five-field
 `WELCOME` prefix may append a 32-through-512-byte reconnect token.
 `SESSION_OPEN` starts each logical replication stream. The server answers with
 `SESSION_SYNC`; a null cursor requests the first available event, otherwise
@@ -89,8 +89,46 @@ The endpoint is `POST /agent/session/{sessionId}` over HTTP/2. The request path
 ID must match the `SESSION_OPEN` payload, and the response cursor comes only
 from durable server storage. The remaining request body carries the journal's
 original CBOR Sequence records. Multiple disposable physical streams may
-overlap for one session; authentication and ownership belong to the surrounding
-control layer.
+overlap for one session. Each stream retains its authenticated connection context.
+Every queued open and append verifies the current label/instance registration and
+session ownership while holding an operation lease. Registration replacement waits
+for already-authorized operations; later work from old streams is rejected.
+Independent session streams may append concurrently.
+
+## Label registration and replacement
+
+`agentLabel` is one unique logical agent name within a server. Labels contain 1–128
+ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`, with exact case-sensitive
+equality and no normalization. Labels are stable across process restarts and own
+the server's sessions. A label alone grants no authority.
+
+The trusted server/provisioner path allocates a launch against either no current
+instance (initial registration) or an exact expected current instance (authorized
+restart). Occupied-label initial issuance and stale expected instances are rejected.
+The latest allocated generation and launch ID fence all older pending permits;
+allocating or issuing a new permit leaves the current registration authoritative.
+The provisioner delivers the bounded, single-use permit through standard input;
+`--agent-label`, generation, and launch ID are non-secret launch arguments.
+
+AgentD generates a fresh instance UUID per process and sends it with the label and
+permit in `HELLO`. Under one durable ownership transition, the server consumes the
+permit, binds this instance, and replaces the preceding instance's reconnect
+credential. The server persists only credential digests and expiry timestamps.
+A reconnect token authenticates only the exact registered label, instance,
+generation, and launch ID. A fresh process cannot reuse it. Heartbeat renewal
+retains the digest and extends expiry from server time.
+
+A lost first `WELCOME` does not make the consumed permit reusable. Recovery obtains
+a new authorized launch against the now-current registration. A reconnect response
+can be retried by the same process with its existing reconnect credential. Connection
+IDs identify disposable transports; delayed control callbacks, delivery completions,
+and stream appends from a replaced instance cannot mutate the replacement's state.
+
+Agent records, session ownership records, and command-ledger records use server
+storage format version 2. Previous identity formats are unsupported and fail
+explicitly before their files are rewritten or removed. There is no conversion or
+legacy authentication path. An ambiguous publication fences the registry until
+reopen; durable recovery cannot revive consumed permits or superseded credentials.
 
 ## Session Journal Records
 

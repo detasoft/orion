@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.registry;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 
 import java.nio.file.Path;
 
@@ -16,26 +16,26 @@ class FileSystemAgentRegistryTest {
     @Test
     void registeredAgentSurvivesCloseAndReopen() throws AgentRegistryException {
         Path root = temporaryDirectory.resolve("agents");
-        AgentId agentId = new AgentId("agent-1");
+        AgentLabel agentLabel = new AgentLabel("agent-1");
 
         AgentRecord registered;
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            assertThat(registry.find(agentId)).isEmpty();
-            registered = registry.register(agentId, "Build agent");
-            assertThat(registry.find(agentId)).contains(registered);
+            assertThat(registry.find(agentLabel)).isEmpty();
+            registered = registry.register(agentLabel, "Build agent");
+            assertThat(registry.find(agentLabel)).contains(registered);
         }
 
         try (FileSystemAgentRegistry reopened = new FileSystemAgentRegistry(root)) {
-            assertThat(reopened.find(agentId)).contains(registered);
+            assertThat(reopened.find(agentLabel)).contains(registered);
         }
     }
 
     @Test
     void duplicateRegistrationPreservesExistingState() throws AgentRegistryException {
         try (FileSystemAgentRegistry registry = registry()) {
-            AgentRecord first = registry.register(new AgentId("agent-1"), "Build agent");
+            AgentRecord first = registry.register(new AgentLabel("agent-1"), "Build agent");
 
-            AgentRecord duplicate = registry.register(new AgentId("agent-1"), "Build agent");
+            AgentRecord duplicate = registry.register(new AgentLabel("agent-1"), "Build agent");
 
             assertThat(duplicate).isSameAs(first);
         }
@@ -43,26 +43,26 @@ class FileSystemAgentRegistryTest {
 
     @Test
     void conflictingDuplicateDoesNotReplaceExistingRecord() throws AgentRegistryException {
-        AgentId agentId = new AgentId("agent-1");
+        AgentLabel agentLabel = new AgentLabel("agent-1");
         try (FileSystemAgentRegistry registry = registry()) {
-            AgentRecord first = registry.register(agentId, "Build agent");
+            AgentRecord first = registry.register(agentLabel, "Build agent");
 
-            assertThatThrownBy(() -> registry.register(agentId, "Other agent"))
+            assertThatThrownBy(() -> registry.register(agentLabel, "Other agent"))
                     .isInstanceOf(AgentRegistryException.class)
                     .extracting(failure -> ((AgentRegistryException) failure).reason())
                     .isEqualTo(AgentRegistryException.Reason.CONFLICT);
-            assertThat(registry.find(agentId)).contains(first);
+            assertThat(registry.find(agentLabel)).contains(first);
         }
     }
 
     @Test
     void registrationsForIndependentAgentsRemainIsolated() throws AgentRegistryException {
         try (FileSystemAgentRegistry registry = registry()) {
-            AgentRecord first = registry.register(new AgentId("agent-1"), "First agent");
-            AgentRecord second = registry.register(new AgentId("agent-2"), "Second agent");
+            AgentRecord first = registry.register(new AgentLabel("agent-1"), "First agent");
+            AgentRecord second = registry.register(new AgentLabel("agent-2"), "Second agent");
 
-            assertThat(registry.find(first.agentId())).contains(first);
-            assertThat(registry.find(second.agentId())).contains(second);
+            assertThat(registry.find(first.agentLabel())).contains(first);
+            assertThat(registry.find(second.agentLabel())).contains(second);
         }
     }
 
@@ -71,7 +71,7 @@ class FileSystemAgentRegistryTest {
         FileSystemAgentRegistry registry = registry();
         registry.close();
 
-        assertThatThrownBy(() -> registry.find(new AgentId("agent-1")))
+        assertThatThrownBy(() -> registry.find(new AgentLabel("agent-1")))
                 .isInstanceOf(AgentRegistryException.class)
                 .extracting(failure -> ((AgentRegistryException) failure).reason())
                 .isEqualTo(AgentRegistryException.Reason.CLOSED);

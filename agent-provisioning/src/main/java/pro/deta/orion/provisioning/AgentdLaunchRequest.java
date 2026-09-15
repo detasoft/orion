@@ -1,7 +1,7 @@
 package pro.deta.orion.provisioning;
 
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 
 import java.net.URI;
@@ -9,7 +9,7 @@ import java.net.URI;
 public record AgentdLaunchRequest(
         URI serverUri,
         String stateDirectory,
-        AgentId agentId,
+        AgentLabel agentLabel,
         AgentGeneration generation,
         AgentLaunchId launchId,
         int maxFrameBytes,
@@ -22,7 +22,7 @@ public record AgentdLaunchRequest(
                     "AgentD server URI must be an absolute HTTPS URI without credentials");
         }
         stateDirectory = requirePath(stateDirectory);
-        if (agentId == null || generation == null || launchId == null) {
+        if (agentLabel == null || generation == null || launchId == null) {
             throw new IllegalArgumentException("AgentD launch identity must not be null");
         }
         if (maxFrameBytes <= 0) {

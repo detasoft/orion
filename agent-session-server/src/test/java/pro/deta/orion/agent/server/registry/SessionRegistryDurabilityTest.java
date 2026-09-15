@@ -1,8 +1,9 @@
 package pro.deta.orion.agent.server.registry;
 
+import java.nio.ByteBuffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
@@ -20,12 +21,64 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SessionRegistryDurabilityTest {
-    private static final AgentId AGENT = new AgentId("agent-1");
+    private static final AgentLabel AGENT = new AgentLabel("agent-1");
     private static final SessionId FIRST = new SessionId("session-1");
     private static final SessionId SECOND = new SessionId("session-2");
 
     @TempDir
     Path root;
+
+    @Test
+    void truncatedUnpreparedCurrentRecordIsDiscardedDuringRecovery() throws Exception {
+        Path transaction = Files.createDirectories(root.resolve(".session-transaction-crash"));
+        byte[] encoded = new SessionRecordCodec().encode(new SessionRecord(
+                AGENT, descriptor(FIRST, "first"), Optional.empty()));
+        Files.write(transaction.resolve(SessionRecordCodec.fileName(FIRST)), java.util.Arrays.copyOf(encoded, 11));
+        try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
+            assertThat(registry.find(FIRST)).isEmpty();
+            assertThat(Files.exists(transaction)).isFalse();
+        }
+    }
+
+    @Test
+    void oldOwnershipFormatIsRejectedWithoutChangingItsFile() throws Exception {
+        try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
+            registry.reserveStart(AGENT, FIRST);
+        }
+        Path record = root.resolve(SessionRecordCodec.fileName(FIRST));
+        byte[] oldFormat = Files.readAllBytes(record);
+        ByteBuffer.wrap(oldFormat).putInt(4, 1);
+        Files.write(record, oldFormat);
+        assertThatThrownBy(() -> new FileSystemSessionRegistry(root))
+                .isInstanceOf(SessionRegistryException.class).hasMessageContaining("unsupported version");
+        assertThat(Files.readAllBytes(record)).isEqualTo(oldFormat);
+    }
+
+    @Test
+    void oldPreparedOwnershipRecordsAreRejectedBeforeRecoveryMovesOrDeletesFiles() throws Exception {
+        try (FileSystemSessionRegistry registry = FileSystemSessionRegistry.withOperations(
+                root, new FailAfterFirstMove())) {
+            assertThatThrownBy(() -> registry.reconcile(AGENT,
+                    List.of(descriptor(FIRST, "first"), descriptor(SECOND, "second"))))
+                    .isInstanceOf(SessionRegistryException.class);
+        }
+        java.util.Map<Path, byte[]> before = new java.util.HashMap<>();
+        try (var files = Files.walk(root)) {
+            for (Path file : files.filter(Files::isRegularFile).toList()) {
+                byte[] bytes = Files.readAllBytes(file);
+                if (file.toString().endsWith(".session")) {
+                    ByteBuffer.wrap(bytes).putInt(4, 1);
+                    Files.write(file, bytes);
+                }
+                before.put(file, bytes);
+            }
+        }
+        assertThatThrownBy(() -> new FileSystemSessionRegistry(root))
+                .isInstanceOf(SessionRegistryException.class).hasMessageContaining("unsupported version");
+        for (var entry : before.entrySet()) {
+            assertThat(Files.readAllBytes(entry.getKey())).isEqualTo(entry.getValue());
+        }
+    }
 
     @Test
     void partialBatchPublicationIsFencedAndCompletedOnReopen() throws Exception {

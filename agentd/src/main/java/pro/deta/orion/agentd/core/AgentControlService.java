@@ -600,7 +600,7 @@ public final class AgentControlService implements AgentService {
             expected = handshake.connection().orElse(null);
         }
         AgentMessage.Heartbeat heartbeat = new AgentMessage.Heartbeat(
-                context.agentId(), context.instanceId(), Math.max(0, epochMillis.getAsLong()));
+                context.agentLabel(), context.instanceId(), Math.max(0, epochMillis.getAsLong()));
         CompletionStage<Void> sending;
         try {
             sending = transport.sendControlCbor(codec.encode(heartbeat));

@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletOutputStream;
@@ -59,9 +61,13 @@ class OrionHttpUnifiedRouteTest {
         SessionEventRecord unknown = codec.decode(codec.encodeOpaque(
                 new EventId(20), 50_000, ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}),
                 List.of(ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}))));
+        try (var journal = new FileSystemSessionJournalStorage(
+                root.resolve("journals"), new JournalStorageConfig(
+                        AgentProtocolLimits.journalDefaults()))) {
+            journal.append(sessionId, List.of(first, unknown));
+        }
         server.onStart();
         try {
-            server.replicationService().append(sessionId, List.of(first, unknown));
             OrionHttpRoute route = new SessionEventsRoute(server);
             String path = "/api/admin/sessions/session-1/events";
 

@@ -1,7 +1,11 @@
 package pro.deta.orion.agent.server.replication;
 
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.agent.protocol.AgentId;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import pro.deta.orion.agent.server.auth.RegisteredAgentFixture;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -31,16 +35,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SessionReplicationServiceTest {
     private static final SessionEventCodec EVENTS =
             new SessionEventCodec(AgentProtocolLimits.defaults());
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
     private static final SessionId SESSION_ID = new SessionId("session-1");
+
+    @org.junit.jupiter.api.io.TempDir
+    Path registrationRoot;
+    private RegisteredAgentFixture registered;
+
+    @BeforeEach
+    void registerAgent() throws Exception {
+        registered = new RegisteredAgentFixture(registrationRoot, AGENT_LABEL, SESSION_ID);
+    }
+
+    @AfterEach
+    void closeRegistration() throws Exception {
+        registered.close();
+    }
 
     @Test
     void derivesTheResumeCursorFromDurableStorage() throws Exception {
         RecordingStorage storage = new RecordingStorage(Optional.of(new EventId(12)));
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
         AgentMessage.SessionSync result = service.open(
-                AGENT_ID, open(Optional.of(new EventId(1)), Optional.of(new EventId(20))));
+                registered.context, open(Optional.of(new EventId(1)), Optional.of(new EventId(20))));
 
         assertThat(result).isEqualTo(
                 new AgentMessage.SessionSync(SESSION_ID, Optional.of(new EventId(12))));
@@ -50,10 +68,10 @@ class SessionReplicationServiceTest {
     @Test
     void returnsTheDurableCursorBeforeTheFirstAvailableSpacedEvent() throws Exception {
         RecordingStorage storage = new RecordingStorage(Optional.of(new EventId(5)));
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
         AgentMessage.SessionSync result = service.open(
-                AGENT_ID, open(Optional.of(new EventId(10)), Optional.of(new EventId(20))));
+                registered.context, open(Optional.of(new EventId(10)), Optional.of(new EventId(20))));
 
         assertThat(result.afterEventId()).contains(new EventId(5));
     }
@@ -61,10 +79,10 @@ class SessionReplicationServiceTest {
     @Test
     void requestsTheFirstAvailableEventForAnEmptyServerJournal() throws Exception {
         RecordingStorage storage = new RecordingStorage(Optional.empty());
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
         AgentMessage.SessionSync result = service.open(
-                AGENT_ID, open(Optional.empty(), Optional.empty()));
+                registered.context, open(Optional.empty(), Optional.empty()));
 
         assertThat(result.afterEventId()).isEmpty();
     }
@@ -76,11 +94,11 @@ class SessionReplicationServiceTest {
         storage.appendResult = new JournalAppendResult(
                 Optional.of(event.eventId()), List.of(event));
         storage.blockAppend = true;
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<AgentMessage.SessionSync> acknowledgement = executor.submit(
-                    () -> service.append(SESSION_ID, List.of(event)));
+                    () -> service.append(registered.context, SESSION_ID, List.of(event)));
             assertThat(storage.appendEntered.await(5, TimeUnit.SECONDS)).isTrue();
 
             assertThat(acknowledgement.isDone()).isFalse();
@@ -96,9 +114,9 @@ class SessionReplicationServiceTest {
         RecordingStorage storage = new RecordingStorage(Optional.empty());
         SessionEventRecord retried = event(4, (byte) 4);
         storage.appendResult = new JournalAppendResult(Optional.of(new EventId(9)), List.of());
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
-        AgentMessage.SessionSync acknowledgement = service.append(SESSION_ID, List.of(retried));
+        AgentMessage.SessionSync acknowledgement = service.append(registered.context, SESSION_ID, List.of(retried));
 
         assertThat(acknowledgement.afterEventId()).contains(new EventId(9));
         assertThat(storage.appended).containsExactly(retried);
@@ -110,12 +128,12 @@ class SessionReplicationServiceTest {
         SessionEventRecord event = event(1, (byte) 1);
         storage.appendResult = new JournalAppendResult(Optional.of(event.eventId()), List.of(event));
         storage.blockAppend = true;
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
         try (var subscription = service.subscribe(SESSION_ID);
              var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             Future<AgentMessage.SessionSync> append = executor.submit(
-                    () -> service.append(SESSION_ID, List.of(event)));
+                    () -> service.append(registered.context, SESSION_ID, List.of(event)));
             assertThat(storage.appendEntered.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
 
@@ -124,7 +142,7 @@ class SessionReplicationServiceTest {
             assertThat(subscription.awaitChange(Duration.ofSeconds(1))).isTrue();
 
             storage.appendResult = new JournalAppendResult(Optional.of(event.eventId()), List.of());
-            service.append(SESSION_ID, List.of(event));
+            service.append(registered.context, SESSION_ID, List.of(event));
             assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
         }
     }
@@ -134,9 +152,9 @@ class SessionReplicationServiceTest {
         RecordingStorage storage = new RecordingStorage(Optional.empty());
         storage.appendFailure = new JournalStorageException(
                 JournalStorageException.Reason.IO_FAILURE, "append failed");
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
         try (var subscription = service.subscribe(SESSION_ID)) {
-            assertThatThrownBy(() -> service.append(SESSION_ID, List.of(event(1, (byte) 1))))
+            assertThatThrownBy(() -> service.append(registered.context, SESSION_ID, List.of(event(1, (byte) 1))))
                     .isInstanceOf(SessionReplicationException.class);
             assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
         }
@@ -147,13 +165,13 @@ class SessionReplicationServiceTest {
         for (JournalStorageException.Reason reason : JournalStorageException.Reason.values()) {
             RecordingStorage storage = new RecordingStorage(Optional.empty());
             storage.appendFailure = new JournalStorageException(reason, reason.name());
-            SessionReplicationService service = new SessionReplicationService(storage);
+            SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
             SessionReplicationException.Kind expected = switch (reason) {
                 case INVALID_APPEND, CONFLICTING_DUPLICATE -> SessionReplicationException.Kind.PROTOCOL;
                 case STORED_CORRUPTION, IO_FAILURE, CLOSED -> SessionReplicationException.Kind.INTERNAL;
             };
 
-            assertThatThrownBy(() -> service.append(SESSION_ID, List.of(event(1, (byte) 1))))
+            assertThatThrownBy(() -> service.append(registered.context, SESSION_ID, List.of(event(1, (byte) 1))))
                     .isInstanceOfSatisfying(SessionReplicationException.class,
                             failure -> assertThat(failure.kind()).isEqualTo(expected))
                     .hasCause(storage.appendFailure);
@@ -164,13 +182,13 @@ class SessionReplicationServiceTest {
     void rejectsEmptyBatchAndMissingDurableCursor() throws Exception {
         RecordingStorage storage = new RecordingStorage(Optional.empty());
         storage.appendResult = new JournalAppendResult(Optional.empty(), List.of());
-        SessionReplicationService service = new SessionReplicationService(storage);
+        SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
 
-        assertThatThrownBy(() -> service.append(SESSION_ID, List.of()))
+        assertThatThrownBy(() -> service.append(registered.context, SESSION_ID, List.of()))
                 .isInstanceOfSatisfying(SessionReplicationException.class,
                         failure -> assertThat(failure.kind())
                                 .isEqualTo(SessionReplicationException.Kind.PROTOCOL));
-        assertThatThrownBy(() -> service.append(SESSION_ID, List.of(event(1, (byte) 1))))
+        assertThatThrownBy(() -> service.append(registered.context, SESSION_ID, List.of(event(1, (byte) 1))))
                 .isInstanceOfSatisfying(SessionReplicationException.class,
                         failure -> assertThat(failure.kind())
                                 .isEqualTo(SessionReplicationException.Kind.INTERNAL));

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agentd.core.AgentConfiguration;
 
@@ -258,7 +258,7 @@ class RemoteAgentdProvisionerTest {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"),
                 stateDirectory,
-                new AgentId("agent-1"),
+                new AgentLabel("agent-1"),
                 new AgentGeneration(1),
                 new AgentLaunchId(UUID.randomUUID()),
                 1_048_576,

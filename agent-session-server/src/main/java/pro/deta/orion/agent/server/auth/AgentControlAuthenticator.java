@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.auth;
 
 import pro.deta.orion.agent.protocol.AgentAuthentication;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -87,8 +87,8 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
     }
 
     public PermitIssueResult issueLaunchPermit(
-            AgentId agentId, AgentGeneration generation, AgentLaunchId launchId) {
-        Objects.requireNonNull(agentId, "agentId");
+            AgentLabel agentLabel, AgentGeneration generation, AgentLaunchId launchId) {
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(generation, "generation");
         Objects.requireNonNull(launchId, "launchId");
         byte[] credential = randomBytes();
@@ -96,7 +96,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
         try {
             Instant now = clock.instant();
             registry.installLaunchPermit(
-                    agentId,
+                    agentLabel,
                     generation,
                     launchId,
                     new AgentRecord.Credential(digest(credential), now.plus(permitLifetime)),
@@ -201,9 +201,10 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                     Instant now = clock.instant();
                     AgentRecord.CredentialDigest tokenDigest = digest(welcomeToken);
                     registry.consumeLaunchPermit(
-                            hello.agentId(),
+                            hello.agentLabel(),
                             authentication.generation(),
                             authentication.launchId(),
+                            hello.instanceId(),
                             credentialDigest,
                             new AgentRecord.Credential(tokenDigest, now.plus(reconnectTokenLifetime)),
                             now);
@@ -216,9 +217,10 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                 } else {
                     Instant now = clock.instant();
                     registry.verifyReconnectToken(
-                            hello.agentId(),
+                            hello.agentLabel(),
                             authentication.generation(),
                             authentication.launchId(),
+                            hello.instanceId(),
                             credentialDigest,
                             now);
                     sendWelcome(
@@ -285,9 +287,9 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             Session published;
             try {
                 registry.verifyReconnectToken(
-                        hello.agentId(), generation, launchId, tokenDigest, clock.instant());
+                        hello.agentLabel(), generation, launchId, hello.instanceId(), tokenDigest, clock.instant());
                 AuthenticatedConnectionContext context = new AuthenticatedConnectionContext(
-                        hello.agentId(),
+                        hello.agentLabel(),
                         generation,
                         launchId,
                         hello.instanceId(),
@@ -297,20 +299,31 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                         connectionId,
                         connection,
                         () -> renewIfOpen(
-                                hello.agentId(),
+                                hello.agentLabel(),
                                 generation,
                                 launchId,
+                                hello.instanceId(),
                                 tokenDigest),
                         (agentVersion, machine, capabilities, observedAt) -> observe(
-                                hello.agentId(),
+                                hello.agentLabel(),
                                 generation,
                                 launchId,
                                 hello.instanceId(),
                                 agentVersion,
                                 machine,
                                 capabilities,
-                                observedAt));
-                published = Objects.requireNonNull(publisher.apply(context), "authenticated session");
+                                observedAt),
+                        () -> {
+                            try {
+                                return registry.acquireRegistration(hello.agentLabel(), generation,
+                                        launchId, hello.instanceId());
+                            } catch (AgentRegistryException failure) {
+                                throw new IllegalStateException("Agent registration is unavailable", failure);
+                            }
+                        });
+                try (var ignored = context.acquireAuthority()) {
+                    published = Objects.requireNonNull(publisher.apply(context), "authenticated session");
+                }
             } catch (Throwable failure) {
                 reject();
                 return;
@@ -344,14 +357,15 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
         }
 
         private synchronized AuthenticatedConnectionContext.RenewalResult renewIfOpen(
-                AgentId agentId,
+                AgentLabel agentLabel,
                 AgentGeneration generation,
                 AgentLaunchId launchId,
+                AgentInstanceId instanceId,
                 AgentRecord.CredentialDigest tokenDigest) {
             if (state != State.PUBLISHING && state != State.AUTHENTICATED) {
                 return AuthenticatedConnectionContext.RenewalResult.REJECTED;
             }
-            return renew(agentId, generation, launchId, tokenDigest);
+            return renew(agentLabel, generation, launchId, instanceId, tokenDigest);
         }
 
         private boolean closeLocked() {
@@ -364,16 +378,18 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
     }
 
     private AuthenticatedConnectionContext.RenewalResult renew(
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentGeneration generation,
             AgentLaunchId launchId,
+            AgentInstanceId instanceId,
             AgentRecord.CredentialDigest tokenDigest) {
         Instant now = clock.instant();
         try {
             registry.renewReconnectToken(
-                    agentId,
+                    agentLabel,
                     generation,
                     launchId,
+                    instanceId,
                     tokenDigest,
                     now.plus(reconnectTokenLifetime),
                     now);
@@ -386,7 +402,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
     }
 
     private AuthenticatedConnectionContext.ObservationResult observe(
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentGeneration generation,
             AgentLaunchId launchId,
             AgentInstanceId instanceId,
@@ -395,7 +411,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             Map<String, String> capabilities,
             Instant observedAt) {
         try {
-            registry.recordObservation(agentId, new AgentRecord.Observation(
+            registry.recordObservation(agentLabel, new AgentRecord.Observation(
                     generation,
                     launchId,
                     instanceId,

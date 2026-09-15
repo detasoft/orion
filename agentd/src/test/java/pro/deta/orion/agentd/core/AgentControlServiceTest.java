@@ -350,7 +350,7 @@ class AgentControlServiceTest {
         await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
         List<AgentMessage.Hello> hellos = messages(transport.controls, AgentMessage.Hello.class);
         AgentMessage.Hello reconnect = hellos.get(1);
-        assertThat(reconnect.agentId()).isEqualTo(initial.agentId());
+        assertThat(reconnect.agentLabel()).isEqualTo(initial.agentLabel());
         assertThat(reconnect.instanceId()).isEqualTo(initial.instanceId());
         assertThat(reconnect.authentication()).hasValueSatisfying(authentication -> {
             assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);

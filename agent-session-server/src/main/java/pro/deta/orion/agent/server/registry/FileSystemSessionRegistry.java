@@ -1,6 +1,6 @@
 package pro.deta.orion.agent.server.registry;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
@@ -47,6 +47,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         try {
             prepared = operations.prepareRoot(requestedRoot.toAbsolutePath().normalize());
             acquired = operations.acquireRoot(prepared);
+            operations.validateRecordFormats(prepared);
             operations.recoverTransactions(prepared);
             load(prepared);
         } catch (SessionRegistryFileOperations.RootInUseException failure) {
@@ -88,10 +89,10 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         }
     }
 
-    public synchronized void reconcile(AgentId agentId, List<SessionDescriptor> sessions)
+    public synchronized void reconcile(AgentLabel agentLabel, List<SessionDescriptor> sessions)
             throws SessionRegistryException {
         requireOpen();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         List<SessionDescriptor> snapshot = List.copyOf(sessions);
         Map<SessionId, SessionDescriptor> reported = new LinkedHashMap<>();
         for (SessionDescriptor descriptor : snapshot) {
@@ -100,7 +101,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
                 throw conflict("Session report contains a duplicate session ID");
             }
             SessionRecord current = records.get(descriptor.sessionId());
-            if (current != null && !current.agentId().equals(agentId)) {
+            if (current != null && !current.agentLabel().equals(agentLabel)) {
                 throw conflict("Session belongs to another agent");
             }
         }
@@ -109,7 +110,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         for (SessionDescriptor descriptor : reported.values()) {
             SessionRecord current = records.get(descriptor.sessionId());
             SessionRecord replacement = new SessionRecord(
-                    agentId,
+                    agentLabel,
                     descriptor,
                     current == null ? Optional.empty() : current.outcome());
             if (!replacement.equals(current)) {
@@ -119,25 +120,25 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         publish(replacements);
     }
 
-    public synchronized void reserveStart(AgentId agentId, SessionId sessionId)
+    public synchronized void reserveStart(AgentLabel agentLabel, SessionId sessionId)
             throws SessionRegistryException {
         requireOpen();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(sessionId, "sessionId");
         if (records.containsKey(sessionId)) {
             throw conflict("Session ID already exists");
         }
         SessionDescriptor starting = new SessionDescriptor(sessionId,
                 AgentMessage.SessionState.STARTING, Optional.empty(), Optional.empty(), "");
-        publish(Map.of(sessionId, new SessionRecord(agentId, starting, Optional.empty())));
+        publish(Map.of(sessionId, new SessionRecord(agentLabel, starting, Optional.empty())));
     }
 
     public synchronized void recordOutcome(
-            AgentId agentId,
+            AgentLabel agentLabel,
             SessionId sessionId,
             SessionRecord.Outcome outcome) throws SessionRegistryException {
         requireOpen();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(sessionId, "sessionId");
         Objects.requireNonNull(outcome, "outcome");
         SessionRecord current = records.get(sessionId);
@@ -146,11 +147,11 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
                     SessionRegistryException.Reason.NOT_FOUND,
                     "Session is not registered");
         }
-        if (!current.agentId().equals(agentId)) {
+        if (!current.agentLabel().equals(agentLabel)) {
             throw conflict("Session belongs to another agent");
         }
         SessionRecord replacement = new SessionRecord(
-                agentId,
+                agentLabel,
                 current.reported(),
                 Optional.of(outcome));
         if (!replacement.equals(current)) {
@@ -164,13 +165,13 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         return Optional.ofNullable(records.get(Objects.requireNonNull(sessionId, "sessionId")));
     }
 
-    public synchronized List<SessionRecord> ownedBy(AgentId agentId)
+    public synchronized List<SessionRecord> ownedBy(AgentLabel agentLabel)
             throws SessionRegistryException {
         requireOpen();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         List<SessionRecord> owned = new ArrayList<>();
         for (SessionRecord record : records.values()) {
-            if (record.agentId().equals(agentId)) {
+            if (record.agentLabel().equals(agentLabel)) {
                 owned.add(record);
             }
         }
@@ -178,12 +179,12 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         return List.copyOf(owned);
     }
 
-    public synchronized boolean owns(AgentId agentId, SessionId sessionId)
+    public synchronized boolean owns(AgentLabel agentLabel, SessionId sessionId)
             throws SessionRegistryException {
         requireOpen();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         SessionRecord record = records.get(Objects.requireNonNull(sessionId, "sessionId"));
-        return record != null && record.agentId().equals(agentId);
+        return record != null && record.agentLabel().equals(agentLabel);
     }
 
     private void publish(Map<SessionId, SessionRecord> replacements)

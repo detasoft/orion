@@ -41,7 +41,7 @@ class AgentProtocolFixtureTest {
         AgentMessage.Hello hello = new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                new AgentId("agent-1"),
+                new AgentLabel("agent-1"),
                 new AgentInstanceId(UUID.fromString("00010203-0405-0607-0809-0a0b0c0d0e0f")),
                 "1.0.0",
                 new MachineInfo("host", "linux", "amd64"),

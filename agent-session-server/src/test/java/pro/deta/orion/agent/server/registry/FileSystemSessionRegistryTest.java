@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.registry;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
@@ -20,8 +20,8 @@ import static pro.deta.orion.agent.protocol.AgentMessage.SessionState.FAILED;
 import static pro.deta.orion.agent.protocol.AgentMessage.SessionState.RUNNING;
 
 class FileSystemSessionRegistryTest {
-    private static final AgentId AGENT = new AgentId("agent-1");
-    private static final AgentId OTHER_AGENT = new AgentId("agent-2");
+    private static final AgentLabel AGENT = new AgentLabel("agent-1");
+    private static final AgentLabel OTHER_AGENT = new AgentLabel("agent-2");
     private static final SessionId SESSION = new SessionId("session-1");
     private static final SessionId OTHER_SESSION = new SessionId("session-2");
 
@@ -36,7 +36,7 @@ class FileSystemSessionRegistryTest {
                     .isInstanceOf(SessionRegistryException.class);
         }
         try (FileSystemSessionRegistry reopened = new FileSystemSessionRegistry(root)) {
-            assertThat(reopened.find(SESSION).orElseThrow().agentId()).isEqualTo(AGENT);
+            assertThat(reopened.find(SESSION).orElseThrow().agentLabel()).isEqualTo(AGENT);
             assertThat(reopened.find(SESSION).orElseThrow().descriptor().state())
                     .isEqualTo(AgentMessage.SessionState.STARTING);
             assertThatThrownBy(() -> reopened.reconcile(OTHER_AGENT, List.of(
@@ -93,7 +93,7 @@ class FileSystemSessionRegistryTest {
                     .extracting(failure -> ((SessionRegistryException) failure).reason())
                     .isEqualTo(SessionRegistryException.Reason.CONFLICT);
             assertThat(registry.find(OTHER_SESSION)).isEmpty();
-            assertThat(registry.find(SESSION).orElseThrow().agentId()).isEqualTo(AGENT);
+            assertThat(registry.find(SESSION).orElseThrow().agentLabel()).isEqualTo(AGENT);
         }
     }
 

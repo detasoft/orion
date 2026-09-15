@@ -1,6 +1,6 @@
 package pro.deta.orion.agent.server.registry;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
@@ -25,7 +25,7 @@ import java.util.Optional;
 final class SessionRecordCodec {
     static final int MAX_RECORD_BYTES = 1_048_576;
     private static final int MAGIC = 0x4f525345;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_TEXT_BYTES = 262_144;
 
     static String fileName(SessionId sessionId) {
@@ -43,7 +43,7 @@ final class SessionRecordCodec {
         try (DataOutputStream output = new DataOutputStream(bytes)) {
             output.writeInt(MAGIC);
             output.writeInt(VERSION);
-            writeText(output, record.agentId().value());
+            writeText(output, record.agentLabel().value());
             writeDescriptor(output, record.reported());
             output.writeBoolean(record.outcome().isPresent());
             if (record.outcome().isPresent()) {
@@ -59,6 +59,13 @@ final class SessionRecordCodec {
         return encoded;
     }
 
+    void rejectUnsupportedVersion(byte[] bytes) throws SessionRegistryFileOperations.StoredRecordException {
+        if (bytes.length >= 8 && ByteBuffer.wrap(bytes).getInt() == MAGIC
+                && ByteBuffer.wrap(bytes).getInt(4) != VERSION) {
+            throw corrupt("Session record has an unsupported version", null);
+        }
+    }
+
     SessionRecord decode(byte[] bytes) throws SessionRegistryFileOperations.StoredRecordException {
         try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(bytes))) {
             if (input.readInt() != MAGIC) {
@@ -67,7 +74,7 @@ final class SessionRecordCodec {
             if (input.readInt() != VERSION) {
                 throw corrupt("Session record has an unsupported version", null);
             }
-            AgentId agentId = new AgentId(readText(input));
+            AgentLabel agentLabel = new AgentLabel(readText(input));
             SessionDescriptor reported = readDescriptor(input);
             Optional<SessionRecord.Outcome> outcome = input.readBoolean()
                     ? Optional.of(new SessionRecord.Outcome(readState(input), readText(input)))
@@ -75,7 +82,7 @@ final class SessionRecordCodec {
             if (input.available() != 0) {
                 throw corrupt("Session record has trailing bytes", null);
             }
-            return new SessionRecord(agentId, reported, outcome);
+            return new SessionRecord(agentLabel, reported, outcome);
         } catch (SessionRegistryFileOperations.StoredRecordException failure) {
             throw failure;
         } catch (EOFException failure) {

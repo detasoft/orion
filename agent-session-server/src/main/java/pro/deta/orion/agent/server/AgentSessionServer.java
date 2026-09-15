@@ -1,6 +1,6 @@
 package pro.deta.orion.agent.server;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.EventId;
@@ -8,6 +8,7 @@ import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.auth.AgentControlAuthenticator;
 import pro.deta.orion.agent.server.auth.AgentdProvisioningControl;
 import pro.deta.orion.agent.server.auth.AuthenticatedAgentConnections;
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
 import pro.deta.orion.agent.server.auth.SessionReconciliationPublisher;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.command.SessionCommandService;
@@ -86,11 +87,11 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             openedSessions = new FileSystemSessionRegistry(root.resolve("sessions"));
             openedJournals = new FileSystemSessionJournalStorage(
                     root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults()));
-            openedReplication = new SessionReplicationService(openedJournals);
+            openedReplication = new SessionReplicationService(openedJournals, openedSessions);
             AtomicReference<SessionCommandService> commands = new AtomicReference<>();
             SessionReconciliationPublisher reconciliation =
                     new SessionReconciliationPublisher(openedSessions,
-                            context -> commands.get().controlSession(context.agentId()));
+                            context -> commands.get().controlSession(context.agentLabel()));
             openedConnections = AuthenticatedAgentConnections.withPolicy(
                     reconciliation::publish, clock, heartbeatDeadline);
             openedCommands = new SessionCommandService(
@@ -175,9 +176,9 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         return TERMINAL_SESSION;
     }
 
-    public synchronized AgentRecord registerAgent(AgentId agentId, String displayName)
+    public synchronized AgentRecord registerAgent(AgentLabel agentLabel, String displayName)
             throws AgentRegistryException {
-        return requireAgentRegistry().register(agentId, displayName);
+        return requireAgentRegistry().register(agentLabel, displayName);
     }
 
     public synchronized SessionCommandService commandService() {
@@ -187,12 +188,17 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         return commandService;
     }
 
-    public synchronized Optional<AgentId> sessionOwner(SessionId sessionId)
+    public synchronized Optional<AgentLabel> sessionOwner(SessionId sessionId)
             throws SessionRegistryException {
         if (sessionRegistry == null) {
             throw new IllegalStateException("Agent session server is not running");
         }
-        return sessionRegistry.find(sessionId).map(record -> record.agentId());
+        return sessionRegistry.find(sessionId).map(record -> record.agentLabel());
+    }
+
+    @TestOnly
+    public synchronized Optional<AuthenticatedConnectionContext> activeAgentContext(AgentLabel label) {
+        return connections == null ? Optional.empty() : connections.active(label);
     }
 
     public synchronized SessionReplicationService replicationService() {
@@ -211,7 +217,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     }
 
     public synchronized AgentdProvisioningControl provisioningControl(
-            AgentId agentId,
+            AgentLabel agentLabel,
             URI serverUri,
             String stateDirectory,
             int maxFrameBytes,
@@ -220,7 +226,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
                 requireAgentRegistry(),
                 authenticator,
                 connections,
-                agentId,
+                agentLabel,
                 serverUri,
                 stateDirectory,
                 maxFrameBytes,

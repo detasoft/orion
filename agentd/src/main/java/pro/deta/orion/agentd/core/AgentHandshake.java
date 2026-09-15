@@ -90,7 +90,7 @@ public final class AgentHandshake implements AutoCloseable {
         return new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                context.agentId(),
+                context.agentLabel(),
                 context.instanceId(),
                 agentVersion,
                 machine,

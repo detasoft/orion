@@ -1,9 +1,13 @@
 package pro.deta.orion.agent.server.auth;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -45,8 +49,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SessionCommandServiceTest {
-    private static final AgentId AGENT = new AgentId("agent-1");
-    private static final AgentId OTHER = new AgentId("agent-2");
+    private static final AgentLabel AGENT = new AgentLabel("agent-1");
+    private static final AgentLabel OTHER = new AgentLabel("agent-2");
     private static final SessionId SESSION = new SessionId("session-1");
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
     private static final AgentProtocolCodec MESSAGES = new AgentProtocolCodec(LIMITS);
@@ -57,6 +61,44 @@ class SessionCommandServiceTest {
     Path root;
 
     @Test
+    void oldLedgerFormatIsRejectedWithoutRewritingCommands() throws Exception {
+        try (Fixture fixture = new Fixture(root)) {
+            fixture.running(SESSION);
+            fixture.commands.resize(AGENT, new CommandId("old-command"), SESSION, 80, 24);
+            fixture.commands.close();
+            Path record;
+            try (var files = Files.list(root.resolve("commands"))) {
+                record = files.filter(path -> path.toString().endsWith(".command")).findFirst().orElseThrow();
+            }
+            byte[] bytes = Files.readAllBytes(record);
+            ByteBuffer.wrap(bytes).putInt(4, 1);
+            Files.write(record, bytes);
+            assertThatThrownBy(fixture::newCommands).isInstanceOf(IOException.class);
+            assertThat(Files.readAllBytes(record)).isEqualTo(bytes);
+        }
+    }
+
+    @Test
+    void oldDeliveryCompletionCannotOverwritePendingRedelivery() throws Exception {
+        try (Fixture fixture = new Fixture(root)) {
+            fixture.running(SESSION);
+            RecordingConnection old = new RecordingConnection();
+            old.completion = new CompletableFuture<>();
+            fixture.connections.activate(context("old", old));
+            CommandId command = new CommandId("resize-pending");
+            fixture.commands.resize(AGENT, command, SESSION, 100, 30);
+            RecordingConnection replacement = new RecordingConnection();
+            replacement.completion = new CompletableFuture<>();
+            fixture.connections.activate(context("replacement", replacement));
+            fixture.commands.redeliver(command);
+            old.completion.completeExceptionally(new IllegalStateException("late failure"));
+            assertThat(fixture.commands.status(command).phase()).isEqualTo(SessionCommandService.Phase.UNKNOWN);
+            replacement.completion.complete(null);
+            assertThat(fixture.commands.status(command).phase()).isEqualTo(SessionCommandService.Phase.SENT);
+        }
+    }
+
+    @Test
     void routesOnlyToCurrentConnectionAndReusesDurableIdentitiesAfterReopen() throws Exception {
         try (Fixture fixture = new Fixture(root)) {
             fixture.running(SESSION);
@@ -64,7 +106,7 @@ class SessionCommandServiceTest {
             AgentControlHandler.Session oldSession = fixture.connections.activate(context("old", old));
             CommandId inputId = new CommandId("input-1");
             var first = fixture.commands.input(AGENT, inputId, SESSION, UUID.randomUUID(),
-                    pro.deta.orion.agent.protocol.ProtocolBytes.copyOf(new byte[]{1}));
+                    ProtocolBytes.copyOf(new byte[]{1}));
             assertThat(first.operationSequence()).isEqualTo(1);
             assertThat(old.sent).hasSize(1);
 
@@ -156,10 +198,10 @@ class SessionCommandServiceTest {
 
             var result = EVENTS.decode(EVENTS.encode(new EventId(1), new SessionEventPayload.CommandResult(
                     SessionCommandSource.SERVER, 1,
-                    pro.deta.orion.agent.protocol.ProtocolBytes.copyOf(MESSAGES.encode(message)),
+                    ProtocolBytes.copyOf(MESSAGES.encode(message)),
                     SessionCommandOutcome.SUCCEEDED, "")));
-            fixture.replication.append(SESSION, List.of(result));
-            fixture.replication.append(SESSION, List.of(result));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(result));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(result));
             assertThat(fixture.commands.status(id).phase()).isEqualTo(SessionCommandService.Phase.CONFIRMED);
             assertThat(fixture.commands.status(id).outcome()).contains(SessionCommandOutcome.SUCCEEDED);
             assertThat(fixture.commands.redeliver(id).phase()).isEqualTo(SessionCommandService.Phase.CONFIRMED);
@@ -177,7 +219,7 @@ class SessionCommandServiceTest {
                     .isEqualTo(SessionCommandService.Phase.DELIVERY_FAILED);
             var exit = EVENTS.decode(EVENTS.encode(new EventId(1),
                     new SessionEventPayload.ProcessExited(0)));
-            fixture.replication.append(SESSION, List.of(exit));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(exit));
             assertThat(fixture.commands.status(signal).phase())
                     .isEqualTo(SessionCommandService.Phase.DELIVERY_FAILED);
             assertThatThrownBy(() -> fixture.commands.terminate(
@@ -218,7 +260,7 @@ class SessionCommandServiceTest {
                     id, SESSION, Optional.empty(), List.of("sh"), "/tmp", Map.of(),
                     80, 24, "none", "native");
             assertThat(fixture.commands.start(AGENT, start).operationSequence()).isZero();
-            assertThat(fixture.sessions.find(SESSION)).get().extracting(record -> record.agentId())
+            assertThat(fixture.sessions.find(SESSION)).get().extracting(record -> record.agentLabel())
                     .isEqualTo(AGENT);
             assertThatThrownBy(() -> fixture.sessions.reconcile(OTHER, List.of(new SessionDescriptor(
                     SESSION, AgentMessage.SessionState.RUNNING,
@@ -232,11 +274,11 @@ class SessionCommandServiceTest {
             var unrelatedFailure = EVENTS.decode(EVENTS.encode(new EventId(1),
                     new SessionEventPayload.SessionStartFailed(
                             new CommandId("other-start"), "wrong command", 0)));
-            fixture.replication.append(SESSION, List.of(unrelatedFailure));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(unrelatedFailure));
             assertThat(fixture.commands.status(id).outcome()).isEmpty();
             var started = EVENTS.decode(EVENTS.encode(new EventId(2),
                     new SessionEventPayload.ProcessStarted(123)));
-            fixture.replication.append(SESSION, List.of(started));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(started));
             assertThat(fixture.commands.status(id).phase()).isEqualTo(SessionCommandService.Phase.CONFIRMED);
             assertThat(fixture.commands.status(id).outcome()).contains(SessionCommandOutcome.SUCCEEDED);
         }
@@ -252,7 +294,7 @@ class SessionCommandServiceTest {
             String diagnostic = "x".repeat(300_000);
             var failure = EVENTS.decode(EVENTS.encode(new EventId(1),
                     new SessionEventPayload.SessionStartFailed(id, diagnostic, 17)));
-            fixture.replication.append(SESSION, List.of(failure));
+            fixture.replication.append(context("journal", new RecordingConnection()), SESSION, List.of(failure));
 
             var status = fixture.commands.status(id);
             assertThat(status.phase()).isEqualTo(SessionCommandService.Phase.CONFIRMED);
@@ -270,17 +312,18 @@ class SessionCommandServiceTest {
                 new ConnectionId(id), connection,
                 () -> AuthenticatedConnectionContext.RenewalResult.RENEWED,
                 (version, machine, capabilities, observedAt) ->
-                        AuthenticatedConnectionContext.ObservationResult.RECORDED);
+                        AuthenticatedConnectionContext.ObservationResult.RECORDED, () -> () -> { });
     }
 
     private static final class RecordingConnection implements AgentControlHandler.Connection {
         private final List<AgentMessage> sent = new ArrayList<>();
         private boolean closed;
+        private CompletableFuture<Void> completion = CompletableFuture.completedFuture(null);
 
         @Override
         public CompletionStage<Void> send(AgentMessage message) {
             sent.add(message);
-            return CompletableFuture.completedFuture(null);
+            return completion;
         }
 
         @Override
@@ -319,7 +362,7 @@ class SessionCommandServiceTest {
                 public void onClosed(Throwable failure) {
                 }
             });
-            replication = new SessionReplicationService(journals);
+            replication = new SessionReplicationService(journals, sessions);
             commands = newCommands();
         }
 

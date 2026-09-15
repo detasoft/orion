@@ -10,7 +10,7 @@ class AgentLaunchContextTest {
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", "target/state",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "7",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0",
@@ -19,7 +19,7 @@ class AgentLaunchContextTest {
 
         try (AgentLaunchContext first = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]));
              AgentLaunchContext second = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]))) {
-            assertThat(first.agentId()).isEqualTo(configuration.agentId());
+            assertThat(first.agentLabel()).isEqualTo(configuration.agentLabel());
             assertThat(first.generation()).isEqualTo(configuration.generation());
             assertThat(first.launchId()).isEqualTo(configuration.launchId());
             assertThat(first.instanceId()).isNotEqualTo(second.instanceId());

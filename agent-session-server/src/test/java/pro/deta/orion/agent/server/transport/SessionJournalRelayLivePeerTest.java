@@ -16,10 +16,11 @@ import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.agent.server.auth.RegisteredAgentFixture;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.EventId;
@@ -143,6 +144,7 @@ class SessionJournalRelayLivePeerTest {
     }
 
     private static final class Peer implements AutoCloseable {
+        private final RegisteredAgentFixture registered;
         private final Server server = new Server();
         private final KeyStore keys;
         private final ServerConnector connector;
@@ -151,8 +153,10 @@ class SessionJournalRelayLivePeerTest {
         private Peer(FileSystemSessionJournalStorage storage) throws Exception {
             keys = CertUtils.convertToKeyStore(CertUtils.generateSelfSignedCertificate(),
                     "test", "changeit".toCharArray());
-            replication = new JettySessionReplicationEndpoint(new SessionReplicationService(storage),
-                    ignored -> Optional.of(new AgentId("agent-1")), LIMITS);
+            registered = new RegisteredAgentFixture(Files.createTempDirectory("relay-registration"),
+                    new AgentLabel("agent-1"), SESSION);
+            replication = new JettySessionReplicationEndpoint(new SessionReplicationService(storage, registered.sessions),
+                    ignored -> Optional.of(registered.context), LIMITS);
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override
                 protected ServerSessionListener newSessionListener(Connector ignored, EndPoint endpoint) {
@@ -196,6 +200,7 @@ class SessionJournalRelayLivePeerTest {
         public void close() throws Exception {
             server.stop();
             replication.close();
+            registered.close();
         }
     }
 }

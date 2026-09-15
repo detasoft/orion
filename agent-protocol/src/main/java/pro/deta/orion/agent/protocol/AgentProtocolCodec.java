@@ -90,7 +90,7 @@ public final class AgentProtocolCodec {
                 case HELLO -> decodeHello(fields);
                 case WELCOME -> decodeWelcome(fields);
                 case HEARTBEAT -> new AgentMessage.Heartbeat(
-                        new AgentId(fields.text(1, "agentId")),
+                        new AgentLabel(fields.text(1, "agentLabel")),
                         new AgentInstanceId(fields.uuid(2, "instanceId")),
                         fields.signedLong(3, "epochMillis"));
                 case AGENT_STATUS -> decodeAgentStatus(fields);
@@ -214,7 +214,7 @@ public final class AgentProtocolCodec {
         writer.unsigned(value.typeCode());
         writer.unsigned(value.protocolVersion().value());
         writer.unsigned(value.journalFormatVersion().value());
-        writer.text(value.agentId().value());
+        writer.text(value.agentLabel().value());
         writer.uuid(value.instanceId().value());
         writer.text(value.agentVersion());
         machine(writer, value.machine());
@@ -245,7 +245,7 @@ public final class AgentProtocolCodec {
             throws AgentProtocolException {
         writer.array(4);
         writer.unsigned(value.typeCode());
-        writer.text(value.agentId().value());
+        writer.text(value.agentLabel().value());
         writer.uuid(value.instanceId().value());
         writer.signed(value.epochMillis());
     }
@@ -254,7 +254,7 @@ public final class AgentProtocolCodec {
             throws AgentProtocolException {
         writer.array(8);
         writer.unsigned(value.typeCode());
-        writer.text(value.agentId().value());
+        writer.text(value.agentLabel().value());
         writer.uuid(value.instanceId().value());
         writer.text(value.agentVersion());
         machine(writer, value.machine());
@@ -388,7 +388,7 @@ public final class AgentProtocolCodec {
         return new AgentMessage.Hello(
                 protocol,
                 journal,
-                new AgentId(fields.text(3, "agentId")),
+                new AgentLabel(fields.text(3, "agentLabel")),
                 new AgentInstanceId(fields.uuid(4, "instanceId")),
                 fields.text(5, "agentVersion"),
                 machine(fields.required(6, "machine")),
@@ -413,7 +413,7 @@ public final class AgentProtocolCodec {
 
     private AgentMessage.AgentStatus decodeAgentStatus(Fields fields) throws AgentProtocolException {
         return new AgentMessage.AgentStatus(
-                new AgentId(fields.text(1, "agentId")),
+                new AgentLabel(fields.text(1, "agentLabel")),
                 new AgentInstanceId(fields.uuid(2, "instanceId")),
                 fields.text(3, "agentVersion"),
                 machine(fields.required(4, "machine")),

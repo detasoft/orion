@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.registry;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -21,13 +21,13 @@ class AgentRegistryRecoveryTest {
     @Test
     void truncatedAndMalformedRecordsAreRejected() throws IOException {
         Path root = createRoot();
-        AgentId agentId = new AgentId("agent-1");
-        Path record = root.resolve(AgentRecordCodec.fileName(agentId));
+        AgentLabel agentLabel = new AgentLabel("agent-1");
+        Path record = root.resolve(AgentRecordCodec.fileName(agentLabel));
 
         Files.write(record, new byte[]{1, 2, 3});
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
 
-        byte[] encoded = encodedRecord(agentId);
+        byte[] encoded = encodedRecord(agentLabel);
         encoded[0] = 0;
         Files.write(record, encoded);
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
@@ -36,9 +36,9 @@ class AgentRegistryRecoveryTest {
     @Test
     void oversizedRecordsAreRejectedAsStoredCorruption() throws IOException {
         Path root = createRoot();
-        AgentId agentId = new AgentId("agent-1");
+        AgentLabel agentLabel = new AgentLabel("agent-1");
         Files.write(
-                root.resolve(AgentRecordCodec.fileName(agentId)),
+                root.resolve(AgentRecordCodec.fileName(agentLabel)),
                 new byte[AgentRecordCodec.MAX_RECORD_BYTES + 1]);
 
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
@@ -47,19 +47,20 @@ class AgentRegistryRecoveryTest {
     @Test
     void unsupportedRecordVersionsAreRejected() throws IOException {
         Path root = createRoot();
-        AgentId agentId = new AgentId("agent-1");
-        byte[] encoded = encodedRecord(agentId);
-        ByteBuffer.wrap(encoded).putInt(4, 2);
-        Files.write(root.resolve(AgentRecordCodec.fileName(agentId)), encoded);
+        AgentLabel agentLabel = new AgentLabel("agent-1");
+        byte[] encoded = encodedRecord(agentLabel);
+        ByteBuffer.wrap(encoded).putInt(4, 1);
+        Files.write(root.resolve(AgentRecordCodec.fileName(agentLabel)), encoded);
 
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
+        assertThat(Files.readAllBytes(root.resolve(AgentRecordCodec.fileName(agentLabel)))).isEqualTo(encoded);
     }
 
     @Test
     void identityMustMatchCanonicalRecordFileName() throws IOException {
         Path root = createRoot();
-        AgentId expected = new AgentId("agent-1");
-        AgentId stored = new AgentId("agent-2");
+        AgentLabel expected = new AgentLabel("agent-1");
+        AgentLabel stored = new AgentLabel("agent-2");
         Files.write(root.resolve(AgentRecordCodec.fileName(expected)), encodedRecord(stored));
 
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
@@ -68,10 +69,10 @@ class AgentRegistryRecoveryTest {
     @Test
     void trailingBytesAreRejected() throws IOException {
         Path root = createRoot();
-        AgentId agentId = new AgentId("agent-1");
-        byte[] encoded = encodedRecord(agentId);
+        AgentLabel agentLabel = new AgentLabel("agent-1");
+        byte[] encoded = encodedRecord(agentLabel);
         Files.write(
-                root.resolve(AgentRecordCodec.fileName(agentId)),
+                root.resolve(AgentRecordCodec.fileName(agentLabel)),
                 Arrays.copyOf(encoded, encoded.length + 1));
 
         assertOpenFails(root, AgentRegistryException.Reason.STORED_CORRUPTION);
@@ -83,7 +84,7 @@ class AgentRegistryRecoveryTest {
         Files.write(root.resolve(".incomplete-agent-record.tmp"), new byte[]{1, 2, 3});
 
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            assertThat(registry.find(new AgentId("agent-1"))).isEmpty();
+            assertThat(registry.find(new AgentLabel("agent-1"))).isEmpty();
         }
     }
 
@@ -91,9 +92,9 @@ class AgentRegistryRecoveryTest {
         return Files.createDirectory(temporaryDirectory.resolve("agents"));
     }
 
-    private static byte[] encodedRecord(AgentId agentId) throws IOException {
+    private static byte[] encodedRecord(AgentLabel agentLabel) throws IOException {
         return new AgentRecordCodec().encode(
-                new AgentRecord(agentId, "Build agent", Optional.empty(), Optional.empty()));
+                new AgentRecord(agentLabel, "Build agent", Optional.empty(), Optional.empty(), Optional.empty()));
     }
 
     private static void assertOpenFails(Path root, AgentRegistryException.Reason reason) {

@@ -1,7 +1,7 @@
 package pro.deta.orion.agent.server.registry;
 
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -35,14 +35,14 @@ final class AgentRecordCodec {
     static final int MAX_RECORD_BYTES = 1_048_576;
 
     private static final int MAGIC = 0x4f524147;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
-    static String fileName(AgentId agentId) {
-        Objects.requireNonNull(agentId, "agentId");
+    static String fileName(AgentLabel agentLabel) {
+        Objects.requireNonNull(agentLabel, "agentLabel");
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(
-                    agentId.value().getBytes(StandardCharsets.UTF_8))) + ".agent";
+                    agentLabel.value().getBytes(StandardCharsets.UTF_8))) + ".agent";
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
@@ -54,10 +54,16 @@ final class AgentRecordCodec {
         try (DataOutputStream output = new DataOutputStream(bytes)) {
             output.writeInt(MAGIC);
             output.writeInt(VERSION);
-            writeText(output, record.agentId().value());
+            writeText(output, record.agentLabel().value());
             writeText(output, record.displayName());
             writeOptional(output, record.launch(), launch -> writeLaunch(output, launch));
             writeOptional(output, record.observation(), observation -> writeObservation(output, observation));
+            writeOptional(output, record.registration(), registration -> {
+                output.writeLong(registration.generation().value());
+                writeUuid(output, registration.launchId().value());
+                writeUuid(output, registration.instanceId().value());
+                writeCredential(output, registration.reconnectToken());
+            });
         }
         byte[] encoded = bytes.toByteArray();
         if (encoded.length > MAX_RECORD_BYTES) {
@@ -79,15 +85,19 @@ final class AgentRecordCodec {
             if (version != VERSION) {
                 throw corrupt("Unsupported agent record version: " + version, null);
             }
-            AgentId agentId = new AgentId(readText(input, 128, "agentId"));
+            AgentLabel agentLabel = new AgentLabel(readText(input, 128, "agentLabel"));
             String displayName = readText(input, AgentRecord.MAX_DISPLAY_NAME_BYTES, "displayName");
             Optional<AgentRecord.Launch> launch = readOptional(input, () -> readLaunch(input));
             Optional<AgentRecord.Observation> observation = readOptional(
                     input, () -> readObservation(input));
+            Optional<AgentRecord.Registration> registration = readOptional(input, () ->
+                    new AgentRecord.Registration(new AgentGeneration(input.readLong()),
+                            new AgentLaunchId(readUuid(input)), new AgentInstanceId(readUuid(input)),
+                            readCredential(input)));
             if (input.available() != 0) {
                 throw corrupt("Agent record has trailing bytes", null);
             }
-            return new AgentRecord(agentId, displayName, launch, observation);
+            return new AgentRecord(agentLabel, displayName, launch, observation, registration);
         } catch (FormatException e) {
             throw e;
         } catch (EOFException e) {
@@ -102,7 +112,6 @@ final class AgentRecordCodec {
         writeUuid(output, launch.launchId().value());
         output.writeByte(stateCode(launch.state()));
         writeOptional(output, launch.launchPermit(), credential -> writeCredential(output, credential));
-        writeOptional(output, launch.reconnectToken(), credential -> writeCredential(output, credential));
     }
 
     private AgentRecord.Launch readLaunch(DataInputStream input) throws IOException {
@@ -111,9 +120,7 @@ final class AgentRecordCodec {
         AgentRecord.LaunchState state = readState(input.readUnsignedByte());
         Optional<AgentRecord.Credential> launchPermit = readOptional(
                 input, () -> readCredential(input));
-        Optional<AgentRecord.Credential> reconnectToken = readOptional(
-                input, () -> readCredential(input));
-        return new AgentRecord.Launch(generation, launchId, state, launchPermit, reconnectToken);
+        return new AgentRecord.Launch(generation, launchId, state, launchPermit);
     }
 
     private void writeCredential(DataOutputStream output, AgentRecord.Credential credential)

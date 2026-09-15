@@ -3,7 +3,7 @@ package pro.deta.orion.agent.server.auth;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AgentdProvisioningControlTest {
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
 
     @TempDir
     Path root;
@@ -36,12 +36,12 @@ class AgentdProvisioningControlTest {
     @Test
     void launchAttemptPersistsItsCredentialBeforeReturningIt() throws Exception {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            registry.register(AGENT_ID, "Worker 1");
+            registry.register(AGENT_LABEL, "Worker 1");
             AuthenticatedAgentConnections connections = connections();
             AgentdProvisioningControl control = control(registry, connections);
 
             try (AgentdLaunchAttempt attempt = control.nextAttempt()) {
-                AgentRecord persisted = registry.find(AGENT_ID).orElseThrow();
+                AgentRecord persisted = registry.find(AGENT_LABEL).orElseThrow();
                 AgentRecord.Launch launch = persisted.launch().orElseThrow();
 
                 assertThat(launch.generation()).isEqualTo(attempt.request().generation());
@@ -54,10 +54,11 @@ class AgentdProvisioningControlTest {
     }
 
     @Test
-    void freshLaunchFencesThePreviousGenerationBeforeReturning() throws Exception {
+    void freshLaunchPreservesThePreviousConnectionUntilRegistration() throws Exception {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            registry.register(AGENT_ID, "Worker 1");
-            AgentRecord.Launch previous = registry.allocateLaunch(AGENT_ID).launch().orElseThrow();
+            registry.register(AGENT_LABEL, "Worker 1");
+            AgentRecord.Launch previous = registry.allocateLaunch(AGENT_LABEL, registry.find(AGENT_LABEL)
+                    .flatMap(record -> record.registration().map(AgentRecord.Registration::instanceId))).launch().orElseThrow();
             AuthenticatedAgentConnections connections = connections();
             TestConnection oldConnection = new TestConnection();
             connections.activate(context(previous.generation(), previous.launchId(), oldConnection));
@@ -65,8 +66,8 @@ class AgentdProvisioningControlTest {
 
             try (AgentdLaunchAttempt attempt = control.nextAttempt()) {
                 assertThat(attempt.request().generation().value()).isEqualTo(2);
-                assertThat(oldConnection.closed).isTrue();
-                assertThat(connections.active(AGENT_ID)).isEmpty();
+                assertThat(oldConnection.closed).isFalse();
+                assertThat(connections.active(AGENT_LABEL)).isPresent();
             }
         }
     }
@@ -74,7 +75,7 @@ class AgentdProvisioningControlTest {
     @Test
     void onlineWaitAcceptsOnlyTheRequestedLaunch() throws Exception {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            registry.register(AGENT_ID, "Worker 1");
+            registry.register(AGENT_LABEL, "Worker 1");
             AuthenticatedAgentConnections connections = connections();
             AgentdProvisioningControl control = control(registry, connections);
             AgentLaunchId expected = new AgentLaunchId(UUID.randomUUID());
@@ -90,7 +91,7 @@ class AgentdProvisioningControlTest {
     @Test
     void sustainedOfflineWindowAllowsRecovery() throws Exception {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            registry.register(AGENT_ID, "Worker 1");
+            registry.register(AGENT_LABEL, "Worker 1");
             AgentdProvisioningControl control = control(registry, connections());
 
             assertThat(control.awaitSustainedOffline(Duration.ofMillis(20))).isTrue();
@@ -100,7 +101,7 @@ class AgentdProvisioningControlTest {
     @Test
     void reconnectDuringOfflineWindowPreventsRecovery() throws Exception {
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
-            registry.register(AGENT_ID, "Worker 1");
+            registry.register(AGENT_LABEL, "Worker 1");
             AuthenticatedAgentConnections connections = connections();
             AgentdProvisioningControl control = control(registry, connections);
             CountDownLatch started = new CountDownLatch(1);
@@ -124,7 +125,7 @@ class AgentdProvisioningControlTest {
                 registry,
                 new AgentControlAuthenticator(registry, connections::activate),
                 connections,
-                AGENT_ID,
+                AGENT_LABEL,
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
@@ -150,7 +151,7 @@ class AgentdProvisioningControlTest {
     private static AuthenticatedConnectionContext context(
             AgentGeneration generation, AgentLaunchId launchId, TestConnection connection) {
         return new AuthenticatedConnectionContext(
-                AGENT_ID,
+                AGENT_LABEL,
                 generation,
                 launchId,
                 new AgentInstanceId(UUID.randomUUID()),
@@ -161,7 +162,7 @@ class AgentdProvisioningControlTest {
                 connection,
                 () -> AuthenticatedConnectionContext.RenewalResult.RENEWED,
                 (agentVersion, machine, capabilities, observedAt) ->
-                        AuthenticatedConnectionContext.ObservationResult.RECORDED);
+                        AuthenticatedConnectionContext.ObservationResult.RECORDED, () -> () -> { });
     }
 
     private static final class TestConnection implements AgentControlHandler.Connection {

@@ -1,6 +1,6 @@
 package pro.deta.orion.agent.server.command;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
@@ -33,7 +33,7 @@ import java.util.function.LongFunction;
 /** Durable command identities and per-session sequence high-water marks. */
 final class FileSystemCommandLedger implements AutoCloseable {
     private static final int MAGIC = 0x4f52434d;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_RECORD_BYTES = AgentProtocolLimits.HARD_MAX_MESSAGE_BYTES + 8192;
 
     private final Path root;
@@ -88,7 +88,7 @@ final class FileSystemCommandLedger implements AutoCloseable {
     }
 
     synchronized Entry reserve(
-            AgentId agentId, CommandId commandId, SessionId sessionId,
+            AgentLabel agentLabel, CommandId commandId, SessionId sessionId,
             LongFunction<AgentMessage> messageFactory) throws IOException, AgentProtocolException {
         requireOpen();
         if (entries.containsKey(commandId)) {
@@ -110,7 +110,7 @@ final class FileSystemCommandLedger implements AutoCloseable {
             }
         }
         byte[] encoded = codec.encode(message);
-        Entry entry = new Entry(agentId, message, encoded);
+        Entry entry = new Entry(agentLabel, message, encoded);
         byte[] stored = encode(entry);
         Path target = root.resolve(fileName(commandId));
         Path temporary = root.resolve(".pending-" + UUID.randomUUID());
@@ -158,7 +158,7 @@ final class FileSystemCommandLedger implements AutoCloseable {
         try (DataOutputStream output = new DataOutputStream(bytes)) {
             output.writeInt(MAGIC);
             output.writeInt(VERSION);
-            output.writeUTF(entry.agentId().value());
+            output.writeUTF(entry.agentLabel().value());
             output.writeInt(entry.encoded().length);
             output.write(entry.encoded());
         }
@@ -176,7 +176,7 @@ final class FileSystemCommandLedger implements AutoCloseable {
             if (input.readInt() != MAGIC || input.readInt() != VERSION) {
                 throw new IOException("Command record header is invalid");
             }
-            AgentId agentId = new AgentId(input.readUTF());
+            AgentLabel agentLabel = new AgentLabel(input.readUTF());
             int size = input.readInt();
             if (size <= 0 || size > AgentProtocolLimits.HARD_MAX_MESSAGE_BYTES) {
                 throw new IOException("Command envelope size is invalid");
@@ -185,7 +185,7 @@ final class FileSystemCommandLedger implements AutoCloseable {
             if (encoded.length != size || input.available() != 0) {
                 throw new IOException("Command record is incomplete");
             }
-            return new Entry(agentId, codec.decode(encoded), encoded);
+            return new Entry(agentLabel, codec.decode(encoded), encoded);
         } catch (AgentProtocolException | IllegalArgumentException failure) {
             throw new IOException("Command record contains an invalid envelope", failure);
         }
@@ -251,9 +251,9 @@ final class FileSystemCommandLedger implements AutoCloseable {
         }
     }
 
-    record Entry(AgentId agentId, AgentMessage message, byte[] encoded) {
+    record Entry(AgentLabel agentLabel, AgentMessage message, byte[] encoded) {
         Entry {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(agentLabel, "agentLabel");
             Objects.requireNonNull(message, "message");
             encoded = Objects.requireNonNull(encoded, "encoded").clone();
             FileSystemCommandLedger.commandId(message);

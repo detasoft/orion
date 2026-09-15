@@ -115,7 +115,7 @@ class AgentdMainTest {
                 });
 
         assertThat(exit).isZero();
-        assertThat(launched.get().agentId().value()).isEqualTo("agent-1");
+        assertThat(launched.get().agentLabel().value()).isEqualTo("agent-1");
         assertThat(sessionHost.get()).isEqualTo(Path.of("/opt/orion/releases/1.0.0/session-host"));
     }
 
@@ -156,7 +156,7 @@ class AgentdMainTest {
         return new String[]{
                 "--server", "https://agent.test",
                 "--state-dir", "target/state",
-                "--agent-id", "agent-1",
+                "--agent-label", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0",

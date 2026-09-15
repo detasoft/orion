@@ -2,7 +2,7 @@ package pro.deta.orion.provisioning;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 
 import java.net.URI;
@@ -306,7 +306,7 @@ class AgentdRecoveryTest {
     private static AgentdLaunchRequest request(long generation) {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), "/var/lib/orion/agent",
-                new AgentId("agent-1"), new AgentGeneration(generation),
+                new AgentLabel("agent-1"), new AgentGeneration(generation),
                 new AgentLaunchId(new UUID(0, generation)), 1024, Long.toString(generation));
     }
 

@@ -19,8 +19,9 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.Callback;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.agent.server.auth.RegisteredAgentFixture;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
@@ -58,15 +59,46 @@ class JettySessionReplicationLivePeerTest {
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
     private static final AgentProtocolCodec PROTOCOL = new AgentProtocolCodec(LIMITS);
     private static final SessionEventCodec EVENTS = new SessionEventCodec(LIMITS);
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
     private final AtomicInteger peerIds = new AtomicInteger();
 
     @TempDir
     Path root;
 
     @Test
+    void replacementFencesAlreadyOpenStreamsAndRetainsCommittedResume() throws Exception {
+        SessionId session = new SessionId("session-1");
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
+            Exchange old = peer.open(session);
+            SessionEventRecord first = event(1, (byte) 1);
+            old.send(first.encodedRecord().toByteArray(), false);
+            assertThat(old.nextMessage()).isEqualTo(new AgentMessage.SessionSync(
+                    session, Optional.of(first.eventId())));
+            peer.registered.launch();
+            old.send(event(2, (byte) 2).encodedRecord().toByteArray(), false);
+            assertThat(old.awaitReset()).isEqualTo(ErrorCode.PROTOCOL_ERROR.code);
+            assertThat(peer.reopen(session)).isEqualTo(new AgentMessage.SessionSync(
+                    session, Optional.of(first.eventId())));
+            assertThat(peer.storage.readAfter(session, Optional.empty()).records()).containsExactly(first);
+        }
+    }
+
+    @Test
+    void authenticatedStreamCannotOpenAnotherLabelsSession() throws Exception {
+        SessionId foreign = new SessionId("foreign-session");
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
+            peer.registered.sessions.reserveStart(new AgentLabel("other-agent"), foreign);
+            Exchange stream = peer.exchange("POST", "/agent/session/" + foreign.value());
+            stream.awaitAccepted();
+            stream.send(PROTOCOL.encode(open(foreign)), false);
+            assertThat(stream.awaitReset()).isEqualTo(ErrorCode.PROTOCOL_ERROR.code);
+            assertThat(peer.storage.lastEventId(foreign)).isEmpty();
+        }
+    }
+
+    @Test
     void admitsOnlyValidSessionPostsWithEstablishedContext() throws Exception {
-        try (Peer established = new Peer(Optional.of(AGENT_ID));
+        try (Peer established = new Peer(Optional.of(AGENT_LABEL));
              Peer missing = new Peer(Optional.empty())) {
             HeadersFrame accepted = established.request("POST", "/agent/session/session-1")
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -82,7 +114,7 @@ class JettySessionReplicationLivePeerTest {
 
     @Test
     void rejectsWrongMethodUnknownPathAndInvalidSessionId() throws Exception {
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             assertThat(status(peer.request("GET", "/agent/session/session-1")
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS))).isEqualTo(405);
             assertThat(status(peer.request("POST", "/agent/other/session-1")
@@ -97,7 +129,7 @@ class JettySessionReplicationLivePeerTest {
         SessionId sessionId = new SessionId("session-1");
         SessionEventRecord first = event(1, (byte) 11);
         SessionEventRecord second = event(2, (byte) 22);
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             Exchange exchange = peer.exchange("POST", "/agent/session/session-1");
             assertThat(status(exchange.headers().get(TIMEOUT_SECONDS, TimeUnit.SECONDS)))
                     .isEqualTo(200);
@@ -127,7 +159,7 @@ class JettySessionReplicationLivePeerTest {
 
     @Test
     void resetsOnlyTheStreamWhoseOpenDisagreesWithItsPath() throws Exception {
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             Exchange invalid = peer.exchange("POST", "/agent/session/session-1");
             Exchange healthy = peer.exchange("POST", "/agent/session/session-2");
             invalid.awaitAccepted();
@@ -144,7 +176,7 @@ class JettySessionReplicationLivePeerTest {
 
     @Test
     void resetsAnIncompleteOpeningItemAtEndOfStream() throws Exception {
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             Exchange exchange = peer.exchange("POST", "/agent/session/session-1");
             exchange.awaitAccepted();
             byte[] encoded = PROTOCOL.encode(open(new SessionId("session-1")));
@@ -159,7 +191,7 @@ class JettySessionReplicationLivePeerTest {
     void slowAppendBackpressuresOnlyItsOwnStream() throws Exception {
         SessionId slowId = new SessionId("slow-session");
         SessionId fastId = new SessionId("fast-session");
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             Exchange slow = peer.open(slowId);
             Exchange fast = peer.open(fastId);
             peer.storage.block(slowId, BlockPoint.BEFORE_DURABILITY);
@@ -180,7 +212,7 @@ class JettySessionReplicationLivePeerTest {
 
     @Test
     void reconnectAlwaysUsesStorageAcrossDisconnectBoundaries() throws Exception {
-        try (Peer peer = new Peer(Optional.of(AGENT_ID))) {
+        try (Peer peer = new Peer(Optional.of(AGENT_LABEL))) {
             SessionId before = new SessionId("before-append");
             Exchange abandoned = peer.open(before);
             abandoned.reset();
@@ -238,15 +270,19 @@ class JettySessionReplicationLivePeerTest {
                 new FileSystemSessionJournalStorage(
                         root.resolve("peer-" + peerIds.incrementAndGet()),
                         new JournalStorageConfig(LIMITS)));
+        private final RegisteredAgentFixture registered;
         private final Server server = new Server();
         private final HTTP2Client client = new HTTP2Client();
         private final JettySessionReplicationEndpoint endpoint;
         private final ServerConnector connector;
         private final Session session;
 
-        private Peer(Optional<AgentId> agentId) throws Exception {
-            SessionReplicationService service = new SessionReplicationService(storage);
-            endpoint = new JettySessionReplicationEndpoint(service, ignored -> agentId, LIMITS);
+        private Peer(Optional<AgentLabel> agentLabel) throws Exception {
+            registered = new RegisteredAgentFixture(root.resolve("registration-" + peerIds.get()),
+                    AGENT_LABEL, new SessionId("session-1"), new SessionId("session-2"));
+            SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
+            endpoint = new JettySessionReplicationEndpoint(service,
+                    ignored -> agentLabel.map(label -> registered.context), LIMITS);
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override
                 protected ServerSessionListener newSessionListener(
@@ -289,6 +325,9 @@ class JettySessionReplicationLivePeerTest {
         }
 
         private Exchange open(SessionId sessionId) throws Exception {
+            if (registered.sessions.find(sessionId).isEmpty()) {
+                registered.sessions.reserveStart(AGENT_LABEL, sessionId);
+            }
             Exchange exchange = exchange("POST", "/agent/session/" + sessionId.value());
             exchange.awaitAccepted();
             exchange.send(PROTOCOL.encode(JettySessionReplicationLivePeerTest.open(sessionId)), false);
@@ -298,6 +337,9 @@ class JettySessionReplicationLivePeerTest {
         }
 
         private AgentMessage reopen(SessionId sessionId) throws Exception {
+            if (registered.sessions.find(sessionId).isEmpty()) {
+                registered.sessions.reserveStart(AGENT_LABEL, sessionId);
+            }
             Exchange exchange = exchange("POST", "/agent/session/" + sessionId.value());
             exchange.awaitAccepted();
             exchange.send(PROTOCOL.encode(JettySessionReplicationLivePeerTest.open(sessionId)), false);
@@ -314,6 +356,7 @@ class JettySessionReplicationLivePeerTest {
                 server.join();
                 endpoint.close();
                 storage.close();
+                registered.close();
             }
         }
     }

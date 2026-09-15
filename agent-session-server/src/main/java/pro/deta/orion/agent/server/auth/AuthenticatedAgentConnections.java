@@ -1,7 +1,6 @@
 package pro.deta.orion.agent.server.auth;
 
-import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -12,6 +11,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,7 +23,7 @@ import java.util.function.Function;
 /**
  * Owns the one authoritative authenticated control connection for each logical agent.
  * Availability starts at authentication and advances only from identity-bound heartbeats observed by
- * the server clock. Heartbeat expiry does not revoke the launch; recovery explicitly fences its generation.
+ * the server clock. Heartbeat expiry does not revoke the launch; durable registration replacement fences its instance.
  */
 public final class AuthenticatedAgentConnections implements AutoCloseable {
     public static final Duration DEFAULT_HEARTBEAT_DEADLINE = Duration.ofSeconds(30);
@@ -32,8 +32,7 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
     private final Function<AuthenticatedConnectionContext, AgentControlHandler.Session> publisher;
     private final Clock clock;
     private final Duration heartbeatDeadline;
-    private final Map<AgentId, ActiveSession> active = new HashMap<>();
-    private final Map<AgentId, Long> revokedThrough = new HashMap<>();
+    private final Map<AgentLabel, ActiveSession> active = new HashMap<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition stateChanged = lock.newCondition();
     private boolean closed;
@@ -62,7 +61,13 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
 
     public AgentControlHandler.Session activate(AuthenticatedConnectionContext context) {
         Objects.requireNonNull(context, "context");
-        rejectIfRevoked(context);
+        try (var ignored = context.acquireAuthority()) {
+            return activateCurrent(context);
+        }
+    }
+
+    private AgentControlHandler.Session activateCurrent(AuthenticatedConnectionContext context) {
+        rejectIfClosed(context);
         AgentControlHandler.Session delegate = Objects.requireNonNull(
                 publisher.apply(context), "authenticated session");
         ActiveSession replacement = new ActiveSession(context, delegate);
@@ -108,16 +113,16 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
         }
     }
 
-    private void rejectIfRevoked(AuthenticatedConnectionContext context) {
+    private void rejectIfClosed(AuthenticatedConnectionContext context) {
         boolean revoked;
         lock.lock();
         try {
-            revoked = isRevoked(context);
+            revoked = closed;
         } finally {
             lock.unlock();
         }
         if (revoked) {
-            IllegalStateException failure = new IllegalStateException("Agent generation has been revoked");
+            IllegalStateException failure = new IllegalStateException("Agent connections are closed");
             reject(context, failure);
             throw failure;
         }
@@ -133,92 +138,29 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
         }
     }
 
-    public void revokeGeneration(AgentId agentId, AgentGeneration generation) {
-        Objects.requireNonNull(agentId, "agentId");
-        Objects.requireNonNull(generation, "generation");
-        ActiveSession revoked = recordRevocation(agentId, generation.value());
-        if (revoked != null) {
-            RuntimeException failure = null;
-            try {
-                revoked.context.connection().close();
-            } catch (RuntimeException closeFailure) {
-                failure = closeFailure;
-            }
-            try {
-                revoked.delegate.onClosed(null);
-            } catch (RuntimeException closeFailure) {
-                failure = append(failure, closeFailure);
-            } finally {
-                revoked.unlock();
-            }
-            if (failure != null) {
-                throw failure;
-            }
-        }
-    }
-
-    private ActiveSession recordRevocation(AgentId agentId, long generation) {
-        ActiveSession candidate;
-        lock.lock();
-        try {
-            revokedThrough.merge(agentId, generation, Math::max);
-            candidate = active.get(agentId);
-        } finally {
-            lock.unlock();
-        }
-        while (candidate != null) {
-            candidate.lock();
-            boolean removed = false;
-            lock.lock();
-            try {
-                ActiveSession current = active.get(agentId);
-                if (current != candidate) {
-                    candidate.unlock();
-                    candidate = current;
-                    continue;
-                }
-                if (candidate.context.generation().value() <= revokedThrough.get(agentId)) {
-                    active.remove(agentId);
-                    candidate.revoke();
-                    stateChanged.signalAll();
-                    removed = true;
-                }
-            } finally {
-                lock.unlock();
-            }
-            if (removed) {
-                return candidate;
-            }
-            candidate.unlock();
-            return null;
-        }
-        return null;
-    }
-
-    private boolean isRevoked(AuthenticatedConnectionContext context) {
-        return closed || context.generation().value() <= revokedThrough.getOrDefault(context.agentId(), 0L);
-    }
-
     @Override
     public void close() {
-        Map<AgentId, AgentGeneration> generations = new HashMap<>();
+        List<ActiveSession> closing;
         lock.lock();
         try {
             if (closed) {
                 return;
             }
             closed = true;
-            for (Map.Entry<AgentId, ActiveSession> entry : active.entrySet()) {
-                generations.put(entry.getKey(), entry.getValue().context.generation());
-            }
+            closing = List.copyOf(active.values());
             stateChanged.signalAll();
         } finally {
             lock.unlock();
         }
         RuntimeException failure = null;
-        for (Map.Entry<AgentId, AgentGeneration> entry : generations.entrySet()) {
+        for (ActiveSession session : closing) {
             try {
-                revokeGeneration(entry.getKey(), entry.getValue());
+                session.context.connection().close();
+            } catch (RuntimeException closeFailure) {
+                failure = append(failure, closeFailure);
+            }
+            try {
+                session.onClosed(null);
             } catch (RuntimeException closeFailure) {
                 failure = append(failure, closeFailure);
             }
@@ -241,13 +183,13 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
             ActiveSession previous;
             lock.lock();
             try {
-                if (isRevoked(replacement.context)) {
-                    throw new IllegalStateException("Agent generation has been revoked");
+                if (closed) {
+                    throw new IllegalStateException("Agent connections are closed");
                 }
-                previous = active.get(replacement.context.agentId());
+                previous = active.get(replacement.context.agentLabel());
                 if (previous == null) {
                     observeInitial(replacement);
-                    active.put(replacement.context.agentId(), replacement);
+                    active.put(replacement.context.agentLabel(), replacement);
                     stateChanged.signalAll();
                     return null;
                 }
@@ -258,13 +200,13 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
             boolean replaced = false;
             lock.lock();
             try {
-                if (isRevoked(replacement.context)) {
-                    throw new IllegalStateException("Agent generation has been revoked");
+                if (closed) {
+                    throw new IllegalStateException("Agent connections are closed");
                 }
-                if (active.get(replacement.context.agentId()) == previous) {
+                if (active.get(replacement.context.agentLabel()) == previous) {
                     observeInitial(replacement);
                     previous.revoke();
-                    active.put(replacement.context.agentId(), replacement);
+                    active.put(replacement.context.agentLabel(), replacement);
                     stateChanged.signalAll();
                     replaced = true;
                     return previous;
@@ -289,11 +231,11 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
         session.lastHeartbeat = observedAt;
     }
 
-    public Optional<AuthenticatedConnectionContext> active(AgentId agentId) {
-        Objects.requireNonNull(agentId, "agentId");
+    public Optional<AuthenticatedConnectionContext> active(AgentLabel agentLabel) {
+        Objects.requireNonNull(agentLabel, "agentLabel");
         lock.lock();
         try {
-            ActiveSession session = active.get(agentId);
+            ActiveSession session = active.get(agentLabel);
             return session == null ? Optional.empty() : Optional.of(session.context);
         } finally {
             lock.unlock();
@@ -301,55 +243,63 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
     }
 
     /** Initiates a send only while the selected connection remains authoritative. */
-    public Optional<CompletionStage<Void>> send(AgentId agentId, AgentMessage message) {
-        Objects.requireNonNull(agentId, "agentId");
+    public Optional<Delivery> send(AgentLabel agentLabel, AgentMessage message) {
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(message, "message");
         ActiveSession candidate;
         lock.lock();
         try {
-            candidate = active.get(agentId);
+            candidate = active.get(agentLabel);
         } finally {
             lock.unlock();
         }
         if (candidate == null) {
             return Optional.empty();
         }
-        candidate.lock();
-        try {
-            lock.lock();
+        try (var ignored = candidate.context.acquireAuthority()) {
+            candidate.lock();
             try {
-                if (closed || active.get(agentId) != candidate || !candidate.authoritative
-                        || !available(agentId, clock.instant())) {
-                    return Optional.empty();
+                lock.lock();
+                try {
+                    if (closed || active.get(agentLabel) != candidate || !candidate.authoritative
+                            || !available(agentLabel, clock.instant())) {
+                        return Optional.empty();
+                    }
+                } finally {
+                    lock.unlock();
                 }
+                return Optional.of(new Delivery(candidate.context,
+                        Objects.requireNonNull(candidate.context.connection().send(message), "command send")));
             } finally {
-                lock.unlock();
+                candidate.unlock();
             }
-            return Optional.of(Objects.requireNonNull(candidate.context.connection().send(message), "command send"));
-        } finally {
-            candidate.unlock();
+        } catch (IllegalStateException rejected) {
+            return Optional.empty();
         }
     }
 
-    public boolean available(AgentId agentId, AgentLaunchId launchId) {
-        Objects.requireNonNull(agentId, "agentId");
+    public record Delivery(AuthenticatedConnectionContext context, CompletionStage<Void> completion) {
+    }
+
+    public boolean available(AgentLabel agentLabel, AgentLaunchId launchId) {
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(launchId, "launchId");
         lock.lock();
         try {
-            return available(agentId, launchId, clock.instant());
+            return available(agentLabel, launchId, clock.instant());
         } finally {
             lock.unlock();
         }
     }
 
-    boolean awaitOnline(AgentId agentId, AgentLaunchId launchId, Duration timeout)
+    boolean awaitOnline(AgentLabel agentLabel, AgentLaunchId launchId, Duration timeout)
             throws InterruptedException {
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(launchId, "launchId");
         long remaining = timeoutNanos(timeout);
         lock.lockInterruptibly();
         try {
-            while (!available(agentId, launchId, clock.instant())) {
+            while (!available(agentLabel, launchId, clock.instant())) {
                 if (closed) {
                     return false;
                 }
@@ -364,21 +314,21 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
         }
     }
 
-    boolean awaitSustainedOffline(AgentId agentId, Duration timeout)
+    boolean awaitSustainedOffline(AgentLabel agentLabel, Duration timeout)
             throws InterruptedException {
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         long remaining = timeoutNanos(timeout);
         lock.lockInterruptibly();
         try {
             if (closed) {
                 return false;
             }
-            if (available(agentId, clock.instant())) {
+            if (available(agentLabel, clock.instant())) {
                 return false;
             }
             while (remaining > 0) {
                 remaining = stateChanged.awaitNanos(remaining);
-                if (closed || available(agentId, clock.instant())) {
+                if (closed || available(agentLabel, clock.instant())) {
                     return false;
                 }
             }
@@ -388,16 +338,16 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
         }
     }
 
-    private boolean available(AgentId agentId, AgentLaunchId launchId, Instant now) {
-        ActiveSession session = active.get(agentId);
+    private boolean available(AgentLabel agentLabel, AgentLaunchId launchId, Instant now) {
+        ActiveSession session = active.get(agentLabel);
         return !closed
                 && session != null
                 && session.context.launchId().equals(launchId)
                 && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
     }
 
-    private boolean available(AgentId agentId, Instant now) {
-        ActiveSession session = active.get(agentId);
+    private boolean available(AgentLabel agentLabel, Instant now) {
+        ActiveSession session = active.get(agentLabel);
         return !closed && session != null && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
     }
 
@@ -435,6 +385,14 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
 
         @Override
         public void onMessage(AgentMessage message) {
+            try (var ignored = context.acquireAuthority()) {
+                onCurrentMessage(message);
+            } catch (IllegalStateException rejected) {
+                context.connection().close();
+            }
+        }
+
+        private void onCurrentMessage(AgentMessage message) {
             if (!acquireIfAuthoritative()) {
                 return;
             }
@@ -450,6 +408,14 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
 
         @Override
         public void onAuthenticated() {
+            try (var ignored = context.acquireAuthority()) {
+                authenticateCurrent();
+            } catch (IllegalStateException rejected) {
+                context.connection().close();
+            }
+        }
+
+        private void authenticateCurrent() {
             if (!acquireIfAuthoritative()) {
                 return;
             }
@@ -464,7 +430,7 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
 
         private boolean observe(AgentMessage message) {
             if (message instanceof AgentMessage.Heartbeat heartbeat) {
-                if (!heartbeat.agentId().equals(context.agentId())
+                if (!heartbeat.agentLabel().equals(context.agentLabel())
                         || !heartbeat.instanceId().equals(context.instanceId())) {
                     failIdentity("Heartbeat identity does not match authenticated connection");
                     return false;
@@ -482,7 +448,7 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
                 lastHeartbeat = observedAt;
                 signalStateChanged();
             } else if (message instanceof AgentMessage.AgentStatus status) {
-                if (!status.agentId().equals(context.agentId())
+                if (!status.agentLabel().equals(context.agentLabel())
                         || !status.instanceId().equals(context.instanceId())) {
                     failIdentity("Agent status identity does not match authenticated connection");
                     return false;
@@ -519,10 +485,10 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
             try {
                 lock.lock();
                 try {
-                    if (!authoritative || active.get(context.agentId()) != this) {
+                    if (!authoritative || active.get(context.agentLabel()) != this) {
                         return;
                     }
-                    active.remove(context.agentId());
+                    active.remove(context.agentLabel());
                     revoke();
                     stateChanged.signalAll();
                 } finally {

@@ -1,9 +1,11 @@
 package pro.deta.orion.agent.server;
 
+import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentAuthentication;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolVersion;
@@ -41,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AgentSessionServerTest {
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
 
     @TempDir
     Path root;
@@ -55,10 +57,14 @@ class AgentSessionServerTest {
         SessionEventRecord unknown = codec.decode(codec.encodeOpaque(
                 new EventId(20), 50_000, ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}),
                 List.of(ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}))));
+        try (var journal = new FileSystemSessionJournalStorage(
+                root.resolve("journals"), new JournalStorageConfig(
+                        AgentProtocolLimits.journalDefaults()))) {
+            journal.append(sessionId, List.of(first, unknown));
+        }
         AgentSessionServer server = new AgentSessionServer(root);
         server.onStart();
         try {
-            server.replicationService().append(sessionId, List.of(first, unknown));
             assertThat(server.readSessionEvents(sessionId, Optional.empty()).records())
                     .containsExactly(first, unknown);
             assertThat(server.readSessionEvents(sessionId, Optional.of(first.eventId())).records())
@@ -99,7 +105,7 @@ class AgentSessionServerTest {
     void composesAuthenticationConnectionOwnershipAndSessionReconciliation() throws Exception {
         AgentSessionServer server = new AgentSessionServer(root);
         server.onStart();
-        server.registerAgent(AGENT_ID, "Worker 1");
+        server.registerAgent(AGENT_LABEL, "Worker 1");
         SessionDescriptor reported = new SessionDescriptor(
                 new SessionId("session-1"),
                 AgentMessage.SessionState.RUNNING,
@@ -109,7 +115,7 @@ class AgentSessionServerTest {
         TestConnection connection = new TestConnection();
 
         try (AgentdLaunchAttempt attempt = server.provisioningControl(
-                AGENT_ID,
+                AGENT_LABEL,
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
@@ -129,7 +135,7 @@ class AgentSessionServerTest {
         assertThat(connection.closed).isTrue();
         try (FileSystemAgentRegistry ignored = new FileSystemAgentRegistry(root.resolve("agents"));
              FileSystemSessionRegistry sessions = new FileSystemSessionRegistry(root.resolve("sessions"))) {
-            assertThat(sessions.ownedBy(AGENT_ID))
+            assertThat(sessions.ownedBy(AGENT_LABEL))
                     .singleElement()
                     .extracting(record -> record.reported())
                     .isEqualTo(reported);
@@ -162,12 +168,12 @@ class AgentSessionServerTest {
 
     @Test
     void shutdownClosesEveryConnectionAndRegistryWhenTransportCleanupFails() throws Exception {
-        AgentId secondAgent = new AgentId("agent-2");
+        AgentLabel secondAgent = new AgentLabel("agent-2");
         AgentSessionServer server = new AgentSessionServer(root);
         server.onStart();
-        server.registerAgent(AGENT_ID, "Worker 1");
+        server.registerAgent(AGENT_LABEL, "Worker 1");
         server.registerAgent(secondAgent, "Worker 2");
-        TestConnection first = authenticate(server, AGENT_ID, new IllegalStateException("first close failed"));
+        TestConnection first = authenticate(server, AGENT_LABEL, new IllegalStateException("first close failed"));
         TestConnection second = authenticate(
                 server, secondAgent, new IllegalStateException("second close failed"));
 
@@ -186,29 +192,29 @@ class AgentSessionServerTest {
     }
 
     private static TestConnection authenticate(
-            AgentSessionServer server, AgentId agentId, RuntimeException closeFailure) throws Exception {
+            AgentSessionServer server, AgentLabel agentLabel, RuntimeException closeFailure) throws Exception {
         TestConnection connection = new TestConnection(closeFailure);
         try (AgentdLaunchAttempt attempt = server.provisioningControl(
-                agentId,
+                agentLabel,
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
                 "2.4.1").nextAttempt()) {
-            server.open(connection).onMessage(hello(agentId, attempt));
+            server.open(connection).onMessage(hello(agentLabel, attempt));
         }
         return connection;
     }
 
     private static AgentMessage.Hello hello(AgentdLaunchAttempt attempt) {
-        return hello(AGENT_ID, attempt);
+        return hello(AGENT_LABEL, attempt);
     }
 
-    private static AgentMessage.Hello hello(AgentId agentId, AgentdLaunchAttempt attempt) {
+    private static AgentMessage.Hello hello(AgentLabel agentLabel, AgentdLaunchAttempt attempt) {
         byte[] permit = Base64.getUrlDecoder().decode(attempt.permit().copyBytes());
         return new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                agentId,
+                agentLabel,
                 new AgentInstanceId(UUID.randomUUID()),
                 "2.4.1",
                 new MachineInfo("worker-1", "linux", "aarch64"),

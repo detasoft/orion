@@ -3,7 +3,7 @@ package pro.deta.orion.agent.server.auth;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -28,8 +28,8 @@ import java.util.concurrent.CompletionStage;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SessionReconciliationPublisherTest {
-    private static final AgentId AGENT = new AgentId("agent-1");
-    private static final AgentId OTHER_AGENT = new AgentId("agent-2");
+    private static final AgentLabel AGENT = new AgentLabel("agent-1");
+    private static final AgentLabel OTHER_AGENT = new AgentLabel("agent-2");
     private static final AgentInstanceId INSTANCE =
             new AgentInstanceId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f"));
     private static final AgentLaunchId LAUNCH =
@@ -128,7 +128,7 @@ class SessionReconciliationPublisherTest {
 
             assertThat(connection.closed).isTrue();
             assertThat(registry.find(SECOND)).isEmpty();
-            assertThat(registry.find(FIRST)).get().extracting(record -> record.agentId())
+            assertThat(registry.find(FIRST)).get().extracting(record -> record.agentLabel())
                     .isEqualTo(OTHER_AGENT);
         }
     }
@@ -206,7 +206,7 @@ class SessionReconciliationPublisherTest {
                 connection,
                 () -> AuthenticatedConnectionContext.RenewalResult.RENEWED,
                 (version, machine, capabilities, observedAt) ->
-                        AuthenticatedConnectionContext.ObservationResult.RECORDED);
+                        AuthenticatedConnectionContext.ObservationResult.RECORDED, () -> () -> { });
     }
 
     private static AgentMessage.Heartbeat heartbeat() {

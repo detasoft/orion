@@ -1,5 +1,15 @@
 package pro.deta.orion.agent.server.auth;
 
+import java.util.concurrent.atomic.AtomicReference;
+import pro.deta.orion.agent.server.command.SessionCommandService;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.CommandId;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
+import pro.deta.orion.agent.protocol.SessionId;
+import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
+import pro.deta.orion.agent.protocol.AgentLabel;
+import pro.deta.orion.agent.protocol.AgentInstanceId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentAuthentication;
@@ -45,6 +55,68 @@ class AgentControlAuthenticatorTest {
     Path root;
 
     @Test
+    void durableReplacementFencesCommandsBeforeReplacementWelcomeCompletes() throws Exception {
+        try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root.resolve("agents"));
+                FileSystemSessionRegistry sessions = new FileSystemSessionRegistry(root.resolve("sessions"));
+                var journals = new FileSystemSessionJournalStorage(
+                        root.resolve("journals"), new JournalStorageConfig(
+                                AgentProtocolLimits.journalDefaults()))) {
+            var commandsReference = new AtomicReference<
+                    SessionCommandService>();
+            AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
+                    context -> commandsReference.get().controlSession(context.agentLabel()));
+            try (var commands = new SessionCommandService(
+                    root.resolve("commands"), registry, sessions, connections, journals)) {
+                commandsReference.set(commands);
+                AgentRecord.Launch first = prepareLaunch(registry);
+                AgentControlAuthenticator authenticator = AgentControlAuthenticator.withPolicy(
+                        registry, connections::activate, CLOCK, new SecureRandom(), PERMIT_LIFETIME, TOKEN_LIFETIME);
+                var issued = (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
+                        TestIdentity.AGENT_LABEL, first.generation(), first.launchId());
+                TestConnection old = new TestConnection();
+                old.pendingCommands = true;
+                AgentControlHandler.Session oldSession = authenticator.open(old);
+                try (var permit = issued.permit()) {
+                    oldSession.onMessage(hello(first, AgentAuthentication.Kind.LAUNCH_PERMIT,
+                            Base64.getUrlDecoder().decode(permit.copyBytes())));
+                }
+                old.sendCompletion.complete(null);
+                var sessionId = new SessionId("session");
+                sessions.reconcile(TestIdentity.AGENT_LABEL, List.of(new SessionDescriptor(
+                        sessionId, AgentMessage.SessionState.RUNNING, Optional.empty(), Optional.empty(), "")));
+                var commandId = new CommandId("resize");
+                commands.resize(TestIdentity.AGENT_LABEL, commandId, sessionId, 100, 30);
+                assertThat(commands.status(commandId).phase())
+                        .isEqualTo(SessionCommandService.Phase.UNKNOWN);
+
+                AgentRecord.Launch next = registry.allocateLaunch(
+                        TestIdentity.AGENT_LABEL, Optional.of(TestIdentity.INSTANCE_ID)).launch().orElseThrow();
+                var nextPermit = (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
+                        TestIdentity.AGENT_LABEL, next.generation(), next.launchId());
+                TestConnection replacement = new TestConnection();
+                try (var permit = nextPermit.permit()) {
+                    AgentMessage.Hello proposed = hello(next, AgentAuthentication.Kind.LAUNCH_PERMIT,
+                            Base64.getUrlDecoder().decode(permit.copyBytes()));
+                    authenticator.open(replacement).onMessage(new AgentMessage.Hello(proposed.protocolVersion(),
+                            proposed.journalFormatVersion(), proposed.agentLabel(),
+                            new AgentInstanceId(UUID.randomUUID()),
+                            proposed.agentVersion(), proposed.machine(), proposed.capabilities(), proposed.authentication()));
+                }
+                assertThat(replacement.handshakeComplete).isFalse();
+                assertThat(replacement.sent).singleElement().isInstanceOf(AgentMessage.Welcome.class);
+                old.commandCompletion.complete(null);
+                oldSession.onMessage(new AgentMessage.CommandResult(commandId, Optional.of(sessionId),
+                        AgentMessage.CommandOutcome.REJECTED, "superseded"));
+                assertThat(commands.status(commandId).phase())
+                        .isEqualTo(SessionCommandService.Phase.UNKNOWN);
+                replacement.sendCompletion.complete(null);
+                assertThat(replacement.handshakeComplete).isTrue();
+            }
+            connections.close();
+        }
+    }
+
+    @Test
     void initialLoginCommitsReconnectCredentialBeforeWelcomeAndContextPublication() throws Exception {
         List<AuthenticatedConnectionContext> authenticated = new ArrayList<>();
         try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
@@ -52,16 +124,16 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
 
             authenticator.open(connection).onMessage(hello(
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
 
-            AgentRecord persisted = registry.find(TestIdentity.AGENT_ID).orElseThrow();
+            AgentRecord persisted = registry.find(TestIdentity.AGENT_LABEL).orElseThrow();
             assertThat(persisted.launch().orElseThrow().launchPermit()).isEmpty();
-            assertThat(persisted.launch().orElseThrow().reconnectToken()).isPresent();
+            assertThat(persisted.registration().map(AgentRecord.Registration::reconnectToken)).isPresent();
             assertThat(connection.sent).singleElement().isInstanceOf(AgentMessage.Welcome.class);
             assertThat(authenticated).isEmpty();
 
@@ -69,7 +141,7 @@ class AgentControlAuthenticatorTest {
 
             assertThat(connection.handshakeComplete).isTrue();
             assertThat(authenticated).singleElement().satisfies(context -> {
-                assertThat(context.agentId()).isEqualTo(TestIdentity.AGENT_ID);
+                assertThat(context.agentLabel()).isEqualTo(TestIdentity.AGENT_LABEL);
                 assertThat(context.generation()).isEqualTo(launch.generation());
                 assertThat(context.launchId()).isEqualTo(launch.launchId());
                 assertThat(context.instanceId()).isEqualTo(TestIdentity.INSTANCE_ID);
@@ -90,7 +162,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, new ArrayList<>());
 
             AgentControlAuthenticator.PermitIssueResult result = authenticator.issueLaunchPermit(
-                    TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                    TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
 
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) result;
@@ -98,12 +170,12 @@ class AgentControlAuthenticatorTest {
             assertThat(encoded).hasSize(43);
             assertThat(Base64.getUrlDecoder().decode(encoded)).hasSize(32);
             assertThat(issued.permit().toString()).isEqualTo("ProvisioningLaunchPermit[redacted]");
-            AgentRecord.Credential persisted = registry.find(TestIdentity.AGENT_ID).orElseThrow()
+            AgentRecord.Credential persisted = registry.find(TestIdentity.AGENT_LABEL).orElseThrow()
                     .launch().orElseThrow().launchPermit().orElseThrow();
             assertThat(persisted.expiresAt()).isEqualTo(NOW.plus(PERMIT_LIFETIME));
             assertThat(persisted.digest().toString()).isEqualTo("CredentialDigest[algorithm=SHA-256]");
             assertThat(authenticator.issueLaunchPermit(
-                    TestIdentity.AGENT_ID, launch.generation(), launch.launchId()))
+                    TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId()))
                     .isEqualTo(new AgentControlAuthenticator.PermitIssueResult.Failed(
                             AgentControlAuthenticator.Failure.REJECTED));
             issued.permit().close();
@@ -119,7 +191,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, new ArrayList<>());
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection initial = new TestConnection();
             authenticator.open(initial).onMessage(hello(
@@ -153,7 +225,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             authenticator.open(connection).onMessage(hello(
@@ -163,8 +235,8 @@ class AgentControlAuthenticatorTest {
 
             assertThat(authenticated.getFirst().renewReconnectToken())
                     .isEqualTo(AuthenticatedConnectionContext.RenewalResult.RENEWED);
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch().orElseThrow()
-                    .reconnectToken().orElseThrow().expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(40)));
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().registration().orElseThrow()
+                    .reconnectToken().expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(40)));
             issued.permit().close();
         }
     }
@@ -179,7 +251,7 @@ class AgentControlAuthenticatorTest {
             authenticator.open(connection).onMessage(new AgentMessage.Hello(
                     AgentProtocolVersion.CURRENT,
                     JournalFormatVersion.CURRENT,
-                    TestIdentity.AGENT_ID,
+                    TestIdentity.AGENT_LABEL,
                     TestIdentity.INSTANCE_ID,
                     "2.4.1",
                     MACHINE,
@@ -197,7 +269,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             List<AgentMessage.Hello> invalid = List.of(
                     hello(launch, new AgentProtocolVersion(2), JournalFormatVersion.CURRENT, permit),
@@ -208,7 +280,7 @@ class AgentControlAuthenticatorTest {
                 authenticator.open(connection).onMessage(hello);
                 assertRejected(connection, authenticated);
             }
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch().orElseThrow()
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().launch().orElseThrow()
                     .launchPermit()).isPresent();
             issued.permit().close();
         }
@@ -223,7 +295,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             clock.advance(PERMIT_LIFETIME);
             TestConnection connection = new TestConnection();
@@ -232,7 +304,7 @@ class AgentControlAuthenticatorTest {
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
 
             assertRejected(connection, authenticated);
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch().orElseThrow()
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().launch().orElseThrow()
                     .launchPermit()).isPresent();
             issued.permit().close();
         }
@@ -247,7 +319,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection initial = new TestConnection();
             authenticator.open(initial).onMessage(hello(
@@ -274,16 +346,16 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
 
             authenticator.open(connection).onMessage(hello(
-                    new pro.deta.orion.agent.protocol.AgentId("agent-2"), launch,
+                    new AgentLabel("agent-2"), launch,
                     AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT, permit));
 
             assertRejected(connection, authenticated);
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch().orElseThrow()
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().launch().orElseThrow()
                     .launchPermit()).isPresent();
             issued.permit().close();
         }
@@ -297,21 +369,22 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             TestConnection wrongCredential = new TestConnection();
             authenticator.open(wrongCredential).onMessage(hello(
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, new byte[32]));
             assertRejected(wrongCredential, authenticated);
 
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
-            AgentRecord.Launch replacement = registry.allocateLaunch(TestIdentity.AGENT_ID)
+            AgentRecord.Launch replacement = registry.allocateLaunch(TestIdentity.AGENT_LABEL, registry.find(TestIdentity.AGENT_LABEL)
+                    .flatMap(record -> record.registration().map(AgentRecord.Registration::instanceId)))
                     .launch().orElseThrow();
             TestConnection superseded = new TestConnection();
             authenticator.open(superseded).onMessage(hello(
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
 
             assertRejected(superseded, authenticated);
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch()).contains(replacement);
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().launch()).contains(replacement);
             issued.permit().close();
         }
     }
@@ -324,7 +397,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, new ArrayList<>());
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             CountDownLatch start = new CountDownLatch(1);
             List<TestConnection> connections = List.of(new TestConnection(), new TestConnection());
@@ -344,8 +417,8 @@ class AgentControlAuthenticatorTest {
 
             assertThat(connections).filteredOn(connection -> connection.sent.size() == 1).hasSize(1);
             assertThat(connections).filteredOn(connection -> connection.closed).hasSize(1);
-            assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().launch().orElseThrow()
-                    .reconnectToken()).isPresent();
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().registration()
+                    .map(AgentRecord.Registration::reconnectToken)).isPresent();
             issued.permit().close();
         }
     }
@@ -358,7 +431,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             authenticator.open(connection).onMessage(hello(
@@ -369,10 +442,10 @@ class AgentControlAuthenticatorTest {
             assertThat(connection.closed).isTrue();
             assertThat(connection.handshakeComplete).isFalse();
             assertThat(authenticated).isEmpty();
-            AgentRecord.Launch persisted = registry.find(TestIdentity.AGENT_ID)
+            AgentRecord.Launch persisted = registry.find(TestIdentity.AGENT_LABEL)
                     .orElseThrow().launch().orElseThrow();
             assertThat(persisted.launchPermit()).isEmpty();
-            assertThat(persisted.reconnectToken()).isPresent();
+            assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().registration()).isPresent();
             TestConnection retry = new TestConnection();
             authenticator.open(retry).onMessage(hello(
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
@@ -390,7 +463,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, new ArrayList<>());
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection initial = new TestConnection();
             authenticator.open(initial).onMessage(hello(
@@ -442,14 +515,14 @@ class AgentControlAuthenticatorTest {
                     TOKEN_LIFETIME);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             AgentControlHandler.Session session = authenticator.open(connection);
             session.onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
             connection.sendCompletion.complete(null);
             AgentMessage.Heartbeat heartbeat = new AgentMessage.Heartbeat(
-                    TestIdentity.AGENT_ID, TestIdentity.INSTANCE_ID, NOW.toEpochMilli());
+                    TestIdentity.AGENT_LABEL, TestIdentity.INSTANCE_ID, NOW.toEpochMilli());
 
             session.onMessage(heartbeat);
             session.onClosed(null);
@@ -494,14 +567,14 @@ class AgentControlAuthenticatorTest {
                     TOKEN_LIFETIME);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             AgentControlHandler.Session session = authenticator.open(connection);
             session.onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
             connection.sendCompletion.complete(null);
             Future<?> message = executor.submit(() -> session.onMessage(new AgentMessage.Heartbeat(
-                    TestIdentity.AGENT_ID, TestIdentity.INSTANCE_ID, NOW.toEpochMilli())));
+                    TestIdentity.AGENT_LABEL, TestIdentity.INSTANCE_ID, NOW.toEpochMilli())));
             assertThat(messageEntered.await(10, TimeUnit.SECONDS)).isTrue();
 
             Future<?> closed = executor.submit(() -> session.onClosed(null));
@@ -520,7 +593,7 @@ class AgentControlAuthenticatorTest {
         AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
         AgentControlAuthenticator.PermitIssueResult.Issued issued =
                 (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                        TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                        TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
         byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
         registry.close();
         TestConnection connection = new TestConnection();
@@ -540,14 +613,14 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             AgentControlHandler.Session session = authenticator.open(connection);
             session.onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
 
             session.onMessage(new AgentMessage.Heartbeat(
-                    TestIdentity.AGENT_ID, TestIdentity.INSTANCE_ID, NOW.toEpochMilli()));
+                    TestIdentity.AGENT_LABEL, TestIdentity.INSTANCE_ID, NOW.toEpochMilli()));
             connection.sendCompletion.complete(null);
 
             assertThat(connection.closed).isTrue();
@@ -565,17 +638,17 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             AgentControlAuthenticator.PermitIssueResult.Issued issued =
                     (AgentControlAuthenticator.PermitIssueResult.Issued) authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             byte[] permit = Base64.getUrlDecoder().decode(issued.permit().copyBytes());
             TestConnection connection = new TestConnection();
             authenticator.open(connection).onMessage(hello(
                     launch, AgentAuthentication.Kind.LAUNCH_PERMIT, permit));
             connection.sendCompletion.complete(null);
-            AgentRecord replacement = registry.allocateLaunch(TestIdentity.AGENT_ID);
+            AgentRecord replacement = registerReplacement(registry);
 
             assertThat(authenticated.getFirst().renewReconnectToken())
                     .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
-            assertThat(registry.find(TestIdentity.AGENT_ID)).contains(replacement);
+            assertThat(registry.find(TestIdentity.AGENT_LABEL)).contains(replacement);
             issued.permit().close();
         }
     }
@@ -606,7 +679,7 @@ class AgentControlAuthenticatorTest {
             AgentRecord.Launch launch = prepareLaunch(registry);
             var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
                     authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             try (var permit = issued.permit()) {
                 TestConnection connection = new TestConnection();
                 AgentControlHandler.Session session = authenticator.open(connection);
@@ -614,18 +687,18 @@ class AgentControlAuthenticatorTest {
                         Base64.getUrlDecoder().decode(permit.copyBytes())));
                 connection.sendCompletion.complete(null);
 
-                assertThat(registry.find(TestIdentity.AGENT_ID).orElseThrow().observation().orElseThrow()
+                assertThat(registry.find(TestIdentity.AGENT_LABEL).orElseThrow().observation().orElseThrow()
                         .observedAt()).isEqualTo(NOW);
 
                 clock.advance(Duration.ofMinutes(1));
                 session.onMessage(new AgentMessage.Heartbeat(
-                        TestIdentity.AGENT_ID, TestIdentity.INSTANCE_ID, 0L));
+                        TestIdentity.AGENT_LABEL, TestIdentity.INSTANCE_ID, 0L));
 
-                AgentRecord observed = registry.find(TestIdentity.AGENT_ID).orElseThrow();
+                AgentRecord observed = registry.find(TestIdentity.AGENT_LABEL).orElseThrow();
                 assertThat(observed.observation().orElseThrow().observedAt()).isEqualTo(clock.instant());
-                assertThat(observed.launch().orElseThrow().reconnectToken().orElseThrow().expiresAt())
+                assertThat(observed.registration().orElseThrow().reconnectToken().expiresAt())
                         .isEqualTo(clock.instant().plus(TOKEN_LIFETIME));
-                assertThat(connections.available(TestIdentity.AGENT_ID, launch.launchId())).isTrue();
+                assertThat(connections.available(TestIdentity.AGENT_LABEL, launch.launchId())).isTrue();
             }
         }
     }
@@ -659,7 +732,7 @@ class AgentControlAuthenticatorTest {
             AgentRecord.Launch launch = prepareLaunch(agentRegistry);
             var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
                     authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             try (var permit = issued.permit()) {
                 FailingRequestConnection connection = new FailingRequestConnection();
                 AgentControlHandler.Session transportSession = authenticator.open(connection);
@@ -676,7 +749,7 @@ class AgentControlAuthenticatorTest {
                 assertThat(connection.sent.get(1)).isEqualTo(new AgentMessage.RequestSessionList());
                 assertThat(connection.handshakeComplete).isTrue();
                 assertThat(connection.closed).isTrue();
-                assertThat(connections.active(TestIdentity.AGENT_ID)).isEmpty();
+                assertThat(connections.active(TestIdentity.AGENT_LABEL)).isEmpty();
             }
         }
     }
@@ -690,7 +763,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
             var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
                     authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             try (var permit = issued.permit()) {
                 TestConnection connection = new TestConnection();
                 AgentControlHandler.Session session = authenticator.open(connection);
@@ -698,12 +771,12 @@ class AgentControlAuthenticatorTest {
                         Base64.getUrlDecoder().decode(permit.copyBytes())));
                 connection.sendCompletion.complete(null);
                 session.onClosed(null);
-                AgentRecord before = registry.find(TestIdentity.AGENT_ID).orElseThrow();
+                AgentRecord before = registry.find(TestIdentity.AGENT_LABEL).orElseThrow();
                 clock.advance(Duration.ofMinutes(1));
 
                 assertThat(authenticated.getFirst().renewReconnectToken())
                         .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
-                assertThat(registry.find(TestIdentity.AGENT_ID)).contains(before);
+                assertThat(registry.find(TestIdentity.AGENT_LABEL)).contains(before);
             }
         }
     }
@@ -716,19 +789,19 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
             var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
                     authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             try (var permit = issued.permit()) {
                 TestConnection connection = new TestConnection();
                 authenticator.open(connection).onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT,
                         Base64.getUrlDecoder().decode(permit.copyBytes())));
-                AgentRecord replacement = registry.allocateLaunch(TestIdentity.AGENT_ID);
+                AgentRecord replacement = registerReplacement(registry);
 
                 connection.sendCompletion.complete(null);
 
                 assertThat(authenticated).isEmpty();
                 assertThat(connection.closed).isTrue();
                 assertThat(connection.handshakeComplete).isFalse();
-                assertThat(registry.find(TestIdentity.AGENT_ID)).contains(replacement);
+                assertThat(registry.find(TestIdentity.AGENT_LABEL)).contains(replacement);
             }
         }
     }
@@ -742,7 +815,7 @@ class AgentControlAuthenticatorTest {
             AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
             var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
                     authenticator.issueLaunchPermit(
-                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+                            TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId());
             try (var permit = issued.permit()) {
                 TestConnection connection = new TestConnection();
                 authenticator.open(connection).onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT,
@@ -756,6 +829,17 @@ class AgentControlAuthenticatorTest {
                 assertThat(connection.handshakeComplete).isFalse();
             }
         }
+    }
+
+    private static AgentRecord registerReplacement(FileSystemAgentRegistry registry) throws Exception {
+        AgentRecord.Launch launch = registry.allocateLaunch(
+                TestIdentity.AGENT_LABEL, Optional.of(TestIdentity.INSTANCE_ID)).launch().orElseThrow();
+        AgentRecord.Credential credential = new AgentRecord.Credential(
+                new AgentRecord.CredentialDigest(new byte[32]), NOW.plusSeconds(600));
+        registry.installLaunchPermit(TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId(), credential, NOW);
+        return registry.consumeLaunchPermit(TestIdentity.AGENT_LABEL, launch.generation(), launch.launchId(),
+                new AgentInstanceId(UUID.randomUUID()),
+                credential.digest(), credential, NOW);
     }
 
     private AgentControlAuthenticator authenticator(
@@ -788,13 +872,14 @@ class AgentControlAuthenticatorTest {
     }
 
     private static AgentRecord.Launch prepareLaunch(FileSystemAgentRegistry registry) throws Exception {
-        registry.register(TestIdentity.AGENT_ID, "Build agent");
-        return registry.allocateLaunch(TestIdentity.AGENT_ID).launch().orElseThrow();
+        registry.register(TestIdentity.AGENT_LABEL, "Build agent");
+        return registry.allocateLaunch(TestIdentity.AGENT_LABEL, registry.find(TestIdentity.AGENT_LABEL)
+                    .flatMap(record -> record.registration().map(AgentRecord.Registration::instanceId))).launch().orElseThrow();
     }
 
     private static AgentMessage.Hello hello(
             AgentRecord.Launch launch, AgentAuthentication.Kind kind, byte[] credential) {
-        return hello(TestIdentity.AGENT_ID, launch, AgentProtocolVersion.CURRENT,
+        return hello(TestIdentity.AGENT_LABEL, launch, AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT, kind, credential);
     }
 
@@ -803,22 +888,22 @@ class AgentControlAuthenticatorTest {
             AgentProtocolVersion protocolVersion,
             JournalFormatVersion journalVersion,
             byte[] credential) {
-        return hello(TestIdentity.AGENT_ID, launch, protocolVersion, journalVersion,
+        return hello(TestIdentity.AGENT_LABEL, launch, protocolVersion, journalVersion,
                 AgentAuthentication.Kind.LAUNCH_PERMIT, credential);
     }
 
     private static AgentMessage.Hello hello(
-            pro.deta.orion.agent.protocol.AgentId agentId,
+            AgentLabel agentLabel,
             AgentRecord.Launch launch,
             AgentProtocolVersion protocolVersion,
             JournalFormatVersion journalVersion,
             byte[] credential) {
-        return hello(agentId, launch, protocolVersion, journalVersion,
+        return hello(agentLabel, launch, protocolVersion, journalVersion,
                 AgentAuthentication.Kind.LAUNCH_PERMIT, credential);
     }
 
     private static AgentMessage.Hello hello(
-            pro.deta.orion.agent.protocol.AgentId agentId,
+            AgentLabel agentLabel,
             AgentRecord.Launch launch,
             AgentProtocolVersion protocolVersion,
             JournalFormatVersion journalVersion,
@@ -827,7 +912,7 @@ class AgentControlAuthenticatorTest {
         return new AgentMessage.Hello(
                 protocolVersion,
                 journalVersion,
-                agentId,
+                agentLabel,
                 TestIdentity.INSTANCE_ID,
                 "2.4.1",
                 MACHINE,
@@ -852,13 +937,15 @@ class AgentControlAuthenticatorTest {
     private static final class TestConnection implements AgentControlHandler.Connection {
         private final List<AgentMessage> sent = new ArrayList<>();
         private final CompletableFuture<Void> sendCompletion = new CompletableFuture<>();
+        private final CompletableFuture<Void> commandCompletion = new CompletableFuture<>();
+        private boolean pendingCommands;
         private boolean handshakeComplete;
         private boolean closed;
 
         @Override
         public CompletionStage<Void> send(AgentMessage message) {
             sent.add(message);
-            return sendCompletion;
+            return pendingCommands && !(message instanceof AgentMessage.Welcome) ? commandCompletion : sendCompletion;
         }
 
         @Override
@@ -904,10 +991,10 @@ class AgentControlAuthenticatorTest {
     }
 
     private static final class TestIdentity {
-        private static final pro.deta.orion.agent.protocol.AgentId AGENT_ID =
-                new pro.deta.orion.agent.protocol.AgentId("agent-1");
-        private static final pro.deta.orion.agent.protocol.AgentInstanceId INSTANCE_ID =
-                new pro.deta.orion.agent.protocol.AgentInstanceId(
+        private static final AgentLabel AGENT_LABEL =
+                new AgentLabel("agent-1");
+        private static final AgentInstanceId INSTANCE_ID =
+                new AgentInstanceId(
                         UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f"));
     }
 

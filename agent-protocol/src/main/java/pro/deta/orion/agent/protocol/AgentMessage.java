@@ -19,7 +19,7 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
     record Hello(
             AgentProtocolVersion protocolVersion,
             JournalFormatVersion journalFormatVersion,
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentInstanceId instanceId,
             String agentVersion,
             MachineInfo machine,
@@ -29,7 +29,7 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         public Hello {
             Objects.requireNonNull(protocolVersion, "protocolVersion");
             Objects.requireNonNull(journalFormatVersion, "journalFormatVersion");
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(agentLabel, "agentLabel");
             Objects.requireNonNull(instanceId, "instanceId");
             agentVersion = ProtocolValidation.nonBlank(agentVersion, "agentVersion");
             Objects.requireNonNull(machine, "machine");
@@ -38,9 +38,9 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
 
         public Hello(AgentProtocolVersion protocolVersion, JournalFormatVersion journalFormatVersion,
-                     AgentId agentId, AgentInstanceId instanceId, String agentVersion,
+                     AgentLabel agentLabel, AgentInstanceId instanceId, String agentVersion,
                      MachineInfo machine, Map<String, String> capabilities) {
-            this(protocolVersion, journalFormatVersion, agentId, instanceId, agentVersion,
+            this(protocolVersion, journalFormatVersion, agentLabel, instanceId, agentVersion,
                     machine, capabilities, Optional.empty());
         }
 
@@ -79,9 +79,9 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Heartbeat(AgentId agentId, AgentInstanceId instanceId, long epochMillis) implements AgentMessage {
+    record Heartbeat(AgentLabel agentLabel, AgentInstanceId instanceId, long epochMillis) implements AgentMessage {
         public Heartbeat {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(agentLabel, "agentLabel");
             Objects.requireNonNull(instanceId, "instanceId");
             if (epochMillis < 0) {
                 throw new IllegalArgumentException("epochMillis must not be negative");
@@ -95,7 +95,7 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
     }
 
     record AgentStatus(
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentInstanceId instanceId,
             String agentVersion,
             MachineInfo machine,
@@ -104,7 +104,7 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
             Map<String, String> capabilities
     ) implements AgentMessage {
         public AgentStatus {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(agentLabel, "agentLabel");
             Objects.requireNonNull(instanceId, "instanceId");
             agentVersion = ProtocolValidation.nonBlank(agentVersion, "agentVersion");
             Objects.requireNonNull(machine, "machine");

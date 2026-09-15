@@ -5,7 +5,7 @@ import org.eclipse.jetty.http2.api.Stream;
 import org.eclipse.jetty.http2.frames.DataFrame;
 import org.eclipse.jetty.http2.frames.ResetFrame;
 import org.eclipse.jetty.util.Callback;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class JettySessionReplicationStream implements Stream.Listener {
     private final Stream stream;
     private final SessionId sessionId;
-    private final AgentId agentId;
+    private final AuthenticatedConnectionContext context;
     private final SessionReplicationService replication;
     private final Executor executor;
     private final AtomicBoolean terminal = new AtomicBoolean();
@@ -39,13 +39,13 @@ final class JettySessionReplicationStream implements Stream.Listener {
     JettySessionReplicationStream(
             Stream stream,
             SessionId sessionId,
-            AgentId agentId,
+            AuthenticatedConnectionContext context,
             SessionReplicationService replication,
             AgentProtocolLimits limits,
             Executor executor) {
         this.stream = Objects.requireNonNull(stream, "stream");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
-        this.agentId = Objects.requireNonNull(agentId, "agentId");
+        this.context = Objects.requireNonNull(context, "context");
         this.replication = Objects.requireNonNull(replication, "replication");
         this.executor = Objects.requireNonNull(executor, "executor");
         decoder = new SessionReplicationDecoder(Objects.requireNonNull(limits, "limits"));
@@ -141,10 +141,10 @@ final class JettySessionReplicationStream implements Stream.Listener {
         List<byte[]> responses = new ArrayList<>(2);
         try {
             if (work.open() != null) {
-                responses.add(codec.encode(replication.open(agentId, work.open())));
+                responses.add(codec.encode(replication.open(context, work.open())));
             }
             if (!work.events().isEmpty()) {
-                responses.add(codec.encode(replication.append(sessionId, work.events())));
+                responses.add(codec.encode(replication.append(context, sessionId, work.events())));
             }
         } catch (SessionReplicationException failure) {
             fail(failure.kind() == SessionReplicationException.Kind.PROTOCOL

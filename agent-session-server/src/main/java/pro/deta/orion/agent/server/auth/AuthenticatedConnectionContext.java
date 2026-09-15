@@ -1,20 +1,22 @@
 package pro.deta.orion.agent.server.auth;
 
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
+import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry.RegistrationLease;
 
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Authenticated launch identity and revocable transport authority published after WELCOME delivery. */
 public final class AuthenticatedConnectionContext {
-    private final AgentId agentId;
+    private final AgentLabel agentLabel;
     private final AgentGeneration generation;
     private final AgentLaunchId launchId;
     private final AgentInstanceId instanceId;
@@ -25,10 +27,11 @@ public final class AuthenticatedConnectionContext {
     private final AgentControlHandler.Connection connection;
     private final Renewal renewal;
     private final Observation observation;
-    private boolean authoritative = true;
+    private volatile boolean authoritative = true;
+    private final Supplier<RegistrationLease> authority;
 
     AuthenticatedConnectionContext(
-            AgentId agentId,
+            AgentLabel agentLabel,
             AgentGeneration generation,
             AgentLaunchId launchId,
             AgentInstanceId instanceId,
@@ -38,8 +41,9 @@ public final class AuthenticatedConnectionContext {
             ConnectionId connectionId,
             AgentControlHandler.Connection connection,
             Renewal renewal,
-            Observation observation) {
-        this.agentId = Objects.requireNonNull(agentId, "agentId");
+            Observation observation,
+            Supplier<RegistrationLease> authority) {
+        this.agentLabel = Objects.requireNonNull(agentLabel, "agentLabel");
         this.generation = Objects.requireNonNull(generation, "generation");
         this.launchId = Objects.requireNonNull(launchId, "launchId");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
@@ -50,10 +54,20 @@ public final class AuthenticatedConnectionContext {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.renewal = Objects.requireNonNull(renewal, "renewal");
         this.observation = Objects.requireNonNull(observation, "observation");
+        this.authority = Objects.requireNonNull(authority, "authority");
     }
 
-    public AgentId agentId() {
-        return agentId;
+    public RegistrationLease acquireAuthority() {
+        RegistrationLease lease = authority.get();
+        if (!authoritative) {
+            lease.close();
+            throw new IllegalStateException("Agent connection has been revoked");
+        }
+        return lease;
+    }
+
+    public AgentLabel agentLabel() {
+        return agentLabel;
     }
 
     public AgentGeneration generation() {
@@ -88,11 +102,14 @@ public final class AuthenticatedConnectionContext {
         return connection;
     }
 
-    public synchronized RenewalResult renewReconnectToken() {
-        if (!authoritative) {
+    public RenewalResult renewReconnectToken() {
+        try (var ignored = acquireAuthority()) {
+            synchronized (this) {
+                return authoritative ? renewal.renew() : RenewalResult.REJECTED;
+            }
+        } catch (IllegalStateException failure) {
             return RenewalResult.REJECTED;
         }
-        return renewal.renew();
     }
 
     synchronized void revoke() {

@@ -1,6 +1,10 @@
 package pro.deta.orion.agent.server.replication;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry.RegistrationLease;
+import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
+import pro.deta.orion.agent.server.registry.SessionRegistryException;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
@@ -15,10 +19,12 @@ import java.util.Optional;
 
 public final class SessionReplicationService implements AutoCloseable {
     private final SessionJournalStorage storage;
+    private final FileSystemSessionRegistry sessions;
     private final LiveEventBroker liveEvents = new LiveEventBroker();
 
-    public SessionReplicationService(SessionJournalStorage storage) {
+    public SessionReplicationService(SessionJournalStorage storage, FileSystemSessionRegistry sessions) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.sessions = Objects.requireNonNull(sessions, "sessions");
     }
 
     public LiveEventBroker.Subscription subscribe(SessionId sessionId) {
@@ -31,11 +37,12 @@ public final class SessionReplicationService implements AutoCloseable {
     }
 
     public AgentMessage.SessionSync open(
-            AgentId agentId,
+            AuthenticatedConnectionContext context,
             AgentMessage.SessionOpen open) throws SessionReplicationException {
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(context, "context");
         Objects.requireNonNull(open, "open");
-        try {
+        try (var authority = acquire(context)) {
+            requireOwner(context, open.sessionId());
             Optional<EventId> durableThrough = storage.lastEventId(open.sessionId());
             return new AgentMessage.SessionSync(open.sessionId(), durableThrough);
         } catch (JournalStorageException failure) {
@@ -47,6 +54,7 @@ public final class SessionReplicationService implements AutoCloseable {
     }
 
     public AgentMessage.SessionSync append(
+            AuthenticatedConnectionContext context,
             SessionId sessionId,
             List<SessionEventRecord> records) throws SessionReplicationException {
         Objects.requireNonNull(sessionId, "sessionId");
@@ -56,7 +64,8 @@ public final class SessionReplicationService implements AutoCloseable {
                     SessionReplicationException.Kind.PROTOCOL,
                     "Replication append batch must not be empty");
         }
-        try {
+        try (var authority = acquire(context)) {
+            requireOwner(context, sessionId);
             JournalAppendResult result = Objects.requireNonNull(
                     storage.append(sessionId, batch), "storage append result");
             EventId durableThrough = result.durableThrough().orElseThrow(
@@ -81,4 +90,28 @@ public final class SessionReplicationService implements AutoCloseable {
                     failure);
         }
     }
+    private static FileSystemAgentRegistry.RegistrationLease acquire(
+            AuthenticatedConnectionContext context) throws SessionReplicationException {
+        try {
+            return context.acquireAuthority();
+        } catch (IllegalStateException failure) {
+            throw new SessionReplicationException(
+                    SessionReplicationException.Kind.PROTOCOL, "Agent connection is no longer authoritative", failure);
+        }
+    }
+
+    private void requireOwner(AuthenticatedConnectionContext context, SessionId sessionId)
+            throws SessionReplicationException {
+        try {
+            if (sessions.find(sessionId).filter(record -> record.agentLabel().equals(context.agentLabel()))
+                    .isEmpty()) {
+                throw new SessionReplicationException(
+                        SessionReplicationException.Kind.PROTOCOL, "Session does not belong to the agent label");
+            }
+        } catch (SessionRegistryException failure) {
+            throw new SessionReplicationException(
+                    SessionReplicationException.Kind.INTERNAL, "Could not read session ownership", failure);
+        }
+    }
+
 }

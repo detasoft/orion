@@ -14,13 +14,14 @@ import java.nio.ByteBuffer;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class AgentProtocolCodecTest {
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
     private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(LIMITS);
-    private static final AgentId AGENT_ID = new AgentId("agent-01KABC");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-01KABC");
     private static final AgentInstanceId INSTANCE_ID = new AgentInstanceId(
             UUID.fromString("12345678-1234-5678-90ab-cdef01234567"));
     private static final SessionId SESSION_ID = new SessionId("session-01KDEF");
@@ -30,6 +31,16 @@ class AgentProtocolCodecTest {
     @MethodSource("knownMessages")
     void roundTripsEveryKnownMessage(AgentMessage message) throws Exception {
         assertThat(CODEC.decode(CODEC.encode(message))).isEqualTo(message);
+    }
+
+    @Test
+    void labelsUseExactCaseSensitiveEqualityAndOneBoundedAsciiSyntax() {
+        assertThat(new AgentLabel("Build.worker-1:primary")).isEqualTo(new AgentLabel("Build.worker-1:primary"));
+        assertThat(new AgentLabel("Build")).isNotEqualTo(new AgentLabel("build"));
+        assertThat(new AgentLabel("a".repeat(128)).value()).hasSize(128);
+        for (String invalid : List.of("", " leading", "trailing ", "-worker", "a/b", "é", "a".repeat(129))) {
+            assertThatThrownBy(() -> new AgentLabel(invalid)).isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
@@ -330,9 +341,9 @@ class AgentProtocolCodecTest {
                         JournalFormatVersion.CURRENT,
                         new ConnectionId("connection-01KJKL"),
                         Map.of("heartbeatMillis", "10000")),
-                new AgentMessage.Heartbeat(AGENT_ID, INSTANCE_ID, 1_788_250_000_000L),
+                new AgentMessage.Heartbeat(AGENT_LABEL, INSTANCE_ID, 1_788_250_000_000L),
                 new AgentMessage.AgentStatus(
-                        AGENT_ID,
+                        AGENT_LABEL,
                         INSTANCE_ID,
                         "1.0.0",
                         machine,
@@ -387,7 +398,7 @@ class AgentProtocolCodecTest {
         return new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                AGENT_ID,
+                AGENT_LABEL,
                 INSTANCE_ID,
                 "1.0.0",
                 new MachineInfo("worker-1", "linux", "aarch64"),
@@ -398,7 +409,7 @@ class AgentProtocolCodecTest {
         return new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
                 JournalFormatVersion.CURRENT,
-                AGENT_ID,
+                AGENT_LABEL,
                 INSTANCE_ID,
                 "1.0.0",
                 new MachineInfo("worker-1", "linux", "aarch64"),

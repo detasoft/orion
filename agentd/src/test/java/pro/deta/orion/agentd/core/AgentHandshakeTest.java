@@ -21,7 +21,7 @@ class AgentHandshakeTest {
 
         assertThat(hello.protocolVersion()).isEqualTo(AgentProtocolVersion.CURRENT);
         assertThat(hello.journalFormatVersion()).isEqualTo(JournalFormatVersion.CURRENT);
-        assertThat(hello.agentId()).isEqualTo(context.agentId());
+        assertThat(hello.agentLabel()).isEqualTo(context.agentLabel());
         assertThat(hello.instanceId()).isEqualTo(context.instanceId());
         assertThat(hello.agentVersion()).isEqualTo("2.4.1");
         assertThat(hello.machine()).isEqualTo(MACHINE);
@@ -56,7 +56,7 @@ class AgentHandshakeTest {
         AgentMessage.Hello hello = handshake.reconnectHello(
                 context, "2.4.1", MACHINE, Map.of("pty", "true"));
 
-        assertThat(hello.agentId()).isEqualTo(context.agentId());
+        assertThat(hello.agentLabel()).isEqualTo(context.agentLabel());
         assertThat(hello.instanceId()).isEqualTo(context.instanceId());
         assertThat(hello.authentication()).hasValueSatisfying(authentication -> {
             assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);
@@ -85,7 +85,7 @@ class AgentHandshakeTest {
         byte[] permit = new byte[32];
         java.util.Arrays.fill(permit, (byte) 7);
         return new AgentLaunchContext(
-                new AgentId("agent-1"), new AgentGeneration(7),
+                new AgentLabel("agent-1"), new AgentGeneration(7),
                 new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
                 new AgentInstanceId(UUID.fromString("8c83ea09-081d-49fd-9f21-43cf93f8039a")),
                 new LaunchPermit(permit));

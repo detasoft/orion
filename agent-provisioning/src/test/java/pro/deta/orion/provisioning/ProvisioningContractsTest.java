@@ -3,7 +3,7 @@ package pro.deta.orion.provisioning;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 
 import java.lang.reflect.Field;
@@ -92,7 +92,7 @@ class ProvisioningContractsTest {
         AgentdLaunchRequest request = new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
-                new AgentId("agent-1"),
+                new AgentLabel("agent-1"),
                 new AgentGeneration(3),
                 new AgentLaunchId(UUID.randomUUID()),
                 1_048_576,
@@ -105,7 +105,7 @@ class ProvisioningContractsTest {
         assertThat(options.operationTimeout()).isEqualTo(Duration.ofSeconds(10));
         assertThatThrownBy(() -> new AgentdLaunchRequest(
                 URI.create("http://orion.example"), request.stateDirectory(),
-                request.agentId(), request.generation(), request.launchId(),
+                request.agentLabel(), request.generation(), request.launchId(),
                 request.maxFrameBytes(), request.agentVersion()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ProvisioningOptions(

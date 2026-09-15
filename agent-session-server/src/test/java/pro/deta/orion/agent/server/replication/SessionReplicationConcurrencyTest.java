@@ -1,8 +1,11 @@
 package pro.deta.orion.agent.server.replication;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import pro.deta.orion.agent.server.auth.RegisteredAgentFixture;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -29,11 +32,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SessionReplicationConcurrencyTest {
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
     private static final SessionEventCodec EVENTS = new SessionEventCodec(LIMITS);
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
     private static final SessionId SESSION_ID = new SessionId("session-1");
 
     @TempDir
     Path root;
+
+    @org.junit.jupiter.api.io.TempDir
+    Path registrationRoot;
+    private RegisteredAgentFixture registered;
+
+    @BeforeEach
+    void registerAgent() throws Exception {
+        registered = new RegisteredAgentFixture(registrationRoot, AGENT_LABEL, SESSION_ID);
+    }
+
+    @AfterEach
+    void closeRegistration() throws Exception {
+        registered.close();
+    }
 
     @Test
     void overlappingPhysicalStreamsConvergeThroughDurableStorage() throws Exception {
@@ -43,9 +60,9 @@ class SessionReplicationConcurrencyTest {
             SessionReplicationService service = service(storage);
 
             var shorter = executor.submit(
-                    () -> service.append(SESSION_ID, records.subList(0, 5)));
+                    () -> service.append(registered.context, SESSION_ID, records.subList(0, 5)));
             var longer = executor.submit(
-                    () -> service.append(SESSION_ID, records));
+                    () -> service.append(registered.context, SESSION_ID, records));
 
             assertThat(shorter.get(10, TimeUnit.SECONDS).afterEventId())
                     .hasValueSatisfying(cursor -> assertThat(cursor)
@@ -62,10 +79,10 @@ class SessionReplicationConcurrencyTest {
         List<SessionEventRecord> records = events(1, 10, (byte) 0);
         try (var storage = storage()) {
             SessionReplicationService service = service(storage);
-            service.append(SESSION_ID, records);
+            service.append(registered.context, SESSION_ID, records);
 
             AgentMessage.SessionSync acknowledgement =
-                    service.append(SESSION_ID, records.subList(0, 5));
+                    service.append(registered.context, SESSION_ID, records.subList(0, 5));
 
             assertThat(acknowledgement.afterEventId()).contains(new EventId(10));
             assertThat(storage.readAfter(SESSION_ID, Optional.empty()).records())
@@ -79,9 +96,9 @@ class SessionReplicationConcurrencyTest {
         SessionEventRecord conflict = event(1, (byte) 2);
         try (var storage = storage()) {
             SessionReplicationService service = service(storage);
-            service.append(SESSION_ID, List.of(original));
+            service.append(registered.context, SESSION_ID, List.of(original));
 
-            assertThatThrownBy(() -> service.append(SESSION_ID, List.of(conflict)))
+            assertThatThrownBy(() -> service.append(registered.context, SESSION_ID, List.of(conflict)))
                     .isInstanceOfSatisfying(SessionReplicationException.class,
                             failure -> assertThat(failure.kind())
                                     .isEqualTo(SessionReplicationException.Kind.PROTOCOL));
@@ -94,12 +111,12 @@ class SessionReplicationConcurrencyTest {
     void serverRestartResumesFromDurableJournalAlone() throws Exception {
         SessionEventRecord event = event(1, (byte) 1);
         try (var storage = storage()) {
-            service(storage).append(SESSION_ID, List.of(event));
+            service(storage).append(registered.context, SESSION_ID, List.of(event));
         }
 
         try (var reopened = storage()) {
             AgentMessage.SessionSync synchronization = service(reopened).open(
-                    AGENT_ID,
+                    registered.context,
                     new AgentMessage.SessionOpen(
                             SESSION_ID,
                             Optional.of(event.eventId()),
@@ -117,7 +134,7 @@ class SessionReplicationConcurrencyTest {
              var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             SessionReplicationService service = service(storage);
             try (var subscription = service.subscribe(SESSION_ID)) {
-                var append = executor.submit(() -> service.append(SESSION_ID, List.of(event)));
+                var append = executor.submit(() -> service.append(registered.context, SESSION_ID, List.of(event)));
                 List<SessionEventRecord> replay = storage.readAfter(SESSION_ID, Optional.empty()).records();
                 if (replay.isEmpty()) {
                     assertThat(subscription.awaitChange(Duration.ofSeconds(5))).isTrue();
@@ -135,8 +152,8 @@ class SessionReplicationConcurrencyTest {
         return new FileSystemSessionJournalStorage(root, new JournalStorageConfig(LIMITS));
     }
 
-    private static SessionReplicationService service(FileSystemSessionJournalStorage storage) {
-        return new SessionReplicationService(storage);
+    private SessionReplicationService service(FileSystemSessionJournalStorage storage) {
+        return new SessionReplicationService(storage, registered.sessions);
     }
 
     private static List<SessionEventRecord> events(long first, long last, byte payloadOffset)

@@ -1,6 +1,6 @@
 package pro.deta.orion.agent.server.registry;
 
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 
@@ -8,11 +8,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 public record SessionRecord(
-        AgentId agentId,
+        AgentLabel agentLabel,
         SessionDescriptor reported,
         Optional<Outcome> outcome) {
     public SessionRecord {
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(reported, "reported");
         outcome = Objects.requireNonNull(outcome, "outcome");
     }

@@ -2,7 +2,7 @@ package pro.deta.orion.agentd.core;
 
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agentd.runtime.BundledSessionHost;
 
@@ -15,7 +15,7 @@ import java.util.UUID;
 public record AgentConfiguration(
         URI serverUri,
         Path stateDirectory,
-        AgentId agentId,
+        AgentLabel agentLabel,
         AgentGeneration generation,
         AgentLaunchId launchId,
         AgentProtocolLimits protocolLimits,
@@ -25,7 +25,7 @@ public record AgentConfiguration(
     public AgentConfiguration {
         serverUri = validateServerUri(serverUri);
         stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory").toAbsolutePath().normalize();
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(generation, "generation");
         Objects.requireNonNull(launchId, "launchId");
         protocolLimits = Objects.requireNonNull(protocolLimits, "protocolLimits");
@@ -41,7 +41,7 @@ public record AgentConfiguration(
         Objects.requireNonNull(arguments, "arguments");
         URI serverUri = null;
         Path stateDirectory = null;
-        AgentId agentId = null;
+        AgentLabel agentLabel = null;
         AgentGeneration generation = null;
         AgentLaunchId launchId = null;
         int maxFrameBytes = AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES;
@@ -53,7 +53,7 @@ public record AgentConfiguration(
             switch (option) {
                 case "--server" -> serverUri = URI.create(nextValue(arguments, ++index, option));
                 case "--state-dir" -> stateDirectory = Path.of(nextValue(arguments, ++index, option));
-                case "--agent-id" -> agentId = new AgentId(nextValue(arguments, ++index, option));
+                case "--agent-label" -> agentLabel = new AgentLabel(nextValue(arguments, ++index, option));
                 case "--generation" -> generation = new AgentGeneration(
                         parsePositiveLong(nextValue(arguments, ++index, option)));
                 case "--launch-id" -> launchId = new AgentLaunchId(
@@ -70,7 +70,7 @@ public record AgentConfiguration(
             throw new IllegalArgumentException("Missing required option: --server");
         }
         requireOption(stateDirectory, "--state-dir");
-        requireOption(agentId, "--agent-id");
+        requireOption(agentLabel, "--agent-label");
         requireOption(generation, "--generation");
         requireOption(launchId, "--launch-id");
         requireOption(agentVersion, "--agent-version");
@@ -81,7 +81,7 @@ public record AgentConfiguration(
         AgentConfiguration configuration = new AgentConfiguration(
                 serverUri,
                 stateDirectory,
-                agentId,
+                agentLabel,
                 generation,
                 launchId,
                 AgentProtocolLimits.defaults().withMaxFrameBytes(maxFrameBytes),

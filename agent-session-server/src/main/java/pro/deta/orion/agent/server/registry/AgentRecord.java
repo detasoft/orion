@@ -1,7 +1,7 @@
 package pro.deta.orion.agent.server.registry;
 
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -19,10 +19,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 public record AgentRecord(
-        AgentId agentId,
+        AgentLabel agentLabel,
         String displayName,
         Optional<Launch> launch,
-        Optional<Observation> observation) {
+        Optional<Observation> observation,
+        Optional<Registration> registration) {
     static final int MAX_DISPLAY_NAME_BYTES = 256;
     static final int MAX_AGENT_VERSION_BYTES = 256;
     static final int MAX_MACHINE_FIELD_BYTES = 256;
@@ -31,10 +32,11 @@ public record AgentRecord(
     static final int MAX_CAPABILITY_VALUE_BYTES = 4_096;
 
     public AgentRecord {
-        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(agentLabel, "agentLabel");
         displayName = boundedText(displayName, MAX_DISPLAY_NAME_BYTES, "displayName", false);
         launch = Objects.requireNonNull(launch, "launch");
         observation = Objects.requireNonNull(observation, "observation");
+        registration = Objects.requireNonNull(registration, "registration");
         if (observation.isPresent() && launch.isEmpty()) {
             throw new IllegalArgumentException("An agent observation requires a launch");
         }
@@ -49,6 +51,26 @@ public record AgentRecord(
                 throw new IllegalArgumentException("An agent observation cannot follow the current launch");
             }
         }
+        if (registration.isPresent()) {
+            Registration registered = registration.orElseThrow();
+            Launch latest = launch.orElseThrow(
+                    () -> new IllegalArgumentException("A registration requires a launch"));
+            if (registered.generation().value() > latest.generation().value()
+                    || registered.generation().equals(latest.generation())
+                    && (!registered.launchId().equals(latest.launchId()) || latest.launchPermit().isPresent())) {
+                throw new IllegalArgumentException("Registration contradicts the latest launch");
+            }
+            if (observation.isPresent()) {
+                Observation observed = observation.orElseThrow();
+                if (observed.generation().value() > registered.generation().value()
+                        || observed.generation().equals(registered.generation())
+                        && (!observed.launchId().equals(registered.launchId())
+                        || !observed.instanceId().equals(registered.instanceId()))) {
+                    throw new IllegalArgumentException("Observation contradicts the registered instance");
+                }
+            }
+        }
+
     }
 
     public enum LaunchState {
@@ -64,18 +86,26 @@ public record AgentRecord(
             AgentGeneration generation,
             AgentLaunchId launchId,
             LaunchState state,
-            Optional<Credential> launchPermit,
-            Optional<Credential> reconnectToken) {
+            Optional<Credential> launchPermit) {
         public Launch {
             Objects.requireNonNull(generation, "generation");
             Objects.requireNonNull(launchId, "launchId");
             Objects.requireNonNull(state, "state");
             launchPermit = Objects.requireNonNull(launchPermit, "launchPermit");
-            reconnectToken = Objects.requireNonNull(reconnectToken, "reconnectToken");
-            if (launchPermit.isPresent() && reconnectToken.isPresent()) {
-                throw new IllegalArgumentException(
-                        "A launch cannot retain a permit after installing a reconnect token");
-            }
+
+        }
+    }
+
+    public record Registration(
+            AgentGeneration generation,
+            AgentLaunchId launchId,
+            AgentInstanceId instanceId,
+            Credential reconnectToken) {
+        public Registration {
+            Objects.requireNonNull(generation, "generation");
+            Objects.requireNonNull(launchId, "launchId");
+            Objects.requireNonNull(instanceId, "instanceId");
+            Objects.requireNonNull(reconnectToken, "reconnectToken");
         }
     }
 

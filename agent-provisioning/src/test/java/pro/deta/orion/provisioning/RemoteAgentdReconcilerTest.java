@@ -2,7 +2,7 @@ package pro.deta.orion.provisioning;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 
 import java.net.URI;
@@ -238,7 +238,7 @@ class RemoteAgentdReconcilerTest {
     private static AgentdLaunchRequest request() {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), "/var/lib/orion/agent",
-                new AgentId("agent-1"), new AgentGeneration(7),
+                new AgentLabel("agent-1"), new AgentGeneration(7),
                 new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
                 1024, "1");
     }

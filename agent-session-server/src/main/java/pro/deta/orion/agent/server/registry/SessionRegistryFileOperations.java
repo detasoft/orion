@@ -168,6 +168,23 @@ class SessionRegistryFileOperations {
         }
     }
 
+    void validateRecordFormats(Path root) throws IOException {
+        SessionRecordCodec codec = new SessionRecordCodec();
+        for (Path record : recordFiles(root)) {
+            codec.rejectUnsupportedVersion(readRecord(record));
+        }
+        try (DirectoryStream<Path> transactions = Files.newDirectoryStream(root, TRANSACTION_PREFIX + "*")) {
+            for (Path transaction : transactions) {
+                if (!Files.isDirectory(transaction, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new StoredRecordException("Session transaction is not a directory", null);
+                }
+                for (Path record : recordFiles(transaction)) {
+                    codec.rejectUnsupportedVersion(readRecord(record));
+                }
+            }
+        }
+    }
+
     void recoverTransactions(Path root) throws IOException {
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, TRANSACTION_PREFIX + "*")) {
             for (Path transaction : entries) {

@@ -7,7 +7,7 @@ import org.eclipse.jetty.http2.api.Stream;
 import org.eclipse.jetty.http2.api.server.ServerSessionListener;
 import org.eclipse.jetty.http2.frames.HeadersFrame;
 import org.eclipse.jetty.util.Callback;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.replication.SessionReplicationService;
@@ -54,10 +54,10 @@ public final class JettySessionReplicationEndpoint implements ServerSessionListe
         if (closed.get()) {
             return reject(stream, 503);
         }
-        Optional<AgentId> context;
+        Optional<AuthenticatedConnectionContext> context;
         try {
             context = Objects.requireNonNull(
-                    contexts.agentIdFor(stream.getSession()), "established context result");
+                    contexts.contextFor(stream.getSession()), "established context result");
         } catch (RuntimeException failure) {
             return reject(stream, 500);
         }

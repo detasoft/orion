@@ -2,7 +2,7 @@ package pro.deta.orion.agent.server.auth;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentGeneration;
-import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AuthenticatedAgentConnectionsTest {
     private static final Instant NOW = Instant.parse("2026-09-10T12:00:00Z");
     private static final Duration HEARTBEAT_DEADLINE = Duration.ofSeconds(30);
-    private static final AgentId AGENT_ID = new AgentId("agent-1");
+    private static final AgentLabel AGENT_LABEL = new AgentLabel("agent-1");
     private static final AgentGeneration GENERATION = new AgentGeneration(3);
     private static final AgentLaunchId LAUNCH_ID =
             new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f"));
@@ -53,12 +53,12 @@ class AuthenticatedAgentConnectionsTest {
 
         session.onMessage(heartbeat);
 
-        assertThat(connections.active(AGENT_ID)).contains(context);
+        assertThat(connections.active(AGENT_LABEL)).contains(context);
         assertThat(messages).containsExactly(heartbeat);
 
         session.onClosed(null);
 
-        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(connections.active(AGENT_LABEL)).isEmpty();
         assertThat(closures).containsExactly((Throwable) null);
     }
 
@@ -99,7 +99,7 @@ class AuthenticatedAgentConnectionsTest {
         firstSession.onClosed(new IllegalStateException("late close"));
         secondSession.onMessage(heartbeat);
 
-        assertThat(connections.active(AGENT_ID)).contains(second);
+        assertThat(connections.active(AGENT_LABEL)).contains(second);
         assertThat(firstTransport.closed).isTrue();
         assertThat(firstClosures).containsExactly((Throwable) null);
         assertThat(firstMessages).isEmpty();
@@ -127,7 +127,7 @@ class AuthenticatedAgentConnectionsTest {
                     Thread.currentThread().interrupt();
                     throw new AssertionError(failure);
                 }
-                assertThat(owner[0].active(AGENT_ID)).isPresent();
+                assertThat(owner[0].active(AGENT_LABEL)).isPresent();
             }
 
             @Override
@@ -150,12 +150,12 @@ class AuthenticatedAgentConnectionsTest {
 
             callback.get(10, TimeUnit.SECONDS);
             takeover.get(10, TimeUnit.SECONDS);
-            assertThat(owner[0].active(AGENT_ID)).contains(second);
+            assertThat(owner[0].active(AGENT_LABEL)).contains(second);
         }
     }
 
     @Test
-    void generationRevocationClosesCurrentConnectionAndFencesLatePublication() {
+    void closeRevokesCurrentConnectionAndFencesLatePublication() {
         List<Throwable> closures = new ArrayList<>();
         AtomicInteger publications = new AtomicInteger();
         AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
@@ -169,9 +169,9 @@ class AuthenticatedAgentConnectionsTest {
                 GENERATION, LAUNCH_ID, "connection-1", currentTransport, renewals);
         connections.activate(current);
 
-        connections.revokeGeneration(AGENT_ID, GENERATION);
+        connections.close();
 
-        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(connections.active(AGENT_LABEL)).isEmpty();
         assertThat(currentTransport.closed).isTrue();
         assertThat(closures).containsExactly((Throwable) null);
         assertThat(current.renewReconnectToken())
@@ -184,14 +184,16 @@ class AuthenticatedAgentConnectionsTest {
         assertThatThrownBy(() -> connections.activate(late))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(lateTransport.closed).isTrue();
-        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(connections.active(AGENT_LABEL)).isEmpty();
         assertThat(publications).hasValue(1);
     }
 
     @Test
-    void staleGenerationRevocationDoesNotCloseNewerConnection() {
+    void lateClosureDoesNotCloseNewerConnection() {
         AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
                 ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()));
+        AgentControlHandler.Session old = connections.activate(context(
+                GENERATION, LAUNCH_ID, "old", new TestConnection(), new AtomicInteger()));
         AgentGeneration replacementGeneration = new AgentGeneration(GENERATION.value() + 1);
         AgentLaunchId replacementLaunch = new AgentLaunchId(UUID.randomUUID());
         TestConnection replacementTransport = new TestConnection();
@@ -203,9 +205,9 @@ class AuthenticatedAgentConnectionsTest {
                 new AtomicInteger());
         connections.activate(replacement);
 
-        connections.revokeGeneration(AGENT_ID, GENERATION);
+        old.onClosed(null);
 
-        assertThat(connections.active(AGENT_ID)).contains(replacement);
+        assertThat(connections.active(AGENT_LABEL)).contains(replacement);
         assertThat(replacementTransport.closed).isFalse();
     }
 
@@ -227,17 +229,17 @@ class AuthenticatedAgentConnectionsTest {
                 observations);
         AgentControlHandler.Session session = connections.activate(context);
 
-        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isTrue();
+        assertThat(connections.available(AGENT_LABEL, LAUNCH_ID)).isTrue();
         assertThat(observations).containsExactly(new Observation(
                 "2.4.1", MACHINE, Map.of("pty", "true"), NOW));
 
         clock.advance(HEARTBEAT_DEADLINE);
-        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isFalse();
+        assertThat(connections.available(AGENT_LABEL, LAUNCH_ID)).isFalse();
 
         session.onMessage(new AgentMessage.Heartbeat(
-                AGENT_ID, INSTANCE_ID, Long.MAX_VALUE));
+                AGENT_LABEL, INSTANCE_ID, Long.MAX_VALUE));
 
-        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isTrue();
+        assertThat(connections.available(AGENT_LABEL, LAUNCH_ID)).isTrue();
         assertThat(renewals).hasValue(1);
         assertThat(observations.getLast().observedAt()).isEqualTo(clock.instant());
     }
@@ -261,7 +263,7 @@ class AuthenticatedAgentConnectionsTest {
         observations.clear();
         MachineInfo updatedMachine = new MachineInfo("worker-1", "linux", "x86_64");
         AgentMessage.AgentStatus status = new AgentMessage.AgentStatus(
-                AGENT_ID,
+                AGENT_LABEL,
                 INSTANCE_ID,
                 "2.5.0",
                 updatedMachine,
@@ -291,16 +293,16 @@ class AuthenticatedAgentConnectionsTest {
                 GENERATION, LAUNCH_ID, "connection-1", heartbeatTransport, new AtomicInteger()));
 
         heartbeatSession.onMessage(new AgentMessage.Heartbeat(
-                new AgentId("other-agent"), INSTANCE_ID, 1L));
+                new AgentLabel("other-agent"), INSTANCE_ID, 1L));
 
         assertThat(heartbeatTransport.closed).isTrue();
-        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(connections.active(AGENT_LABEL)).isEmpty();
 
         TestConnection statusTransport = new TestConnection();
         AgentControlHandler.Session statusSession = connections.activate(context(
                 GENERATION, LAUNCH_ID, "connection-2", statusTransport, new AtomicInteger()));
         statusSession.onMessage(new AgentMessage.AgentStatus(
-                AGENT_ID,
+                AGENT_LABEL,
                 new AgentInstanceId(UUID.randomUUID()),
                 "2.4.1",
                 MACHINE,
@@ -309,7 +311,7 @@ class AuthenticatedAgentConnectionsTest {
                 Map.of()));
 
         assertThat(statusTransport.closed).isTrue();
-        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(connections.active(AGENT_LABEL)).isEmpty();
         assertThat(messages).isEmpty();
         assertThat(closures).hasSize(2).allMatch(IllegalArgumentException.class::isInstance);
     }
@@ -320,7 +322,7 @@ class AuthenticatedAgentConnectionsTest {
                 ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()));
         try (var executor = Executors.newSingleThreadExecutor()) {
             var waiting = executor.submit(() -> connections.awaitOnline(
-                    AGENT_ID, LAUNCH_ID, Duration.ofSeconds(10)));
+                    AGENT_LABEL, LAUNCH_ID, Duration.ofSeconds(10)));
 
             connections.close();
 
@@ -355,7 +357,7 @@ class AuthenticatedAgentConnectionsTest {
             AtomicInteger renewals,
             List<Observation> observations) {
         return new AuthenticatedConnectionContext(
-                AGENT_ID,
+                AGENT_LABEL,
                 generation,
                 launchId,
                 INSTANCE_ID,
@@ -371,11 +373,11 @@ class AuthenticatedAgentConnectionsTest {
                 (agentVersion, machine, capabilities, observedAt) -> {
                     observations.add(new Observation(agentVersion, machine, capabilities, observedAt));
                     return AuthenticatedConnectionContext.ObservationResult.RECORDED;
-                });
+                }, () -> () -> { });
     }
 
     private static AgentMessage.Heartbeat heartbeat() {
-        return new AgentMessage.Heartbeat(AGENT_ID, INSTANCE_ID, 1L);
+        return new AgentMessage.Heartbeat(AGENT_LABEL, INSTANCE_ID, 1L);
     }
 
     private static AgentControlHandler.Session recordingSession(
