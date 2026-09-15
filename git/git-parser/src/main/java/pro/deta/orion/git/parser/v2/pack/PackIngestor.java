@@ -7,8 +7,10 @@ import java.io.IOException;
  * This is a consumer of storage and parsing, not part of either API or a required callback implementation.
  * Enumeration automatically preserves original bytes in the upload's sink. Full payloads are streamed into
  * hashing; resolved objects are recorded through upload.addObject with their logical type and content size.
- * Delta resolution and pending dependencies belong here. Retaining or rereading earlier bases is a separate
- * ingestion concern; PackUpload does not expose positional reads or a base lookup API.
+ * Delta resolution, caching, and pending dependencies belong here. For OFS_DELTA, restore the base from
+ * upload.read at the referenced pack offset when it is not cached. For REF_DELTA, upload.find locates bases
+ * already registered in this upload; published external bases are read through repository storage as needed.
+ * Deferred delta payloads can also be reread from the upload without advancing the enumerator.
  * Missing indexed IDs do not prove external dependencies because later entries may resolve to those IDs.
  * After enumeration, finish pending work or fail, then record confirmed dependencies via addExternalBaseId.
  *

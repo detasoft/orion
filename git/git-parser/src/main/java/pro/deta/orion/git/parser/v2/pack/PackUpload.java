@@ -4,6 +4,8 @@ import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Optional;
 
 /**
  * Owns one pack upload: its enumerator, byte sink, accumulated object index, and external dependencies.
@@ -14,7 +16,20 @@ import java.io.IOException;
  * addObject associates a fully consumed entry with its resolved ID, logical type, and content size.
  * Results may arrive in dependency order; identical repeats are harmless and conflicting results fail.
  * addExternalBaseId accumulates confirmed external dependencies, not every encountered REF_DELTA base.
- * Reconstruction, hashing, and access to bases needed for deferred resolution belong to the caller.
+ * Reconstruction, hashing, and dependency ordering belong to the caller.
+ *
+ * <p>read provides positional access to the original raw bytes already accepted by this upload's sink,
+ * including bytes still buffered internally. It never advances the enumerator or reads more source input.
+ * Offsets are relative to the pack header. Any writable heap, direct, or sliced ByteBuffer is supported;
+ * reads advance position, preserve limit, and do not retain the buffer. Partial reads are allowed.
+ * An empty destination returns zero; otherwise read returns a positive count or -1 at or beyond the stored end.
+ * That end may grow with further enumeration. Negative offsets fail with IllegalArgumentException,
+ * null buffers with NullPointerException, and read-only buffers with ReadOnlyBufferException.
+ * I/O failures remain IOException; reads after rollback fail with ClosedChannelException.
+ * find searches only objects successfully registered through addObject in this upload and returns their
+ * original physical entry, including its offset and delta representation. Duplicate ObjectIds may return
+ * any matching entry. Absence is Optional.empty(), not proof that a base is external: it may resolve later.
+ * Lookup errors remain IOException. Neither lookup nor raw reads resolve objects or query other packs.
  *
  * <p>commit requires enumeration through the verified checksum, a result for every physical entry, and
  * confirmed external dependencies. Empty packs also require completed enumeration. Storage preserves
@@ -28,6 +43,10 @@ import java.io.IOException;
  */
 public interface PackUpload {
     PackEnumerator enumerator();
+
+    int read(long offset, ByteBuffer destination) throws IOException;
+
+    Optional<PackEnumerator.Entry> find(ObjectId objectId) throws IOException;
 
     void addObject(PackEnumerator.Entry entry, ObjectId objectId, ObjectType type, long size)
             throws IOException;
