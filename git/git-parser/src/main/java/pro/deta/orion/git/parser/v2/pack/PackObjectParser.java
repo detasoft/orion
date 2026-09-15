@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;

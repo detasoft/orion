@@ -225,7 +225,7 @@ class GitBlockingWireTransportTest {
         RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
         GitBlockingWireTransport output = output(sink);
         GitV1Advertisement advertisement = new GitV1Advertisement(
-                List.of(GitCapability.MULTI_ACK),
+                List.of(GitCapability.MULTI_ACK.entry()),
                 List.of(
                         new GitAdvertisedRef(
                                 MAIN_ID,

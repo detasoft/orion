@@ -638,7 +638,7 @@ class DefaultGitNativeRepositoryServiceTest {
                                                 GitObjectId.of(NULL_ID),
                                                 feature,
                                                 "refs/heads/feature")),
-                                Set.of(GitCapability.ATOMIC.name()),
+                                Set.of(GitCapability.ATOMIC.wireName()),
                                 complete.quarantine()),
                         GitNativeRepositoryAccessHook.ALLOW_ALL);
 

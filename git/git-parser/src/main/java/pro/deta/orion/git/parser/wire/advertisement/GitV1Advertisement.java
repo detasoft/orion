@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Objects;
 
 public record GitV1Advertisement(
-        List<GitCapability> capabilities,
+        List<GitCapability.Entry> capabilities,
         List<GitAdvertisedRef> refs) {
 
     public GitV1Advertisement {

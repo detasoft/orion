@@ -1,23 +1,16 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.GitWriter;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.net.io.BufferedByteOutput;
 
-import java.io.IOException;
 import java.util.Objects;
 
 /**
  * Decoded negotiation reply. GitWriter owns packet encoding and protocol-specific response framing.
  * Responses can be recorded as values in algorithm tests; transport flushing is separate from protocol packets.
- * FetchNegotiatorIterator yields these responses and accumulates the result in NegotiationContext.
- * writeTo delegates encoding to GitWriter, whose protocol response framing remains a placeholder.
+ * The iterator exposes the latest step's replies in wire order and accumulates common objects in
+ * NegotiationContext. FetchNegotiator passes reply batches to GitWriter, including the terminal batch.
  */
 public sealed interface NegotiationResponse {
-    default void writeTo(BufferedByteOutput output) throws IOException {
-        new GitWriter(output).writeNegotiationResponse(this);
-    }
-
     /** Object acknowledgment; protocol v2 uses PLAIN, while legacy may use a negotiated suffix. */
     record Ack(ObjectId objectId, Status status) implements NegotiationResponse {
         public Ack {

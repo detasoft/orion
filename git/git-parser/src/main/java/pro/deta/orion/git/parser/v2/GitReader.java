@@ -1,11 +1,9 @@
 package pro.deta.orion.git.parser.v2;
 
-import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
-import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -18,9 +16,11 @@ import java.util.Objects;
  * ControlState decoder for header validation and limits. Reads exactly the current packet; later packets
  * remain available through the same input. No stream is closed and no repository operation is performed.
  * UTF-8 text permits one trailing LF, rejects embedded line/control characters, and fails on malformed UTF-8.
- * FetchNegotiator's version-specific parsers consume initial arguments. readNegotiationMessage handles
- * subsequent legacy have/done/flush packets. EOF and malformed input are IOException, never implicit DONE.
+ * FetchNegotiator owns initial argument and subsequent have/done/flush parsing.
+ * EOF and malformed input are IOException, never implicit DONE.
  * Other command parsing remains to be added; no second fetch request parser is retained here.
+ * readText bulk-reads one payload and releases its temporary buffer even when decoding fails.
+ * A trailing LF is excluded before decoding, avoiding a second String for the stripped line.
  */
 public final class GitReader {
     private final BufferedByteInput input;
@@ -30,17 +30,7 @@ public final class GitReader {
     }
 
     public ControlState readControlState() throws IOException {
-        int header = 0;
-        for (int i = 0; i < ControlState.PKT_LINE_HEADER_SIZE; i++) {
-            header = (header << 8) | input.readUnsignedByte();
-        }
-        Result<ControlState> result = ControlState.readControlType(header);
-        if (result instanceof Result.Success<ControlState> success) {
-            return success.value();
-        }
-        Result.Failure<ControlState> failure = (Result.Failure<ControlState>) result;
-        throw new GitPktLineFormatException("Invalid pkt-line header: " + failure.getMessage(),
-                failure.throwable());
+        return ControlState.readFrom(input);
     }
 
     public String readText(ControlState packet) throws IOException {
@@ -48,18 +38,23 @@ public final class GitReader {
         if (packet.type() != ControlState.ControlType.DATA) {
             throw new IOException("Expected a data packet");
         }
-        byte[] bytes = new byte[packet.payloadLength()];
-        for (int i = 0; i < bytes.length; i++) {
-            bytes[i] = (byte) input.readUnsignedByte();
+        ByteBuf payload = input.readCopy(packet.payloadLength(), UnpooledByteBufAllocator.DEFAULT);
+        try {
+            return decodeLine(payload.nioBuffer());
+        } finally {
+            payload.release();
+        }
+    }
+
+    private static String decodeLine(ByteBuffer bytes) throws IOException {
+        if (bytes.hasRemaining() && bytes.get(bytes.limit() - 1) == '\n') {
+            bytes.limit(bytes.limit() - 1);
         }
         String line;
         try {
-            line = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+            line = StandardCharsets.UTF_8.newDecoder().decode(bytes).toString();
         } catch (CharacterCodingException error) {
             throw new IOException("Invalid UTF-8 in Git request", error);
-        }
-        if (line.endsWith("\n")) {
-            line = line.substring(0, line.length() - 1);
         }
         for (int i = 0; i < line.length(); i++) {
             if (line.charAt(i) < 32 || line.charAt(i) == 127) {
@@ -67,24 +62,5 @@ public final class GitReader {
             }
         }
         return line;
-    }
-
-    public NegotiationMessage readNegotiationMessage() throws IOException {
-        ControlState packet = readControlState();
-        if (packet.type() == ControlState.ControlType.FLUSH) {
-            return NegotiationMessage.Control.END_ROUND;
-        }
-        String line = readText(packet);
-        if (line.equals("done")) {
-            return NegotiationMessage.Control.DONE;
-        }
-        if (line.startsWith("have ")) {
-            try {
-                return new NegotiationMessage.Have(new ObjectId(line.substring(5)));
-            } catch (IllegalArgumentException error) {
-                throw new IOException("Invalid have object ID", error);
-            }
-        }
-        throw new IOException("Unexpected negotiation message: " + line);
     }
 }

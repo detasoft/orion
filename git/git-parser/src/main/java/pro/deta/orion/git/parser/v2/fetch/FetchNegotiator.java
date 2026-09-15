@@ -1,24 +1,21 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.GitReader;
+import pro.deta.orion.git.parser.v2.GitWriter;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData.ProtocolVersion;
-import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
-import java.util.Set;
 
 /**
  * Owns fetch request parsing and the wire loop around an object-based FetchNegotiatorIterator.
@@ -34,23 +31,25 @@ import java.util.Set;
  * Capability advertisement, object access, ref resolution, and filter execution belong to FetchCommand;
  * parsing does not imply that an extension is enabled or that any requested object exists.
  *
- * <p>negotiate parses the request, creates the iterator, writes each yielded response, and returns its
- * accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
+ * <p>negotiate parses the request, creates the iterator, writes replies including the terminal batch,
+ * and returns the accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
+ * V2 feeds only already parsed initialMessages; legacy reads one message at a time and flushes replies
+ * before reading more. An empty legacy request finishes without reading negotiation messages.
  * Input/output are borrowed and never closed here. Iterator processing and response framing remain
  * placeholders; request parsing and NegotiationContext are implemented, not a complete fetch exchange.
  */
 public final class FetchNegotiator {
-    private static final Set<String> V2_FLAGS = Set.of(
-            GitCapability.THIN_PACK.wireToken(), GitCapability.OFS_DELTA.wireToken(),
-            GitCapability.INCLUDE_TAG.wireToken(), GitCapability.NO_PROGRESS.wireToken(),
-            GitCapability.WAIT_FOR_DONE.wireToken(), GitCapability.SIDEBAND_ALL.wireToken(),
-            GitCapability.DEEPEN_RELATIVE.wireToken());
+    private static final GitCapability[] V2_FLAGS = {
+            GitCapability.THIN_PACK, GitCapability.OFS_DELTA, GitCapability.INCLUDE_TAG,
+            GitCapability.NO_PROGRESS, GitCapability.WAIT_FOR_DONE, GitCapability.SIDEBAND_ALL,
+            GitCapability.DEEPEN_RELATIVE
+    };
 
-    private final BufferedByteInput input;
-    private final BufferedByteOutput output;
+    private final GitReader input;
+    private final GitWriter output;
     private final ProtocolVersion version;
 
-    public FetchNegotiator(BufferedByteInput input, BufferedByteOutput output, ProtocolVersion version) {
+    public FetchNegotiator(GitReader input, GitWriter output, ProtocolVersion version) {
         this.input = Objects.requireNonNull(input, "input");
         this.output = Objects.requireNonNull(output, "output");
         this.version = Objects.requireNonNull(version, "version");
@@ -62,109 +61,159 @@ public final class FetchNegotiator {
             case V1 -> parseV1Request(input);
             case V2 -> parseV2Request(input);
         };
-        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request,
-                new GitReader(input)::readNegotiationMessage);
-        while (iterator.hasNext()) {
-            NegotiationResponse response = iterator.next();
-            response.writeTo(output);
+        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request);
+        if (version == ProtocolVersion.V2) {
+            for (NegotiationMessage message : request.initialMessages()) {
+                boolean more = iterator.next(message);
+                writeResponses(iterator.getResponsesToSend());
+                if (!more) {
+                    break;
+                }
+            }
+        } else if (!request.wants().isEmpty()) {
+            boolean more;
+            do {
+                more = iterator.next(readNegotiationMessage(input));
+                writeResponses(iterator.getResponsesToSend());
+            } while (more);
         }
         return iterator.getContext();
     }
 
-    public static FetchRequest parseV0Request(BufferedByteInput input) throws IOException {
+    private void writeResponses(List<NegotiationResponse> responsesToSend) throws IOException {
+        if (!responsesToSend.isEmpty()) {
+            output.writeNegotiationRound(responsesToSend);
+            output.flush();
+        }
+    }
+
+    public static NegotiationMessage readNegotiationMessage(GitReader reader) throws IOException {
+        ControlState packet = reader.readControlState();
+        if (packet.type() == ControlState.ControlType.FLUSH) {
+            return NegotiationMessage.Control.END_ROUND;
+        }
+        String line = reader.readText(packet);
+        if (line.equals(GitCapability.DONE.wireName())) {
+            return NegotiationMessage.Control.DONE;
+        }
+        if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
+            try {
+                return new NegotiationMessage.Have(
+                        new ObjectId(line.substring(GitCapability.HAVE.wireName().length() + 1)));
+            } catch (IllegalArgumentException error) {
+                throw new IOException("Invalid have object ID", error);
+            }
+        }
+        throw new IOException("Unexpected negotiation message: " + line);
+    }
+
+
+    public static FetchRequest parseV0Request(GitReader input) throws IOException {
         return parseLegacyRequest(input);
     }
 
-    public static FetchRequest parseV1Request(BufferedByteInput input) throws IOException {
+    public static FetchRequest parseV1Request(GitReader input) throws IOException {
         return parseLegacyRequest(input);
     }
 
-    public static FetchRequest parseV2Request(BufferedByteInput input) throws IOException {
-        GitReader reader = new GitReader(input);
-        Arguments arguments = new Arguments();
+    public static FetchRequest parseV2Request(GitReader reader) throws IOException {
+        FetchRequest request = new FetchRequest();
+        request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
             ControlState packet = reader.readControlState();
             if (packet.type() == ControlState.ControlType.FLUSH) {
-                if (arguments.wants.isEmpty() && arguments.wantRefs.isEmpty()) {
+                if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
                     throw invalid("Fetch requires want or want-ref");
                 }
-                arguments.messages.add(NegotiationMessage.Control.END_ROUND);
-                return arguments.build(FetchRequest.Mode.PROTOCOL_V2);
+                request.initialMessages().add(NegotiationMessage.Control.END_ROUND);
+                validate(request);
+                return request;
             }
             String line = reader.readText(packet);
-            if (line.startsWith("want ")) {
-                arguments.wants.add(objectId(line.substring(5)));
-            } else if (line.startsWith("have ")) {
-                arguments.messages.add(new NegotiationMessage.Have(objectId(line.substring(5))));
-            } else if (line.equals("done")) {
-                if (arguments.messages.contains(NegotiationMessage.Control.DONE)) {
+            if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
+                request.wants().add(objectId(line.substring(GitCapability.WANT.wireName().length() + 1)));
+            } else if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
+                request.initialMessages().add(new NegotiationMessage.Have(
+                        objectId(line.substring(GitCapability.HAVE.wireName().length() + 1))));
+            } else if (line.equals(GitCapability.DONE.wireName())) {
+                if (request.initialMessages().contains(NegotiationMessage.Control.DONE)) {
                     throw invalid("Duplicate done");
                 }
-                arguments.messages.add(NegotiationMessage.Control.DONE);
-            } else if (line.startsWith("want-ref ")) {
-                String ref = token(line.substring(9));
+                request.initialMessages().add(NegotiationMessage.Control.DONE);
+            } else if (line.startsWith(GitCapability.WANT_REF.wireName() + " ")) {
+                String ref = token(line.substring(GitCapability.WANT_REF.wireName().length() + 1));
                 validateWantedRef(ref);
-                arguments.wantRefs.add(ref);
+                request.wantRefs().add(ref);
             } else if (line.startsWith("packfile-uris ")) {
-                if (!arguments.uriProtocols.isEmpty()) {
+                if (!request.packfileUriProtocols().isEmpty()) {
                     throw invalid("Duplicate packfile-uris");
                 }
                 for (String protocol : line.substring(14).split(",", -1)) {
                     if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
                         throw invalid("Invalid packfile URI protocol");
                     }
-                    arguments.uriProtocols.add(protocol);
+                    request.packfileUriProtocols().add(protocol);
                 }
-            } else if (V2_FLAGS.contains(line)) {
-                arguments.capabilities.add(line);
+            } else if (isV2Flag(line)) {
+                request.capabilities().add(GitCapability.parse(line, GitObjectFormat.SHA1));
             } else {
-                arguments.acceptShared(line);
+                acceptShared(request, line);
             }
         }
     }
 
-    private static FetchRequest parseLegacyRequest(BufferedByteInput input) throws IOException {
-        GitReader reader = new GitReader(input);
-        Arguments arguments = new Arguments();
+    private static boolean isV2Flag(String name) {
+        GitCapability capability = GitCapability.fromWireName(name).orElse(null);
+        if (capability == null) {
+            return false;
+        }
+        for (GitCapability allowed : V2_FLAGS) {
+            if (capability == allowed) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static FetchRequest parseLegacyRequest(GitReader reader) throws IOException {
+        FetchRequest request = new FetchRequest();
         boolean receivedLine = false;
         boolean wantsEnded = false;
         while (true) {
             ControlState packet = reader.readControlState();
             if (packet.type() == ControlState.ControlType.FLUSH) {
-                if (receivedLine && arguments.wants.isEmpty()) {
+                if (receivedLine && request.wants().isEmpty()) {
                     throw invalid("Legacy fetch requires want");
                 }
-                FetchRequest.Mode mode = arguments.capabilities.contains(GitCapability.MULTI_ACK_DETAILED.wireToken())
+                FetchRequest.Mode mode = request.capabilities().contains(GitCapability.MULTI_ACK_DETAILED.entry())
                         ? FetchRequest.Mode.MULTI_ACK_DETAILED
-                        : arguments.capabilities.contains(GitCapability.MULTI_ACK.wireToken())
+                        : request.capabilities().contains(GitCapability.MULTI_ACK.entry())
                                 ? FetchRequest.Mode.MULTI_ACK : FetchRequest.Mode.SINGLE_ACK;
-                return arguments.build(mode);
+                request.setMode(mode);
+                validate(request);
+                return request;
             }
             String line = reader.readText(packet);
             receivedLine = true;
-            if (line.startsWith("want ")) {
+            if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
                 if (wantsEnded) {
                     throw invalid("Want after legacy request options");
                 }
-                String[] values = line.substring(5).split(" ", -1);
-                boolean firstWant = arguments.wants.isEmpty();
+                String[] values = line.substring(GitCapability.WANT.wireName().length() + 1).split(" ", -1);
+                boolean firstWant = request.wants().isEmpty();
                 if (!firstWant && values.length != 1) {
                     throw invalid("Capabilities are only allowed on the first want");
                 }
-                arguments.wants.add(objectId(values[0]));
+                request.wants().add(objectId(values[0]));
                 for (int i = 1; i < values.length; i++) {
-                    String capability = token(values[i]);
-                    if (capability.startsWith("object-format=") && !capability.equals("object-format=sha1")) {
-                        throw invalid("Only SHA-1 object IDs are supported");
-                    }
-                    arguments.capabilities.add(capability);
+                    request.capabilities().add(GitCapability.parse(values[i], GitObjectFormat.SHA1));
                 }
             } else {
-                if (arguments.wants.isEmpty()) {
+                if (request.wants().isEmpty()) {
                     throw invalid("Legacy request must start with want");
                 }
                 wantsEnded = true;
-                arguments.acceptShared(line);
+                acceptShared(request, line);
             }
         }
     }
@@ -221,60 +270,55 @@ public final class FetchNegotiator {
         return new IOException(message);
     }
 
-    /** Local parser accumulator; it owns no streams, repository state, or negotiation decisions. */
-    private static final class Arguments {
-        private final Set<ObjectId> wants = new LinkedHashSet<>();
-        private final Set<ObjectId> shallow = new LinkedHashSet<>();
-        private final Set<String> capabilities = new LinkedHashSet<>();
-        private final List<NegotiationMessage> messages = new ArrayList<>();
-        private final Set<String> wantRefs = new LinkedHashSet<>();
-        private final Set<String> deepenNot = new LinkedHashSet<>();
-        private final Set<String> uriProtocols = new LinkedHashSet<>();
-        private OptionalInt depth = OptionalInt.empty();
-        private OptionalLong deepenSince = OptionalLong.empty();
-        private Optional<String> filter = Optional.empty();
-
-        private void acceptShared(String line) throws IOException {
-            if (line.startsWith("shallow ")) {
-                shallow.add(objectId(line.substring(8)));
-            } else if (line.startsWith("deepen ")) {
-                if (depth.isPresent()) {
+    private static void acceptShared(FetchRequest request, String line) throws IOException {
+        int separator = line.indexOf(' ');
+        String name = separator < 0 ? line : line.substring(0, separator);
+        if (separator < 0) {
+            throw invalid("Unsupported fetch argument: " + line);
+        }
+        String value = line.substring(separator + 1);
+        GitCapability capability = GitCapability.fromWireName(name).orElse(null);
+        if (capability == null) {
+            throw invalid("Unsupported fetch argument: " + line);
+        }
+        switch (capability) {
+            case SHALLOW -> request.shallowCommits().add(objectId(value));
+            case DEEPEN -> {
+                if (request.depth().isPresent()) {
                     throw invalid("Duplicate deepen");
                 }
-                int value = (int) unsignedNumber(line.substring(7), Integer.MAX_VALUE);
-                if (value == 0) {
+                int depth = (int) unsignedNumber(value, Integer.MAX_VALUE);
+                if (depth == 0) {
                     throw invalid("Depth must be positive");
                 }
-                depth = OptionalInt.of(value);
-            } else if (line.startsWith("deepen-since ")) {
-                if (deepenSince.isPresent()) {
+                request.setDepth(OptionalInt.of(depth));
+            }
+            case DEEPEN_SINCE -> {
+                if (request.deepenSince().isPresent()) {
                     throw invalid("Duplicate deepen-since");
                 }
-                deepenSince = OptionalLong.of(unsignedNumber(line.substring(13), Long.MAX_VALUE));
-            } else if (line.startsWith("deepen-not ")) {
-                deepenNot.add(token(line.substring(11)));
-            } else if (line.startsWith("filter ")) {
-                if (filter.isPresent()) {
+                request.setDeepenSince(OptionalLong.of(unsignedNumber(value, Long.MAX_VALUE)));
+            }
+            case DEEPEN_NOT -> request.deepenNot().add(token(value));
+            case FILTER -> {
+                if (request.filter().isPresent()) {
                     throw invalid("Duplicate filter");
                 }
-                filter = Optional.of(token(line.substring(7)));
-            } else {
-                throw invalid("Unsupported fetch argument: " + line);
+                request.setFilter(Optional.of(token(value)));
             }
+            default -> throw invalid("Unsupported fetch argument: " + line);
         }
+    }
 
-        private FetchRequest build(FetchRequest.Mode mode) throws IOException {
-            if (depth.isPresent() && (deepenSince.isPresent() || !deepenNot.isEmpty())) {
-                throw invalid("Depth cannot be combined with deepen-since or deepen-not");
-            }
-            if (capabilities.contains(GitCapability.DEEPEN_RELATIVE.wireToken()) && depth.isEmpty()) {
-                throw invalid("deepen-relative requires depth");
-            }
-            if (mode != FetchRequest.Mode.PROTOCOL_V2 && capabilities.contains(GitCapability.WAIT_FOR_DONE.wireToken())) {
-                throw invalid("wait-for-done requires protocol v2");
-            }
-            return new FetchRequest(wants, shallow, mode, capabilities, messages, wantRefs,
-                    depth, deepenSince, deepenNot, filter, uriProtocols);
+    private static void validate(FetchRequest request) throws IOException {
+        if (request.depth().isPresent() && (request.deepenSince().isPresent() || !request.deepenNot().isEmpty())) {
+            throw invalid("Depth cannot be combined with deepen-since or deepen-not");
+        }
+        if (request.capabilities().contains(GitCapability.DEEPEN_RELATIVE.entry()) && request.depth().isEmpty()) {
+            throw invalid("deepen-relative requires depth");
+        }
+        if (request.mode() != FetchRequest.Mode.PROTOCOL_V2 && request.waitForDone()) {
+            throw invalid("wait-for-done requires protocol v2");
         }
     }
 }

@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;

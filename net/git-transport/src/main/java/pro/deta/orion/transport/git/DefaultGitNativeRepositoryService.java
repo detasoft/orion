@@ -560,83 +560,81 @@ public final class DefaultGitNativeRepositoryService
                 StandardCharsets.US_ASCII));
     }
 
-    private static List<GitCapability> uploadPackCapabilities(
+    private static List<GitCapability.Entry> uploadPackCapabilities(
             GitWireConfiguration configuration) {
         GitWireConfiguration.LegacyUploadPack uploadPack =
                 configuration.uploadPack();
-        List<GitCapability> capabilities = new ArrayList<>();
+        List<GitCapability.Entry> capabilities = new ArrayList<>();
         if (uploadPack.multiAckDetailed()) {
-            capabilities.add(GitCapability.MULTI_ACK_DETAILED);
-            capabilities.add(GitCapability.MULTI_ACK);
+            capabilities.add(GitCapability.MULTI_ACK_DETAILED.entry());
+            capabilities.add(GitCapability.MULTI_ACK.entry());
         }
         if (uploadPack.thinPack()) {
-            capabilities.add(GitCapability.THIN_PACK);
+            capabilities.add(GitCapability.THIN_PACK.entry());
         }
         if (uploadPack.sideBand64k()) {
-            capabilities.add(GitCapability.SIDE_BAND_64K);
+            capabilities.add(GitCapability.SIDE_BAND_64K.entry());
         }
         if (uploadPack.ofsDelta()) {
-            capabilities.add(GitCapability.OFS_DELTA);
+            capabilities.add(GitCapability.OFS_DELTA.entry());
         }
-        capabilities.add(GitCapability.SHALLOW);
-        capabilities.add(GitCapability.DEEPEN_SINCE);
-        capabilities.add(GitCapability.DEEPEN_NOT);
-        capabilities.add(GitCapability.DEEPEN_RELATIVE);
-        capabilities.add(GitCapability.NO_PROGRESS);
-        capabilities.add(GitCapability.INCLUDE_TAG);
+        capabilities.add(GitCapability.SHALLOW.entry());
+        capabilities.add(GitCapability.DEEPEN_SINCE.entry());
+        capabilities.add(GitCapability.DEEPEN_NOT.entry());
+        capabilities.add(GitCapability.DEEPEN_RELATIVE.entry());
+        capabilities.add(GitCapability.NO_PROGRESS.entry());
+        capabilities.add(GitCapability.INCLUDE_TAG.entry());
         if (uploadPack.agent()) {
-            capabilities.add(GitCapability.agent("orion-native"));
+            capabilities.add(GitCapability.AGENT.withValue("orion-native"));
         }
         return capabilities;
     }
 
-    private static List<GitCapability> receivePackCapabilities(
+    private static List<GitCapability.Entry> receivePackCapabilities(
             GitWireConfiguration configuration) {
         GitWireConfiguration.LegacyReceivePack receivePack =
                 configuration.receivePack();
-        List<GitCapability> capabilities = new ArrayList<>();
+        List<GitCapability.Entry> capabilities = new ArrayList<>();
         if (receivePack.reportStatus()) {
-            capabilities.add(GitCapability.REPORT_STATUS);
-            capabilities.add(GitCapability.REPORT_STATUS_V2);
+            capabilities.add(GitCapability.REPORT_STATUS.entry());
+            capabilities.add(GitCapability.REPORT_STATUS_V2.entry());
         }
-        capabilities.add(GitCapability.DELETE_REFS);
+        capabilities.add(GitCapability.DELETE_REFS.entry());
         if (receivePack.sideBand64k()) {
-            capabilities.add(GitCapability.SIDE_BAND_64K);
+            capabilities.add(GitCapability.SIDE_BAND_64K.entry());
         }
-        capabilities.add(GitCapability.QUIET);
+        capabilities.add(GitCapability.QUIET.entry());
         if (receivePack.atomic()) {
-            capabilities.add(GitCapability.ATOMIC);
+            capabilities.add(GitCapability.ATOMIC.entry());
         }
         if (receivePack.ofsDelta()) {
-            capabilities.add(GitCapability.OFS_DELTA);
+            capabilities.add(GitCapability.OFS_DELTA.entry());
         }
         if (receivePack.objectFormat()) {
-            capabilities.add(GitCapability.objectFormat("sha1"));
+            capabilities.add(GitCapability.OBJECT_FORMAT.withValue("sha1"));
         }
         if (receivePack.agent()) {
-            capabilities.add(GitCapability.agent("orion-native"));
+            capabilities.add(GitCapability.AGENT.withValue("orion-native"));
         }
         return capabilities;
     }
 
     private GitV1Advertisement legacyAdvertisement(
             NativeGitRepository repository,
-            List<GitCapability> baseCapabilities,
+            List<GitCapability.Entry> baseCapabilities,
             boolean advertiseHeadSymref) {
         Objects.requireNonNull(repository, "repository");
         Map<String, String> refs = repository.refs();
         List<GitAdvertisedRef> advertisedRefs = new ArrayList<>();
         String headTarget = effectiveHeadTarget(repository, refs);
         String headObjectId = refs.get(headTarget);
-        List<GitCapability> capabilities =
+        List<GitCapability.Entry> capabilities =
                 new ArrayList<>(baseCapabilities);
         if (headObjectId != null) {
             advertisedRefs.add(
                     GitAdvertisedRef.direct(headObjectId, "HEAD"));
             if (advertiseHeadSymref) {
-                capabilities.add(GitCapability.symref(
-                        "HEAD",
-                        headTarget));
+                capabilities.add(GitCapability.SYMREF.withValue("HEAD:" + headTarget));
             }
         }
         List<String> refNames = new ArrayList<>(refs.keySet());

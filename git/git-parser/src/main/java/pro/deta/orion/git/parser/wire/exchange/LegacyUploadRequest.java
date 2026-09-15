@@ -63,11 +63,11 @@ public record LegacyUploadRequest(
 
     public boolean negotiated(GitCapability capability) {
         Objects.requireNonNull(capability, "capability");
-        if (!capabilities.contains(capability.name())) {
+        if (!capabilities.contains(capability.wireName())) {
             return false;
         }
-        for (GitCapability advertised : serverAdvertisement.capabilities()) {
-            if (advertised.name().equals(capability.name())) {
+        for (GitCapability.Entry advertised : serverAdvertisement.capabilities()) {
+            if (advertised.name().equals(capability.wireName())) {
                 return true;
             }
         }

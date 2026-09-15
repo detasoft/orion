@@ -3,31 +3,30 @@ package pro.deta.orion.git.parser.v2.fetch;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 
 import java.io.IOException;
-import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Object-based negotiation iterator owned by FetchNegotiator. It starts with the parsed request and owns
- * the accumulating NegotiationContext. Protocol v2 consumes request.initialMessages without reading another
- * request; legacy obtains subsequent messages from input. Tests can supply object messages directly.
- * hasNext/next will yield ordered responses while updating common objects, readiness, and client completion.
- * Repeated hasNext must not duplicate responses; next after exhaustion must fail with NoSuchElementException.
+ * Object-based negotiation state machine owned by FetchNegotiator. Each next(message) processes one decoded
+ * message and replaces the pending reply batch; true means more messages are needed, false ends the exchange.
+ * Replies from the terminal step must still be sent. Calls after completion must fail with IllegalStateException.
+ * Tests feed messages directly and inspect replies and the accumulating context after each step or round.
+ * The caller supplies v2 initialMessages, including END_ROUND after DONE, without reading another request.
+ * Legacy replies can be delivered before the round ends, avoiding a wait for input from a client awaiting ACK.
+ * getResponsesToSend returns an immutable snapshot of the latest step, without draining it; repeated reads
+ * must not change state. The next step must clear previous replies even if it produces no new replies.
  * Readiness, repository lookup, and ACK decisions remain unimplemented. No empty successful result is faked.
- * getContext always returns the same context, including after exhaustion. No byte parsing or stream ownership.
+ * getContext always returns the same context. No byte parsing, input callbacks, or stream ownership.
  */
 public final class FetchNegotiatorIterator {
     private final NegotiationContext context;
-    private final MessageSource input;
+    private final List<NegotiationResponse> responsesToSend = new ArrayList<>();
 
-    public FetchNegotiatorIterator(FetchRequest request, MessageSource input) {
+    public FetchNegotiatorIterator(FetchRequest request) {
         this.context = new NegotiationContext(request);
-        this.input = Objects.requireNonNull(input, "input");
     }
 
-    public boolean hasNext() throws IOException {
-        throw new UnsupportedOperationException("Negotiation iteration is not implemented");
-    }
-
-    public NegotiationResponse next() throws IOException {
+    public boolean next(NegotiationMessage msg) throws IOException {
         throw new UnsupportedOperationException("Negotiation iteration is not implemented");
     }
 
@@ -35,9 +34,7 @@ public final class FetchNegotiatorIterator {
         return context;
     }
 
-    /** Supplies a decoded message; EOF is an error rather than implicit DONE. */
-    @FunctionalInterface
-    public interface MessageSource {
-        NegotiationMessage read() throws IOException;
+    public List<NegotiationResponse> getResponsesToSend() {
+        return List.copyOf(responsesToSend);
     }
 }

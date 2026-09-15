@@ -1,7 +1,11 @@
 package pro.deta.orion.git.parser.wire.control;
 
+import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
+import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.util.Result;
+
+import java.io.IOException;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.HEX_VALUES;
 import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.*;
@@ -21,8 +25,26 @@ public record ControlState(ControlType type, int length) {
         return length - PKT_LINE_HEADER_SIZE;
     }
 
-    public static Result<ControlState> readControlType(int headerValue) {
+    public static ControlState readFrom(BufferedByteInput input) throws IOException {
+        int header = 0;
+        for (int i = 0; i < ControlState.PKT_LINE_HEADER_SIZE; i++) {
+            header = (header << 8) | input.readUnsignedByte();
+        }
+        return controlStateValueOf(header);
+    }
 
+    public static ControlState controlStateValueOf(int value) throws GitPktLineFormatException {
+        switch (readControlType(value)) {
+            case Result.Failure<ControlState> v -> {
+                throw new GitPktLineFormatException("Invalid pkt-line header: " + v.getMessage(), v.throwable());
+            }
+            case Result.Success<ControlState> v -> {
+                return v.value();
+            }
+        }
+    }
+
+    public static Result<ControlState> readControlType(int headerValue) {
         int h0 = HEX_VALUES[(headerValue >>> 24) & 0xff];
         int h1 = HEX_VALUES[(headerValue >>> 16) & 0xff];
         int h2 = HEX_VALUES[(headerValue >>> 8) & 0xff];

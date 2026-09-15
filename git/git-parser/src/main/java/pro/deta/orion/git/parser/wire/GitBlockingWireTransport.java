@@ -614,7 +614,7 @@ public final class GitBlockingWireTransport {
         List<GitAdvertisedRef> refs = advertisement.refs();
         GitAdvertisedRef first = refs.getFirst();
         List<String> capabilityTokens = new ArrayList<>();
-        for (GitCapability capability : advertisement.capabilities()) {
+        for (GitCapability.Entry capability : advertisement.capabilities()) {
             capabilityTokens.add(capability.wireToken());
         }
         lines.add(encodeLine(first.objectId() + " " + first.name() + "\0" + String.join(" ", capabilityTokens)));

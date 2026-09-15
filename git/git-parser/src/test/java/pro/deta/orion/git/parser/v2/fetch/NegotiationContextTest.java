@@ -5,9 +5,6 @@ import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,8 +48,11 @@ class NegotiationContextTest {
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {
-        return new FetchRequest(Set.of(SECOND), Set.of(FIRST), FetchRequest.Mode.PROTOCOL_V2,
-                Set.of(), messages, Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(),
-                Optional.empty(), Set.of());
+        FetchRequest request = new FetchRequest();
+        request.setMode(FetchRequest.Mode.PROTOCOL_V2);
+        request.wants().add(SECOND);
+        request.shallowCommits().add(FIRST);
+        request.initialMessages().addAll(messages);
+        return request;
     }
 }

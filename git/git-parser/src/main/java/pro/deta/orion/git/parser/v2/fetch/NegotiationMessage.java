@@ -18,7 +18,6 @@ public sealed interface NegotiationMessage {
         }
     }
 
-    /** Distinct protocol events; neither event closes the underlying transport. */
     enum Control implements NegotiationMessage {
         END_ROUND,
         DONE

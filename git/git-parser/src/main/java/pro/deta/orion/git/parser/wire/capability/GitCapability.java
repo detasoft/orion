@@ -1,186 +1,168 @@
 package pro.deta.orion.git.parser.wire.capability;
 
+import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-public final class GitCapability {
-    public static final GitCapability MULTI_ACK = bare("multi_ack");
-    public static final GitCapability MULTI_ACK_DETAILED =
-            bare("multi_ack_detailed");
-    public static final GitCapability NO_DONE = bare("no-done");
-    public static final GitCapability WAIT_FOR_DONE = bare("wait-for-done");
-    public static final GitCapability SIDEBAND_ALL = bare("sideband-all");
-    public static final GitCapability THIN_PACK = bare("thin-pack");
-    public static final GitCapability NO_THIN = bare("no-thin");
-    public static final GitCapability SIDE_BAND = bare("side-band");
-    public static final GitCapability SIDE_BAND_64K = bare("side-band-64k");
-    public static final GitCapability OFS_DELTA = bare("ofs-delta");
-    public static final GitCapability SHALLOW = bare("shallow");
-    public static final GitCapability DEEPEN_SINCE = bare("deepen-since");
-    public static final GitCapability DEEPEN_NOT = bare("deepen-not");
-    public static final GitCapability DEEPEN_RELATIVE =
-            bare("deepen-relative");
-    public static final GitCapability NO_PROGRESS = bare("no-progress");
-    public static final GitCapability INCLUDE_TAG = bare("include-tag");
-    public static final GitCapability REPORT_STATUS = bare("report-status");
-    public static final GitCapability REPORT_STATUS_V2 =
-            bare("report-status-v2");
-    public static final GitCapability DELETE_REFS = bare("delete-refs");
-    public static final GitCapability QUIET = bare("quiet");
-    public static final GitCapability ATOMIC = bare("atomic");
-    public static final GitCapability PUSH_OPTIONS = bare("push-options");
-    public static final GitCapability ALLOW_TIP_SHA1_IN_WANT =
-            bare("allow-tip-sha1-in-want");
-    public static final GitCapability ALLOW_REACHABLE_SHA1_IN_WANT =
-            bare("allow-reachable-sha1-in-want");
-    public static final GitCapability FILTER = bare("filter");
-    public static final GitCapability REF_IN_WANT = bare("ref-in-want");
+/**
+ * Known capability, fetch argument, and negotiation message names. Wire spelling differs from Enum.name(). A runtime
+ * value belongs to Entry, never to the shared enum instance. STANDARD_NAMES defines which known names must
+ * not be created as custom extensions; membership is independent of the capabilities allowed by a command.
+ * parse reads a bare or valued wire token, splitting only at the first '=' and preserving custom names.
+ * Entry validates syntax; parse also checks an explicit object-format value against expectedObjectFormat.
+ * Invalid tokens and mismatched formats are IOException. Other capability support remains caller policy.
+ */
+public enum GitCapability {
+    WANT_REF("want-ref"),
+    WANT("want"),
+    HAVE("have"),
+    DONE("done"),
+    MULTI_ACK("multi_ack"),
+    MULTI_ACK_DETAILED("multi_ack_detailed"),
+    NO_DONE("no-done"),
+    WAIT_FOR_DONE("wait-for-done"),
+    SIDEBAND_ALL("sideband-all"),
+    THIN_PACK("thin-pack"),
+    NO_THIN("no-thin"),
+    SIDE_BAND("side-band"),
+    SIDE_BAND_64K("side-band-64k"),
+    OFS_DELTA("ofs-delta"),
+    AGENT("agent"),
+    OBJECT_FORMAT("object-format"),
+    SYMREF("symref"),
+    SHALLOW("shallow"),
+    DEEPEN("deepen"),
+    DEEPEN_SINCE("deepen-since"),
+    DEEPEN_NOT("deepen-not"),
+    DEEPEN_RELATIVE("deepen-relative"),
+    NO_PROGRESS("no-progress"),
+    INCLUDE_TAG("include-tag"),
+    REPORT_STATUS("report-status"),
+    REPORT_STATUS_V2("report-status-v2"),
+    DELETE_REFS("delete-refs"),
+    QUIET("quiet"),
+    ATOMIC("atomic"),
+    PUSH_OPTIONS("push-options"),
+    ALLOW_TIP_SHA1_IN_WANT("allow-tip-sha1-in-want"),
+    ALLOW_REACHABLE_SHA1_IN_WANT("allow-reachable-sha1-in-want"),
+    PUSH_CERT("push-cert"),
+    FILTER("filter"),
+    REF_IN_WANT("ref-in-want"),
+    SESSION_ID("session-id");
 
-    private static final Set<String> STANDARD_NAMES = Set.of(
-            "multi_ack",
-            "multi_ack_detailed",
-            "no-done",
-            "wait-for-done",
-            "sideband-all",
-            "thin-pack",
-            "no-thin",
-            "side-band",
-            "side-band-64k",
-            "ofs-delta",
-            "agent",
-            "object-format",
-            "symref",
-            "shallow",
-            "deepen-since",
-            "deepen-not",
-            "deepen-relative",
-            "no-progress",
-            "include-tag",
-            "report-status",
-            "report-status-v2",
-            "delete-refs",
-            "quiet",
-            "atomic",
-            "push-options",
-            "allow-tip-sha1-in-want",
-            "allow-reachable-sha1-in-want",
-            "push-cert",
-            "filter",
-            "ref-in-want",
-            "session-id");
+    private static final Set<GitCapability> STANDARD_NAMES = Set.of(
+            MULTI_ACK, MULTI_ACK_DETAILED, NO_DONE, WAIT_FOR_DONE, SIDEBAND_ALL,
+            THIN_PACK, NO_THIN, SIDE_BAND, SIDE_BAND_64K, OFS_DELTA, AGENT, OBJECT_FORMAT,
+            SYMREF, SHALLOW, DEEPEN_SINCE, DEEPEN_NOT, DEEPEN_RELATIVE, NO_PROGRESS, INCLUDE_TAG,
+            REPORT_STATUS, REPORT_STATUS_V2, DELETE_REFS, QUIET, ATOMIC, PUSH_OPTIONS,
+            ALLOW_TIP_SHA1_IN_WANT, ALLOW_REACHABLE_SHA1_IN_WANT, PUSH_CERT, FILTER, REF_IN_WANT, SESSION_ID);
 
-    private final String name;
-    private final Optional<String> value;
+    private final String wireName;
 
-    private GitCapability(
-            String name,
-            Optional<String> value) {
-        this.name = validateName(name);
-        this.value = Objects.requireNonNull(value, "value")
-                .map(GitCapability::validateValue);
+    GitCapability(String wireName) {
+        this.wireName = wireName;
     }
 
-    public static GitCapability agent(String value) {
-        return valued("agent", value);
+    public String wireName() {
+        return wireName;
     }
 
-    public static GitCapability objectFormat(String value) {
-        return valued("object-format", value);
+    public Entry entry() {
+        return new Entry(wireName, Optional.empty());
     }
 
-    public static GitCapability symref(
-            String source,
-            String target) {
-        return valued(
-                "symref",
-                validateValue(source) + ":" + validateValue(target));
+    public Entry withValue(String value) {
+        return new Entry(wireName, Optional.of(Objects.requireNonNull(value, "value")));
     }
 
-    public static GitCapability pushCert(String nonce) {
-        return valued("push-cert", nonce);
-    }
-
-    public static GitCapability sessionId(String value) {
-        return valued("session-id", value);
-    }
-
-    public static GitCapability custom(String name) {
-        return custom(name, Optional.empty());
-    }
-
-    public static GitCapability custom(
-            String name,
-            String value) {
-        return custom(
-                name,
-                Optional.of(Objects.requireNonNull(value, "value")));
-    }
-
-    public String name() {
-        return name;
-    }
-
-    public Optional<String> value() {
-        return value;
-    }
-
-    public String wireToken() {
-        return value.map(item -> name + "=" + item).orElse(name);
-    }
-
-    private static GitCapability custom(
-            String name,
-            Optional<String> value) {
-        String checkedName = validateName(name);
-        if (STANDARD_NAMES.contains(checkedName)) {
-            throw new IllegalArgumentException(
-                    "Standard capability must use its typed instance or factory");
+    public static Entry parse(String wireToken, GitObjectFormat expectedObjectFormat) throws IOException {
+        Objects.requireNonNull(wireToken, "wireToken");
+        Objects.requireNonNull(expectedObjectFormat, "expectedObjectFormat");
+        Entry entry;
+        try {
+            int separator = wireToken.indexOf('=');
+            entry = separator < 0 ? new Entry(wireToken, Optional.empty())
+                    : new Entry(wireToken.substring(0, separator), Optional.of(wireToken.substring(separator + 1)));
+        } catch (IllegalArgumentException error) {
+            throw new IOException("Invalid capability", error);
         }
-        return new GitCapability(checkedName, value);
-    }
-
-    private static GitCapability bare(String name) {
-        return new GitCapability(name, Optional.empty());
-    }
-
-    private static GitCapability valued(
-            String name,
-            String value) {
-        return new GitCapability(
-                name,
-                Optional.of(Objects.requireNonNull(value, "value")));
-    }
-
-    private static String validateName(String name) {
-        String checked = Objects.requireNonNull(name, "name");
-        if (checked.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Capability name must not be empty");
+        if (entry.name().equals(OBJECT_FORMAT.wireName()) && entry.value().isPresent()
+                && !entry.value().get().equals(expectedObjectFormat.wireName())) {
+            throw new IOException("Expected object format " + expectedObjectFormat.wireName()
+                    + ", received " + entry.value().get());
         }
-        for (int index = 0; index < checked.length(); index++) {
-            char value = checked.charAt(index);
-            if (Character.isWhitespace(value) || value == '=') {
-                throw new IllegalArgumentException(
-                        "Capability name must not contain whitespace or '='");
+        return entry;
+    }
+
+    public static Optional<GitCapability> fromWireName(String name) {
+        Objects.requireNonNull(name, "name");
+        for (GitCapability capability : values()) {
+            if (capability.wireName.equals(name)) {
+                return Optional.of(capability);
             }
         }
-        return checked;
+        return Optional.empty();
     }
 
-    private static String validateValue(String value) {
-        String checked = Objects.requireNonNull(value, "value");
-        if (checked.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Capability value must not be empty");
+    /**
+     * One immutable bare or valued capability token, including custom extensions not listed in the enum.
+     * Known names are normally created with enum.entry()/withValue(); custom rejects STANDARD_NAMES.
+     * Different agent, symref, and other values coexist without modifying shared enum constants.
+     * Validation preserves the existing name/value contract; wireToken serializes name[=value].
+     */
+    public record Entry(String name, Optional<String> value) {
+        public Entry {
+            name = validateName(name);
+            value = Objects.requireNonNull(value, "value").map(Entry::validateValue);
         }
-        for (int index = 0; index < checked.length(); index++) {
-            char character = checked.charAt(index);
-            if (character <= 32 || character >= 127) {
-                throw new IllegalArgumentException(
-                        "Capability value must contain printable non-space ASCII");
+
+        public static Entry custom(String name) {
+            return custom(name, Optional.empty());
+        }
+
+        public static Entry custom(String name, String value) {
+            return custom(name, Optional.of(Objects.requireNonNull(value, "value")));
+        }
+
+        public String wireToken() {
+            return value.map(item -> name + "=" + item).orElse(name);
+        }
+
+        private static Entry custom(String name, Optional<String> value) {
+            String checkedName = validateName(name);
+            if (fromWireName(checkedName).filter(STANDARD_NAMES::contains).isPresent()) {
+                throw new IllegalArgumentException("Standard capability must use its enum instance");
             }
+            return new Entry(checkedName, value);
         }
-        return checked;
+
+        private static String validateName(String name) {
+            String checked = Objects.requireNonNull(name, "name");
+            if (checked.isEmpty()) {
+                throw new IllegalArgumentException("Capability name must not be empty");
+            }
+            for (int index = 0; index < checked.length(); index++) {
+                char character = checked.charAt(index);
+                if (Character.isWhitespace(character) || character == '=') {
+                    throw new IllegalArgumentException("Capability name must not contain whitespace or '='");
+                }
+            }
+            return checked;
+        }
+
+        private static String validateValue(String value) {
+            String checked = Objects.requireNonNull(value, "value");
+            if (checked.isEmpty()) {
+                throw new IllegalArgumentException("Capability value must not be empty");
+            }
+            for (int index = 0; index < checked.length(); index++) {
+                char character = checked.charAt(index);
+                if (character <= 32 || character >= 127) {
+                    throw new IllegalArgumentException("Capability value must contain printable non-space ASCII");
+                }
+            }
+            return checked;
+        }
     }
 }
