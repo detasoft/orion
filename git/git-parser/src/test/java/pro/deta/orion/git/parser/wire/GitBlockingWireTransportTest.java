@@ -5,13 +5,12 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -29,7 +28,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.v2.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
 
 class GitBlockingWireTransportTest {
     private static final String MAIN_ID =
@@ -55,12 +54,12 @@ class GitBlockingWireTransportTest {
         GitPktLine data = transport.readPacket();
         ByteBuf payload = transport.payloadBuffer(data);
         try {
-            assertThat(data.type()).isEqualTo(GitPktLine.ControlType.DATA);
+            assertThat(data).isInstanceOf(GitPktLine.Data.class);
             assertThat(payload.toString(StandardCharsets.UTF_8))
                     .isEqualTo("hello\n");
 
             GitPktLine flush = transport.readPacket();
-            assertThat(flush.type()).isEqualTo(GitPktLine.ControlType.FLUSH);
+            assertThat(flush).isSameAs(GitPktLine.Control.FLUSH);
             assertThat(flush.payloadLength()).isZero();
         } finally {
             payload.release();
@@ -85,12 +84,14 @@ class GitBlockingWireTransportTest {
                 StandardCharsets.UTF_8);
         try {
             transport.writeData(payload);
+            assertThat(payload.readerIndex()).isZero();
+            assertThat(payload.refCnt()).isEqualTo(1);
             transport.writeFlush();
             transport.flush();
 
             assertThat(sink.writeLengths()).containsExactly(4, 5, 4);
-            assertThat(sink.byteArrayWriteLengths()).containsExactly(4, 4);
-            assertThat(sink.byteBufWriteLengths()).containsExactly(5);
+            assertThat(sink.byteArrayWriteLengths()).containsExactly(4, 5, 4);
+            assertThat(sink.byteBufWriteLengths()).isEmpty();
             assertThat(sink.ascii()).isEqualTo("0009hello0000");
         } finally {
             payload.release();

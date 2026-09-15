@@ -24,7 +24,7 @@ import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadRequest;
 import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
 
@@ -150,26 +150,26 @@ public final class GitBlockingWireSession {
                 throw new EOFException("Incomplete protocol v2 command");
             }
             GitPktLine control = next.get();
-            switch (control.type()) {
-                case DATA -> {
-                    String payload = readAsciiPayload(control);
+            switch (control) {
+                case GitPktLine.Data packet -> {
+                    String payload = readAsciiPayload(packet);
                     if (command == null) {
                         command = readV2CommandPayload(payload);
                     } else if (!isSupportedV2CommandCapability(payload)) {
                         throw invalidV2Request();
                     }
                 }
-                case DELIMITER -> {
+                case GitPktLine.Control.DELIMITER -> {
                     if (command == null) {
                         throw invalidV2Request();
                     }
                     serveV2Command(data, command);
                     command = null;
                 }
-                case FLUSH -> {
+                case GitPktLine.Control.FLUSH -> {
                     return;
                 }
-                case RESPONSE_END -> throw invalidV2Request();
+                case GitPktLine.Control.RESPONSE_END -> throw invalidV2Request();
             }
         }
     }
@@ -206,9 +206,9 @@ public final class GitBlockingWireSession {
         LsRefsAccumulator request = new LsRefsAccumulator(configuration);
         while (true) {
             GitPktLine control = wire.readPacket();
-            switch (control.type()) {
-                case DATA -> request.accept(readAsciiPayload(control));
-                case FLUSH -> {
+            switch (control) {
+                case GitPktLine.Data packet -> request.accept(readAsciiPayload(packet));
+                case GitPktLine.Control.FLUSH -> {
                     GitLsRefsResponse response = repositoryService.lsRefs(
                             data,
                             request.complete(),
@@ -216,7 +216,7 @@ public final class GitBlockingWireSession {
                     wire.sendLsRefs(response);
                     return;
                 }
-                case DELIMITER, RESPONSE_END -> throw invalidV2Request();
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw invalidV2Request();
             }
         }
     }
@@ -288,13 +288,13 @@ public final class GitBlockingWireSession {
         FetchAccumulator fetch = new FetchAccumulator(configuration);
         while (true) {
             GitPktLine control = wire.readPacket();
-            switch (control.type()) {
-                case DATA -> fetch.accept(readAsciiPayload(control));
-                case FLUSH -> {
+            switch (control) {
+                case GitPktLine.Data packet -> fetch.accept(readAsciiPayload(packet));
+                case GitPktLine.Control.FLUSH -> {
                     serveFetch(data, fetch.complete());
                     return;
                 }
-                case DELIMITER, RESPONSE_END -> throw invalidV2FetchRequest();
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw invalidV2FetchRequest();
             }
         }
     }
@@ -401,16 +401,16 @@ public final class GitBlockingWireSession {
                 new LegacyUploadRequestBuilder();
         while (true) {
             GitPktLine control = wire.readPacket();
-            switch (control.type()) {
-                case DATA -> request.accept(readAsciiPayload(control));
-                case FLUSH -> {
+            switch (control) {
+                case GitPktLine.Data packet -> request.accept(readAsciiPayload(packet));
+                case GitPktLine.Control.FLUSH -> {
                     if (request.wants.isEmpty()) {
                         throw invalidLegacyUploadRequest(
                                 GitWireError.Kind.MISSING_LEGACY_UPLOAD_WANT);
                     }
                     return request.complete(data, advertisement);
                 }
-                case DELIMITER, RESPONSE_END ->
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalidLegacyUploadRequest(
                                 GitWireError.Kind
                                         .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
@@ -479,9 +479,9 @@ public final class GitBlockingWireSession {
         GitObjectId lastCommon = null;
         while (true) {
             GitPktLine control = wire.readPacket();
-            switch (control.type()) {
-                case DATA -> {
-                    String line = readAsciiPayload(control);
+            switch (control) {
+                case GitPktLine.Data packet -> {
+                    String line = readAsciiPayload(packet);
                     if ("done".equals(line)) {
                         if (lastCommon == null) {
                             wire.sendNak();
@@ -513,7 +513,7 @@ public final class GitBlockingWireSession {
                                 GitBlockingWireTransport.AckStatus.CONTINUE);
                     }
                 }
-                case FLUSH -> {
+                case GitPktLine.Control.FLUSH -> {
                     if (lastCommon != null
                             && request.negotiated(
                                     GitCapability.MULTI_ACK_DETAILED)
@@ -531,7 +531,7 @@ public final class GitBlockingWireSession {
                         return;
                     }
                 }
-                case DELIMITER, RESPONSE_END ->
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalidLegacyUploadRequest(
                                 GitWireError.Kind
                                         .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
@@ -635,14 +635,14 @@ public final class GitBlockingWireSession {
         Set<String> refNames = new LinkedHashSet<>();
         while (true) {
             GitPktLine control = wire.readPacket();
-            switch (control.type()) {
-                case DATA -> acceptLegacyReceiveLine(
+            switch (control) {
+                case GitPktLine.Data packet -> acceptLegacyReceiveLine(
                         commands,
                         shallowObjectIds,
                         capabilities,
                         refNames,
-                        ((GitPktLine.Data) control).content());
-                case FLUSH -> {
+                        packet.content());
+                case GitPktLine.Control.FLUSH -> {
                     if (commands.isEmpty()) {
                         return null;
                     }
@@ -653,7 +653,7 @@ public final class GitBlockingWireSession {
                             capabilities,
                             advertisement);
                 }
-                case DELIMITER, RESPONSE_END ->
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalidLegacyReceiveRequest(
                                 GitWireError.Kind
                                         .UNSUPPORTED_LEGACY_RECEIVE_CONTROL);

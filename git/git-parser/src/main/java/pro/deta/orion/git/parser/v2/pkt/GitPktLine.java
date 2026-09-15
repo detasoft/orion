@@ -1,8 +1,9 @@
-package pro.deta.orion.git.parser.wire.pkt;
+package pro.deta.orion.git.parser.v2.pkt;
 
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
 import java.io.EOFException;
@@ -13,28 +14,23 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.HEX_VALUES;
+import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.*;
 
 /**
  * One completely read pkt-line: Data owns its payload, while Control has no payload.
- * readFrom validates the header and reads exactly the declared payload through BufferedByteInput.readBytes.
+ * readNextFrom validates the header and reads exactly the declared payload through BufferedByteInput.readBytes.
  * DATA stays binary until text() is explicitly requested; arbitrary pack bytes need not be valid UTF-8.
- * type and lengths are derived from the variant, never independently mutable header state.
+ * Lengths are derived from the variant, never independently mutable header state.
  * No stream or reference-counted buffer is retained. EOF during the header or payload is an IOException.
  * readNextFrom permits clean EOF before a packet; partial headers and payloads always fail.
+ * writeTo validates the packet size before writing its header and payload; flushing belongs to the caller.
+ * Its optional SideBand argument prefixes Data with a channel byte and includes it in the wire length.
+ * Control markers remain unprefixed. The default is NONE; payload bytes never include an implicit channel.
  */
-public sealed interface GitPktLine {
+public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
     int PKT_LINE_HEADER_SIZE = 4;
     int MAX_PKT_LINE_LENGTH = 65_520;
-
-    enum ControlType {
-        DATA,
-        FLUSH,
-        DELIMITER,
-        RESPONSE_END
-    }
-
-    ControlType type();
 
     default int payloadLength() {
         return this instanceof Data data ? data.content().length : 0;
@@ -44,6 +40,36 @@ public sealed interface GitPktLine {
         return PKT_LINE_HEADER_SIZE + payloadLength();
     }
 
+    default void writeTo(BufferedByteOutput output) throws IOException {
+        writeTo(output, SideBand.NONE);
+    }
+
+    default void writeTo(BufferedByteOutput output, SideBand sideBand) throws IOException {
+        Objects.requireNonNull(output, "output");
+        Objects.requireNonNull(sideBand, "sideBand");
+        int wireLength = switch (this) {
+            case Data data -> data.length() + (sideBand == SideBand.NONE ? 0 : 1);
+            case Control control -> control.wireValue();
+        };
+        if (wireLength > MAX_PKT_LINE_LENGTH) {
+            throw new IllegalArgumentException("Pkt-line payload exceeds Git pkt-line limit");
+        }
+        boolean hasChannel = this instanceof Data && sideBand != SideBand.NONE;
+        byte[] header = new byte[PKT_LINE_HEADER_SIZE + (hasChannel ? 1 : 0)];
+        for (int index = 0; index < PKT_LINE_HEADER_SIZE; index++) {
+            int shift = (PKT_LINE_HEADER_SIZE - 1 - index) * 4;
+            header[index] = hexDigit((wireLength >>> shift) & 0x0f);
+        }
+        if (hasChannel) {
+            header[PKT_LINE_HEADER_SIZE] = sideBand.wireValue();
+        }
+        output.write(header);
+        if (this instanceof Data data) {
+            output.write(data.content());
+        }
+    }
+
+
     /**
      * Raw payload owned by this packet. content exposes the bytes without another copy.
      * text decodes strict UTF-8, removes one final LF, and rejects embedded ASCII control characters.
@@ -52,11 +78,6 @@ public sealed interface GitPktLine {
     record Data(byte[] content) implements GitPktLine {
         public Data {
             Objects.requireNonNull(content, "content");
-        }
-
-        @Override
-        public ControlType type() {
-            return ControlType.DATA;
         }
 
         public String text() throws IOException {
@@ -81,24 +102,26 @@ public sealed interface GitPktLine {
 
     /** Payload-free pkt-line markers; reading one never consumes bytes belonging to the next packet. */
     enum Control implements GitPktLine {
-        FLUSH(ControlType.FLUSH),
-        DELIMITER(ControlType.DELIMITER),
-        RESPONSE_END(ControlType.RESPONSE_END);
+        FLUSH(0), DELIMITER(1), RESPONSE_END(2);
 
-        private final ControlType type;
+        private final int wireValue;
 
-        Control(ControlType type) {
-            this.type = type;
+        Control(int wireValue) {
+            this.wireValue = wireValue;
         }
 
-        @Override
-        public ControlType type() {
-            return type;
+        public int wireValue() {
+            return wireValue;
         }
-    }
 
-    static GitPktLine readFrom(BufferedByteInput input) throws IOException {
-        return readNextFrom(input).orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
+        public static Control valueOf(int wireValue) throws GitPktLineFormatException {
+            for (Control control : values()) {
+                if (control.wireValue == wireValue) {
+                    return control;
+                }
+            }
+            throw malformed(new GitGeneralException(RESERVED_LENGTH));
+        }
     }
 
     static Optional<GitPktLine> readNextFrom(BufferedByteInput input) throws IOException {
@@ -121,18 +144,17 @@ public sealed interface GitPktLine {
             }
             length = (length << 4) | digit;
         }
-        if (length == 3) {
-            throw malformed(new GitGeneralException(RESERVED_LENGTH));
-        }
+        return Optional.of(valueOf(length, input));
+    }
+
+    private static GitPktLine valueOf(int length, BufferedByteInput input) throws IOException {
         if (length > MAX_PKT_LINE_LENGTH) {
             throw malformed(new GitGeneralException(LENGTH_EXCEEDS_LIMIT));
         }
-        return Optional.of(switch (length) {
-            case 0 -> Control.FLUSH;
-            case 1 -> Control.DELIMITER;
-            case 2 -> Control.RESPONSE_END;
-            default -> new Data(input.readBytes(length - PKT_LINE_HEADER_SIZE));
-        });
+        if (length < PKT_LINE_HEADER_SIZE) {
+            return Control.valueOf(length);
+        }
+        return new Data(input.readBytes(length - PKT_LINE_HEADER_SIZE));
     }
 
     private static GitPktLineFormatException malformed(GitGeneralException cause) {

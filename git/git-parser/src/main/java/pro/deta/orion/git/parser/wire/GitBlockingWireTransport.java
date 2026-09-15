@@ -9,18 +9,22 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.serialization.AsciiPacketSequenceSerialization;
 import pro.deta.orion.git.parser.wire.serialization.OutputSerialization;
 import pro.deta.orion.git.parser.wire.serialization.PacketListSerialization;
 import pro.deta.orion.git.parser.wire.serialization.PktLineSerialization;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.EOFException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,9 +32,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
-import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
+import static pro.deta.orion.git.parser.v2.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.v2.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
 import static pro.deta.orion.git.parser.wire.serialization.AsciiPacketUtils.*;
 
 public final class GitBlockingWireTransport {
@@ -38,7 +41,6 @@ public final class GitBlockingWireTransport {
 
     private final BufferedByteInput input;
     private final BufferedByteOutput outputSink;
-    private final GitPktLineWriter pktLineWriter;
 
     public GitBlockingWireTransport(BufferedByteOutput outputSink) {
         this(null, outputSink);
@@ -47,11 +49,10 @@ public final class GitBlockingWireTransport {
     public GitBlockingWireTransport(BufferedByteInput input, BufferedByteOutput outputSink) {
         this.input = input;
         this.outputSink = Objects.requireNonNull(outputSink, "outputSink");
-        pktLineWriter = new GitPktLineWriter();
     }
 
     public GitPktLine readPacket() throws IOException {
-        return GitPktLine.readFrom(requireInput());
+        return readNextPacket().orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
     }
 
     public Optional<GitPktLine> readNextPacket() throws IOException {
@@ -70,8 +71,12 @@ public final class GitBlockingWireTransport {
     public void writeData(ByteBuf payload) throws IOException {
         Objects.requireNonNull(payload, "payload");
         int payloadLength = payload.readableBytes();
-        outputSink.write(pktLineWriter.writeDataHeader(payloadLength));
-        outputSink.write(payload.slice(payload.readerIndex(), payloadLength));
+        if (payloadLength > MAX_PKT_LINE_LENGTH - PKT_LINE_HEADER_SIZE) {
+            throw new IllegalArgumentException("Pkt-line payload exceeds Git pkt-line limit");
+        }
+        byte[] bytes = new byte[payloadLength];
+        payload.getBytes(payload.readerIndex(), bytes);
+        writeData(bytes);
     }
 
     public void writeText(String payload) throws IOException {
@@ -87,37 +92,37 @@ public final class GitBlockingWireTransport {
     }
 
     public void writeFlush() throws IOException {
-        outputSink.write(pktLineWriter.writeFlush());
+        GitPktLine.Control.FLUSH.writeTo(outputSink);
     }
 
     public void writeDelimiter() throws IOException {
-        outputSink.write(pktLineWriter.writeDelimiter());
+        GitPktLine.Control.DELIMITER.writeTo(outputSink);
     }
 
     public void writeResponseEnd() throws IOException {
-        outputSink.write(pktLineWriter.writeResponseEnd());
+        GitPktLine.Control.RESPONSE_END.writeTo(outputSink);
     }
 
     public void writeSideBandData(ByteBuf payload) throws IOException {
-        writeSideBand(SideBandChannel.DATA, payload);
+        writeSideBand(SideBand.DATA, payload);
     }
 
     public void writeSideBandProgress(ByteBuf payload) throws IOException {
-        writeSideBand(SideBandChannel.PROGRESS, payload);
+        writeSideBand(SideBand.PROGRESS, payload);
     }
 
     public void writeSideBandProgress(String payload) throws IOException {
         byte[] bytes = utf8(payload);
-        writeSideBand(SideBandChannel.PROGRESS, bytes, 0, bytes.length);
+        writeSideBand(SideBand.PROGRESS, bytes, 0, bytes.length);
     }
 
     public void writeSideBandError(ByteBuf payload) throws IOException {
-        writeSideBand(SideBandChannel.ERROR, payload);
+        writeSideBand(SideBand.ERROR, payload);
     }
 
     public void writeSideBandError(String payload) throws IOException {
         byte[] bytes = utf8(payload);
-        writeSideBand(SideBandChannel.ERROR, bytes, 0, bytes.length);
+        writeSideBand(SideBand.ERROR, bytes, 0, bytes.length);
     }
 
     public void flush() throws IOException {
@@ -212,7 +217,7 @@ public final class GitBlockingWireTransport {
         }
         String payload = "ERR " + message + "\n";
         validateAsciiPacket(payload, 0);
-        sendSerialization(new PktLineSerialization(payload.getBytes(StandardCharsets.UTF_8), payload.getBytes(StandardCharsets.UTF_8).length + PKT_LINE_HEADER_SIZE));
+        sendSerialization(new PktLineSerialization(payload.getBytes(StandardCharsets.UTF_8)));
     }
 
     public void sendProtocolV2FetchAcknowledgments(List<GitObjectId> acknowledgments, boolean sidebandAll) throws IOException {
@@ -229,7 +234,7 @@ public final class GitBlockingWireTransport {
             }
         }
         if (sidebandAll) {
-            sendSerialization(new PacketListSerialization(encodeAsciiPackets(payloads, true)));
+            sendSerialization(new PacketListSerialization(encodeAsciiPackets(payloads, true), SideBand.DATA));
             return;
         }
         sendSerialization(new AsciiPacketSequenceSerialization(payloads));
@@ -382,7 +387,7 @@ public final class GitBlockingWireTransport {
         if (packetLength > MAX_PKT_LINE_LENGTH) {
             throw new IllegalArgumentException(failureMessage, new IllegalArgumentException("Git wire-line exceeds maximum length"));
         }
-        sendSerialization(new PktLineSerialization(payloadBytes, packetLength));
+        sendSerialization(new PktLineSerialization(payloadBytes));
     }
 
     private static void validateObjectId(String objectId) {
@@ -478,13 +483,19 @@ public final class GitBlockingWireTransport {
         outputSink.write(bytes);
     }
 
-    public void writeData(byte[] payload) throws IOException {
-        Objects.requireNonNull(payload, "payload");
-        outputSink.write(pktLineWriter.writeDataHeader(payload.length));
-        outputSink.write(payload);
+    public void writePacket(GitPktLine packet) throws IOException {
+        writePacket(packet, SideBand.NONE);
     }
 
-    private void writeSideBand(SideBandChannel channel, ByteBuf payload) throws IOException {
+    public void writePacket(GitPktLine packet, SideBand sideBand) throws IOException {
+        packet.writeTo(outputSink, sideBand);
+    }
+
+    public void writeData(byte[] payload) throws IOException {
+        writePacket(new GitPktLine.Data(payload));
+    }
+
+    private void writeSideBand(SideBand channel, ByteBuf payload) throws IOException {
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(payload, "payload");
         int payloadOffset = payload.readerIndex();
@@ -494,14 +505,15 @@ public final class GitBlockingWireTransport {
         }
         do {
             int chunkLength = Math.min(remaining, SideBandOutput.MAXIMUM_PAYLOAD);
-            outputSink.write(pktLineWriter.writeSidebandHeader(channel.wireValue(), chunkLength));
-            outputSink.write(payload.slice(payloadOffset, chunkLength));
+            byte[] content = new byte[chunkLength];
+            payload.getBytes(payloadOffset, content);
+            new GitPktLine.Data(content).writeTo(outputSink, channel);
             payloadOffset += chunkLength;
             remaining -= chunkLength;
         } while (remaining > 0);
     }
 
-    private void writeSideBand(SideBandChannel channel, byte[] payload, int offset, int length) throws IOException {
+    private void writeSideBand(SideBand channel, byte[] payload, int offset, int length) throws IOException {
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(payload, "payload");
         int payloadOffset = offset;
@@ -511,8 +523,9 @@ public final class GitBlockingWireTransport {
         }
         do {
             int chunkLength = Math.min(remaining, SideBandOutput.MAXIMUM_PAYLOAD);
-            outputSink.write(pktLineWriter.writeSidebandHeader(channel.wireValue(), chunkLength));
-            outputSink.write(payload, payloadOffset, chunkLength);
+            byte[] content = payloadOffset == 0 && chunkLength == payload.length
+                    ? payload : Arrays.copyOfRange(payload, payloadOffset, payloadOffset + chunkLength);
+            new GitPktLine.Data(content).writeTo(outputSink, channel);
             payloadOffset += chunkLength;
             remaining -= chunkLength;
         } while (remaining > 0);
@@ -550,9 +563,9 @@ public final class GitBlockingWireTransport {
     private final class SideBandOutput implements BufferedByteOutput {
         private static final int MAXIMUM_PAYLOAD = MAX_PKT_LINE_LENGTH - PKT_LINE_HEADER_SIZE - 1;
 
-        private final SideBandChannel channel;
+        private final SideBand channel;
 
-        private SideBandOutput(SideBandChannel channel) {
+        private SideBandOutput(SideBand channel) {
             this.channel = Objects.requireNonNull(channel, "channel");
         }
 
@@ -579,19 +592,16 @@ public final class GitBlockingWireTransport {
         }
     }
 
-    private static List<byte[]> encodePackets(GitV1Advertisement advertisement) {
-        List<byte[]> packets = new ArrayList<>();
+    private static List<GitPktLine> encodePackets(GitV1Advertisement advertisement) {
+        List<GitPktLine> packets = new ArrayList<>();
         for (byte[] line : encodeLines(advertisement)) {
             int packetLength = line.length + PKT_LINE_HEADER_SIZE;
             if (packetLength > MAX_PKT_LINE_LENGTH) {
                 throw new IllegalArgumentException("Advertisement line exceeds Git wire-line limit");
             }
-            byte[] packet = new byte[packetLength];
-            writeHeader(packet, packetLength);
-            System.arraycopy(line, 0, packet, PKT_LINE_HEADER_SIZE, line.length);
-            packets.add(packet);
+            packets.add(new GitPktLine.Data(line));
         }
-        packets.add(new byte[]{'0', '0', '0', '0'});
+        packets.add(GitPktLine.Control.FLUSH);
         return List.copyOf(packets);
     }
 
@@ -633,21 +643,6 @@ public final class GitBlockingWireTransport {
         }
     }
 
-    public enum SideBandChannel {
-        DATA(1), PROGRESS(2), ERROR(3);
-
-        private final byte wireValue;
-
-        SideBandChannel(int wireValue) {
-            this.wireValue = (byte) wireValue;
-        }
-
-        public byte wireValue() {
-            return wireValue;
-        }
-    }
-
-
     public record ReceiveCommandStatus(String refName, boolean ok, String message) {
         public ReceiveCommandStatus {
             Objects.requireNonNull(refName, "refName");
@@ -656,8 +651,6 @@ public final class GitBlockingWireTransport {
     }
 
     public final class LegacySideBandResponse implements AutoCloseable {
-        private static final byte[] NAK = {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
-        private static final byte[] FLUSH = {'0', '0', '0', '0'};
 
         private final NativePackProducer producer;
         private final boolean sendNakBeforePack;
@@ -674,11 +667,11 @@ public final class GitBlockingWireTransport {
             }
             try {
                 if (sendNakBeforePack) {
-                    writeRaw(NAK);
+                    writeText("NAK\n");
                 }
-                SideBandOutput packOutput = new SideBandOutput(SideBandChannel.DATA);
+                SideBandOutput packOutput = new SideBandOutput(SideBand.DATA);
                 producer.writeTo(packOutput);
-                writeRaw(FLUSH);
+                writeFlush();
                 flush();
                 complete();
             } catch (IOException | RuntimeException error) {
@@ -712,7 +705,6 @@ public final class GitBlockingWireTransport {
     }
 
     public final class LegacyPackResponse implements AutoCloseable {
-        private static final byte[] NAK = {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
 
         private final NativePackProducer producer;
         private final boolean sendNakBeforePack;
@@ -729,7 +721,7 @@ public final class GitBlockingWireTransport {
             }
             try {
                 if (sendNakBeforePack) {
-                    writeRaw(NAK);
+                    writeText("NAK\n");
                 }
                 RawPackOutput packOutput = new RawPackOutput();
                 producer.writeTo(packOutput);
@@ -762,13 +754,10 @@ public final class GitBlockingWireTransport {
     }
 
     public final class ProtocolV2PackfileResponse implements AutoCloseable {
-        private static final byte[] PACKFILE_HEADER = {'0', '0', '0', 'd', 'p', 'a', 'c', 'k', 'f', 'i', 'l', 'e', '\n'};
-        private static final byte[] DELIMITER = {'0', '0', '0', '1'};
-        private static final byte[] FLUSH = {'0', '0', '0', '0'};
-
         private final NativePackProducer producer;
-        private final List<byte[]> prePackSectionPackets;
-        private final byte[] packfileHeader;
+        private final List<GitPktLine> prePackSectionPackets;
+        private final GitPktLine packfileHeader;
+        private final SideBand sideBand;
         private boolean closed;
 
         private ProtocolV2PackfileResponse(
@@ -785,7 +774,8 @@ public final class GitBlockingWireTransport {
                     wantedRefs,
                     packfileUris,
                     sidebandAll);
-            this.packfileHeader = sidebandAll ? encodeAsciiPacket("packfile\n", true) : PACKFILE_HEADER;
+            this.packfileHeader = encodeAsciiPacket("packfile\n", sidebandAll);
+            this.sideBand = sidebandAll ? SideBand.DATA : SideBand.NONE;
         }
 
         public void advance() throws IOException {
@@ -793,12 +783,12 @@ public final class GitBlockingWireTransport {
                 throw new IllegalStateException("Protocol v2 packfile response is closed");
             }
             try {
-                for (byte[] packet : prePackSectionPackets) {
-                    writeRaw(packet);
+                for (GitPktLine packet : prePackSectionPackets) {
+                    writePacket(packet, sideBand);
                 }
-                writeRaw(packfileHeader);
-                producer.writeTo(new SideBandOutput(SideBandChannel.DATA));
-                writeRaw(FLUSH);
+                writePacket(packfileHeader, sideBand);
+                producer.writeTo(new SideBandOutput(SideBand.DATA));
+                writeFlush();
                 flush();
                 close();
             } catch (IOException | RuntimeException error) {
@@ -826,7 +816,7 @@ public final class GitBlockingWireTransport {
             }
         }
 
-        private static List<byte[]> prePackSectionPackets(
+        private static List<GitPktLine> prePackSectionPackets(
                 Set<GitObjectId> shallowBoundaries,
                 Set<GitObjectId> unshallowBoundaries,
                 Map<String, GitObjectId> wantedRefs,
@@ -842,7 +832,7 @@ public final class GitBlockingWireTransport {
                     && packfileUris.isEmpty()) {
                 return List.of();
             }
-            List<byte[]> packets = new ArrayList<>();
+            List<GitPktLine> packets = new ArrayList<>();
             if (!shallowBoundaries.isEmpty()
                     || !unshallowBoundaries.isEmpty()) {
                 packets.add(encodeAsciiPacket("shallow-info\n", sidebandAll));
@@ -862,7 +852,7 @@ public final class GitBlockingWireTransport {
                                     + "\n",
                             sidebandAll));
                 }
-                packets.add(DELIMITER);
+                packets.add(GitPktLine.Control.DELIMITER);
             }
             if (!wantedRefs.isEmpty()) {
                 packets.add(encodeAsciiPacket("wanted-refs\n", sidebandAll));
@@ -872,7 +862,7 @@ public final class GitBlockingWireTransport {
                     validateObjectId(objectId.value());
                     packets.add(encodeAsciiPacket(objectId.value() + " " + refName + "\n", sidebandAll));
                 }
-                packets.add(DELIMITER);
+                packets.add(GitPktLine.Control.DELIMITER);
             }
             if (!packfileUris.isEmpty()) {
                 packets.add(encodeAsciiPacket("packfile-uris\n", sidebandAll));
@@ -880,7 +870,7 @@ public final class GitBlockingWireTransport {
                     Objects.requireNonNull(packfileUri, "packfileUri");
                     packets.add(encodeAsciiPacket(packfileUri.packHash() + " " + packfileUri.uri() + "\n", sidebandAll));
                 }
-                packets.add(DELIMITER);
+                packets.add(GitPktLine.Control.DELIMITER);
             }
             return List.copyOf(packets);
         }
@@ -919,7 +909,6 @@ public final class GitBlockingWireTransport {
         private final List<ReceiveCommandStatus> statuses;
         private final boolean sideBand64k;
         private int packetIndex;
-        private int packetOffset;
 
         private ReceivePackStatusSerialization(
                 String unpackStatus,
@@ -932,93 +921,30 @@ public final class GitBlockingWireTransport {
 
         @Override
         public void writeTo(GitBlockingWireTransport wire) throws IOException {
-            while (packetIndex < packetCount()) {
-                int packetSize = packetSize();
-                byte[] packet = new byte[packetSize - packetOffset];
-                for (int index = 0; index < packet.length; index++) {
-                    packet[index] = byteAt(packetOffset + index);
+            while (packetIndex < statuses.size() + 2) {
+                GitPktLine packet;
+                if (packetIndex == 0) {
+                    packet = new GitPktLine.Data(utf8("unpack " + unpackStatus + "\n"));
+                } else if (packetIndex <= statuses.size()) {
+                    packet = new GitPktLine.Data(utf8(receiveCommandStatusPayload(statuses.get(packetIndex - 1))));
+                } else {
+                    packet = GitPktLine.Control.FLUSH;
                 }
-                OutputSerialization.writeBytes(wire, packet);
+                if (sideBand64k) {
+                    ByteArrayOutputStream bytes = new ByteArrayOutputStream(packet.length());
+                    packet.writeTo(new OutputStreamBufferedByteOutput(bytes));
+                    byte[] payload = bytes.toByteArray();
+                    wire.writeSideBand(SideBand.DATA, payload, 0, payload.length);
+                } else {
+                    wire.writePacket(packet);
+                }
                 packetIndex++;
-                packetOffset = 0;
+            }
+            if (sideBand64k && packetIndex == statuses.size() + 2) {
+                wire.writeFlush();
+                packetIndex++;
             }
             wire.flush();
-        }
-
-        private int packetCount() {
-            int innerPacketCount = statuses.size() + 2;
-            return sideBand64k ? innerPacketCount + 1 : innerPacketCount;
-        }
-
-        private int packetSize() {
-            return packetLength() == 0 ? PKT_LINE_HEADER_SIZE : packetLength();
-        }
-
-        private int packetLength() {
-            if (outerFlush()) {
-                return 0;
-            }
-            if (!sideBand64k) {
-                return innerPacketLength();
-            }
-            return PKT_LINE_HEADER_SIZE + 1 + innerPacketSize();
-        }
-
-        private boolean outerFlush() {
-            return sideBand64k && packetIndex == statuses.size() + 2;
-        }
-
-        private int innerPacketSize() {
-            return innerPacketLength() == 0 ? PKT_LINE_HEADER_SIZE : innerPacketLength();
-        }
-
-        private int innerPacketLength() {
-            byte[] payload = innerPayload();
-            return payload == null ? 0 : payload.length + PKT_LINE_HEADER_SIZE;
-        }
-
-        private byte[] innerPayload() {
-            if (packetIndex == 0) {
-                return ("unpack " + unpackStatus + "\n")
-                        .getBytes(StandardCharsets.UTF_8);
-            }
-            int statusIndex = packetIndex - 1;
-            if (statusIndex < statuses.size()) {
-                return receiveCommandStatusPayload(statuses.get(statusIndex)).getBytes(StandardCharsets.UTF_8);
-            }
-            return null;
-        }
-
-        private byte byteAt(int offset) {
-            if (packetLength() == 0) {
-                return '0';
-            }
-            if (!sideBand64k) {
-                return innerByteAt(offset);
-            }
-            if (offset < PKT_LINE_HEADER_SIZE) {
-                return headerByte(packetLength(), offset);
-            }
-            if (offset == PKT_LINE_HEADER_SIZE) {
-                return SideBandChannel.DATA.wireValue();
-            }
-            return innerByteAt(offset - PKT_LINE_HEADER_SIZE - 1);
-        }
-
-        private byte innerByteAt(int offset) {
-            int innerPacketLength = innerPacketLength();
-            if (innerPacketLength == 0) {
-                return '0';
-            }
-            if (offset < PKT_LINE_HEADER_SIZE) {
-                return headerByte(innerPacketLength, offset);
-            }
-            return innerPayload()[offset - PKT_LINE_HEADER_SIZE];
-        }
-
-        private static byte headerByte(int packetLength, int offset) {
-            int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
-            return hexDigit((packetLength >>> shift) & 0x0f);
         }
     }
 

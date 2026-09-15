@@ -1,39 +1,28 @@
 package pro.deta.orion.git.parser.wire.serialization;
 
-import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
+import static pro.deta.orion.git.parser.v2.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.v2.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
 
 public class AsciiPacketUtils {
-    public static List<byte[]> encodeAsciiPackets(List<String> payloads, boolean sidebandAll) {
-        List<byte[]> packets = new ArrayList<>();
+    public static List<GitPktLine> encodeAsciiPackets(List<String> payloads, boolean sidebandAll) {
+        List<GitPktLine> packets = new ArrayList<>();
         for (String payload : payloads) {
             packets.add(encodeAsciiPacket(payload, sidebandAll));
         }
-        packets.add(new byte[]{'0', '0', '0', '0'});
+        packets.add(GitPktLine.Control.FLUSH);
         return List.copyOf(packets);
     }
 
-    public static byte[] encodeAsciiPacket(String payload, boolean sidebandAll) {
+    public static GitPktLine.Data encodeAsciiPacket(String payload, boolean sidebandAll) {
         int sidebandLength = sidebandAll ? 1 : 0;
         validateAsciiPacket(payload, sidebandLength);
-        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE + sidebandLength;
-        byte[] packet = new byte[packetLength];
-        writeHeader(packet, packetLength);
-        byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
-        int payloadOffset = PKT_LINE_HEADER_SIZE;
-        if (sidebandAll) {
-            packet[payloadOffset] = GitBlockingWireTransport.SideBandChannel.DATA.wireValue();
-            payloadOffset++;
-        }
-        System.arraycopy(payloadBytes, 0, packet, payloadOffset, payloadBytes.length);
-        return packet;
+        return new GitPktLine.Data(payload.getBytes(StandardCharsets.US_ASCII));
     }
 
     public static void validateAsciiPacket(String payload, int extraPayloadBytes) {
@@ -47,10 +36,4 @@ public class AsciiPacketUtils {
         }
     }
 
-    public static void writeHeader(byte[] output, int packetLength) {
-        output[0] = hexDigit((packetLength >>> 12) & 0x0f);
-        output[1] = hexDigit((packetLength >>> 8) & 0x0f);
-        output[2] = hexDigit((packetLength >>> 4) & 0x0f);
-        output[3] = hexDigit(packetLength & 0x0f);
-    }
 }

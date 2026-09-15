@@ -4,7 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Consumer;
 
 final class GitBlockingClientWire {
     private static final int MAXIMUM_REPORT_STATUS_BYTES = 1024 * 1024;
@@ -40,7 +39,7 @@ final class GitBlockingClientWire {
                     GitClientFailure.Phase.ADVERTISEMENT);
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.type() == GitPktLine.ControlType.FLUSH) {
+                if (packet == GitPktLine.Control.FLUSH) {
                     break;
                 }
                 requireData(packet, GitClientFailure.Phase.ADVERTISEMENT);
@@ -96,7 +95,7 @@ final class GitBlockingClientWire {
         while (true) {
             GitPktLine packet = readPacket(
                     GitClientFailure.Phase.NEGOTIATION);
-            if (packet.type() != GitPktLine.ControlType.DATA) {
+            if (!(packet instanceof GitPktLine.Data)) {
                 throw protocolFailure(
                         GitClientFailure.Kind.MALFORMED_RESPONSE,
                         GitClientFailure.Phase.NEGOTIATION,
@@ -292,7 +291,7 @@ final class GitBlockingClientWire {
         while (true) {
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.type() == GitPktLine.ControlType.FLUSH) {
+                if (packet == GitPktLine.Control.FLUSH) {
                     request.packTarget().flush();
                     return total;
                 }
@@ -344,7 +343,7 @@ final class GitBlockingClientWire {
                     GitClientFailure.Phase.REPORT_STATUS);
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.type() == GitPktLine.ControlType.FLUSH) {
+                if (packet == GitPktLine.Control.FLUSH) {
                     return List.copyOf(lines);
                 }
                 requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
@@ -364,7 +363,7 @@ final class GitBlockingClientWire {
                     GitClientFailure.Phase.REPORT_STATUS);
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.type() == GitPktLine.ControlType.FLUSH) {
+                if (packet == GitPktLine.Control.FLUSH) {
                     return parsePacketLines(status.toByteArray());
                 }
                 requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
@@ -411,7 +410,8 @@ final class GitBlockingClientWire {
         List<String> lines = new ArrayList<>();
         try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes))) {
             while (true) {
-                GitPktLine packet = GitPktLine.readFrom(input);
+                GitPktLine packet = GitPktLine.readNextFrom(input)
+                        .orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
                 switch (packet) {
                     case GitPktLine.Control.FLUSH -> {
                         if (input.available() != 0) {
@@ -537,7 +537,7 @@ final class GitBlockingClientWire {
     private static void requireData(
             GitPktLine packet,
             GitClientFailure.Phase phase) throws GitClientProtocolException {
-        if (packet.type() != GitPktLine.ControlType.DATA) {
+        if (!(packet instanceof GitPktLine.Data)) {
             throw protocolFailure(
                     GitClientFailure.Kind.MALFORMED_RESPONSE,
                     phase,

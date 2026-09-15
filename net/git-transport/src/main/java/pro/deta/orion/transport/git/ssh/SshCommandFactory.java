@@ -34,7 +34,8 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -45,6 +46,7 @@ import pro.deta.orion.util.stream.*;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -60,8 +62,6 @@ public class SshCommandFactory implements CommandFactory {
     public static final String ISSUE_TOKEN = "issue-token";
     public static final String ENROLL_KEY = "enroll-key";
     public static final String STATE = "state";
-    private static final GitPktLineWriter PKT_LINE_WRITER =
-            new GitPktLineWriter();
     private final OrionExecutor orionExecutor;
     private final CommandDispatcher commandDispatcher;
     private final PlainCommandRenderer commandRenderer;
@@ -332,9 +332,7 @@ public class SshCommandFactory implements CommandFactory {
             String message) throws IOException {
         OutputStreamBufferedByteOutput output =
                 new OutputStreamBufferedByteOutput(outputStream);
-        writePktLine(
-                output,
-                ("ERR " + message + "\n").getBytes(StandardCharsets.UTF_8));
+        new GitPktLine.Data(("ERR " + message + "\n").getBytes(StandardCharsets.UTF_8)).writeTo(output);
         output.flush();
     }
 
@@ -342,19 +340,17 @@ public class SshCommandFactory implements CommandFactory {
             OutputStream outputStream,
             String message) throws IOException {
         byte[] payload = message.getBytes(StandardCharsets.UTF_8);
-        OutputStreamBufferedByteOutput output =
-                new OutputStreamBufferedByteOutput(outputStream);
-        for (byte[] packet : PKT_LINE_WRITER.writeSidebandPackets(3, payload)) {
-            output.write(packet);
-        }
+        OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(outputStream);
+        int maximumPayload = GitPktLine.MAX_PKT_LINE_LENGTH - GitPktLine.PKT_LINE_HEADER_SIZE - 1;
+        int offset = 0;
+        do {
+            int end = Math.min(payload.length, offset + maximumPayload);
+            byte[] content = offset == 0 && end == payload.length
+                    ? payload : Arrays.copyOfRange(payload, offset, end);
+            new GitPktLine.Data(content).writeTo(output, SideBand.ERROR);
+            offset = end;
+        } while (offset < payload.length);
         output.flush();
-    }
-
-    private static void writePktLine(
-            OutputStreamBufferedByteOutput output,
-            byte[] payload) throws IOException {
-        output.write(PKT_LINE_WRITER.writeDataHeader(payload.length));
-        output.write(payload);
     }
 
     private static boolean isReceivePack(String commandLine) {

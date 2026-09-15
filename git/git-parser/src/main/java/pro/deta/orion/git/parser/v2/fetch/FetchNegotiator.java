@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData.ProtocolVersion;
 
 import java.io.IOException;

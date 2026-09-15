@@ -1,13 +1,14 @@
 package pro.deta.orion.git.parser.v2;
 
-import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
+import java.io.EOFException;
 import java.util.Objects;
 
 /**
- * Reads complete Git pkt-lines from a borrowed BufferedByteInput through GitPktLine.readFrom.
+ * Reads complete Git pkt-lines from a borrowed BufferedByteInput through GitPktLine.readNextFrom.
  * readPacket returns either Data with all payload bytes or a payload-free Control marker.
  * Commands obtain validated UTF-8 through Data.text when their grammar requires text; binary packets stay raw.
  * No stream is closed. Header/payload truncation is an IOException, never an implicit end of negotiation.
@@ -20,6 +21,6 @@ public final class GitReader {
     }
 
     public GitPktLine readPacket() throws IOException {
-        return GitPktLine.readFrom(input);
+        return GitPktLine.readNextFrom(input).orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
     }
 }

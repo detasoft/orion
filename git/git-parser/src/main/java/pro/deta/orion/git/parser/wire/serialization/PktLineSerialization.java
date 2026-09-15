@@ -1,38 +1,24 @@
 package pro.deta.orion.git.parser.wire.serialization;
 
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 
 import java.io.IOException;
 
-import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
-import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
-
 public final class PktLineSerialization implements OutputSerialization {
-    private final byte[] payload;
-    private final int packetLength;
-    private int packetOffset;
+    private final GitPktLine packet;
+    private boolean written;
 
-    public PktLineSerialization(byte[] payload, int packetLength) {
-        this.payload = payload.clone();
-        this.packetLength = packetLength;
+    public PktLineSerialization(byte[] payload) {
+        this.packet = new GitPktLine.Data(payload.clone());
     }
 
     @Override
     public void writeTo(GitBlockingWireTransport wire) throws IOException {
-        byte[] packet = new byte[packetLength - packetOffset];
-        for (int index = 0; index < packet.length; index++) {
-            packet[index] = byteAt(packetOffset + index);
+        if (!written) {
+            written = true;
+            wire.writePacket(packet);
         }
-        packetOffset = packetLength;
-        OutputSerialization.writeBytes(wire, packet);
         wire.flush();
-    }
-
-    private byte byteAt(int offset) {
-        if (offset < PKT_LINE_HEADER_SIZE) {
-            int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
-            return hexDigit((packetLength >>> shift) & 0x0f);
-        }
-        return payload[offset - PKT_LINE_HEADER_SIZE];
     }
 }
