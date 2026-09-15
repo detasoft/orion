@@ -5,12 +5,16 @@ package pro.deta.orion.git.parser.v2.command;
  * Creates and closes the v2 PackIngestor within execution. Reuses shared receive-pack policy validation;
  * the session and reader do not manage ingestion state or storage resources.
  *
+ * <p>Call storage.uploadNewPack(source) and own the returned index with try-with-resources. Pass the index to
+ * ingestor.resolvePack, which drives the enumerator loop and adds resolved entries. After required policy
+ * checks, call index.commit(externalBaseIds). Closing without commit rolls back staging; closing after commit
+ * only releases resources. The index owns its enumerator; neither owns the caller's transport input.
  * Ref updates remain conditional and run after pack publication; their failure does not undo that publication.
  *
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code execute(PushRequest, BufferedByteInput)} - consume any required pack and return PushResponse.</li>
- *   <li>{@code receivePack(...)} - privately coordinate pack ingestion; the contract remains to be defined.</li>
+ *   <li>{@code receivePack(...)} - privately create the upload index and run the ingestor's enumeration loop.</li>
  *   <li>{@code publish(...)} - privately validate updates and publish through the existing provider policy.</li>
  * </ul>
  * Method names and signatures are provisional. Pack input continues from the same logical input used for

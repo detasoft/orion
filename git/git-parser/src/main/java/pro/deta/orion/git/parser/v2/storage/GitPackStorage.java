@@ -2,7 +2,12 @@ package pro.deta.orion.git.parser.v2.storage;
 
 /**
  * Stores pack bytes and indexes internally behind GitStorageApi; files and paths stay inside storage.
- * Object resolution and operation-specific policy belong to callers. The reception API remains to be defined.
+ * Object resolution and operation-specific policy belong to callers. uploadNewPack creates a private
+ * implementation of GitStorageApi.PackIndex with an independent PackEnumerator over retained input.
+ * Original bytes are stored as the caller drives enumeration. The index registers physical entries and
+ * accepts resolved metadata incrementally; it owns publication and rollback, without a public upload ID.
+ * Input bytes following the checksum remain available to the caller. Closing the index closes its parser
+ * and releases staging, but never closes source input or discards a completed publication.
  *
  * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified PackId,
  * then check the manifest and reuse an existing publication or commit the prepared bytes, index, and manifest.
@@ -17,8 +22,9 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
+ *   <li>{@code uploadNewPack(source)} - create an isolated upload index with its borrowed enumerator.</li>
  *   <li>{@code openPack(packId)} - open original quarantined or published bytes as a caller-owned PackRead.</li>
- *   <li>{@code publish(packId)} - durably publish a prepared pack and its dependencies.</li>
+ *   <li>{@code commit(...)} - internally publish the index's pack and confirmed external dependencies.</li>
  *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
  * </ul>
  * Methods remain placeholders.
