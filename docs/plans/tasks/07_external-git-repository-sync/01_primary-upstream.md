@@ -325,7 +325,7 @@ Run the command from Step 2. Expected: PASS.
 **Files:**
 
 - Reuse: `core/common/src/main/java/pro/deta/orion/config/ConfigurationSecrets.java`
-  from [06/02](../06_remote-git-proxy-bootstrap/02_proxy-config-and-secrets.md),
+  implemented with scoped credential resolution in `a8cf31a5`,
   binding the GitHub profile to the owning `RepositoryAddress`.
 - Create: `git/git-sync/src/main/java/pro/deta/orion/git/sync/GitRemoteConnection.java`
 - Create: `git/git-sync/src/main/java/pro/deta/orion/git/sync/GitRemoteProfile.java`

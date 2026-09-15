@@ -28,6 +28,7 @@ import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
@@ -836,6 +837,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)

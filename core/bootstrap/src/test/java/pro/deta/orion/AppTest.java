@@ -49,6 +49,7 @@ class AppTest {
     void runReturnsErrorWhenStartupFails() {
         try (TestLifecycleContext context = new TestLifecycleContext(true)) {
             assertEquals(1, App.run(context.lifecycle(), false));
+            assertEquals(1, context.service.stops);
         }
     }
 
@@ -118,13 +119,14 @@ class AppTest {
         private final OrionExecutor executor = new OrionExecutor(4, new OrionThreadFactory());
         private final OrionEventManager eventManager = new OrionEventManager();
         private final OrionApplicationLifecycle lifecycle;
+        private final RecordingServiceLifecycle service;
 
         private TestLifecycleContext() {
             this(false);
         }
 
         private TestLifecycleContext(boolean failStart) {
-            RecordingServiceLifecycle service = new RecordingServiceLifecycle(failStart);
+            service = new RecordingServiceLifecycle(failStart);
             ServiceLifecycleStateMachineAdapter serviceMachine =
                     new ServiceLifecycleStateMachineAdapter("service", service);
             AggregateStateMachine runtime = AggregateLifecycleStateMachineAdapter.define("runtime")
@@ -154,6 +156,7 @@ class AppTest {
     private static final class RecordingServiceLifecycle implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
         private final boolean failStart;
         private boolean running;
+        private int stops;
 
         private RecordingServiceLifecycle(boolean failStart) {
             this.failStart = failStart;
@@ -169,6 +172,7 @@ class AppTest {
 
         @Override
         public void onStop() {
+            stops++;
             running = false;
         }
 

@@ -1557,7 +1557,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void saveAccessControlAndReload(AccessControl accessControl, String message, UserEmail author) {
         saveAccessControl(accessControl, message, author);
-        reloadAccessControlOrThrow(author + " " + message);
+        reload(author + " " + message);
     }
 
     private void saveAccessControlSnapshotAndReload(
@@ -1565,10 +1565,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String message,
             UserEmail author) {
         accessControlStorage.save(snapshot, new AccessControlSaveRequest(message, author));
-        reloadAccessControlOrThrow(author + " " + message);
+        reload(author + " " + message);
     }
 
-    private void reloadAccessControlOrThrow(String initiator) {
+    public void reload(String initiator) {
         synchronized (reloadLock) {
             switch (loadValidatedAccessControlSnapshot()) {
                 case Result.Success<AccessControlSnapshot>(var loaded) -> prepareAndUpdateAccessControl(loaded);

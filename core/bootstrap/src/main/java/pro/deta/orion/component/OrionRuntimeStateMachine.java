@@ -1,6 +1,7 @@
 package pro.deta.orion.component;
 
 import jakarta.inject.Inject;
+import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
@@ -27,7 +28,8 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
  *
  * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, Agent session server, then transports.
  * The executor is needed for lifecycle work. The event manager must be running before ACL registers and
- * publishes reload events. ACL must be loaded before authenticated server state starts, and transports are
+ * publishes reload events. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
+ * or public transports start. Failure in either phase must stop startup. Transports are
  * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
  * authentication and durable registries, and the executor stops last.</p>
  */
@@ -40,8 +42,10 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
-            TransportLifecycleStateMachine transports) {
-        super(rootStateMachine(executor, eventManager, accessControl, agentSessionServer, transports));
+            TransportLifecycleStateMachine transports,
+            @Named("bootstrap-proxies") Runnable bootstrapProxies) {
+        super(rootStateMachine(executor, eventManager, accessControl, agentSessionServer, transports,
+                bootstrapProxies));
     }
 
     private static AggregateStateMachine rootStateMachine(
@@ -49,11 +53,18 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
-            TransportLifecycleStateMachine transports) {
+            TransportLifecycleStateMachine transports,
+            Runnable bootstrapProxies) {
         List<RuntimeChild> startOrder = List.of(
                 child("executor", executor::start, executor::stop, executor::currentState),
                 child("event-manager", eventManager::start, eventManager::stop, eventManager::currentState),
-                child("access-control", accessControl::start, accessControl::stop, accessControl::currentState),
+                child("access-control", () -> {
+                    accessControl.start();
+                    if (!RUNNING.equals(accessControl.currentState())) {
+                        throw new IllegalStateException("ACL must be running before proxy activation");
+                    }
+                    bootstrapProxies.run();
+                }, accessControl::stop, accessControl::currentState),
                 child("agent-session-server", agentSessionServer::start, agentSessionServer::stop,
                         agentSessionServer::currentState),
                 child("transports", transports::start, transports::stop, transports::currentState));

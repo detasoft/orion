@@ -1,6 +1,16 @@
 package pro.deta.orion.test;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import java.util.LinkedHashMap;
+import java.net.URI;
+import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.acl.storage.AccessControlSaveRequest;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.component.DaggerOrionComponent;
+import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.util.ConfigurationContext;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -8,7 +18,6 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -35,6 +44,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapProxyTransportIT {
@@ -66,7 +76,10 @@ class BootstrapProxyTransportIT {
                     "material.p12", materialBytes(configuration, environment)),
                     "bootstrap inputs", GitCommitAuthor.EMPTY);
 
-            var upstreamProvider = (ProxyAwareNativeGitRepositoryProvider) upstream.repositoryProvider();
+            var upstreamProvider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
+                    new FileNativeGitRepositoryProvider(
+                            new ConfigurationContext(upstreamConfiguration).getFileGitStoragePath()),
+                    environment);
             String upstreamCache = upstreamProvider.prepareProvisional(
                     "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
@@ -93,53 +106,79 @@ class BootstrapProxyTransportIT {
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
                     var storage = new AccessControlStorageResolver(bootstrap.repositorySources(), provider).resolve();
-                    var current = new AtomicReference<>(bootstrap.adoptProxies(storage));
-                    var secrets = new ConfigurationSecrets(current::get, bootstrap.configurationCipher());
-                    provider.activate(current::get, secrets);
-                    assertThat(current.get().system().proxies()).hasSize(1);
-                    assertThat(current.get().system().secrets()).hasSize(1);
-                    assertThat(provider.repositoryNames()).doesNotContain(cache);
-                    assertThat(provider.isPublicRepositoryName(cache)).isFalse();
-
-                    ByteArrayOutputStream xml = new ByteArrayOutputStream();
-                    OrionXml.write(current.get(), xml);
-                    byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
-                    repository.saveFiles(REF, Map.of("orion.xml", updatedConfiguration),
-                            "upstream edit", GitCommitAuthor.EMPTY);
-                    provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                    assertThat(retained.loadFiles(REF, List.of("orion.xml")).files())
-                            .containsEntry("orion.xml", updatedConfiguration);
-
-                    Path credentialFile = Path.of(java.net.URI.create(configuration.getBootstrap()
-                            .getAccessControl().getAuth().get("credential")));
-                    String external = Files.readString(credentialFile);
-                    Files.writeString(credentialFile, "invalid-external-credential");
+                    var component = runtimeComponent(configuration, bootstrap);
+                    var lifecycle = component.orionApplicationLifecycle();
                     try {
-                        provider.openForRead(cache).valueOrFailure("stored credential");
-                        assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
-                                .isInstanceOf(IllegalStateException.class)
-                                .hasMessage("Bootstrap inputs are unavailable or invalid");
-                    } finally {
+                        assertThat(lifecycle.runApplication())
+                                .isEqualTo(RUNNING);
+                        var current = new AtomicReference<>(OrionXml.read(new ByteArrayInputStream(
+                                storage.load().valueOrFailure("runtime configuration").files().get("orion.xml"))));
+                        assertThat(current.get().system().proxies()).hasSize(1);
+                        assertThat(current.get().system().secrets()).hasSize(1);
+                        assertThat(provider.repositoryNames()).doesNotContain(cache);
+                        assertThat(provider.isPublicRepositoryName(cache)).isFalse();
+
+                        ByteArrayOutputStream xml = new ByteArrayOutputStream();
+                        OrionXml.write(current.get(), xml);
+                        byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
+                        repository.saveFiles(REF, Map.of("orion.xml", updatedConfiguration),
+                                "upstream edit", GitCommitAuthor.EMPTY);
+                        provider.openForRead(cache).valueOrFailure("refreshed proxy");
+                        assertThat(retained.loadFiles(REF, List.of("orion.xml")).files())
+                                .containsEntry("orion.xml", updatedConfiguration);
+
+                        Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
+                                .getAccessControl().getAuth().get("credential")));
+                        String external = Files.readString(credentialFile);
+                        Files.writeString(credentialFile, "invalid-external-credential");
+                        try {
+                            provider.openForRead(cache).valueOrFailure("stored credential");
+                            assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                                    .isInstanceOf(IllegalStateException.class)
+                                    .hasMessage("Bootstrap inputs are unavailable or invalid");
+                        } finally {
+                            Files.writeString(credentialFile, external);
+                        }
+
+                        configureSources(configuration, upstream, transport);
+                        char[] replacement = Files.readString(credentialFile).toCharArray();
                         Files.writeString(credentialFile, external);
+                        var rotated = component.configurationSecrets().replaceSystem(current.get(),
+                                current.get().system().proxies().getFirst().secret().orElseThrow(), replacement);
+                        assertThat(replacement).containsOnly('\0');
+                        var beforeRotation = storage.load().valueOrFailure("before rotation");
+                        var rotatedFiles = new LinkedHashMap<>(beforeRotation.files());
+                        ByteArrayOutputStream rotatedXml = new ByteArrayOutputStream();
+                        OrionXml.write(rotated, rotatedXml);
+                        rotatedFiles.put(storage.primaryPath(), rotatedXml.toByteArray());
+                        storage.save(new AccessControlSnapshot(
+                                        rotatedFiles, beforeRotation.version()),
+                                new AccessControlSaveRequest(
+                                        "rotate proxy credential", UserEmail.EMPTY));
+                        component.orionAccessControlService().reload("credential rotation");
+                        current.set(rotated);
+                        provider.openForRead(cache).valueOrFailure("rotated credential");
+
+                        retained.saveFiles(REF, Map.of("marker.txt", bytes("proxy edit")),
+                                "proxy edit", GitCommitAuthor.EMPTY);
+                        assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
+                                .containsEntry("marker.txt", bytes("proxy edit"));
+
+                        var stale = retained.prepareFileUpdate(
+                                REF, Map.of("marker.txt", bytes("stale edit")),
+                                "stale candidate", GitCommitAuthor.EMPTY);
+                        repository.saveFiles(REF, Map.of("marker.txt", bytes("concurrent upstream edit")),
+                                "concurrent edit", GitCommitAuthor.EMPTY);
+                        String upstreamRevision = repository.refs().get(REF);
+                        assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
+                                GitNativeRepositoryAccessHook.ALLOW_ALL))
+                                .extracting(ReceivePackStatus::ok).containsExactly(false);
+                        assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
+                        assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
+                                .containsEntry("marker.txt", bytes("concurrent upstream edit"));
+                    } finally {
+                        lifecycle.shutdownApplication();
                     }
-
-                    retained.saveFiles(REF, Map.of("marker.txt", bytes("proxy edit")),
-                            "proxy edit", GitCommitAuthor.EMPTY);
-                    assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
-                            .containsEntry("marker.txt", bytes("proxy edit"));
-
-                    var stale = retained.prepareFileUpdate(
-                            REF, Map.of("marker.txt", bytes("stale edit")),
-                            "stale candidate", GitCommitAuthor.EMPTY);
-                    repository.saveFiles(REF, Map.of("marker.txt", bytes("concurrent upstream edit")),
-                            "concurrent edit", GitCommitAuthor.EMPTY);
-                    String upstreamRevision = repository.refs().get(REF);
-                    assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
-                            GitNativeRepositoryAccessHook.ALLOW_ALL))
-                            .extracting(ReceivePackStatus::ok).containsExactly(false);
-                    assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
-                    assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
-                            .containsEntry("marker.txt", bytes("concurrent upstream edit"));
                 }
 
                 try (BootstrapContext restarted = BootstrapContext.open(configuration, environment)) {
@@ -150,18 +189,23 @@ class BootstrapProxyTransportIT {
                     var provider = restarted.repositoryProvider();
                     var storage = new AccessControlStorageResolver(restarted.repositorySources(), provider).resolve();
                     var before = storage.load().valueOrFailure("configuration before adoption").version();
-                    OrionDocument current = restarted.adoptProxies(storage);
-                    assertThat(storage.load().valueOrFailure("configuration after adoption").version()).isEqualTo(before);
-                    var secrets = new ConfigurationSecrets(() -> current, restarted.configurationCipher());
-                    provider.activate(() -> current, secrets);
-                    assertThat(provider.openForRead(cache)).isNotNull();
-                    stopped = true;
-                    upstream.close();
-                    assertThatThrownBy(() -> restarted.repositoryProvider().openForRead(cache))
-                            .isInstanceOf(IllegalStateException.class);
-                    assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
-                            .isInstanceOf(IllegalStateException.class)
-                            .hasMessage("Bootstrap inputs are unavailable or invalid");
+                    var component = runtimeComponent(configuration, restarted);
+                    var lifecycle = component.orionApplicationLifecycle();
+                    try {
+                        assertThat(lifecycle.runApplication())
+                                .isEqualTo(RUNNING);
+                        assertThat(storage.load().valueOrFailure("configuration after adoption").version()).isEqualTo(before);
+                        assertThat(provider.openForRead(cache)).isNotNull();
+                        stopped = true;
+                        upstream.close();
+                        assertThatThrownBy(() -> restarted.repositoryProvider().openForRead(cache))
+                                .isInstanceOf(IllegalStateException.class);
+                        assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                                .isInstanceOf(IllegalStateException.class)
+                                .hasMessage("Bootstrap inputs are unavailable or invalid");
+                    } finally {
+                        lifecycle.shutdownApplication();
+                    }
                 }
             }
         } finally {
@@ -169,6 +213,21 @@ class BootstrapProxyTransportIT {
                 upstream.close();
             }
         }
+    }
+
+    private static OrionComponent runtimeComponent(
+            OrionConfiguration configuration, BootstrapContext context) {
+        return DaggerOrionComponent.builder()
+                .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
+                .serverIdentityCapability(context.serverIdentity())
+                .acmeKeyMaterialCapability(context.acmeKeyMaterial())
+                .tlsCapability(context.tlsKeyMaterial())
+                .sshHostKeyCapability(context.sshHostKeys())
+                .configurationCipherCapability(context.configurationCipher())
+                .nativeGitRepositoryProvider(context.repositoryProvider())
+                .bootstrapRepositorySources(context.repositorySources())
+                .build();
     }
 
     private Map<String, String> configureSources(

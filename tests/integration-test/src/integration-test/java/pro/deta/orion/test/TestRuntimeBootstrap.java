@@ -7,6 +7,7 @@ import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
@@ -46,6 +47,7 @@ final class TestRuntimeBootstrap {
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(identity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)

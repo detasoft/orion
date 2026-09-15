@@ -1,7 +1,7 @@
 # Configure and Accept an Orion Repository Mirror on GitHub
 
 Status: todo
-Depends on: shared Git credential resolution in [06/02](02_proxy-config-and-secrets.md),
+Depends on: completed shared Git credential resolution (`a8cf31a5`, `8750c1ee`),
 [07/03 bidirectional runtime](../07_external-git-repository-sync/03_github-commit-replication.md)
 (which builds on 07/01).
 

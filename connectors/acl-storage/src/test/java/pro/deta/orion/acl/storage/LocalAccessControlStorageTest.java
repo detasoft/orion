@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LocalAccessControlStorageTest {
     private static final String ACL_PATH = "config/orion.xml";
@@ -37,7 +38,7 @@ class LocalAccessControlStorageTest {
 
         assertThat(snapshot.files()).containsOnlyKeys(ACL_PATH)
                 .containsEntry(ACL_PATH, bytes("existing ACL"));
-        assertThat(snapshot.version()).isEmpty();
+        assertThat(snapshot.version()).isPresent();
     }
 
     @Test
@@ -142,6 +143,52 @@ class LocalAccessControlStorageTest {
                 .containsOnlyKeys(ROLES_PATH, ACL_PATH)
                 .containsEntry(ROLES_PATH, bytes("resolved roles"))
                 .containsEntry(ACL_PATH, bytes("resolved ACL"));
+    }
+
+    @Test
+    void rejectsAStaleRevisionAfterASecondaryFileChanges() throws Exception {
+        var configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        var storage = new LocalAccessControlStorage(configuration);
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("original"), ROLES_PATH, bytes("roles")),
+                Optional.empty()), new AccessControlSaveRequest("seed", UserEmail.EMPTY));
+        AccessControlSnapshot before = storage.load().valueOrFailure("snapshot");
+        Files.write(root.resolve(ROLES_PATH), bytes("new roles"));
+
+        assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
+                Map.of(ACL_PATH, bytes("stale"), ROLES_PATH, bytes("roles")), before.version()),
+                new AccessControlSaveRequest("stale", UserEmail.EMPTY)))
+                .isInstanceOf(AccessControlConcurrentUpdateException.class);
+        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("original"));
+        assertThat(Files.readAllBytes(root.resolve(ROLES_PATH))).isEqualTo(bytes("new roles"));
+    }
+
+    @Test
+    void concurrentOwnersCannotBothSaveTheSameRevision() throws Exception {
+        var first = new LocalAccessControlStorage(config(root));
+        var second = new LocalAccessControlStorage(config(root));
+        var request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        first.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("initial")), request);
+        var revision = first.load().valueOrFailure("snapshot").version();
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var results = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+            for (var storage : List.of(first, second)) {
+                results.add(executor.submit(() -> {
+                    barrier.await();
+                    try {
+                        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH,
+                                bytes(storage == first ? "first" : "second")), revision), request);
+                        return true;
+                    } catch (AccessControlConcurrentUpdateException conflict) {
+                        return false;
+                    }
+                }));
+            }
+            assertThat(List.of(results.get(0).get(), results.get(1).get())).containsExactlyInAnyOrder(true, false);
+        }
+        var reopened = new LocalAccessControlStorage(config(root));
+        assertThat(reopened.load().valueOrFailure("saved").version()).isNotEqualTo(revision);
     }
 
     private static BootstrapConfigurationSourceConfig config(Path directory) {

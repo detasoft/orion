@@ -47,9 +47,25 @@ class NativeGitKeyMaterialContentStoreTest {
         GitRepositoryFileSnapshot snapshot = fixture.repository().loadFiles(
                 REF,
                 List.of("orion.xml", MATERIAL_PATH));
-        assertThat(snapshot.version()).contains(version);
+        assertThat(store.read().orElseThrow().version()).isEqualTo(version);
         assertThat(snapshot.files()).containsEntry("orion.xml", bytes("configuration"));
         assertThat(snapshot.files()).containsEntry(MATERIAL_PATH, bytes("encrypted-material"));
+    }
+
+    @Test
+    void preservesAConfigurationEditMadeAfterMaterialWasOpened() throws Exception {
+        Fixture fixture = fixture(Map.of(MATERIAL_PATH, bytes("initial"), "orion.xml", bytes("initial config")));
+        NativeGitKeyMaterialContentStore store = fixture.store();
+        String version = store.read().orElseThrow().version();
+        fixture.repository().saveFiles(REF, Map.of("orion.xml", bytes("new config")),
+                "configuration update", GitCommitAuthor.EMPTY);
+
+        String saved = store.write(bytes("updated material"), version);
+
+        assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
+        assertThat(fixture.repository().loadFiles(REF, List.of("orion.xml", MATERIAL_PATH)).files())
+                .containsEntry("orion.xml", bytes("new config"))
+                .containsEntry(MATERIAL_PATH, bytes("updated material"));
     }
 
     @Test

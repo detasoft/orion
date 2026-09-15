@@ -1,8 +1,8 @@
 # Complete Bidirectional GitHub Mirror Runtime
 
 Status: todo
-Depends on: [07/01](01_primary-upstream.md), shared Git credential resolution in
-[06/02](../06_remote-git-proxy-bootstrap/02_proxy-config-and-secrets.md).
+Depends on: [07/01](01_primary-upstream.md), completed shared Git credential resolution
+(`a8cf31a5`, `8750c1ee`).
 
 ## Required result
 

@@ -78,6 +78,7 @@ public class App {
                         .runtimeOptions(options.runtimeOptions())
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
+                        .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
                         .sshHostKeyCapability(bootstrap.sshHostKeys())
                         .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
@@ -109,6 +110,7 @@ public class App {
         StateMachineDefinition.State state = lifecycle.runApplication();
         if (!RUNNING.equals(state)) {
             log.error("Orion startup failed with state {}", state);
+            lifecycle.shutdownApplication();
             return 1;
         }
 

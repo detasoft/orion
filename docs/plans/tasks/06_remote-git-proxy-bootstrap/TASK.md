@@ -27,9 +27,14 @@ identity preservation on reopening, and unavailable upstreams.
 `ConfigurationSecrets` owns stored credential resolution for both the GitHub
 profile and persistent proxy connections. The proxy provider activates validated
 configuration bindings through the existing transport path while retaining private
-source handles. Public Git transports reject internal bootstrap cache names
-independently of binding state. Automatic adoption and activation during application
-startup remain pending.
+source handles (`a8cf31a5`, `8750c1ee`). Application startup adopts and activates
+bindings after ACL loading and before Agent authentication or public transports.
+Native `BootstrapProxyTransportIT` verifies stored HTTP/SSH credential rotation,
+restart without rewriting bindings, and private-cache isolation through that lifecycle.
+`BootstrapContextTest` also covers local configuration with remote material and
+startup rejection of invalid stored secrets. Configuration updates check revisions
+in both Git and local directories; Git material revisions track material content
+so sibling configuration edits remain intact.
 `BootstrapContext` already preserves failure causes (`9b0bb402`). These are
 implementation observations, not evidence that all acceptance checks passed.
 

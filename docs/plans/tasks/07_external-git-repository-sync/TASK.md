@@ -26,8 +26,8 @@ Transparent bootstrap proxies remain in
 read/write semantics and are not the background mirror engine.
 The operator-facing GitHub setup and cross-stream acceptance are owned by
 [06/07](../06_remote-git-proxy-bootstrap/07_github-mirror-setup.md), using the
-shared credential boundary from 06/02. Those tasks do not take over the existing
-primary-upstream claim.
+completed shared credential boundary (`a8cf31a5`, `8750c1ee`). This setup work
+does not take over the existing primary-upstream claim.
 
 ## Dependencies and acceptance
 

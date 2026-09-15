@@ -148,7 +148,8 @@ public final class BootstrapContext implements AutoCloseable {
         return repositorySources;
     }
 
-    public OrionDocument adoptProxies(AccessControlStorage storage) {
+    public static OrionDocument adoptProxies(AccessControlStorage storage,
+            ProxyAwareNativeGitRepositoryProvider repositoryProvider, ConfigurationCipherCapability cipher) {
         Objects.requireNonNull(storage, "configuration storage");
         RuntimeException lastSaveFailure = null;
         for (int attempt = 0; attempt <= 3; attempt++) {
@@ -157,8 +158,7 @@ public final class BootstrapContext implements AutoCloseable {
             if (snapshot.version().isEmpty()) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
-            ConfigurationSecrets secrets = new ConfigurationSecrets(
-                    () -> current, keyMaterial.configurationCipher());
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
             OrionDocument candidate = repositoryProvider.adoptProvisional(current, secrets);
             if (candidate == current) {
                 return current;

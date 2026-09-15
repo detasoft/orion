@@ -1,7 +1,7 @@
 # Administer Remote Proxy Aliases
 
 Status: todo
-Depends on: [06/02](02_proxy-config-and-secrets.md).
+Depends on: completed persistent proxy bindings and shared stored credentials (`964cd7a6`, `8750c1ee`).
 
 ## Requirements and design
 

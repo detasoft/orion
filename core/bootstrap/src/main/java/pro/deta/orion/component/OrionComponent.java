@@ -6,6 +6,8 @@ import dagger.Component;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
@@ -34,6 +36,9 @@ public interface OrionComponent {
     OrionAccessControlServiceImpl orionAccessControlService();
 
     @TestOnly
+    ConfigurationSecrets configurationSecrets();
+
+    @TestOnly
     NativeGitRepositoryProvider nativeGitRepositoryProvider();
 
     @Named("runtime")
@@ -46,9 +51,10 @@ public interface OrionComponent {
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
+        @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
-        @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryProvider repositoryProvider);
+        @BindsInstance Builder nativeGitRepositoryProvider(ProxyAwareNativeGitRepositoryProvider repositoryProvider);
         @BindsInstance Builder bootstrapRepositorySources(BootstrapRepositorySources repositorySources);
 
         default Builder defaultConfigurationProvider() {
@@ -63,6 +69,7 @@ public interface OrionComponent {
                     .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                    .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                     .tlsCapability(TlsCapability.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)

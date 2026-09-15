@@ -9,6 +9,15 @@ import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Optional;
+import java.util.TreeMap;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -20,6 +29,12 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     @Override
     public Result<AccessControlSnapshot> load() {
+        synchronized (LocalAccessControlStorage.class) {
+            return loadFiles();
+        }
+    }
+
+    private Result<AccessControlSnapshot> loadFiles() {
         Map<String, byte[]> files = new java.util.LinkedHashMap<>();
         try {
             for (String configuredPath : config.selectedPaths()) {
@@ -29,7 +44,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                 }
                 files.put(configuredPath, Files.readAllBytes(file));
             }
-            return new Result.Success<>(new AccessControlSnapshot(files, java.util.Optional.empty()));
+            return new Result.Success<>(new AccessControlSnapshot(files, Optional.of(version(files))));
         } catch (IOException e) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, e.getMessage(), e);
         } catch (IllegalArgumentException e) {
@@ -39,16 +54,47 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     @Override
     public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
-        try {
-            for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                Path file = aclPath(entry.getKey());
-                if (file.getParent() != null) {
-                    Files.createDirectories(file.getParent());
+        synchronized (LocalAccessControlStorage.class) {
+            try {
+                Path directory = aclDirectory();
+                Files.createDirectories(directory);
+                try (FileChannel channel = FileChannel.open(directory.resolve(".orion-configuration.lock"),
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                     var ignored = channel.lock()) {
+                    if (snapshot.version().isPresent()) {
+                        Result<AccessControlSnapshot> loaded = load();
+                        if (!(loaded instanceof Result.Success<AccessControlSnapshot> success)
+                                || !snapshot.version().equals(success.value().version())) {
+                            throw new AccessControlConcurrentUpdateException("Local configuration changed before save", null);
+                        }
+                    }
+                    for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
+                        Path file = aclPath(entry.getKey());
+                        if (file.getParent() != null) {
+                            Files.createDirectories(file.getParent());
+                        }
+                        Files.write(file, entry.getValue());
+                    }
                 }
-                Files.write(file, entry.getValue());
+            } catch (IOException e) {
+                throw new RuntimeException("Cannot save local ACL snapshot", e);
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Cannot save local ACL snapshot", e);
+        }
+    }
+
+    private static String version(Map<String, byte[]> files) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (var entry : new TreeMap<>(files).entrySet()) {
+                byte[] path = entry.getKey().getBytes(StandardCharsets.UTF_8);
+                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(path.length).array());
+                digest.update(path);
+                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(entry.getValue().length).array());
+                digest.update(entry.getValue());
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException failure) {
+            throw new IllegalStateException("SHA-256 is unavailable", failure);
         }
     }
 

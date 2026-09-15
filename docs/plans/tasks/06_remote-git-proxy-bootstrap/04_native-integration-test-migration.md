@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on: completed bootstrap runtime boundaries and native transport acceptance (`79dd66b4`),
-[06/02](02_proxy-config-and-secrets.md),
+completed persistent proxy adoption and credential activation (`a79b1f2d`, `8750c1ee`),
 [06/05](05_git-configuration-integration-fixtures.md).
 
 ## Requirements and design

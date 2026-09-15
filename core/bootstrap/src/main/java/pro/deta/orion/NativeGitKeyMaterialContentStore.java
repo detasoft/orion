@@ -15,6 +15,9 @@ import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,7 +54,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         try {
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, List.of(path));
             byte[] bytes = snapshot.files().get(path);
-            String version = snapshot.version().orElse(refRevision);
+            String version = materialVersion(bytes);
             observation = new Observation(version, refRevision);
             return Optional.of(new KeyMaterialSnapshot(bytes, version));
         } catch (GitRepositoryFileNotFoundException missing) {
@@ -65,9 +68,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
     @Override
     public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
         Objects.requireNonNull(bytes, "bytes");
-        if (observation == null) {
-            read();
-        }
+        read();
         if (!Objects.equals(observation.materialVersion(), expectedVersion)) {
             throw conflict();
         }
@@ -90,13 +91,21 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
             } catch (GitRepositoryConcurrentUpdateException conflict) {
                 throw conflict();
             }
-            String version = update.refUpdates().getFirst().newId();
-            observation = new Observation(version, version);
+            String version = materialVersion(bytes);
+            observation = new Observation(version, update.refUpdates().getFirst().newId());
             return version;
         } catch (KeyMaterialStoreConflictException conflict) {
             throw conflict;
         } catch (GitOperationException | RuntimeException failure) {
             throw new IOException("Cannot write key material store", failure);
+        }
+    }
+
+    private static String materialVersion(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException failure) {
+            throw new IllegalStateException("SHA-256 is unavailable", failure);
         }
     }
 
