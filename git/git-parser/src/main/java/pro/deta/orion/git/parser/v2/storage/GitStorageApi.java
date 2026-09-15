@@ -3,7 +3,6 @@ package pro.deta.orion.git.parser.v2.storage;
 import pro.deta.orion.git.parser.v2.pack.PackEnumerator;
 import pro.deta.orion.git.parser.v2.data.ObjectRead;
 import pro.deta.orion.git.parser.v2.data.ObjectType;
-import pro.deta.orion.git.parser.v2.data.PackRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
@@ -12,38 +11,32 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Provides the single external API for storage operations belonging to one repository.
  * Commands use this facade; ref, pack, and object stores remain internal implementation details.
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
- * uploadNewPack starts one isolated upload and returns its PackIndex before consuming the whole pack.
- * The index supplies an independent PackEnumerator over an input wrapper that retains original bytes as
- * they are consumed. The caller drives enumeration and records resolved objects through that index.
- * The caller closes the index on every outcome; source input remains caller-owned. Setup failure cleans
- * its own resources. Publication and rollback belong to the index, without an external upload identifier.
+ * uploadNewPack(source) creates an isolated PackUpload and its PackEnumerator before consuming the pack.
+ * Storage constructs the enumerator with the source and an internal raw-byte sink. As parsing progresses,
+ * the enumerator forwards original bytes into that sink, including the header, entry encodings, and checksum.
+ * Only bytes belonging to this pack enter the sink; subsequent protocol bytes remain available through the
+ * same caller-owned source. Setup failure releases only resources created by that attempt.
+ * The caller drives enumeration and records resolved objects through the upload. Storage does not call back
+ * into a resolver. commit and rollback belong to the upload; its parser and sink never own the source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
- * openPack reads original quarantined or published bytes without changing publication state.
- * ObjectRead and PackRead handles belong to the caller; absence is Optional.empty(), while I/O failures
- * remain errors. Open PackRead handles retain their bytes until closed.
+ * ObjectRead handles belong to the caller; absence is Optional.empty(), while I/O failures remain errors.
  * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
  * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
  * Ref-update failures do not undo pack publication.
- * addObjectEntry registers an already verified, durably stored loose object by ID, logical type, and size;
- * it does not receive bytes and preserves other locations of that object.
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code uploadNewPack(source)} - start an upload with its enumerator and isolated staging index.</li>
- *   <li>{@code addObjectEntry(objectId, type, size)} - register an already stored loose object.</li>
- *   <li>{@code openPack(packId)} - open original pack bytes as a caller-owned PackRead.</li>
+ *   <li>{@code uploadNewPack(source)} - create an upload with its enumerator and internal byte sink.</li>
  *   <li>{@code snapshotRefs()} - return refs and symbolic or detached HEAD from one consistent state.</li>
  *   <li>{@code updateRefs(updates, atomic)} - conditionally update refs and return one RefUpdateResult
  *       containing the original update per input, in request order.</li>
@@ -56,16 +49,8 @@ import java.util.Set;
  * all operations address the same repository, and ref targets must be available before updates become visible.
  */
 public final class GitStorageApi {
-    public PackIndex uploadNewPack(BufferedByteInput source) throws IOException {
+    public PackUpload uploadNewPack(BufferedByteInput source) throws IOException {
         throw new UnsupportedOperationException("Pack upload is not implemented");
-    }
-
-    public Optional<PackRead> openPack(PackId packId) throws IOException {
-        throw new UnsupportedOperationException("Pack reads are not implemented");
-    }
-
-    public void addObjectEntry(ObjectId objectId, ObjectType type, long size) throws IOException {
-        throw new UnsupportedOperationException("Loose object registration is not implemented");
     }
 
     public Optional<ObjectRead> readObject(ObjectId objectId) throws IOException {
@@ -96,43 +81,36 @@ public final class GitStorageApi {
     }
 
     /**
-     * Storage-owned index and transaction for one upload; distinct instances isolate identical concurrent packs.
-     * enumerator returns the same borrowed parser throughout the upload. Storage registers physical entries
-     * as they are enumerated and retains their bytes without requiring all payloads in memory.
-     * entryAt finds a previously encountered entry by absolute offset, including an unresolved OFS base.
-     * find searches resolved IDs; absence does not prove that a REF base is external or absent from later input.
-     * read accesses retained raw pack bytes for deferred resolution and follows PackRead's ByteBuffer contract
-     * over the currently stored prefix. Its current end is not necessarily the end of reception.
+     * Owns one pack upload: its enumerator, byte sink, accumulated object index, and external dependencies.
+     * Distinct instances isolate attempts even when their final PackIds match. enumerator returns the same
+     * borrowed parser for the lifetime of the attempt. Its raw-byte sink belongs to this upload and receives
+     * bytes directly from the enumerator as parsing progresses, independently of resolved index entries.
+     * Sink I/O failures propagate through enumeration as IOException. There is no separate public write method.
      * addObject associates a fully consumed entry with its resolved ID, logical type, and content size.
-     * Identical repeats are harmless; conflicting results and foreign entries are rejected. Results can be
-     * added in dependency order rather than physical order. The caller owns reconstruction and hashing.
+     * Results may arrive in dependency order; identical repeats are harmless and conflicting results fail.
+     * addExternalBaseId accumulates confirmed external dependencies, not every encountered REF_DELTA base.
+     * Reconstruction, hashing, and access to bases needed for deferred resolution belong to the caller.
      *
      * <p>commit requires enumeration through the verified checksum, a result for every physical entry, and
-     * confirmed externalBaseIds. Empty packs also require completed enumeration. Storage locates and retains
-     * external bases, then durably publishes pack bytes, index, and manifest under its PackId lock. It returns
-     * that PackId; no object is publicly visible before publication. Dependencies contain no externalPackIds.
-     * An I/O error can have an uncertain commit outcome; retry inspects the durable manifest.
-     * close is idempotent: it rolls back unpublished staging or releases resources after commit, including
-     * the owned enumerator. It never closes source input or deletes committed data, other uploads' data,
-     * or bytes retained by open handles. Failure recovery ignores incomplete staging.
-     * All methods are used sequentially within the owning operation; no callback or thread pool is required.
-     * This interface defines future behavior only; the storage implementation remains to be written.
+     * confirmed external dependencies. Empty packs also require completed enumeration. Storage preserves
+     * external bases and durably publishes bytes, index, and manifest under the verified PackId lock.
+     * An I/O error can have an uncertain commit outcome; retries inspect the durable manifest.
+     * rollback releases the owned parser and sink and discards only this attempt's unpublished staging.
+     * It is idempotent and never removes committed data or another attempt's resources. The caller invokes
+     * it in finally, including after commit; cleanup must not mask the original operation failure.
+     * Neither outcome closes the caller's source input. Recovery ignores incomplete staging.
+     * Methods are used sequentially within the owning operation. This is a contract for future implementation.
      */
-    public interface PackIndex extends AutoCloseable {
+    public interface PackUpload {
         PackEnumerator enumerator();
-
-        Optional<PackEnumerator.Entry> entryAt(long offset) throws IOException;
-
-        Optional<PackEnumerator.Entry> find(ObjectId objectId) throws IOException;
-
-        int read(long offset, ByteBuffer destination) throws IOException;
 
         void addObject(PackEnumerator.Entry entry, ObjectId objectId, ObjectType type, long size)
                 throws IOException;
 
-        PackId commit(Set<ObjectId> externalBaseIds) throws IOException;
+        void addExternalBaseId(ObjectId externalBase) throws IOException;
 
-        @Override
-        void close() throws IOException;
+        void commit() throws IOException;
+
+        void rollback() throws IOException;
     }
 }

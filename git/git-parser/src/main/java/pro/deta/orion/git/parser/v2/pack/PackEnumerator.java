@@ -5,6 +5,7 @@ import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.WritableByteChannel;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -18,19 +19,32 @@ import java.util.OptionalLong;
  * next drains and validates any unread payload before advancing; entry metadata remains valid afterward,
  * but the payload cursor belongs only to the current entry. Premature EOF and malformed packs are IOException.
  * Parsing stops after the checksum, leaving subsequent protocol bytes available through the same input.
- * Closing releases parser resources without closing the source. No concurrent-use guarantee is required.
+ * Closing releases parser resources without closing the source or sink. No concurrent-use guarantee is required.
  *
  * <p>The constructor accepts any pack stream exposed as BufferedByteInput, including network, file, or memory
  * input. next() advances, read(destination) reads payload, and close() releases parser resources.
- * Callers own their next/read loop and any hashing or delta resolution. Parsing is independent of repository
- * storage or any particular consumer; storage can retain bytes by wrapping the supplied input.
- * Parsing methods remain placeholders. Construction stores the input without reading it.
+ * An optional caller-owned WritableByteChannel receives original raw bytes in order as parsing progresses,
+ * including headers, compressed payloads, delta base references, and the checksum. Inflated payload bytes
+ * returned by read are a separate view. Draining skipped payloads also forwards their raw bytes exactly once.
+ * Partial sink writes must be completed before the parser releases the corresponding buffer. Sink failures
+ * propagate as IOException and stop enumeration. Bytes after this pack are never forwarded to the sink.
+ * The sink accepts bytes during next/read; durable publication remains the caller's responsibility.
+ * Callers own their loop, hashing, and delta resolution. Parsing depends on neither repository storage nor
+ * a particular consumer. The source-only constructor supports parsing without retaining raw bytes.
+ * Parsing methods remain placeholders. Constructors store dependencies without reading or writing bytes.
  */
 public final class PackEnumerator implements AutoCloseable {
     private final BufferedByteInput source;
+    private final WritableByteChannel rawSink;
 
     public PackEnumerator(BufferedByteInput source) {
         this.source = Objects.requireNonNull(source, "source");
+        this.rawSink = null;
+    }
+
+    public PackEnumerator(BufferedByteInput source, WritableByteChannel rawSink) {
+        this.source = Objects.requireNonNull(source, "source");
+        this.rawSink = Objects.requireNonNull(rawSink, "rawSink");
     }
 
     public Entry next() throws IOException {
