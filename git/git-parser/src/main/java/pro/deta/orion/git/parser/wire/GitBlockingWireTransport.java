@@ -9,7 +9,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 import pro.deta.orion.git.parser.wire.serialization.AsciiPacketSequenceSerialization;
 import pro.deta.orion.git.parser.wire.serialization.OutputSerialization;
@@ -28,8 +28,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
-import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 import static pro.deta.orion.git.parser.wire.serialization.AsciiPacketUtils.*;
 
@@ -50,22 +50,17 @@ public final class GitBlockingWireTransport {
         pktLineWriter = new GitPktLineWriter();
     }
 
-    public ControlState readControlState() throws IOException {
-        return ControlState.readFrom(requireInput());
-    }
-
-    public Optional<ControlState> readNextControlState() throws IOException {
-        return ControlState.readNextFrom(requireInput());
-    }
-
-    public ByteBuf payloadBuffer(ControlState control) {
-        Objects.requireNonNull(control, "control");
-        return control instanceof ControlState.Data data ? Unpooled.wrappedBuffer(data.content()) : Unpooled.EMPTY_BUFFER;
-    }
-
     public GitPktLine readPacket() throws IOException {
-        ControlState control = readControlState();
-        return new GitPktLine(control, payloadBuffer(control));
+        return GitPktLine.readFrom(requireInput());
+    }
+
+    public Optional<GitPktLine> readNextPacket() throws IOException {
+        return GitPktLine.readNextFrom(requireInput());
+    }
+
+    public ByteBuf payloadBuffer(GitPktLine control) {
+        Objects.requireNonNull(control, "control");
+        return control instanceof GitPktLine.Data data ? Unpooled.wrappedBuffer(data.content()) : Unpooled.EMPTY_BUFFER;
     }
 
     public int readRawInto(ByteBuf target, int maxLength) throws IOException {
@@ -652,12 +647,6 @@ public final class GitBlockingWireTransport {
         }
     }
 
-    public record GitPktLine(ControlState control, ByteBuf payload) {
-        public GitPktLine {
-            Objects.requireNonNull(control, "control");
-            Objects.requireNonNull(payload, "payload");
-        }
-    }
 
     public record ReceiveCommandStatus(String refName, boolean ok, String message) {
         public ReceiveCommandStatus {

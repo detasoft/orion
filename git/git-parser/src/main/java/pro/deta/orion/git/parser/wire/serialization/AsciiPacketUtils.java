@@ -7,8 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
-import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
-import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
 
 public class AsciiPacketUtils {
     public static List<byte[]> encodeAsciiPackets(List<String> payloads, boolean sidebandAll) {

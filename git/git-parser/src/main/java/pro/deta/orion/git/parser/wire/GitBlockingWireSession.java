@@ -24,7 +24,7 @@ import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadRequest;
 import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
 
@@ -142,14 +142,14 @@ public final class GitBlockingWireSession {
             throws IOException {
         V2Command command = null;
         while (true) {
-            var next = wire.readNextControlState();
+            var next = wire.readNextPacket();
             if (next.isEmpty()) {
                 if (command == null) {
                     return;
                 }
                 throw new EOFException("Incomplete protocol v2 command");
             }
-            ControlState control = next.get();
+            GitPktLine control = next.get();
             switch (control.type()) {
                 case DATA -> {
                     String payload = readAsciiPayload(control);
@@ -205,7 +205,7 @@ public final class GitBlockingWireSession {
             InitialRequestData data) throws IOException {
         LsRefsAccumulator request = new LsRefsAccumulator(configuration);
         while (true) {
-            ControlState control = wire.readControlState();
+            GitPktLine control = wire.readPacket();
             switch (control.type()) {
                 case DATA -> request.accept(readAsciiPayload(control));
                 case FLUSH -> {
@@ -221,7 +221,7 @@ public final class GitBlockingWireSession {
         }
     }
 
-    private String readAsciiPayload(ControlState control) throws IOException {
+    private String readAsciiPayload(GitPktLine control) throws IOException {
         ByteBuf payload = wire.payloadBuffer(control);
         try {
             return asciiLine(payload);
@@ -287,7 +287,7 @@ public final class GitBlockingWireSession {
             InitialRequestData data) throws IOException {
         FetchAccumulator fetch = new FetchAccumulator(configuration);
         while (true) {
-            ControlState control = wire.readControlState();
+            GitPktLine control = wire.readPacket();
             switch (control.type()) {
                 case DATA -> fetch.accept(readAsciiPayload(control));
                 case FLUSH -> {
@@ -400,7 +400,7 @@ public final class GitBlockingWireSession {
         LegacyUploadRequestBuilder request =
                 new LegacyUploadRequestBuilder();
         while (true) {
-            ControlState control = wire.readControlState();
+            GitPktLine control = wire.readPacket();
             switch (control.type()) {
                 case DATA -> request.accept(readAsciiPayload(control));
                 case FLUSH -> {
@@ -478,7 +478,7 @@ public final class GitBlockingWireSession {
         Set<GitObjectId> commonHaves = new LinkedHashSet<>();
         GitObjectId lastCommon = null;
         while (true) {
-            ControlState control = wire.readControlState();
+            GitPktLine control = wire.readPacket();
             switch (control.type()) {
                 case DATA -> {
                     String line = readAsciiPayload(control);
@@ -634,14 +634,14 @@ public final class GitBlockingWireSession {
         Set<String> capabilities = new LinkedHashSet<>();
         Set<String> refNames = new LinkedHashSet<>();
         while (true) {
-            ControlState control = wire.readControlState();
+            GitPktLine control = wire.readPacket();
             switch (control.type()) {
                 case DATA -> acceptLegacyReceiveLine(
                         commands,
                         shallowObjectIds,
                         capabilities,
                         refNames,
-                        ((ControlState.Data) control).content());
+                        ((GitPktLine.Data) control).content());
                 case FLUSH -> {
                     if (commands.isEmpty()) {
                         return null;

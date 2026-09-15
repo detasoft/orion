@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire.control;
+package pro.deta.orion.git.parser.wire.pkt;
 
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -23,7 +23,7 @@ import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.*;
  * No stream or reference-counted buffer is retained. EOF during the header or payload is an IOException.
  * readNextFrom permits clean EOF before a packet; partial headers and payloads always fail.
  */
-public sealed interface ControlState {
+public sealed interface GitPktLine {
     int PKT_LINE_HEADER_SIZE = 4;
     int MAX_PKT_LINE_LENGTH = 65_520;
 
@@ -49,7 +49,7 @@ public sealed interface ControlState {
      * text decodes strict UTF-8, removes one final LF, and rejects embedded ASCII control characters.
      * Empty data remains distinct from FLUSH. Binary consumers use content and do not call text.
      */
-    record Data(byte[] content) implements ControlState {
+    record Data(byte[] content) implements GitPktLine {
         public Data {
             Objects.requireNonNull(content, "content");
         }
@@ -80,7 +80,7 @@ public sealed interface ControlState {
     }
 
     /** Payload-free pkt-line markers; reading one never consumes bytes belonging to the next packet. */
-    enum Control implements ControlState {
+    enum Control implements GitPktLine {
         FLUSH(ControlType.FLUSH),
         DELIMITER(ControlType.DELIMITER),
         RESPONSE_END(ControlType.RESPONSE_END);
@@ -97,11 +97,11 @@ public sealed interface ControlState {
         }
     }
 
-    static ControlState readFrom(BufferedByteInput input) throws IOException {
+    static GitPktLine readFrom(BufferedByteInput input) throws IOException {
         return readNextFrom(input).orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
     }
 
-    static Optional<ControlState> readNextFrom(BufferedByteInput input) throws IOException {
+    static Optional<GitPktLine> readNextFrom(BufferedByteInput input) throws IOException {
         int first;
         try {
             first = input.readUnsignedByte();

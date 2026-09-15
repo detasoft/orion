@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData.ProtocolVersion;
 
 import java.io.IOException;
@@ -87,12 +87,12 @@ public final class FetchNegotiator {
     }
 
     public static NegotiationMessage readNegotiationMessage(GitReader reader) throws IOException {
-        ControlState packet = reader.readPacket();
+        GitPktLine packet = reader.readPacket();
         return switch (packet) {
-            case ControlState.Control.FLUSH -> NegotiationMessage.Control.END_ROUND;
-            case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+            case GitPktLine.Control.FLUSH -> NegotiationMessage.Control.END_ROUND;
+            case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                     throw invalid("Expected a data packet");
-            case ControlState.Data data -> {
+            case GitPktLine.Data data -> {
                 String line = data.text();
                 if (line.equals(GitCapability.DONE.wireName())) {
                     yield NegotiationMessage.Control.DONE;
@@ -114,9 +114,9 @@ public final class FetchNegotiator {
         FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
-            ControlState packet = reader.readPacket();
+            GitPktLine packet = reader.readPacket();
             switch (packet) {
-                case ControlState.Control.FLUSH -> {
+                case GitPktLine.Control.FLUSH -> {
                     if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
                         throw invalid("Fetch requires want or want-ref");
                     }
@@ -124,9 +124,9 @@ public final class FetchNegotiator {
                     validate(request);
                     return request;
                 }
-                case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
-                case ControlState.Data data -> {
+                case GitPktLine.Data data -> {
                     String line = data.text();
                     if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
                         request.wants().add(objectId(line.substring(GitCapability.WANT.wireName().length() + 1)));
@@ -180,9 +180,9 @@ public final class FetchNegotiator {
         boolean receivedLine = false;
         boolean wantsEnded = false;
         while (true) {
-            ControlState packet = reader.readPacket();
+            GitPktLine packet = reader.readPacket();
             switch (packet) {
-                case ControlState.Control.FLUSH -> {
+                case GitPktLine.Control.FLUSH -> {
                     if (receivedLine && request.wants().isEmpty()) {
                         throw invalid("Legacy fetch requires want");
                     }
@@ -194,9 +194,9 @@ public final class FetchNegotiator {
                     validate(request);
                     return request;
                 }
-                case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
-                case ControlState.Data data -> {
+                case GitPktLine.Data data -> {
                     String line = data.text();
                     receivedLine = true;
                     if (line.startsWith(GitCapability.WANT.wireName() + " ")) {

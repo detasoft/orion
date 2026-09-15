@@ -282,6 +282,30 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void rejectsMalformedNestedStatusPackets() {
+        byte[] complete = concat(packet("unpack ok\n"), packet("ok refs/heads/main\n"));
+        for (byte[] report : new byte[][]{
+                "zzzz".getBytes(StandardCharsets.US_ASCII),
+                "0003".getBytes(StandardCharsets.US_ASCII),
+                "0001".getBytes(StandardCharsets.US_ASCII),
+                "0008ab".getBytes(StandardCharsets.US_ASCII),
+                complete,
+                concat(complete, flush(), new byte[]{42})}) {
+            RecordingTransport transport = new RecordingTransport(concat(
+                    advertisement("report-status side-band-64k"), sideBandPacket(1, report), flush()));
+            GitReceivePackRequest request = new GitReceivePackRequest(
+                    List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                    output -> { });
+
+            var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+            assertThat(transport.session.closed).isTrue();
+        }
+    }
+
+    @Test
     void rejectsUnknownPushStatusSideBandChannels() {
         for (int channel : new int[] {0, 4, 255}) {
             RecordingTransport transport = new RecordingTransport(concat(

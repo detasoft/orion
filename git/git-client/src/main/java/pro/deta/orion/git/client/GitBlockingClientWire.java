@@ -4,10 +4,12 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -34,14 +36,15 @@ final class GitBlockingClientWire {
             throws IOException, GitClientProtocolException {
         List<String> lines = new ArrayList<>();
         while (true) {
-            GitBlockingWireTransport.GitPktLine packet = readPacket(
+            GitPktLine packet = readPacket(
                     GitClientFailure.Phase.ADVERTISEMENT);
+            ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.control().type() == ControlState.ControlType.FLUSH) {
+                if (packet.type() == GitPktLine.ControlType.FLUSH) {
                     break;
                 }
                 requireData(packet, GitClientFailure.Phase.ADVERTISEMENT);
-                String line = ascii(packet.payload(),
+                String line = ascii(payload,
                         GitClientFailure.Phase.ADVERTISEMENT);
                 if (lines.isEmpty() && "version 1".equals(stripLf(line))) {
                     continue;
@@ -49,7 +52,7 @@ final class GitBlockingClientWire {
                 rejectServerError(line, GitClientFailure.Phase.ADVERTISEMENT);
                 lines.add(stripLf(line));
             } finally {
-                packet.payload().release();
+                payload.release();
             }
         }
         return parseAdvertisement(lines);
@@ -91,21 +94,21 @@ final class GitBlockingClientWire {
         boolean sideBand = advertisement.capabilities().contains("side-band-64k")
                 || advertisement.capabilities().contains("side-band");
         while (true) {
-            GitBlockingWireTransport.GitPktLine packet = readPacket(
+            GitPktLine packet = readPacket(
                     GitClientFailure.Phase.NEGOTIATION);
-            if (packet.control().type() != ControlState.ControlType.DATA) {
-                packet.payload().release();
+            if (packet.type() != GitPktLine.ControlType.DATA) {
                 throw protocolFailure(
                         GitClientFailure.Kind.MALFORMED_RESPONSE,
                         GitClientFailure.Phase.NEGOTIATION,
                         "Expected upload-pack negotiation response");
             }
-            if (sideBand && isSideBand(packet.payload())) {
+            if (sideBand && isSideBand(((GitPktLine.Data) packet).content())) {
                 return readSideBandPack(packet, request, maximumPackBytes);
             }
+            ByteBuf payload = wire.payloadBuffer(packet);
             try {
                 String line = stripLf(ascii(
-                        packet.payload(), GitClientFailure.Phase.NEGOTIATION));
+                        payload, GitClientFailure.Phase.NEGOTIATION));
                 rejectServerError(line, GitClientFailure.Phase.NEGOTIATION);
                 if (!"NAK".equals(line) && !line.startsWith("ACK ")) {
                     throw protocolFailure(
@@ -114,7 +117,7 @@ final class GitBlockingClientWire {
                             "Unexpected upload-pack negotiation response");
                 }
             } finally {
-                packet.payload().release();
+                payload.release();
             }
             if (!sideBand) {
                 return readRawPack(request, maximumPackBytes);
@@ -280,20 +283,20 @@ final class GitBlockingClientWire {
     }
 
     private long readSideBandPack(
-            GitBlockingWireTransport.GitPktLine first,
+            GitPktLine first,
             GitUploadPackRequest request,
             long maximumPackBytes)
             throws IOException, GitClientProtocolException {
         long total = 0;
-        GitBlockingWireTransport.GitPktLine packet = first;
+        GitPktLine packet = first;
         while (true) {
+            ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.control().type() == ControlState.ControlType.FLUSH) {
+                if (packet.type() == GitPktLine.ControlType.FLUSH) {
                     request.packTarget().flush();
                     return total;
                 }
                 requireData(packet, GitClientFailure.Phase.PACK_TRANSFER);
-                ByteBuf payload = packet.payload();
                 if (!payload.isReadable()) {
                     throw protocolFailure(
                             GitClientFailure.Kind.MALFORMED_RESPONSE,
@@ -327,7 +330,7 @@ final class GitBlockingClientWire {
                             "Unknown Git side-band channel");
                 }
             } finally {
-                packet.payload().release();
+                payload.release();
             }
             packet = readPacket(GitClientFailure.Phase.PACK_TRANSFER);
         }
@@ -337,17 +340,18 @@ final class GitBlockingClientWire {
             throws IOException, GitClientProtocolException {
         List<String> lines = new ArrayList<>();
         while (true) {
-            GitBlockingWireTransport.GitPktLine packet = readPacket(
+            GitPktLine packet = readPacket(
                     GitClientFailure.Phase.REPORT_STATUS);
+            ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.control().type() == ControlState.ControlType.FLUSH) {
+                if (packet.type() == GitPktLine.ControlType.FLUSH) {
                     return List.copyOf(lines);
                 }
                 requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
                 lines.add(stripLf(ascii(
-                        packet.payload(), GitClientFailure.Phase.REPORT_STATUS)));
+                        payload, GitClientFailure.Phase.REPORT_STATUS)));
             } finally {
-                packet.payload().release();
+                payload.release();
             }
         }
     }
@@ -356,14 +360,14 @@ final class GitBlockingClientWire {
             throws IOException, GitClientProtocolException {
         ByteArrayOutputStream status = new ByteArrayOutputStream();
         while (true) {
-            GitBlockingWireTransport.GitPktLine packet = readPacket(
+            GitPktLine packet = readPacket(
                     GitClientFailure.Phase.REPORT_STATUS);
+            ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                if (packet.control().type() == ControlState.ControlType.FLUSH) {
+                if (packet.type() == GitPktLine.ControlType.FLUSH) {
                     return parsePacketLines(status.toByteArray());
                 }
                 requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
-                ByteBuf payload = packet.payload();
                 if (!payload.isReadable()) {
                     throw protocolFailure(
                             GitClientFailure.Kind.MALFORMED_RESPONSE,
@@ -397,7 +401,7 @@ final class GitBlockingClientWire {
                             "Unknown Git side-band channel");
                 }
             } finally {
-                packet.payload().release();
+                payload.release();
             }
         }
     }
@@ -405,36 +409,24 @@ final class GitBlockingClientWire {
     private static List<String> parsePacketLines(byte[] bytes)
             throws GitClientProtocolException {
         List<String> lines = new ArrayList<>();
-        int offset = 0;
-        while (offset < bytes.length) {
-            if (bytes.length - offset < 4) {
-                throw malformedStatus();
-            }
-            int length;
-            try {
-                length = Integer.parseInt(
-                        new String(bytes, offset, 4, StandardCharsets.US_ASCII),
-                        16);
-            } catch (NumberFormatException error) {
-                throw malformedStatus();
-            }
-            offset += 4;
-            if (length == 0) {
-                if (offset != bytes.length) {
-                    throw malformedStatus();
+        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes))) {
+            while (true) {
+                GitPktLine packet = GitPktLine.readFrom(input);
+                switch (packet) {
+                    case GitPktLine.Control.FLUSH -> {
+                        if (input.available() != 0) {
+                            throw malformedStatus();
+                        }
+                        return List.copyOf(lines);
+                    }
+                    case GitPktLine.Data data ->
+                            lines.add(stripLf(new String(data.content(), StandardCharsets.UTF_8)));
+                    case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw malformedStatus();
                 }
-                return List.copyOf(lines);
             }
-            int payloadLength = length - 4;
-            if (payloadLength < 0 || payloadLength > bytes.length - offset) {
-                throw malformedStatus();
-            }
-            String line = new String(
-                    bytes, offset, payloadLength, StandardCharsets.UTF_8);
-            lines.add(stripLf(line));
-            offset += payloadLength;
+        } catch (IOException error) {
+            throw malformedStatus();
         }
-        throw malformedStatus();
     }
 
     private static GitRemoteAdvertisement parseAdvertisement(List<String> lines)
@@ -515,7 +507,7 @@ final class GitBlockingClientWire {
         }
     }
 
-    private GitBlockingWireTransport.GitPktLine readPacket(
+    private GitPktLine readPacket(
             GitClientFailure.Phase phase)
             throws IOException, GitClientProtocolException {
         try {
@@ -543,9 +535,9 @@ final class GitBlockingClientWire {
     }
 
     private static void requireData(
-            GitBlockingWireTransport.GitPktLine packet,
+            GitPktLine packet,
             GitClientFailure.Phase phase) throws GitClientProtocolException {
-        if (packet.control().type() != ControlState.ControlType.DATA) {
+        if (packet.type() != GitPktLine.ControlType.DATA) {
             throw protocolFailure(
                     GitClientFailure.Kind.MALFORMED_RESPONSE,
                     phase,
@@ -592,11 +584,11 @@ final class GitBlockingClientWire {
         }
     }
 
-    private static boolean isSideBand(ByteBuf payload) {
-        if (!payload.isReadable()) {
+    private static boolean isSideBand(byte[] payload) {
+        if (payload.length == 0) {
             return false;
         }
-        int channel = payload.getUnsignedByte(payload.readerIndex());
+        int channel = payload[0] & 0xff;
         return channel >= 1 && channel <= 3;
     }
 

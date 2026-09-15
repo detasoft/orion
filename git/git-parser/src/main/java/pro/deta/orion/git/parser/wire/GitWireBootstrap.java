@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.wire;
 
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInput;
@@ -42,15 +42,12 @@ public final class GitWireBootstrap {
 
     public static GitWireBootstrap nativeDaemon(BufferedByteInput input, BufferedByteOutput output) throws IOException {
         GitBlockingWireTransport wire = new GitBlockingWireTransport(input, output);
-        GitBlockingWireTransport.GitPktLine packet = wire.readPacket();
-        try {
-            if (packet.control().type() != ControlState.ControlType.DATA) {
-                throw new IllegalArgumentException("Malformed native Git request");
-            }
-            return new GitWireBootstrap(wire, nativeDaemonData(packet.payload().toString(StandardCharsets.UTF_8)));
-        } finally {
-            packet.payload().release();
+        GitPktLine packet = wire.readPacket();
+        if (!(packet instanceof GitPktLine.Data data)) {
+            throw new IllegalArgumentException("Malformed native Git request");
         }
+        return new GitWireBootstrap(wire,
+                nativeDaemonData(new String(data.content(), StandardCharsets.UTF_8)));
     }
 
     public GitBlockingWireTransport wire() {

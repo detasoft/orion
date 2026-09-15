@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.ByteArrayInputStream;
@@ -20,7 +20,7 @@ class GitReaderTest {
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
                 String expected = line.endsWith("\n") ? line.substring(0, line.length() - 1) : line;
-                assertThat(((ControlState.Data) reader.readPacket()).text()).isEqualTo(expected);
+                assertThat(((GitPktLine.Data) reader.readPacket()).text()).isEqualTo(expected);
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
         }
@@ -31,7 +31,7 @@ class GitReaderTest {
         for (byte[] payload : new byte[][]{{(byte) 0xc3, 0x28}, {(byte) 0xe2, (byte) 0x82}, {(byte) 0x80, '\n'}}) {
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
-                assertThatThrownBy(() -> ((ControlState.Data) reader.readPacket()).text())
+                assertThatThrownBy(() -> ((GitPktLine.Data) reader.readPacket()).text())
                         .isInstanceOf(IOException.class).hasMessageContaining("Invalid UTF-8");
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
@@ -44,7 +44,7 @@ class GitReaderTest {
             byte[] payload = line.getBytes(StandardCharsets.UTF_8);
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
-                assertThatThrownBy(() -> ((ControlState.Data) reader.readPacket()).text())
+                assertThatThrownBy(() -> ((GitPktLine.Data) reader.readPacket()).text())
                         .isInstanceOf(IOException.class).hasMessageContaining("Control character");
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
@@ -56,16 +56,16 @@ class GitReaderTest {
         try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(
                 "0000000100020004".getBytes(StandardCharsets.US_ASCII)))) {
             var reader = new GitReader(input);
-            for (var type : new ControlState.ControlType[]{ControlState.ControlType.FLUSH,
-                    ControlState.ControlType.DELIMITER, ControlState.ControlType.RESPONSE_END}) {
+            for (var type : new GitPktLine.ControlType[]{GitPktLine.ControlType.FLUSH,
+                    GitPktLine.ControlType.DELIMITER, GitPktLine.ControlType.RESPONSE_END}) {
                 var packet = reader.readPacket();
                 assertThat(packet.type()).isEqualTo(type);
-                assertThat(packet).isInstanceOf(ControlState.Control.class);
+                assertThat(packet).isInstanceOf(GitPktLine.Control.class);
                 assertThat(packet.payloadLength()).isZero();
             }
             var packet = reader.readPacket();
-            assertThat(packet.type()).isEqualTo(ControlState.ControlType.DATA);
-            assertThat(((ControlState.Data) packet).text()).isEmpty();
+            assertThat(packet.type()).isEqualTo(GitPktLine.ControlType.DATA);
+            assertThat(((GitPktLine.Data) packet).text()).isEmpty();
             assertThat(input.available()).isZero();
         }
     }
@@ -74,7 +74,7 @@ class GitReaderTest {
     void dataContainsRawBytesBeforeAnyTextDecoding() throws Exception {
         byte[] raw = {(byte) 0xff, 0, (byte) 0x80};
         try (var input = inputWithMarker(raw)) {
-            var data = (ControlState.Data) new GitReader(input).readPacket();
+            var data = (GitPktLine.Data) new GitReader(input).readPacket();
             assertThat(data.content()).containsExactly(raw);
             assertThat(input.readUnsignedByte()).isEqualTo('N');
             assertThatThrownBy(data::text).isInstanceOf(IOException.class);
@@ -84,13 +84,13 @@ class GitReaderTest {
     @Test
     void optionalPacketReadAllowsOnlyCleanEof() throws Exception {
         try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(new byte[0]))) {
-            assertThat(ControlState.readNextFrom(input)).isEmpty();
-            assertThatThrownBy(() -> ControlState.readFrom(input)).isInstanceOf(EOFException.class);
+            assertThat(GitPktLine.readNextFrom(input)).isEmpty();
+            assertThatThrownBy(() -> GitPktLine.readFrom(input)).isInstanceOf(EOFException.class);
         }
         for (String truncated : new String[]{"0", "000", "0006a"}) {
             try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(
                     truncated.getBytes(StandardCharsets.US_ASCII)))) {
-                assertThatThrownBy(() -> ControlState.readNextFrom(input)).isInstanceOf(EOFException.class);
+                assertThatThrownBy(() -> GitPktLine.readNextFrom(input)).isInstanceOf(EOFException.class);
             }
         }
     }

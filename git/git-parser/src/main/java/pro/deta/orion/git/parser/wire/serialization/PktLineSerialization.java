@@ -5,7 +5,7 @@ import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import java.io.IOException;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
-import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.PKT_LINE_HEADER_SIZE;
 
 public final class PktLineSerialization implements OutputSerialization {
     private final byte[] payload;

@@ -11,7 +11,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -29,7 +29,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
+import static pro.deta.orion.git.parser.wire.pkt.GitPktLine.MAX_PKT_LINE_LENGTH;
 
 class GitBlockingWireTransportTest {
     private static final String MAIN_ID =
@@ -52,15 +52,15 @@ class GitBlockingWireTransportTest {
     void readsPktLineControlAndPayloadFromBufferedInput() throws Exception {
         GitBlockingWireTransport transport = input("000ahello\n0000");
 
-        ControlState data = transport.readControlState();
+        GitPktLine data = transport.readPacket();
         ByteBuf payload = transport.payloadBuffer(data);
         try {
-            assertThat(data.type()).isEqualTo(ControlState.ControlType.DATA);
+            assertThat(data.type()).isEqualTo(GitPktLine.ControlType.DATA);
             assertThat(payload.toString(StandardCharsets.UTF_8))
                     .isEqualTo("hello\n");
 
-            ControlState flush = transport.readControlState();
-            assertThat(flush.type()).isEqualTo(ControlState.ControlType.FLUSH);
+            GitPktLine flush = transport.readPacket();
+            assertThat(flush.type()).isEqualTo(GitPktLine.ControlType.FLUSH);
             assertThat(flush.payloadLength()).isZero();
         } finally {
             payload.release();
@@ -71,7 +71,7 @@ class GitBlockingWireTransportTest {
     void rejectsMalformedPktLineHeaderFromBufferedInput() {
         GitBlockingWireTransport transport = input("zzzz");
 
-        assertThatThrownBy(transport::readControlState)
+        assertThatThrownBy(transport::readPacket)
                 .isInstanceOf(GitPktLineFormatException.class)
                 .hasMessageContaining("Invalid Git pkt-line header");
     }
