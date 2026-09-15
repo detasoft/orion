@@ -13,8 +13,12 @@ import java.util.OptionalLong;
 
 /**
  * Sequentially parses one pack from caller-owned input, independently of repository storage and resolution.
- * next returns the next physical entry, or null only after the declared entries and checksum are verified.
- * packId returns that verified checksum after next has successfully returned null, including for an empty pack.
+ * hasNext reports whether another physical entry remains. next returns that entry and never returns null;
+ * after successful exhaustion it throws NoSuchElementException. Both methods report input errors as IOException.
+ * Repeated hasNext calls do not consume entries or repeat raw-sink writes. While entries remain, hasNext leaves
+ * the current payload cursor unchanged. When none remain, it drains the last unread payload and verifies the
+ * checksum before returning false. Premature EOF or a checksum mismatch is an error, not normal exhaustion.
+ * packId returns the verified checksum after hasNext has returned false, including for an empty pack.
  * It performs no I/O; calling it before successful completion fails with IllegalStateException.
  * Truncated input, a checksum mismatch, or a sink failure cannot produce a successfully completed pack ID.
  * read streams the current entry's inflated payload into a writable ByteBuffer: full object content or delta
@@ -26,33 +30,37 @@ import java.util.OptionalLong;
  * Closing releases parser resources without closing the source or sink. No concurrent-use guarantee is required.
  *
  * <p>The constructor accepts any pack stream exposed as BufferedByteInput, including network, file, or memory
- * input. next() advances, read(destination) reads payload, and close() releases parser resources.
+ * input. hasNext()/next() drive iteration, read(destination) reads payload, and close() releases resources.
  * An optional caller-owned WritableByteChannel receives original raw bytes in order as parsing progresses,
  * including headers, compressed payloads, delta base references, and the checksum. Inflated payload bytes
  * returned by read are a separate view. Draining skipped payloads also forwards their raw bytes exactly once.
  * Partial sink writes must be completed before the parser releases the corresponding buffer. Sink failures
- * propagate as IOException and stop enumeration. Bytes after this pack are never forwarded to the sink.
- * The sink accepts bytes during next/read; durable publication remains the caller's responsibility.
+ * propagate as IOException and stop iteration. Bytes after this pack are never forwarded to the sink.
+ * The sink accepts bytes during hasNext/next/read; durable publication remains the caller's responsibility.
  * Callers own their loop, hashing, and delta resolution. Parsing depends on neither repository storage nor
  * a particular consumer. The source-only constructor supports parsing without retaining raw bytes.
  * Parsing methods remain placeholders. Constructors store dependencies without reading or writing bytes.
  */
-public final class PackEnumerator implements AutoCloseable {
+public final class PackObjectIterator implements AutoCloseable {
     private final BufferedByteInput source;
     private final WritableByteChannel rawSink;
 
-    public PackEnumerator(BufferedByteInput source) {
+    public PackObjectIterator(BufferedByteInput source) {
         this.source = Objects.requireNonNull(source, "source");
         this.rawSink = null;
     }
 
-    public PackEnumerator(BufferedByteInput source, WritableByteChannel rawSink) {
+    public PackObjectIterator(BufferedByteInput source, WritableByteChannel rawSink) {
         this.source = Objects.requireNonNull(source, "source");
         this.rawSink = Objects.requireNonNull(rawSink, "rawSink");
     }
 
+    public boolean hasNext() throws IOException {
+        throw new UnsupportedOperationException("Pack iteration is not implemented");
+    }
+
     public Entry next() throws IOException {
-        throw new UnsupportedOperationException("Pack enumeration is not implemented");
+        throw new UnsupportedOperationException("Pack iteration is not implemented");
     }
 
     public int read(ByteBuffer destination) throws IOException {

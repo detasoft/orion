@@ -5,7 +5,7 @@ package pro.deta.orion.git.parser.v2.command;
  * Creates and closes the v2 PackIngestor within execution. Reuses shared receive-pack policy validation;
  * the session and reader do not manage ingestion state or storage resources.
  *
- * <p>Call storage.uploadNewPack(source), then pass the returned upload to ingestor.resolvePack. Enumeration
+ * <p>Call storage.uploadNewPack(source), then pass the returned upload to ingestor.resolvePack. Iteration
  * retains original bytes in the upload's internal sink while the ingestor records resolved objects and bases.
  * The ingestor determines the verified PackId and calls upload.commit(packId) after successful resolution.
  * Command policy and ref checks remain here. Always call upload.rollback() in finally to release resources
@@ -16,7 +16,7 @@ package pro.deta.orion.git.parser.v2.command;
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code execute(PushRequest, BufferedByteInput)} - consume any required pack and return PushResponse.</li>
- *   <li>{@code receivePack(...)} - privately create the upload and run the ingestor's enumeration loop.</li>
+ *   <li>{@code receivePack(...)} - privately create the upload and run the ingestor's iteration loop.</li>
  *   <li>{@code publish(...)} - privately validate updates and publish through the existing provider policy.</li>
  * </ul>
  * Method names and signatures are provisional. Pack input continues from the same logical input used for

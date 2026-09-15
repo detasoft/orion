@@ -3,8 +3,8 @@ package pro.deta.orion.git.parser.v2.storage;
 /**
  * Stores pack bytes and indexes internally behind GitStorageApi; files and paths stay inside storage.
  * Object resolution and operation-specific policy belong to callers. uploadNewPack creates a private
- * implementation of PackUpload with a PackEnumerator constructed from the source and an internal
- * raw-byte sink. The enumerator sends original bytes to that sink as it advances. Only bytes through the pack
+ * implementation of PackUpload with a PackObjectIterator constructed from the source and an internal
+ * raw-byte sink. The iterator sends original bytes to that sink as it advances. Only bytes through the pack
  * checksum are retained; later protocol bytes remain available through the caller's source.
  * Resolved metadata and external base IDs accumulate separately.
  * The upload owns its parser, sink, commit, and rollback without a public upload ID. Rollback releases those
@@ -23,7 +23,7 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code uploadNewPack(source)} - create an upload with an enumerator and private raw-byte sink.</li>
+ *   <li>{@code uploadNewPack(source)} - create an upload with an iterator and private raw-byte sink.</li>
  *   <li>{@code commit(...)} - internally publish the upload's pack and confirmed external dependencies.</li>
  *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
  * </ul>

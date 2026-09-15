@@ -19,12 +19,12 @@ import java.util.Optional;
  * Provides the single external API for storage operations belonging to one repository.
  * Commands use this facade; ref, pack, and object stores remain internal implementation details.
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
- * uploadNewPack(source) creates an isolated PackUpload and its PackEnumerator before consuming the pack.
- * Storage constructs the enumerator with the source and an internal raw-byte sink. As parsing progresses,
- * the enumerator forwards original bytes into that sink, including the header, entry encodings, and checksum.
+ * uploadNewPack(source) creates an isolated PackUpload and its PackObjectIterator before consuming the pack.
+ * Storage constructs the iterator with the source and an internal raw-byte sink. As parsing progresses,
+ * the iterator forwards original bytes into that sink, including the header, entry encodings, and checksum.
  * Only bytes belonging to this pack enter the sink; subsequent protocol bytes remain available through the
  * same caller-owned source. Setup failure releases only resources created by that attempt.
- * The caller drives enumeration and records resolved objects through the upload. Storage does not call back
+ * The caller drives iteration and records resolved objects through the upload. Storage does not call back
  * into a resolver. commit and rollback belong to the upload; its parser and sink never own the source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
@@ -35,7 +35,7 @@ import java.util.Optional;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code uploadNewPack(source)} - create an upload with its enumerator and internal byte sink.</li>
+ *   <li>{@code uploadNewPack(source)} - create an upload with its iterator and internal byte sink.</li>
  *   <li>{@code snapshotRefs()} - return refs and symbolic or detached HEAD from one consistent state.</li>
  *   <li>{@code updateRefs(updates, atomic)} - conditionally update refs and return one RefUpdateResult
  *       containing the original update per input, in request order.</li>
