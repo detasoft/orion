@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -14,6 +15,9 @@ import java.util.Optional;
  * borrowed parser for the lifetime of the attempt. Its raw-byte sink belongs to this upload and receives
  * bytes directly from the iterator as parsing progresses, independently of resolved index entries.
  * Sink I/O failures propagate through iteration as IOException. There is no separate public write method.
+ * storage returns the owning repository's GitStorageApi for reading published external bases. This is a
+ * borrowed facade, not a new connection or resource owned by the resolver. Upload-local reads and find
+ * remain separate from published-object lookup through storage.
  * addObject associates a fully consumed entry with its resolved ID, logical type, and content size.
  * Results may arrive in dependency order; identical repeats are harmless and conflicting results fail.
  * addExternalBaseId accumulates confirmed external dependencies, not every encountered REF_DELTA base.
@@ -44,6 +48,8 @@ import java.util.Optional;
  * Methods are used sequentially within the owning operation. This is a contract for future implementation.
  */
 public interface PackUpload {
+    GitStorageApi storage();
+
     PackObjectIterator iterator();
 
     int read(long offset, ByteBuffer destination) throws IOException;
