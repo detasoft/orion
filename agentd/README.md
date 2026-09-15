@@ -1,5 +1,29 @@
 # AgentD
 
+## Run from the checkout
+
+`make run-agent` is a thin alias for the `run-agent` Maven profile. It builds
+the reactor dependencies, including the local native host, and calls
+`AgentdMain` through `exec:java` in the current terminal:
+
+```sh
+make run-agent AGENT_ARGS='--help'
+# Equivalent Maven command:
+mvn -pl agentd -am -Pdev,run-agent \
+  -Dagentd.run.arguments='--help' process-classes
+```
+
+Pass the normal AgentD command-line options in `AGENT_ARGS`. Daemon startup
+requires `--server`, `--state-dir`, `--agent-label`, `--generation`,
+`--launch-id`, and `--agent-version`. Supply the server-issued launch permit
+as a base64url line followed by EOF on standard input, never in `AGENT_ARGS`.
+Paths containing spaces can be single-quoted inside the argument string.
+
+The alias uses the existing authentication and TLS checks. The default
+`make run-server` configuration has HTTPS disabled: connecting AgentD requires
+an enabled HTTPS listener with a certificate trusted by the AgentD JVM, plus
+a fresh server-issued launch authorization. The alias does not issue it.
+
 ## Control runtime
 
 `Agent.create` assembles the production control runtime around one process lock,

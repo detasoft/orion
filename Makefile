@@ -12,7 +12,7 @@ RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>'
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
 	help skill-check skills-check \
-	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
+	run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
 	cargo-init rust-install session-host session-host-test session-host-linux-test \

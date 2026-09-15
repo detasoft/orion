@@ -1,5 +1,6 @@
 ORION_ROOT ?= $(CURDIR)/orion_root
 ORION_ARGS ?=
+AGENT_ARGS ?=
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
@@ -24,7 +25,7 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server enroll-admin-key require-key-material-password issue-token issue-token-raw
+.PHONY: run-server run-agent enroll-admin-key require-key-material-password issue-token issue-token-raw
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
 .PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
@@ -54,6 +55,10 @@ enroll-admin-key: ## Enroll an admin SSH key
 run-server: require-key-material-password ## Run the Orion server
 	$(MAVEN) -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
+
+run-agent: ## Run AgentD on this machine; set AGENT_ARGS for its command-line options
+	$(MAVEN) -pl agentd -am -Pdev,run-agent \
+		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
 
 # Scenario:
 # 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
