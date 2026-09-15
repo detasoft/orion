@@ -27,7 +27,9 @@ import java.util.Optional;
  * earlier in the same attemptResolve call. Dependency metadata remains indexed, but no reference counts or
  * future-use analysis retain restored payloads. Keep bytes needed by an active reconstruction or open handle
  * alive until that use ends. Publish the original pack as-is with its index and external-base metadata;
- * do not separately persist restored object content. Reuse and caching are deferred optimizations.
+ * do not separately persist restored object content. A future optional byte-bounded LRU in PackIndex may
+ * retain bases after observed use, as a reuse heuristic; misses still follow this reread path. This cache
+ * is not implemented or required by the current resolution contract.
  *
  * <p>attemptResolve(result) uses the ObjectId from HashedGitObjectRead when upload already indexed a full
  * object; it does not reopen content just to hash it again. For ContentGitObjectRead it reads the provided

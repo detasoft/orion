@@ -36,6 +36,16 @@ import java.util.Optional;
  * Commit uses this query without retrieving a list of unfinished chains. addExternalBaseId accumulates
  * confirmed external dependencies without duplicates or persisted externalPackIds.
  *
+ * <p>Future optimization, not implemented: keep an upload-local LRU of restored base bytes alongside this
+ * index. During parsing, future consumers are unknown; an observed reference to a base is only a reuse hint.
+ * When that base is read and restored for resolution, its bytes may enter the LRU; subsequent use refreshes
+ * recency. Bound cached payload by total retained byte size, not entry count, and bypass oversized bases.
+ * This is temporary, optional memory state, never part of the published index or a separate persisted copy.
+ * Eviction removes only cached bytes, preserving object records and waiting chains. A miss repeats reading
+ * and reconstruction from the original pack or published external storage. Eviction must not invalidate an
+ * active read handle; the cache budget does not bound the working memory needed by active reconstruction.
+ * Until this optimization is introduced, retain the current reread behavior without future-consumer tracking.
+ *
  * <p>PackUpload.commit rejects unresolved state, finishes pending storage writes, and publishes the association
  * between the pack and this already populated index. Temporary waiting structures may then be discarded.
  * Rollback discards only this attempt's unpublished resources. Methods are sequential; mutations after commit
