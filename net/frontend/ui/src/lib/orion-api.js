@@ -83,6 +83,9 @@ export function createOrionClient(options = {}) {
     remoteAliases() {
       return request('/api/admin/proxies')
     },
+    mutateRemoteAlias(command) {
+      return request('/api/admin/proxies', { method: 'POST', body: JSON.stringify(command) })
+    },
     repositories() {
       return request('/api/admin/repositories')
     },

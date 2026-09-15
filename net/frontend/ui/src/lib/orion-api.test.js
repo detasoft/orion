@@ -52,6 +52,23 @@ describe('createOrionClient', () => {
     expect(fetchImpl.mock.calls[0][1].headers.get('Authorization')).toBe('Bearer admin-token')
   })
 
+  it('posts proxy commands with their revision and keeps credentials out of the URL', async () => {
+    const result = { status: 'saved', revision: 'next', alias: { alias: 'backup', status: 'success' } }
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), {
+      status: 201, headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    const command = { action: 'replace-credential', scope: 'system', revision: 'read',
+      alias: 'backup', credential: 'private-value' }
+    expect(await client.mutateRemoteAlias(command)).toEqual(result)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/proxies')
+    expect(init.method).toBe('POST')
+    expect(init.headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(init.headers.get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual(command)
+  })
+
   it('loads repository discovery from the Admin API', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ repositories: [] }), {
       status: 200,

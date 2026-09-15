@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Base64;
@@ -22,6 +24,79 @@ class RuntimeHttpAdminApiIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void adminProxyCommandsPersistAndRecoverAcrossRetryAndRestart() throws Exception {
+        Path upstream = tempDir.resolve("upstream.git");
+        GitRepositoryFixture.seedBareRepository(upstream, tempDir.resolve("seed"), "main",
+                Map.of("file", "content".getBytes(StandardCharsets.UTF_8)));
+        var configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("proxy-admin"));
+        String token;
+        try (var orion = RuntimeHttpTestSupport.start(configuration)) {
+            token = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(), orion.httpUrl("/api/admin/token"), 600);
+            var listing = RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/proxies"),
+                    TestBearerTokens.bearer(token));
+            assertThat(listing.status()).isEqualTo(200);
+            String revision = OBJECT_MAPPER.readTree(listing.body()).get("revision").asText();
+            Map<String, Object> create = Map.of("action", "create", "scope", "system", "revision", revision,
+                    "alias", "archive", "upstream", upstream.toUri().toString(), "ref", "main",
+                    "credentialKind", "NONE");
+            assertThat(proxyCommand(orion, null, create).status()).isEqualTo(403);
+            var wrongScope = new java.util.LinkedHashMap<>(create);
+            wrongScope.put("scope", "organization");
+            assertThat(proxyCommand(orion, token, wrongScope).status()).isEqualTo(400);
+
+            var saved = proxyCommand(orion, token, create);
+            assertThat(saved.status()).isEqualTo(201);
+            JsonNode result = OBJECT_MAPPER.readTree(saved.body());
+            assertThat(result.get("status").asText()).isEqualTo("saved");
+            assertThat(result.at("/alias/status").asText()).isEqualTo("success");
+            assertThat(result.at("/alias/endpoint").isNull()).isTrue();
+            assertThat(saved.body()).doesNotContain("bootstrap/proxy-", "secret", "credential");
+            String savedRevision = result.get("revision").asText();
+            assertThat(savedRevision).isNotEqualTo(revision);
+            assertThat(proxyCommand(orion, token, create).status()).isEqualTo(409);
+
+            Map<String, Object> retry = Map.of("action", "retry", "scope", "system",
+                    "revision", savedRevision, "alias", "archive");
+            Path offline = tempDir.resolve("offline.git");
+            Files.move(upstream, offline);
+            try {
+                var unavailable = proxyCommand(orion, token, retry);
+                assertThat(unavailable.status()).isEqualTo(200);
+                assertThat(OBJECT_MAPPER.readTree(unavailable.body()).at("/alias/status").asText())
+                        .isEqualTo("unavailable");
+            } finally {
+                Files.move(offline, upstream);
+            }
+            var recovered = proxyCommand(orion, token, retry);
+            assertThat(recovered.status()).isEqualTo(200);
+            assertThat(OBJECT_MAPPER.readTree(recovered.body()).at("/alias/status").asText())
+                    .isEqualTo("success");
+            assertThat(OBJECT_MAPPER.readTree(recovered.body()).get("revision").asText()).isEqualTo(savedRevision);
+            orion.accessControlService().reload("verify saved proxy");
+            assertThat(adminAcl(orion, token).body()).contains("archive");
+            assertThat(orion.repositoryProvider().repositoryNames())
+                    .noneMatch(name -> name.startsWith("bootstrap/proxy-"));
+        }
+        try (var restarted = RuntimeHttpTestSupport.start(configuration)) {
+            var listing = RuntimeHttpTestSupport.request("GET", restarted.httpUrl("/api/admin/proxies"),
+                    TestBearerTokens.bearer(token));
+            assertThat(listing.status()).isEqualTo(200);
+            JsonNode aliases = OBJECT_MAPPER.readTree(listing.body()).get("aliases");
+            assertThat(aliases.size()).isEqualTo(1);
+            assertThat(aliases.get(0).get("alias").asText()).isEqualTo("archive");
+            assertThat(aliases.get(0).get("status").asText()).isEqualTo("success");
+        }
+    }
+
+    private static RuntimeHttpTestSupport.HttpResponse proxyCommand(
+            RuntimeHttpTestSupport.StartedOrion orion, String token, Map<String, Object> command) throws Exception {
+        return RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/proxies"),
+                token == null ? null : TestBearerTokens.bearer(token), "application/json",
+                OBJECT_MAPPER.writeValueAsBytes(command));
+    }
 
     @Test
     void runtimeAdminApiEnforcesBearerAuthorizationAndServesRouteContract() throws Exception {
