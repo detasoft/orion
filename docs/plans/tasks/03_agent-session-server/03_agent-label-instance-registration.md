@@ -1,7 +1,8 @@
 # Replace AgentId with unique labels and agent instance registration
 
 - Owner: codex, session 01a09f52-b1d0-7522-bbed-2c6c389576b6, branch `codex/agent-label-instance-b1d0`,
-  worktree `.worktrees/agent-label-instance-b1d0`, started 2026-09-15 07:07 Europe/Amsterdam.
+  worktree `.worktrees/agent-label-instance-b1d0`, paused 2026-09-15 08:02 Europe/Amsterdam;
+  next: integrate reviewed commit `cef0fad5ca41fcb7b277f11711ee98247945f9e7` after user authorization.
 
 ## Required result
 
