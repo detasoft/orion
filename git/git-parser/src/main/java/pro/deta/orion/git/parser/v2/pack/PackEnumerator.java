@@ -1,10 +1,11 @@
-package pro.deta.orion.git.parser.v2;
+package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -19,22 +20,31 @@ import java.util.OptionalLong;
  * Parsing stops after the checksum, leaving subsequent protocol bytes available through the same input.
  * Closing releases parser resources without closing the source. No concurrent-use guarantee is required.
  *
- * <p>Preliminary methods: open(source) creates a parser, next() advances, read(destination) reads payload,
- * and close() releases the parser. Storage can wrap this interface to track entries and retain consumed bytes.
- * The ingestor owns its ordinary next/read loop, hashing and delta resolution. No callbacks or storage calls
- * occur in the independent parser. The factory remains a placeholder; actual parsing is not implemented.
+ * <p>The constructor accepts any pack stream exposed as BufferedByteInput, including network, file, or memory
+ * input. next() advances, read(destination) reads payload, and close() releases parser resources.
+ * Callers own their next/read loop and any hashing or delta resolution. Parsing is independent of repository
+ * storage or any particular consumer; storage can retain bytes by wrapping the supplied input.
+ * Parsing methods remain placeholders. Construction stores the input without reading it.
  */
-public interface PackEnumerator extends AutoCloseable {
-    static PackEnumerator open(BufferedByteInput source) throws IOException {
+public final class PackEnumerator implements AutoCloseable {
+    private final BufferedByteInput source;
+
+    public PackEnumerator(BufferedByteInput source) {
+        this.source = Objects.requireNonNull(source, "source");
+    }
+
+    public Entry next() throws IOException {
         throw new UnsupportedOperationException("Pack enumeration is not implemented");
     }
 
-    Entry next() throws IOException;
-
-    int read(ByteBuffer destination) throws IOException;
+    public int read(ByteBuffer destination) throws IOException {
+        throw new UnsupportedOperationException("Pack payload reads are not implemented");
+    }
 
     @Override
-    void close() throws IOException;
+    public void close() throws IOException {
+        throw new UnsupportedOperationException("Pack parser cleanup is not implemented");
+    }
 
     /**
      * Physical entry metadata available before reading its payload. Offsets address the original pack bytes;
@@ -43,14 +53,14 @@ public interface PackEnumerator extends AutoCloseable {
      * which may refer inside or outside the pack. Full entries have neither base field.
      * The parser validates these combinations and boundaries; this value does not contain a resolved ObjectId.
      */
-    record Entry(long offset, long dataOffset, long inflatedSize, Type type,
-                 OptionalLong baseOffset, Optional<ObjectId> baseId) {
+    public record Entry(long offset, long dataOffset, long inflatedSize, Type type,
+                        OptionalLong baseOffset, Optional<ObjectId> baseId) {
     }
 
     /**
      * Encoding found in a pack header; delta values describe storage representation, not logical object type.
      */
-    enum Type {
+    public enum Type {
         COMMIT, TREE, BLOB, TAG, OFS_DELTA, REF_DELTA
     }
 }

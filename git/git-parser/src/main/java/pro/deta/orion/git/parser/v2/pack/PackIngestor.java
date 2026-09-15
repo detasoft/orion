@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2;
+package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi.PackIndex;
@@ -8,6 +8,7 @@ import java.util.Set;
 
 /**
  * Owns pack-object resolution for PushCommand, using an ordinary loop over index.enumerator().next().
+ * This is a consumer of storage and pack parsing, not part of either API or a required callback implementation.
  * For full objects, streams the payload into hashing and calls index.addObject with the resolved metadata.
  * For OFS_DELTA, finds the base through index.entryAt; for REF_DELTA, searches index.find and repository storage.
  * Missing or unresolved bases defer an entry. The ingestor owns pending dependencies and restores them when

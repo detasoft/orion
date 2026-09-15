@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.PackEnumerator;
+import pro.deta.orion.git.parser.v2.pack.PackEnumerator;
 import pro.deta.orion.git.parser.v2.data.ObjectRead;
 import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.data.PackRead;
@@ -25,7 +25,7 @@ import java.util.Set;
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
  * uploadNewPack starts one isolated upload and returns its PackIndex before consuming the whole pack.
  * The index supplies an independent PackEnumerator over an input wrapper that retains original bytes as
- * they are consumed. The ingestor drives enumeration and records resolved objects through that index.
+ * they are consumed. The caller drives enumeration and records resolved objects through that index.
  * The caller closes the index on every outcome; source input remains caller-owned. Setup failure cleans
  * its own resources. Publication and rollback belong to the index, without an external upload identifier.
  *
@@ -105,7 +105,7 @@ public final class GitStorageApi {
      * over the currently stored prefix. Its current end is not necessarily the end of reception.
      * addObject associates a fully consumed entry with its resolved ID, logical type, and content size.
      * Identical repeats are harmless; conflicting results and foreign entries are rejected. Results can be
-     * added in dependency order rather than physical order. The ingestor owns reconstruction and hashing.
+     * added in dependency order rather than physical order. The caller owns reconstruction and hashing.
      *
      * <p>commit requires enumeration through the verified checksum, a result for every physical entry, and
      * confirmed externalBaseIds. Empty packs also require completed enumeration. Storage locates and retains
