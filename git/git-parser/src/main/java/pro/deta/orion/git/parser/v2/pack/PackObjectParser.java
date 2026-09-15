@@ -6,7 +6,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
-import java.nio.channels.WritableByteChannel;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -20,7 +19,9 @@ import java.util.OptionalLong;
  * or size. The parser never fetches bases, applies deltas, or treats a delta instruction hash as an ObjectId.
  * No mode parameter is needed: both paths consume content, but retain different results.
  *
- * <p>Original header, base-reference, and compressed bytes are forwarded to the borrowed rawSink.
+ * <p>Original header, base-reference, and compressed bytes are appended to the borrowed PackByteStore.
+ * This same store provides positional reads for ContentGitObjectRead; no separate write-only sink or copy
+ * of the payload is required. The caller has already retained the preceding pack prefix up to offset.
  * Parsing uses bounded working buffers. Content reads may rely on retained original pack bytes rather than
  * an object-sized array. No separate inflated-content store or cache for later consumers is required.
  * offset is the absolute entry-header position; dataOffset is the absolute start of its zlib stream.
@@ -28,7 +29,7 @@ import java.util.OptionalLong;
  * Prefetched bytes after that boundary stay available through the same buffered input and are not forwarded.
  * Sink writes complete before buffers are reused. Failures and truncated or malformed data are IOException;
  * no successful result is returned, and parser-owned temporary content is released. Partial raw writes may
- * already have happened; the caller owns rollback. Neither source nor rawSink is closed.
+ * already have happened; the caller owns rollback. Neither source nor byteStore is closed.
  *
  * <p>The caller owns the returned object's read resources. PackUpload retains original pack bytes and offsets
  * for deferred resolution; later consumers reread them instead of retaining this result's inflated content.
@@ -40,7 +41,7 @@ public final class PackObjectParser {
     private PackObjectParser() {
     }
 
-    public static Result parseEntry(BufferedByteInput source, long offset, WritableByteChannel rawSink)
+    public static Result parseEntry(BufferedByteInput source, long offset, PackByteStore byteStore)
             throws IOException {
         throw new UnsupportedOperationException("Pack entry parsing is not implemented");
     }

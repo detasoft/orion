@@ -12,6 +12,9 @@ import java.io.IOException;
  * records and waiting dependencies incrementally without keeping the entire index in memory.
  * storage returns the owning repository's borrowed GitStorageApi for reading published external bases.
  * Distinct attempts own isolated resources even if their eventual PackIds match.
+ * One PackByteStore supplies both the parser's append sink and positional reads of retained raw bytes.
+ * Parser and content handles borrow it; upload owns its lifetime. FileChannel and paths stay behind this
+ * interface, and reading accepted writes does not require a durability flush.
  *
  * <p>hasNext validates the pack header and tracks its declared entry count. next uses the static
  * PackObjectParser.parseEntry to consume an entry, then calls index.addEntry with its physical metadata.

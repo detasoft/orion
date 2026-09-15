@@ -11,6 +11,9 @@ import java.util.Objects;
  * another entry's future use. PackUpload.readObject reopens original pack bytes by offset when content is
  * needed again. Any required decompression and delta reconstruction are repeated; no consumer counting or
  * cross-entry content cache is required at this stage. Content is not separately persisted alongside the pack.
+ * Pack-backed reads borrow the same PackByteStore used by the parser for appends and use its positional read
+ * at indexed offsets. They do not close that store, change its append position, or require writes to be forced
+ * before reading. FileChannel remains hidden behind the shared byte-store interface.
  * GitStorageApi.readObject and GitPackObjectResolver.getObject return restored content with COMMIT, TREE,
  * BLOB, or TAG type. Only the resolver applies delta instructions; reading a delta payload does not restore it.
  * type, nonnegative size, and payload remain stable while open. Read offsets address inflated bytes, excluding

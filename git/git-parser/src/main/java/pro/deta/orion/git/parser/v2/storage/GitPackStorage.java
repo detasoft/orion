@@ -9,7 +9,8 @@ package pro.deta.orion.git.parser.v2.storage;
  * are retained; later protocol bytes remain available through the caller's source.
  * PackIndex accumulates provisional metadata, resolved ObjectIds, external bases, and waiting dependencies
  * directly in storage. It need not reside entirely in memory or share the byte store's backing format.
- * Each upload owns a PackByteStore: parsing borrows its WritableByteChannel view, while upload.readObject
+ * Each upload owns a PackByteStore: parsing borrows its combined append and positional-read interface.
+ * Content handles borrow that same store, while upload.readObject
  * opens retained entries by offset and exposes inflated payload through caller-owned ContentGitObjectRead handles.
  * Raw reads remain internal to storage. The initial implementation uses a private FileChannel behind
  * PackByteStore, with no public file
