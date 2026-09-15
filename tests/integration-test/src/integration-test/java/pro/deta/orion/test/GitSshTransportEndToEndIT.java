@@ -732,7 +732,7 @@ class GitSshTransportEndToEndIT {
                 awaitOccurrences(output, "orion: RUNNING", 2);
 
                 channel.sendWindowChange(20, 24, 0, 0);
-                send(clientInput, "repo\t\r");
+                send(clientInput, "repositori\t\r");
                 awaitContains(output, "orion\n");
                 send(clientInput, "touch " + marker + "; echo $(id) | cat >x `id`\r");
                 awaitContains(output, "UNKNOWN_COMMAND: Unknown command");

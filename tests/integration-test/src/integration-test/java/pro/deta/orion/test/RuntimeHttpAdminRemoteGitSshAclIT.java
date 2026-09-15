@@ -1,20 +1,22 @@
 package pro.deta.orion.test;
 
-import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.auth.AuthenticationResult;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.test.integration.git.GitSshTestServer;
 import pro.deta.orion.util.KeyUtils;
@@ -24,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,9 +39,14 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
+import static pro.deta.orion.test.RemoteBootstrapTestSupport.PASSWORD_ENV;
+import static pro.deta.orion.test.RemoteBootstrapTestSupport.materialBytes;
+import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
 
+/** Orion bootstraps over SSH from JGit, publishes an ACL update, and reloads it after restart. */
 class RuntimeHttpAdminRemoteGitSshAclIT {
-    private static final String BRANCH = "master";
+    private static final String REF = "refs/heads/main";
     private static final String ACL_FILE = "orion.xml";
     private static final String TEST_PASSWORD = "password";
     private static final String TEST_PASSWORD_HASH = new OrionPasswordHashingService()
@@ -49,91 +57,90 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
 
     @Test
     void postAccessControlUpdatesRemoteGitSshStorageAndSurvivesRestart() throws Exception {
-        Path orionRoot = tempDir.resolve("orion-remote-git");
+        var configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("target"));
+        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
+        var environment = Map.of(PASSWORD_ENV, "bootstrap-test-password");
+        byte[] material = materialBytes(configuration, environment);
         Path repositoriesRoot = tempDir.resolve("git-ssh");
         Path remoteAclRepository = repositoriesRoot.resolve("orion-acl.git");
         Files.createDirectories(repositoriesRoot);
-        GitRepositoryFixture.seedBareRepository(
-                remoteAclRepository,
-                tempDir.resolve("remote-acl-seed"),
-                BRANCH,
-                Map.of(ACL_FILE, serialize(defaultAccessControlWithUsers("remote-bootstrap-user"))));
+        GitRepositoryFixture.seedBareRepository(remoteAclRepository, tempDir.resolve("remote-acl-seed"), "main",
+                Map.of(ACL_FILE, serialize(OrionDocument.withAccessControl(
+                                defaultAccessControlWithUsers("remote-bootstrap-user"))),
+                        "material.p12", material));
 
         Path privateKey = copyPrivateKey("e2e/trusted-user-rsa.pem", tempDir.resolve("trusted-user-rsa.pem"));
         KeyPair userKey = KeyUtils.readRSAKeyPair(privateKey)
                 .valueOrFailure("Trusted user SSH key should load");
         KeyPair hostKey = KeyUtils.readKeyFromFile(copyPrivateKey(
-                        "e2e/server-rsa.pem",
-                        tempDir.resolve("server-rsa.pem")))
+                        "e2e/server-rsa.pem", tempDir.resolve("server-rsa.pem")))
                 .valueOrFailure("Server SSH key should load");
-
-        TestPorts.Batch gitPorts = TestPorts.nextBatch();
         try (GitSshTestServer gitServer = GitSshTestServer.start(
-                repositoriesRoot,
-                "git",
-                hostKey,
-                userKey.getPublic(),
-                gitPorts.ssh())) {
+                repositoriesRoot, "git", hostKey, userKey.getPublic(), TestPorts.nextBatch().ssh())) {
             Path knownHosts = tempDir.resolve("known_hosts");
             Files.writeString(knownHosts, gitServer.knownHostsLine() + "\n");
-            String privateKeyLocation = privateKey.toRealPath().toUri().toString();
-            String knownHostsLocation = knownHosts.toRealPath().toUri().toString();
-            OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot, config -> {
-                config.getBootstrap().getAccessControl()
-                        .setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));
-                config.getBootstrap().getAccessControl().setRef(BRANCH);
-                config.getBootstrap().getAccessControl().setPath(ACL_FILE);
-                config.getBootstrap().getAccessControl().getAuth()
-                        .put("credentialKind", "ssh-private-key");
-                config.getBootstrap().getAccessControl().getAuth()
-                        .put("credential", privateKeyLocation);
-                config.getBootstrap().getAccessControl().getAuth()
-                        .put("knownHosts", knownHostsLocation);
-            });
-
-            try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-                RuntimeHttpTestSupport.HttpResponse initialAcl = RuntimeHttpTestSupport.request(
-                        "GET",
-                        orion.httpUrl("/api/admin/acl"),
-                        TestBearerTokens.bearer(rootToken(orion)));
-                assertThat(initialAcl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
-                assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8)))
-                        .contains("root", "remote-bootstrap-user");
-                assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
-
-                RuntimeHttpTestSupport.HttpResponse update = RuntimeHttpTestSupport.request(
-                        "POST",
-                        orion.httpUrl("/api/admin/acl"),
-                        TestBearerTokens.bearer(rootToken(orion)),
-                        "application/xml",
-                        serialize(defaultAccessControlWithUsers("remote-git-updated-user")));
-
-                assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
-                assertUserAuthenticates(orion, "remote-git-updated-user");
+            var authentication = Map.of("credentialKind", "ssh-private-key",
+                    "credential", privateKey.toRealPath().toUri().toString(),
+                    "knownHosts", knownHosts.toRealPath().toUri().toString());
+            for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getAccessControl(),
+                    configuration.getBootstrap().getKeyMaterial())) {
+                source.setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));
+                source.setRef(REF);
+                source.setAuth(authentication);
             }
 
-            AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));
-            assertThat(userIds(savedAcl)).contains("root", "remote-git-updated-user");
-            assertThat(userIds(savedAcl)).doesNotContain("remote-bootstrap-user");
+            var http = configuration.getTransport().getHttp();
+            URL aclUrl = new URL("http", http.getAddress(), http.getPort(), "/api/admin/acl");
+            URL tokenUrl = new URL("http", http.getAddress(), http.getPort(), "/api/admin/token");
+            for (int launch = 0; launch < 2; launch++) {
+                try (var bootstrap = BootstrapContext.open(configuration, environment)) {
+                    var component = runtimeComponent(configuration, bootstrap);
+                    var lifecycle = component.orionApplicationLifecycle();
+                    try {
+                        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                        lifecycle.waitForStarting();
+                        String authorization = TestBearerTokens.bearer(rootToken(tokenUrl));
+                        var initialAcl = RuntimeHttpTestSupport.request("GET", aclUrl, authorization);
+                        assertThat(initialAcl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+                        String expectedUser = launch == 0 ? "remote-bootstrap-user" : "remote-git-updated-user";
+                        assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8)))
+                                .contains("root", expectedUser);
+                        assertUserAuthenticates(component.orionAccessControlService(), expectedUser);
+                        String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                                .repositoryName().orElseThrow();
+                        assertThat(bootstrap.repositoryProvider().repositoryNames()).doesNotContain(cache);
 
-            try (RuntimeHttpTestSupport.StartedOrion restarted = RuntimeHttpTestSupport.start(configuration)) {
-                assertUserAuthenticates(restarted, "remote-git-updated-user");
-                RuntimeHttpTestSupport.HttpResponse aclAfterRestart = RuntimeHttpTestSupport.request(
-                        "GET",
-                        restarted.httpUrl("/api/admin/acl"),
-                        TestBearerTokens.bearer(rootToken(restarted)));
-                assertThat(userIds(aclAfterRestart.body().getBytes(StandardCharsets.UTF_8)))
-                        .contains("root", "remote-git-updated-user");
+                        if (launch == 0) {
+                            var current = new XmlService().deserializeDocument(new ByteArrayInputStream(
+                                    initialAcl.body().getBytes(StandardCharsets.UTF_8)));
+                            var updated = current.replaceAccessControl(
+                                    defaultAccessControlWithUsers("remote-git-updated-user"));
+                            byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
+                            var update = RuntimeHttpTestSupport.request("POST", aclUrl, authorization,
+                                    "application/xml", serialize(updated));
+                            assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+                            assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
+                            assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
+                                    .isEqualTo(materialBeforeUpdate);
+                        } else {
+                            assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8)))
+                                    .doesNotContain("remote-bootstrap-user");
+                        }
+                    } finally {
+                        lifecycle.shutdownApplication();
+                        lifecycle.waitForShutdown();
+                    }
+                }
+                assertThat(userIds(readFileFromRepository(remoteAclRepository, ACL_FILE)))
+                        .contains("root", "remote-git-updated-user")
+                        .doesNotContain("remote-bootstrap-user");
             }
         }
     }
 
-    private static String rootToken(RuntimeHttpTestSupport.StartedOrion orion) throws IOException {
-        return TestBearerTokens.issueToken(
-                orion.httpUrl("/api/admin/token"),
-                "root",
-                TEST_PASSWORD.toCharArray(),
-                600);
+    private static String rootToken(URL tokenUrl) throws IOException {
+        return TestBearerTokens.issueToken(tokenUrl, "root", TEST_PASSWORD.toCharArray(), 600);
     }
 
     private static AccessControl defaultAccessControlWithUsers(String... extraUserIds) {
@@ -147,22 +154,15 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
         return draft.toAccessControl();
     }
 
-    private static byte[] serialize(AccessControl accessControl) throws IOException {
+    private static byte[] serialize(OrionDocument document) throws IOException {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serialize(accessControl, output);
+            new XmlService().serializeDocument(document, output);
             return output.toByteArray();
         }
     }
 
-    private static AccessControl deserialize(byte[] content) throws IOException {
-        return new XmlService().deserialize(new ByteArrayInputStream(content));
-    }
-
     private static List<String> userIds(byte[] content) throws IOException {
-        return userIds(deserialize(content));
-    }
-
-    private static List<String> userIds(AccessControl accessControl) {
+        var accessControl = new XmlService().deserialize(new ByteArrayInputStream(content));
         List<String> userIds = new ArrayList<>();
         for (AccessControl.User user : accessControl.getUsers()) {
             userIds.add(user.getId());
@@ -170,17 +170,15 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
         return userIds;
     }
 
-    private static void assertUserAuthenticates(RuntimeHttpTestSupport.StartedOrion orion, String userId) {
-        assertThat(orion.accessControlService().authenticateUser(
-                userId,
-                TEST_PASSWORD.getBytes(StandardCharsets.UTF_8)))
+    private static void assertUserAuthenticates(OrionAccessControlService accessControl, String userId) {
+        assertThat(accessControl.authenticateUser(userId, TEST_PASSWORD.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(AuthenticationResult.Success.class);
     }
 
     private static byte[] readFileFromRepository(Path repositoryPath, String filePath) throws IOException {
         try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile());
              RevWalk revWalk = new RevWalk(repository)) {
-            ObjectId head = repository.resolve(Constants.R_HEADS + BRANCH);
+            var head = repository.resolve(REF);
             assertThat(head).isNotNull();
             var commit = revWalk.parseCommit(head);
             try (TreeWalk treeWalk = TreeWalk.forPath(repository, filePath, commit.getTree())) {

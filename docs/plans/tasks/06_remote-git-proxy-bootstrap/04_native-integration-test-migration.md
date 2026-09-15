@@ -3,15 +3,18 @@
 Status: todo
 Depends on: completed bootstrap runtime boundaries and native transport acceptance (`79dd66b4`),
 completed persistent proxy adoption and credential activation (`a79b1f2d`, `8750c1ee`),
-[06/05](05_git-configuration-integration-fixtures.md).
+completed remote-bootstrap fixtures (`RemoteBootstrapTestSupport`, verified by
+`RemoteBootstrapConfigurationIT` and full `mvn verify -Pdev -T 4` on 2026-09-15).
 
 ## Requirements and design
 
 Verify remote bootstrap against a second local Orion runtime exposing native
-HTTP and SSH Git. Share deterministic fixture support from 06/05. Tests must
+HTTP and SSH Git. Reuse `RemoteBootstrapTestSupport`. Tests must
 assert public APIs, snapshots, and observable refs rather than JGit storage
 layout, a `config` file, an assumed `master` branch, or `jgit-runtime` lifecycle.
 Proxy UI and background GitHub mirroring are not prerequisites for these tests.
+Preserve the separate Orion/JGit SSH interoperability coverage in
+`RuntimeHttpAdminRemoteGitSshAclIT`, including the JGit upstream and repository assertions.
 
 ## Implementation plan
 
