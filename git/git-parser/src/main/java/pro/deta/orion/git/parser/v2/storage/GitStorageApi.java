@@ -28,6 +28,10 @@ import java.util.Optional;
  * are IOException and release only resources owned by that attempt, preserving other operations' data.
  * Pack reads return caller-owned PackRead handles that keep original pack bytes available until closed.
  * Absence is Optional.empty(); opening or reading failures are IOException rather than absence.
+ * openPack reads either quarantined or published bytes without changing publication state. It is used inside
+ * resolution, not as a separate push lifecycle step. Only published packs contribute objects to readObject,
+ * findPacksByObjectIds, and publishedPacks; outgoing pack selection must respect that publication boundary.
+ * PushCommand coordinates quarantinePack(source), ingestor.resolvePack(index), and publishPack(index.packId()).
  *
  * <p>Preliminary methods:
  * <ul>
@@ -36,12 +40,10 @@ import java.util.Optional;
  *       and return one RefUpdateResult containing the original update per input, in request order.</li>
  *   <li>{@code quarantinePack(BufferedByteInput source)} - store one pack and return its PackScanIndex
  *       for subsequent resolution by the calling operation.</li>
- *   <li>{@code openQuarantinedPack(packId)} - open original quarantined pack bytes for positional reads
- *       during resolution.</li>
+ *   <li>{@code openPack(packId)} - open original quarantined or published pack bytes as a PackRead.</li>
  *   <li>{@code publishPack(PackId packId)} - publish a quarantined pack after object resolution and final
  *       index preparation; callers pass no upload identifiers, files, or paths.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
- *   <li>{@code openPublishedPack(packId)} - open original published pack bytes as a PackRead.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
  *   <li>{@code readObject(objectId)} - open an ObjectRead owned and closed by the caller, or return absence;
  *       opening and reading failures are IOException, not absence.</li>
@@ -55,12 +57,8 @@ public final class GitStorageApi {
         throw new UnsupportedOperationException("Pack quarantine is not implemented");
     }
 
-    public Optional<PackRead> openQuarantinedPack(PackId packId) throws IOException {
-        throw new UnsupportedOperationException("Quarantined pack reads are not implemented");
-    }
-
-    public Optional<PackRead> openPublishedPack(PackId packId) throws IOException {
-        throw new UnsupportedOperationException("Published pack reads are not implemented");
+    public Optional<PackRead> openPack(PackId packId) throws IOException {
+        throw new UnsupportedOperationException("Pack reads are not implemented");
     }
 
     public void publishPack(PackId packId) throws IOException {
