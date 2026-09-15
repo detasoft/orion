@@ -15,7 +15,8 @@ import java.util.Optional;
  * writes within the upload; unpublished records never contribute to repository-wide object lookup.
  *
  * <p>addEntry creates a provisional record keyed by original offset with physical metadata and base links.
- * Upload calls it before returning each entry, including full objects. Every record starts unresolved.
+ * Upload calls it before returning each parsed result. Every record starts unresolved; upload immediately
+ * completes full objects through addObject using HashedGitObjectRead. Delta entries wait for the resolver.
  * addObject completes that same record with ObjectId, logical type, and restored content size; the offset
  * already belongs to entry. Allowed logical types are COMMIT, TREE, BLOB, and TAG. Exact repeats are harmless;
  * conflicting data or completing an unregistered entry fails. Records retain all ObjectIds needed for the
@@ -31,7 +32,7 @@ import java.util.Optional;
  * It neither removes the entry nor materializes all dependents. addObject removes only the completed entry's
  * unresolved status and its waiting dependency; its own dependents remain discoverable. Repeating lookup
  * after successful resolution walks whole chains and branches. Failed attempts leave waiting state intact.
- * hasUnresolved reports whether any provisional record remains, including an unresolved full object.
+ * hasUnresolved reports whether any provisional record remains, including an incompletely registered full object.
  * Commit uses this query without retrieving a list of unfinished chains. addExternalBaseId accumulates
  * confirmed external dependencies without duplicates or persisted externalPackIds.
  *

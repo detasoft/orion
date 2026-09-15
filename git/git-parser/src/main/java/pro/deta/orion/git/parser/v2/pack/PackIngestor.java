@@ -4,13 +4,15 @@ import java.io.IOException;
 
 /**
  * Coordinates pack resolution for PushCommand through PackUpload.
- * The loop is while (upload.hasNext()) { resolver.attemptResolve(upload.next()); }.
+ * While upload.hasNext(), obtain upload.next(), delegate the parsed result to resolver.attemptResolve,
+ * and close result.object() in finally without masking a primary failure. This closes a read handle, not
+ * upload-owned backing content needed by deferred chains. Hashed results have no content resources to release.
  * This is a consumer of storage and parsing, not part of either API or a required callback implementation.
  * Create and close a GitPackObjectResolver for this upload. Delegate every entry, including full objects,
- * to attemptResolve(entry), which registers resolved results and follows any chains they unblock.
- * This ingestor only handles metadata: it never reads, decompresses, or hashes payload bytes and never
- * applies delta instructions. PackUpload owns parsing and retaining bytes; the resolver owns reconstruction,
- * hashing, index registration, and base-content reads. Upload retains content; its storage-provided PackIndex
+ * to attemptResolve(result), which uses full-object hashes or resolves delta content and follows waiting chains.
+ * This ingestor never reads, decompresses, or hashes payload bytes and never applies delta instructions.
+ * PackUpload owns parsing, full-object hashing, and retaining bytes; the resolver owns reconstruction,
+ * hashing reconstructed results, index completion, and base reads. Upload's storage-provided PackIndex
  * holds records and waiting chains. This ingestor keeps no second chain graph or payload cache. getObject(id)
  * provides content to other consumers; the ingestion loop does not need to open or read those handles.
  * upload.next parses and retains each complete physical entry with bounded buffers and registers its metadata

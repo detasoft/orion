@@ -6,8 +6,9 @@ package pro.deta.orion.git.parser.v2.command;
  * the session and reader do not manage ingestion state or storage resources.
  *
  * <p>Call storage.uploadNewPack(source), then pass the returned upload to ingestor.resolvePack. Iteration
- * retains original bytes in the upload's internal sink. The ingestor delegates reconstruction, hashing,
- * and index registration to its resolver and records confirmed external bases without reading payloads.
+ * retains original bytes in the upload's internal sink and hashes full objects while parsing. The ingestor
+ * delegates delta reconstruction, result hashing, and index completion to its resolver, records confirmed
+ * external bases, and closes each parsed result without reading payloads itself.
  * The ingestor obtains upload.packId() and calls upload.commit(packId), which checks the index for unresolved
  * entries before publishing the pack and its accumulated index.
  * Command policy and ref checks remain here. Always call upload.rollback() in finally to release resources

@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
@@ -14,9 +14,13 @@ import java.io.IOException;
  * Distinct attempts own isolated resources even if their eventual PackIds match.
  *
  * <p>hasNext validates the pack header and tracks its declared entry count. next uses the static
- * PackObjectParser.parseEntry to consume one complete entry with bounded buffers into the internal raw sink,
- * then calls index.addEntry before returning metadata. Even full objects initially enter the index as
- * unresolved. Sink or index failures stop the attempt and prevent successful completion.
+ * PackObjectParser.parseEntry to consume an entry, then calls index.addEntry with its physical metadata.
+ * Full objects yield HashedGitObjectRead; upload completes their records through index.addObject immediately.
+ * Delta results carry ContentGitObjectRead; upload adopts their backing payload into its storage for later
+ * reconstruction, without requiring an in-memory map of all payloads. Delta index records remain unresolved.
+ * next returns the parsed Result after these steps. The caller closes result.object() after use; upload-owned
+ * backing bytes and index records remain available. Sink, retention, or index failures stop the attempt,
+ * release any unreturned read handle, and prevent successful completion.
  * next never returns null and throws NoSuchElementException after successful exhaustion. Repeated hasNext
  * calls do not consume another entry. After the declared entries, hasNext verifies the checksum before
  * returning false. Truncation and malformed input are IOException, not normal exhaustion.
@@ -28,15 +32,20 @@ import java.io.IOException;
  * During the first pass, each original byte block is both retained and fed once to a streaming digest
  * accumulator, such as MessageDigest.update. The trailing checksum is retained but excluded from update;
  * compare it with the final digest to obtain PackId. Neither hashing nor entry scanning loads the whole pack
- * into memory. Inflated payload is inspected with bounded buffers to locate and validate zlib boundaries,
- * then discarded; first-pass index records contain offsets, types, lengths, and base references.
+ * into memory. Inflated payload is inspected with bounded buffers to locate and validate zlib boundaries.
+ * For full objects, a separate digest includes the canonical object header and inflated bytes to compute
+ * ObjectId before discarding them. Delta instructions are not hashed as objects. Index records contain
+ * offsets, types, lengths, base references, and any ObjectId already computed for a full object.
  *
- * <p>readObject(entryOffset) opens a caller-owned GitObjectRead for an indexed entry's inflated payload:
+ * <p>readObject(entryOffset) opens a caller-owned ContentGitObjectRead for an indexed entry's inflated payload:
  * object content or delta instructions. The absolute offset identifies an entry already returned by next,
  * whose original bytes are fully retained. A negative or unknown entry offset fails with IllegalArgumentException.
  * The handle exposes entry.type and entry.inflatedSize; its own read offsets address inflated payload bytes.
  * Reads decompress retained data without rereading transport input or advancing iteration. Opening the handle
- * does not require loading the whole payload; content is read as needed through the GitObjectRead contract.
+ * does not require loading the whole payload; content is read as needed through ContentGitObjectRead.
+ * Full objects whose first-pass result retained only a hash can be reopened here when needed as bases.
+ * Retained delta payload can be reused. Neither this read nor the static parser applies deltas; delta handles
+ * expose instructions even when the index knows the final ObjectId.
  * Close handles before rollback; closing a handle does not close upload. Access after rollback fails with
  * ClosedChannelException. Reconstruction and hashing belong to the resolver, which follows indexed offsets,
  * opens reads for required entries and bases, and records computed ObjectIds. The ingestor reads no payloads.
@@ -63,11 +72,11 @@ public interface PackUpload {
 
     boolean hasNext() throws IOException;
 
-    PackObjectParser.Entry next() throws IOException;
+    PackObjectParser.Result next() throws IOException;
 
     PackId packId();
 
-    GitObjectRead readObject(long entryOffset) throws IOException;
+    ContentGitObjectRead readObject(long entryOffset) throws IOException;
 
     void commit(PackId packId) throws IOException;
 

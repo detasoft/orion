@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
@@ -31,7 +31,7 @@ import java.util.Optional;
  * Storage never calls back into the resolver. commit and rollback belong to upload and never close source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
- * GitObjectRead handles belong to the caller and expose restored content with only COMMIT, TREE, BLOB, or TAG
+ * ContentGitObjectRead handles belong to the caller and expose restored content with only COMMIT, TREE, BLOB, or TAG
  * types. Absence is Optional.empty(), while I/O failures remain errors.
  * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
  * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
@@ -45,7 +45,7 @@ import java.util.Optional;
  *       containing the original update per input, in request order.</li>
  *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing requested objects.</li>
- *   <li>{@code readObject(objectId)} - open resolved object content as a caller-owned GitObjectRead.</li>
+ *   <li>{@code readObject(objectId)} - open resolved object content as a caller-owned ContentGitObjectRead.</li>
  *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, size, and a bounded prefix.</li>
  * </ul>
  * Methods remain placeholders. Object resolution and operation-specific policy belong to the caller;
@@ -56,7 +56,7 @@ public final class GitStorageApi {
         throw new UnsupportedOperationException("Pack upload is not implemented");
     }
 
-    public Optional<GitObjectRead> readObject(ObjectId objectId) throws IOException {
+    public Optional<ContentGitObjectRead> readObject(ObjectId objectId) throws IOException {
         throw new UnsupportedOperationException("Object reads are not implemented");
     }
 
