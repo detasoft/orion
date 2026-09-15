@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
@@ -114,6 +115,21 @@ class NativeBootstrapGitFetcherTest {
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during complete object validation");
         assertThat(repository.refs()).isEmpty();
+    }
+
+    @Test
+    void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
+        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("proxy").valueOrFailure("create proxy");
+        repository.saveFiles("refs/heads/main", Map.of("orion.xml", new byte[]{1}), "local", GitCommitAuthor.EMPTY);
+        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", new byte[]{2}), "remote", GitCommitAuthor.EMPTY);
+        Map<String, String> before = repository.refs();
+
+        assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(repository, new LooseObjectStore(),
+                new LooseRefStore.Update("refs/heads/main", "1".repeat(40), before.get("refs/heads/incoming"))))
+                .isInstanceOfSatisfying(BootstrapGitProxyException.class, failure ->
+                        assertThat(failure.status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT));
+        assertThat(repository.refs()).isEqualTo(before);
     }
 
     private Upstream upstream(String content) throws Exception {

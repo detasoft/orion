@@ -37,7 +37,10 @@ final class NativeFetchedRefPublisher {
         if (!results.equals(List.of(RefUpdateResult.CREATED))
                 && !results.equals(List.of(RefUpdateResult.FAST_FORWARD))
                 && !results.equals(List.of(RefUpdateResult.NO_OP))) {
-            throw new BootstrapGitProxyException("local ref publication");
+            throw new BootstrapGitProxyException("local ref publication",
+                    results.contains(RefUpdateResult.STALE)
+                            ? ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT
+                            : ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
         }
     }
 }

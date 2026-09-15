@@ -1,6 +1,10 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.git.client.GitClientFailure;
+import pro.deta.orion.git.client.GitClientTransportException;
+import java.util.concurrent.atomic.AtomicReference;
+import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
@@ -36,6 +40,66 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
+    @Test
+    void observesActiveBindingsWithoutRefreshingOrPublishingAndTracksConfigurationIdentity() {
+        AtomicInteger refreshes = new AtomicInteger();
+        AtomicInteger pushes = new AtomicInteger();
+        var provider = provider(refreshes, pushes);
+        OrionDocument document = proxyDocument("configuration", "file:///upstream.git");
+        GitProxyBinding binding = document.system().proxies().getFirst();
+        assertThat(provider.syncObservation(binding).status()).isEqualTo(NOT_CHECKED);
+        provider.activate(() -> document, secrets(document));
+        refreshes.set(0);
+
+        var observation = provider.syncObservation(binding);
+
+        assertThat(observation.status()).isEqualTo(SUCCESS);
+        assertThat(observation.observedAt()).isNotNull();
+        assertThat(provider.syncObservation(binding)).isEqualTo(observation);
+        assertThat(provider.syncObservation(
+                proxyDocument("configuration", "file:///other.git").system().proxies().getFirst()).status())
+                .isEqualTo(NOT_CHECKED);
+        assertThat(refreshes).hasValue(0);
+        assertThat(pushes).hasValue(0);
+    }
+
+    @Test
+    void recordsSafeNativeAuthenticationFailureThenRecovery() {
+        var failure = new AtomicReference<GitClientFailure>();
+        var provider = new ProxyAwareNativeGitRepositoryProvider(
+                new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> {
+                    if (failure.get() != null) {
+                        new NativeBootstrapGitFetcher().fetch(location, (service, uri, options) -> {
+                            throw new GitClientTransportException(
+                                    failure.get().kind(), failure.get().retryable(), failure.get().message());
+                        }, repository);
+                    }
+                }, (location, transport, repository, received, updates, atomic) -> List.of());
+        OrionDocument document = proxyDocument("configuration", "file:///upstream.git");
+        GitProxyBinding binding = document.system().proxies().getFirst();
+        provider.activate(() -> document, secrets(document));
+        failure.set(new GitClientFailure(GitClientFailure.Kind.AUTHENTICATION_FAILED,
+                GitClientFailure.Phase.OPEN, false, "private upstream response with secret", null));
+        String internal = BootstrapGitLocation.persistent(binding).proxyName();
+
+        assertThatThrownBy(() -> provider.openForRead(internal))
+                .hasMessageNotContaining("secret").hasNoCause();
+        assertThat(provider.syncObservation(binding).status()).isEqualTo(AUTHENTICATION_FAILED);
+        var failedAt = provider.syncObservation(binding).observedAt();
+        assertThat(failedAt).isNotNull();
+
+        failure.set(new GitClientFailure(GitClientFailure.Kind.TIMEOUT,
+                GitClientFailure.Phase.OPEN, true, "private timeout details", null));
+        assertThatThrownBy(() -> provider.openForRead(internal)).hasMessageNotContaining("private");
+        assertThat(provider.syncObservation(binding).status()).isEqualTo(UNAVAILABLE);
+
+        failure.set(null);
+        provider.openForRead(internal).valueOrFailure("recovered");
+        assertThat(provider.syncObservation(binding).status()).isEqualTo(SUCCESS);
+        assertThat(provider.syncObservation(binding).observedAt()).isAfterOrEqualTo(failedAt);
+    }
+
     @Test
     void passesPreparedPackUnchangedToTheUpstreamPusher() throws Exception {
         java.util.ArrayList<byte[]> forwarded = new java.util.ArrayList<>();

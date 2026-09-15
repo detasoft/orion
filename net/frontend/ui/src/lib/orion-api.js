@@ -80,6 +80,9 @@ export function createOrionClient(options = {}) {
     lifecycleState() {
       return request('/api/admin/lifecycle/state')
     },
+    remoteAliases() {
+      return request('/api/admin/proxies')
+    },
     repositories() {
       return request('/api/admin/repositories')
     },

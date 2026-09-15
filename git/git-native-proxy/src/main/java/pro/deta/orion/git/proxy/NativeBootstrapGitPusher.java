@@ -51,7 +51,8 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
                 OPTIONS,
                 request);
         if (!(result instanceof GitClientResult.Success<GitReceivePackResult> success)) {
-            throw new BootstrapGitProxyException("upstream ref publication");
+            throw new BootstrapGitProxyException("upstream ref publication",
+                    ((GitClientResult.Failed<GitReceivePackResult>) result).failure());
         }
         return accepted(updates, success.value());
     }

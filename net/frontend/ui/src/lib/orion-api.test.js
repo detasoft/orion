@@ -42,6 +42,16 @@ describe('createOrionClient', () => {
     expect(response.bodyUsed).toBe(false)
   })
 
+  it('loads remote aliases through the authenticated Admin API', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('{"aliases":[]}', {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    expect(await client.remoteAliases()).toEqual({ aliases: [] })
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/admin/proxies')
+    expect(fetchImpl.mock.calls[0][1].headers.get('Authorization')).toBe('Bearer admin-token')
+  })
+
   it('loads repository discovery from the Admin API', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ repositories: [] }), {
       status: 200,

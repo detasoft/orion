@@ -6,6 +6,7 @@ const client = {
   createOrUpdateUser: vi.fn(),
   lifecycleState: vi.fn(),
   repositories: vi.fn(),
+  remoteAliases: vi.fn(),
   routes: vi.fn(),
   transports: vi.fn(),
 }
@@ -39,6 +40,7 @@ beforeEach(() => {
   })
   client.lifecycleState.mockResolvedValue('RUNNING')
   client.repositories.mockResolvedValue({ repositories: [] })
+  client.remoteAliases.mockResolvedValue({ aliases: [] })
   client.transports.mockResolvedValue({
     http: { enabled: true, url: 'http://localhost:8000' },
     https: { enabled: true, url: 'https://localhost:8443' },
@@ -49,6 +51,37 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('offers remote aliases separately and requires a connection', async () => {
+    const wrapper = mountApp()
+    const aliases = wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Remote aliases')
+
+    expect(aliases).toBeDefined()
+    await aliases.trigger('click')
+    expect(wrapper.text()).toContain('Connect to Orion first')
+    expect(client.remoteAliases).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('loads the Remote aliases section after an authenticated connection', async () => {
+    client.remoteAliases.mockResolvedValue({ aliases: [{
+      scope: 'system', alias: 'configuration', upstream: 'https://git.example/config.git',
+      transport: 'https', ref: 'refs/heads/main', endpoint: null, status: 'success', observedAt: null,
+    }] })
+    const wrapper = mountApp()
+    await connect(wrapper)
+    const aliases = wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Remote aliases')
+    await aliases.trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+
+    expect(client.remoteAliases).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('configuration')
+    expect(wrapper.text()).toContain('No public Git endpoint')
+    wrapper.unmount()
+  })
+
   it('offers the terminal and requires a connection before opening a session', async () => {
     const wrapper = mountApp()
     const terminal = wrapper.findAll('.primary-nav .nav-item')

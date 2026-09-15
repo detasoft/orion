@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -199,6 +200,19 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             throw new IllegalStateException("Bootstrap source has not been resolved: " + sourceId);
         }
         return repositoryName;
+    }
+
+    public SyncObservation syncObservation(GitProxyBinding binding) {
+        Objects.requireNonNull(binding, "proxy binding");
+        BootstrapGitRuntimeProxy proxy = activeBindings.get(BootstrapGitLocation.persistent(binding).proxyName());
+        return proxy == null ? new SyncObservation(SyncStatus.NOT_CHECKED, null) : proxy.syncObservation();
+    }
+
+    public record SyncObservation(SyncStatus status, Instant observedAt) {
+    }
+
+    public enum SyncStatus {
+        NOT_CHECKED, SUCCESS, UNAVAILABLE, AUTHENTICATION_FAILED, CONFLICT
     }
 
     public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets) {

@@ -4,11 +4,13 @@ import AppIcon from './components/AppIcon.vue'
 import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
 
+const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAliases.vue'))
 const SessionTerminal = defineAsyncComponent(() => import('./components/SessionTerminal.vue'))
 
 const navItems = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
   { id: 'repositories', label: 'Repositories', icon: 'repository' },
+  { id: 'remote-aliases', label: 'Remote aliases', icon: 'git-branch' },
   { id: 'people', label: 'People', icon: 'users' },
   { id: 'activity', label: 'Activity', icon: 'activity' },
   { id: 'terminal', label: 'Terminal', icon: 'terminal' },
@@ -39,6 +41,7 @@ let draftConnectionAttempt = 0
 const titles = {
   overview: ['Overview', 'A quiet view of everything happening in Orion.'],
   repositories: ['Repositories', 'Browse and manage source repositories.'],
+  'remote-aliases': ['Remote aliases', 'Inspect upstream-backed Git access paths.'],
   people: ['People', 'Manage members and repository access.'],
   activity: ['Activity', 'The latest changes across your server.'],
   terminal: ['Terminal', 'Session history and live terminal output.'],
@@ -506,6 +509,18 @@ onMounted(() => {
             </div>
           </div>
         </section>
+
+        <template v-else-if="activeView === 'remote-aliases'">
+          <RemoteAliases
+            v-if="isConnected"
+            :token="settings.token"
+            @authorization-error="clearExpiredCredentials"
+          />
+          <div v-else class="empty-state panel">
+            <h3>Connect to Orion first</h3>
+            <p>Open Settings to inspect remote aliases.</p>
+          </div>
+        </template>
 
         <section v-else-if="activeView === 'people'" class="people-grid">
           <div class="empty-state panel">

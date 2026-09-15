@@ -1,6 +1,10 @@
 package pro.deta.orion.git.proxy;
 
 import org.eclipse.jgit.api.Git;
+import pro.deta.orion.git.client.GitClientFailure;
+import pro.deta.orion.git.client.GitClientTransportException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
 import org.junit.jupiter.api.Test;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -70,6 +74,8 @@ class NativeBootstrapGitPusherTest {
                 true);
 
         assertThat(results).doesNotContain(RefUpdateResult.STALE);
+        assertThat(proxy.syncObservation().status()).isEqualTo(SUCCESS);
+        assertThat(proxy.syncObservation().observedAt()).isNotNull();
         assertThat(rebuiltPacks).hasValue(0);
         try (Git bareGit = Git.open(upstream.bare().toFile())) {
             assertThat(repository.refs().get(location.refName()))
@@ -108,9 +114,35 @@ class NativeBootstrapGitPusherTest {
                 true);
 
         assertThat(accepted).containsExactly(false);
+        var proxy = new BootstrapGitRuntimeProxy(location, repository,
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
+        assertThat(proxy.publish(received, update.refUpdates(), true)).containsExactly(RefUpdateResult.STALE);
+        assertThat(proxy.syncObservation().status()).isEqualTo(CONFLICT);
         assertThat(repository.refs()).containsEntry(location.refName(), localOldId);
         assertThat(cloneContent(upstream.bare(), "conflict-checkout")).isEqualTo("upstream change");
         upstream.git().close();
+    }
+
+    @Test
+    void runtimeRecordsNativePushAuthenticationFailureWithoutKeepingTheRemoteMessage() throws Exception {
+        BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
+        NativeGitRepository repository = repository(location);
+        NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
+                Map.of("orion.xml", new byte[]{1}), "update", GitCommitAuthor.EMPTY);
+        var proxy = new BootstrapGitRuntimeProxy(location, repository,
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                (selected, transport, target) -> { },
+                (selected, transport, target, received, updates, atomic) -> new NativeBootstrapGitPusher().push(
+                        selected, (service, uri, options) -> {
+                            throw new GitClientTransportException(GitClientFailure.Kind.AUTHENTICATION_FAILED,
+                                    false, "upstream-secret-response");
+                        }, target, received, updates, atomic));
+
+        assertThatThrownBy(() -> proxy.publish(ingest(repository, update), update.refUpdates(), true))
+                .hasMessageNotContaining("upstream-secret-response").hasNoCause();
+        assertThat(proxy.syncObservation().status()).isEqualTo(AUTHENTICATION_FAILED);
+        assertThat(proxy.syncObservation().observedAt()).isNotNull();
     }
 
     @Test

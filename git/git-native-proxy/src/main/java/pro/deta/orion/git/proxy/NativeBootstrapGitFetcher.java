@@ -93,7 +93,7 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
         if (result instanceof GitClientResult.Success<T> success) {
             return success.value();
         }
-        throw new BootstrapGitProxyException(stage);
+        throw new BootstrapGitProxyException(stage, ((GitClientResult.Failed<T>) result).failure());
     }
 
     private static final class IngestionOutput implements BufferedByteOutput {

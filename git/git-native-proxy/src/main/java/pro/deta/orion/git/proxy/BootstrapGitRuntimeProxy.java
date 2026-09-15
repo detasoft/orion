@@ -6,7 +6,10 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -19,6 +22,7 @@ final class BootstrapGitRuntimeProxy {
     private final BootstrapGitTransportFactory transportFactory;
     private final BootstrapGitFetcher fetcher;
     private final BootstrapGitPusher pusher;
+    private volatile SyncObservation observation = new SyncObservation(SyncStatus.NOT_CHECKED, null);
 
     BootstrapGitRuntimeProxy(
             BootstrapGitLocation location,
@@ -33,20 +37,48 @@ final class BootstrapGitRuntimeProxy {
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
 
+    SyncObservation syncObservation() {
+        return observation;
+    }
+
+    private void observed(SyncStatus status) {
+        observation = new SyncObservation(status, Instant.now());
+    }
+
     public synchronized void refresh() {
         try {
             transportFactory.withTransport(location, (selected, transport) -> {
                 fetcher.fetch(selected, transport, repository);
                 return null;
             });
+            observed(SyncStatus.SUCCESS);
         } catch (BootstrapGitProxyException error) {
+            observed(error.status());
             throw error;
         } catch (Exception error) {
+            observed(SyncStatus.UNAVAILABLE);
             throw new BootstrapGitProxyException("upstream synchronization");
         }
     }
 
     public synchronized List<RefUpdateResult> publish(
+            PackIngestionResult.Complete received,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) {
+        try {
+            List<RefUpdateResult> results = publishUpdates(received, updates, atomic);
+            observed(results.contains(RefUpdateResult.STALE) ? SyncStatus.CONFLICT : SyncStatus.SUCCESS);
+            return results;
+        } catch (BootstrapGitProxyException error) {
+            observed(error.status());
+            throw error;
+        } catch (RuntimeException error) {
+            observed(SyncStatus.UNAVAILABLE);
+            throw error;
+        }
+    }
+
+    private List<RefUpdateResult> publishUpdates(
             PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
