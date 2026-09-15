@@ -54,8 +54,9 @@ import java.util.Optional;
  * A missing REF base may resolve later in the same pack. Using a published copy does not by itself prove
  * that the base must be recorded as external; final classification accounts for the completed upload index.
  * Returned handles retain the resources needed to read their content until closed. Callers close those
- * handles before closing this resolver. The ingestor supplies newly encountered entries and records confirmed
- * external dependencies after resolution. This class owns neither retained pending state nor commit or rollback.
+ * handles before closing this resolver. The ingestor supplies newly encountered entries; the index determines
+ * its externalBaseIds list during commit. Neither resolver nor ingestor separately records external bases.
+ * This class owns neither retained pending state nor commit or rollback.
  *
  * <p>Preliminary methods: attemptResolve(result) resolves an entry and unblocked chains; getObject(objectId)
  * opens restored content; close() releases temporary resolution resources and owned base reads. These methods

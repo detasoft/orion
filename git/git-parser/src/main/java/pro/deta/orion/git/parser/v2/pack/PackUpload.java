@@ -62,9 +62,10 @@ import java.util.Objects;
  * <p>commit(packId) requires completed iteration and a matching verified checksum, even for an empty pack.
  * It checks index.hasUnresolved itself and refuses publication with IOException when any unfinished record
  * or chain remains. Index lookup errors also prevent publication; no separate ingestor check is required.
- * Confirmed external base IDs must have been recorded before commit. Storage finishes pending byte and index
- * writes, preserves external bases, and durably publishes the association between this pack and its already
- * populated index under the PackId lock. No complete index collection is transferred from caller memory.
+ * During commit the index itself determines and stores its externalBaseIds list from completed records.
+ * Storage finishes pending byte and index writes, preserves external bases, and durably publishes this pack
+ * together with its populated index under the PackId lock. No complete index collection is transferred
+ * from caller memory.
  * Temporary waiting structures may then be removed; completed index records remain published.
  * Mutations after commit are rejected. An I/O failure during publication can have an uncertain outcome;
  * retries inspect durable publication metadata. Validation rejection publishes nothing.

@@ -26,16 +26,14 @@ import java.util.Objects;
  * triggers dependent entries inside the same attemptResolve call, so one input entry can complete several
  * waiting chains. The upload indexes waiting dependencies by base ObjectId or absolute entry offset;
  * the ingestor neither scans all unresolved entries after each object nor manages chain removal.
- * Missing bases are deferred dependencies, not yet evidence of an invalid pack. Record confirmed external
- * dependencies through upload.index().addExternalBaseId after iteration. After hasNext returns false, obtain
+ * Missing bases are deferred dependencies, not yet evidence of an invalid pack. After hasNext returns false, obtain
  * upload.packId() and call upload.commit(packId). Commit itself checks index.hasUnresolved and rejects unfinished
- * chains; this ingestor does not retrieve a list or duplicate that check. Confirmed external bases may remain
- * nonempty. Failed parsing or resolution must not lead to commit.
+ * chains. The index itself builds its externalBaseIds list during commit; this ingestor neither collects
+ * that list nor reports external bases. Failed parsing or resolution must not lead to commit.
  *
  * <p>The constructor borrows one upload and creates the resolver owned by this ingestor. resolvePack()
  * iterates parsed results, closes their read handles, delegates resolution, and requests upload commit.
- * recordExternalBases remains a placeholder for final classification through the completed index; until
- * that work is implemented, ingestion cannot reach publication. No independent pending map is introduced.
+ * No independent pending map or external-base collection is introduced.
  * close() releases owned resolver and ingestion resources. PushCommand performs command policy checks and
  * rolls back upload staging in finally without undoing a successful commit. This consumer borrows the upload
  * and never closes source input.
@@ -58,12 +56,7 @@ public final class PackIngestor implements AutoCloseable {
                 resolver.attemptResolve(result);
             }
         }
-        recordExternalBases();
         upload.commit(upload.packId());
-    }
-
-    private void recordExternalBases() throws IOException {
-        throw new UnsupportedOperationException("External base classification is not implemented");
     }
 
     @Override

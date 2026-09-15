@@ -29,6 +29,7 @@ import java.util.Optional;
  * Resolution completes records through upload.index(). Storage controls placement of index records and waiting
  * chains; the API requires neither whole-index memory storage nor paths, files, or a final bulk transfer.
  * commit checks index.hasUnresolved, completes pending writes, and durably attaches pack to the existing index.
+ * The index itself builds its externalBaseIds list during commit from the completed records and base links.
  * Storage never calls back into the resolver. commit and rollback belong to upload and never close source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.

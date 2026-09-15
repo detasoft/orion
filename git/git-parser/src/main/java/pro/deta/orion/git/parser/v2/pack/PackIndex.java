@@ -4,6 +4,7 @@ import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -33,8 +34,14 @@ import java.util.Optional;
  * unresolved status and its waiting dependency; its own dependents remain discoverable. Repeating lookup
  * after successful resolution walks whole chains and branches. Failed attempts leave waiting state intact.
  * hasUnresolved reports whether any provisional record remains, including an incompletely registered full object.
- * Commit uses this query without retrieving a list of unfinished chains. addExternalBaseId accumulates
- * confirmed external dependencies without duplicates or persisted externalPackIds.
+ * Commit uses this query without retrieving a list of unfinished chains.
+ *
+ * <p>During commit, the index itself determines external dependencies from its complete object records and
+ * retained base links, and builds the externalBaseIds list without duplicates. The caller neither supplies
+ * this list nor reports individual external bases. The list is part of the finalized index metadata used
+ * by storage to preserve required bases, without persisted externalPackIds. externalBaseIds returns an
+ * immutable list after index finalization; before that it fails with IllegalStateException rather than
+ * exposing an incomplete list as final. Computing and storing this list belong to the index implementation.
  *
  * <p>Future optimization, not implemented: keep an upload-local LRU of restored base bytes alongside this
  * index. During parsing, future consumers are unknown; an observed reference to a base is only a reuse hint.
@@ -66,5 +73,5 @@ public interface PackIndex {
 
     boolean hasUnresolved() throws IOException;
 
-    void addExternalBaseId(ObjectId externalBase) throws IOException;
+    List<ObjectId> externalBaseIds() throws IOException;
 }
