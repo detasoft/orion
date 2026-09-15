@@ -1,8 +1,9 @@
 # Rework Verifiable Session Journal Continuity
 
 Status: todo
-Depends on: completed AgentD journal relay (`e31d32e3`) and server and AgentD MVP
-acceptance (03/06 and 04/08). This is follow-up work, not an MVP gate.
+Depends on: completed AgentD journal relay (`e31d32e3`), integrated server MVP
+acceptance (`0d3641fd`), and [AgentD MVP acceptance](04_agentd/08_release-and-acceptance.md).
+This is follow-up work, not an MVP gate.
 
 ## Problem
 

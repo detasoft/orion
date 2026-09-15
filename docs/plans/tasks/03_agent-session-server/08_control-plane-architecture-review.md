@@ -1,9 +1,8 @@
 # Review the Agent Session Control Plane
 
 Status: todo
-Depends on:
-[AgentD MVP acceptance](../04_agentd/08_release-and-acceptance.md),
-[central agent session server MVP acceptance](06_release-and-acceptance.md)
+Depends on: [AgentD MVP acceptance](../04_agentd/08_release-and-acceptance.md).
+The central agent session server MVP acceptance is integrated and verified in `0d3641fd`.
 
 Perform a read-only end-to-end architecture review of `agentd` and the central
 agent session server after both sides of the current MVP are complete.
