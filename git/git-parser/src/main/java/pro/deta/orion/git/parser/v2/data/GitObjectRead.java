@@ -3,7 +3,9 @@ package pro.deta.orion.git.parser.v2.data;
 import java.io.IOException;
 
 /**
- * Result of reading Git object data, exposing type and inflated size independently of what was retained.
+ * Result of reading Git object data, exposing its type and the size of the represented bytes.
+ * size counts compressed bytes for RawGitObjectRead and inflated payload bytes for CompressedGitObjectRead
+ * and its subclasses, including the full content length used to compute a HashedGitObjectRead result.
  * RawGitObjectRead provides original compressed bytes without decompression. CompressedGitObjectRead is
  * the separate shared decompression branch, extended by HashedGitObjectRead and ContentGitObjectRead.
  * HashedGitObjectRead retains only a full object's canonical ObjectId; ContentGitObjectRead provides access
