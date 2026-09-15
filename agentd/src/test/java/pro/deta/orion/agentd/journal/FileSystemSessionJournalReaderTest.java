@@ -1044,9 +1044,9 @@ class FileSystemSessionJournalReaderTest {
             Future<PagedReadResult> reading = executor.submit(() ->
                     readAll(temporaryDirectory, Optional.empty()));
             try (OutputStream output = Files.newOutputStream(disappearing)) {
+                Files.delete(disappearing);
                 output.write(event(1, new byte[]{1}));
                 output.flush();
-                Files.delete(disappearing);
             }
             result = reading.get(5, TimeUnit.SECONDS);
         }
