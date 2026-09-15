@@ -1,6 +1,16 @@
 package pro.deta.orion.transport.git.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.agent.protocol.*;
+import pro.deta.orion.agent.server.AgentSessionServer;
+import pro.deta.orion.agent.server.connection.AgentControlHandler;
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+import java.nio.file.Path;
+import java.util.UUID;
+import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
@@ -49,6 +59,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 
 class LegacySshCommandCatalogTest {
+    @TempDir
+    Path root;
+    private AgentSessionServer agentServer;
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
     private final CommandNode commandTree = new LegacySshCommandCatalog(
@@ -56,7 +69,7 @@ class LegacySshCommandCatalogTest {
             new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
             new RepositoryProvider(),
             () -> shutdown.set(true),
-            new ReadOnlyDomainCommandCatalog(new DomainSource()))
+            new ReadOnlyDomainCommandCatalog(new DomainSource()), () -> agentServer)
             .commandTree();
     private final CommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
@@ -77,6 +90,46 @@ class LegacySshCommandCatalogTest {
         assertFailure(dispatch("issue-token invalid", user(List.of())), CommandFailureCode.INVALID_ARGUMENTS);
         assertFailure(dispatch("issue-token 0", user(List.of())), CommandFailureCode.INVALID_ARGUMENTS);
         assertFailure(dispatch("issue-token 1 extra", user(List.of())), CommandFailureCode.INVALID_ARGUMENTS);
+    }
+
+    @Test
+    void launchPermitRequiresAdminAndValidLaunchParameters() throws Exception {
+        String command = "issue-launch-permit local https://localhost:8443 '/tmp/local agent' dev";
+        assertFailure(dispatch(command, SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);
+        assertFailure(dispatch(command, user(List.of())), CommandFailureCode.ACCESS_DENIED);
+        agentServer = new AgentSessionServer(root);
+        agentServer.onStart();
+        try {
+            UserIdentity admin = user(List.of(grant(AccessControl.GrantKey.ADMIN)));
+            assertFailure(dispatch("issue-launch-permit local http://localhost /tmp/agent dev", admin),
+                    CommandFailureCode.INVALID_ARGUMENTS);
+            assertFailure(dispatch("issue-launch-permit local", admin), CommandFailureCode.INVALID_ARGUMENTS);
+            CommandResult result = dispatch(command, admin);
+            assertThat(result).isInstanceOf(CommandResult.Message.class);
+            String first = ((CommandResult.Message) result).value();
+            assertThat(first.split("\\n")).hasSize(3);
+            assertThat(first.split("\\n")[0]).isEqualTo("1");
+            assertThat(java.util.Base64.getUrlDecoder().decode(first.split("\\n")[2])).hasSize(32);
+            PermitConnection original = new PermitConnection();
+            var firstHello = hello(first);
+            agentServer.open(original).onMessage(firstHello);
+            assertThat(original.authenticated).isTrue();
+            PermitConnection replay = new PermitConnection();
+            agentServer.open(replay).onMessage(firstHello);
+            assertThat(replay.authenticated).isFalse();
+            assertThat(replay.closed).isTrue();
+            String next = ((CommandResult.Message) dispatch(command, admin)).value();
+            assertThat(original.closed).isFalse();
+            PermitConnection replacement = new PermitConnection();
+            agentServer.open(replacement).onMessage(hello(next));
+            assertThat(replacement.authenticated).isTrue();
+            assertThat(original.closed).isTrue();
+            assertThat(next.split("\\n")[0]).isEqualTo("2");
+            assertThat(next.split("\\n")[1]).isNotEqualTo(first.split("\\n")[1]);
+            assertThat(next.split("\\n")[2]).isNotEqualTo(first.split("\\n")[2]);
+        } finally {
+            agentServer.onStop();
+        }
     }
 
     @Test
@@ -129,6 +182,7 @@ class LegacySshCommandCatalogTest {
                         "whoami",
                         "issue-token",
                         "token",
+                        "issue-launch-permit",
                         "state",
                         "status",
                         "repositories",
@@ -223,6 +277,36 @@ class LegacySshCommandCatalogTest {
     private static void assertFailure(CommandResult result, CommandFailureCode code) {
         assertThat(result).isInstanceOf(CommandResult.Failure.class);
         assertThat(((CommandResult.Failure) result).code()).isEqualTo(code);
+    }
+
+    private static AgentMessage.Hello hello(String authorization) {
+        String[] lines = authorization.split("\n");
+        return new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
+                new AgentLabel("local"), new AgentInstanceId(UUID.randomUUID()), "dev",
+                new MachineInfo("local", "linux", "aarch64"), Map.of(),
+                Optional.of(new AgentAuthentication(new AgentGeneration(Long.parseLong(lines[0])),
+                        new AgentLaunchId(UUID.fromString(lines[1])), AgentAuthentication.Kind.LAUNCH_PERMIT,
+                        ProtocolBytes.copyOf(Base64.getUrlDecoder().decode(lines[2])))));
+    }
+
+    private static final class PermitConnection implements AgentControlHandler.Connection {
+        private boolean authenticated;
+        private boolean closed;
+
+        @Override
+        public CompletionStage<Void> send(AgentMessage message) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
+            authenticated = true;
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
     }
 
     private static final class RecordingAccessControlService implements OrionAccessControlService {

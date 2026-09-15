@@ -92,7 +92,7 @@ public final class AgentdMain {
         }
     }
 
-    private static void launch(AgentConfiguration configuration, AgentLaunchContext context)
+    static void launch(AgentConfiguration configuration, AgentLaunchContext context)
             throws InterruptedException {
         try (Agent agent = Agent.create(configuration, context)) {
             Thread shutdownHook = new Thread(agent::close, "agentd-shutdown-hook");

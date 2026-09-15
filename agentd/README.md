@@ -2,27 +2,59 @@
 
 ## Run from the checkout
 
-`make run-agent` is a thin alias for the `run-agent` Maven profile. It builds
-the reactor dependencies, including the local native host, and calls
-`AgentdMain` through `exec:java` in the current terminal:
+With Orion running and your administrator SSH key enrolled (`make enroll-admin-key`),
+start AgentD in another terminal:
 
 ```sh
+make run-agent
 make run-agent AGENT_ARGS='--help'
-# Equivalent Maven command:
-mvn -pl agentd -am -Pdev,run-agent \
-  -Dagentd.run.arguments='--help' process-classes
 ```
 
-Pass the normal AgentD command-line options in `AGENT_ARGS`. Daemon startup
-requires `--server`, `--state-dir`, `--agent-label`, `--generation`,
-`--launch-id`, and `--agent-version`. Supply the server-issued launch permit
-as a base64url line followed by EOF on standard input, never in `AGENT_ARGS`.
-Paths containing spaces can be single-quoted inside the argument string.
+The Make goal builds the reactor dependencies and runs `LocalAgentMain` through
+`exec:java`. It requests a fresh launch authorization from the running server
+through the existing public-key SSH administrator connection, then starts the
+ordinary AgentD runtime in the foreground. The permit stays in memory and is
+never passed in process arguments, written to a file, or printed by the launcher.
+Every new invocation obtains a fresh generation, launch ID, and single-use permit.
 
-The alias uses the existing authentication and TLS checks. The default
-`make run-server` configuration has HTTPS disabled: connecting AgentD requires
-an enabled HTTPS listener with a certificate trusted by the AgentD JVM, plus
-a fresh server-issued launch authorization. The alias does not issue it.
+Defaults are SSH `root@localhost:8022`, control `https://localhost:8443`, agent label
+`local`, and owner-only local state under `orion_root/agentd-local`. Override these
+through `AGENT_ARGS`, for example:
+
+```sh
+make run-agent AGENT_ARGS="--ssh-port 9022 --server https://localhost:9443 --state-dir '/tmp/local agent'"
+```
+
+`--ssh-option` passes one additional `ssh -o` option, such as `IdentityFile=/path/to/key`.
+The SSH request has a 30-second deadline. Failed SSH requests and malformed responses
+stop startup. Stopping AgentD leaves its native sessions running; another invocation
+reuses their state and registers a fresh AgentD instance.
+
+HTTPS must already be enabled on Orion with a certificate trusted by the AgentD JVM.
+The default `make run-server` configuration has HTTPS disabled. The launcher retains
+certificate and hostname validation and does not change server TLS configuration.
+For a private CA, configure the Maven JVM truststore before running the alias.
+
+The equivalent Maven command is:
+
+```sh
+mvn -pl agentd -am -Pdev,run-agent process-classes
+# Add -Dagentd.run.arguments='...' to pass launcher options.
+```
+
+The server administrative SSH command is:
+
+```text
+issue-launch-permit LABEL HTTPS_URI ABSOLUTE_STATE_DIRECTORY AGENT_VERSION
+```
+
+It requires application administrator authority, registers the label if needed, and
+uses the same durable provisioning mechanism as server-controlled launches. Its
+response is three newline-terminated lines: generation, launch UUID, and base64url
+permit. An existing agent remains authoritative until its replacement authenticates;
+issuing a permit alone does not disconnect it. A label registered with different
+display metadata is rejected. The ordinary `AgentdMain` entry point continues to
+accept provisioner-supplied parameters and the permit on standard input.
 
 ## Control runtime
 

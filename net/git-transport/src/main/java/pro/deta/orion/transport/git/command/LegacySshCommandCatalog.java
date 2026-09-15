@@ -2,6 +2,12 @@ package pro.deta.orion.transport.git.command;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import jakarta.inject.Provider;
+import pro.deta.orion.agent.server.AgentSessionServer;
+import pro.deta.orion.agent.server.registry.AgentRegistryException;
+import pro.deta.orion.agent.protocol.AgentLabel;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.provisioning.ProvisioningException;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
@@ -24,6 +30,9 @@ import pro.deta.orion.util.OrionProvider;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public final class LegacySshCommandCatalog {
     private static final Set<String> NO_PARAMETERS = Set.of();
@@ -34,6 +43,7 @@ public final class LegacySshCommandCatalog {
     private final Runnable shutdownAction;
     private final SshCredentialCommandCatalog sshCredentialCommandCatalog;
     private final ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog;
+    private final Provider<AgentSessionServer> agentServer;
 
     @Inject
     public LegacySshCommandCatalog(
@@ -42,14 +52,16 @@ public final class LegacySshCommandCatalog {
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
             SshCredentialCommandCatalog sshCredentialCommandCatalog,
-            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            Provider<AgentSessionServer> agentServer) {
         this(
                 accessControlService,
                 runtimeStateMachine,
                 repositoryProvider,
                 () -> orionProvider.getOrionApplicationLifecycle().beginShutdown(),
                 sshCredentialCommandCatalog,
-                readOnlyDomainCommandCatalog);
+                readOnlyDomainCommandCatalog,
+                agentServer);
     }
 
     LegacySshCommandCatalog(
@@ -57,14 +69,16 @@ public final class LegacySshCommandCatalog {
             AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
             Runnable shutdownAction,
-            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            Provider<AgentSessionServer> agentServer) {
         this(
                 accessControlService,
                 runtimeStateMachine,
                 repositoryProvider,
                 shutdownAction,
                 new SshCredentialCommandCatalog(accessControlService),
-                readOnlyDomainCommandCatalog);
+                readOnlyDomainCommandCatalog,
+                agentServer);
     }
 
     private LegacySshCommandCatalog(
@@ -73,7 +87,8 @@ public final class LegacySshCommandCatalog {
             NativeGitRepositoryProvider repositoryProvider,
             Runnable shutdownAction,
             SshCredentialCommandCatalog sshCredentialCommandCatalog,
-            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            Provider<AgentSessionServer> agentServer) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
         this.runtimeStateMachine = Objects.requireNonNull(runtimeStateMachine, "runtimeStateMachine");
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
@@ -84,6 +99,7 @@ public final class LegacySshCommandCatalog {
         this.readOnlyDomainCommandCatalog = Objects.requireNonNull(
                 readOnlyDomainCommandCatalog,
                 "readOnlyDomainCommandCatalog");
+        this.agentServer = Objects.requireNonNull(agentServer, "agentServer");
     }
 
     public CommandNode commandTree() {
@@ -99,6 +115,7 @@ public final class LegacySshCommandCatalog {
         return builder
                 .action(tokenDefinition("issue-token"))
                 .action(tokenDefinition("token"))
+                .action(definition("issue-launch-permit", 4, this::admin, this::issueLaunchPermit))
                 .action(adminDefinition("state", this::lifecycleStatus))
                 .action(adminDefinition("status", this::lifecycleStatus))
                 .action(adminDefinition("repositories", this::repositories))
@@ -189,6 +206,31 @@ public final class LegacySshCommandCatalog {
 
     private CommandResult lifecycleStatus(CommandInvocation invocation) {
         return new CommandResult.Message(runtimeStateMachine.describeStatus());
+    }
+
+    private CommandResult issueLaunchPermit(CommandInvocation invocation) {
+        List<String> arguments = invocation.arguments().positional();
+        try {
+            AgentSessionServer server = agentServer.get();
+            AgentLabel label = new AgentLabel(arguments.get(0));
+            var control = server.provisioningControl(label, URI.create(arguments.get(1)), arguments.get(2),
+                    AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES, arguments.get(3));
+            server.registerAgent(label, label.value());
+            try (var attempt = control.nextAttempt()) {
+                byte[] permit = attempt.permit().copyBytes();
+                try {
+                    return new CommandResult.Message(attempt.request().generation().value() + "\n"
+                            + attempt.request().launchId().value() + "\n"
+                            + new String(permit, StandardCharsets.US_ASCII));
+                } finally {
+                    Arrays.fill(permit, (byte) 0);
+                }
+            }
+        } catch (IllegalArgumentException failure) {
+            return failure(CommandFailureCode.INVALID_ARGUMENTS, "Invalid AgentD launch parameters");
+        } catch (ProvisioningException | AgentRegistryException | IllegalStateException failure) {
+            return failure(CommandFailureCode.HANDLER_FAILED, "Could not issue an AgentD launch permit");
+        }
     }
 
     private CommandResult repositories(CommandInvocation invocation) {

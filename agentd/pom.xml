@@ -203,7 +203,7 @@
                                     <goal>java</goal>
                                 </goals>
                                 <configuration>
-                                    <mainClass>pro.deta.orion.agentd.AgentdMain</mainClass>
+                                    <mainClass>pro.deta.orion.agentd.LocalAgentMain</mainClass>
                                     <commandlineArgs>${agentd.run.arguments}</commandlineArgs>
                                 </configuration>
                             </execution>
