@@ -1,7 +1,5 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi.PackUpload;
-
 import java.io.IOException;
 
 /**
