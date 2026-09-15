@@ -3,6 +3,10 @@
 Status: todo
 Depends on: completed local terminal attach `8667378a`
 
+- Owner: codex, session 01a09f52-b1d0-7522-bbed-2c6c389576b6,
+  branch `codex/local-journal-ack-01a09f52`,
+  worktree `.worktrees/local-journal-ack-01a09f52`, started 2026-09-15 16:25 Europe/Amsterdam.
+
 Add an opt-in `--ack-journal` testing mode without changing the default
 non-acknowledging attach behavior.
 
@@ -26,3 +30,21 @@ non-acknowledging attach behavior.
 - Default start and attach still send no acknowledgement.
 - Opt-in behavior advances the real host retention watermark only after safe
   page delivery and is covered across restart, rotation, and failure cases.
+
+## Design and Implementation
+
+- Parse `--ack-journal` for local terminal start and attach, and pass the explicit
+  choice through the existing terminal attachment path.
+- Let the journal follower identify fully decoded and successfully delivered
+  pages using the existing reader boundaries and issues. Use the existing native
+  control client and acknowledgement result; retain no cursor on disk and add
+  no server connection or alternative journal reader.
+- Keep successful acknowledgement watermarks monotonic within one invocation.
+  Contain acknowledgement rejection to this optional mode, preserving terminal
+  output and ordinary manual controls after acknowledgement is disabled.
+- Extend parsing, follower, attachment, and real native-host tests to cover the
+  default, opt-in, replay/restart, rotation, incomplete/corrupt/missing data,
+  output failure, ambiguous delivery, and definite rejection. Check retained
+  history and actual host watermarks rather than only emitted command shapes.
+- Update local terminal help and documentation with the retention warning and
+  the absence of any server-durability guarantee.
