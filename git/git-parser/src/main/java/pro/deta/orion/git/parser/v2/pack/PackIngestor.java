@@ -1,15 +1,13 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectRead;
-
 import java.io.IOException;
 import java.util.Objects;
 
 /**
  * Coordinates pack resolution for PushCommand through PackUpload.
- * While upload.hasNext(), obtain upload.next(), delegate the parsed result to resolver.attemptResolve,
- * and close result.object() in finally without masking a primary failure. This closes a read handle, not
- * upload-owned original pack bytes needed by deferred chains. Hashed results have no content resources to release.
+ * While upload.hasNext(), delegate upload.next() to resolver.attemptResolve. Each result contains physical
+ * metadata and an optional full-object hash, with no read handle to close. The resolver requests content
+ * through upload readers when needed; upload retains original bytes for deferred chains.
  * This is a consumer of storage and parsing, not part of either API or a required callback implementation.
  * Create and close a GitPackObjectResolver for this upload. Delegate every entry, including full objects,
  * to attemptResolve(result), which uses full-object hashes or resolves delta content and follows waiting chains.
@@ -32,7 +30,7 @@ import java.util.Objects;
  * that list nor reports external bases. Failed parsing or resolution must not lead to commit.
  *
  * <p>The constructor borrows one upload and creates the resolver owned by this ingestor. resolvePack()
- * iterates parsed results, closes their read handles, delegates resolution, and requests upload commit.
+ * iterates parsed results, delegates resolution, and requests upload commit.
  * No independent pending map or external-base collection is introduced.
  * close() releases owned resolver and ingestion resources. PushCommand performs command policy checks and
  * rolls back upload staging in finally without undoing a successful commit. This consumer borrows the upload
@@ -51,10 +49,7 @@ public final class PackIngestor implements AutoCloseable {
 
     public void resolvePack() throws IOException {
         while (upload.hasNext()) {
-            PackObjectParser.Result result = upload.next();
-            try (GitObjectRead object = result.object()) {
-                resolver.attemptResolve(result);
-            }
+            resolver.attemptResolve(upload.next());
         }
         upload.commit(upload.packId());
     }

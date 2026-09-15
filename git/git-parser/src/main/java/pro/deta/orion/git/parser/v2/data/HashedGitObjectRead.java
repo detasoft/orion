@@ -1,31 +1,21 @@
 package pro.deta.orion.git.parser.v2.data;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.net.io.BufferedByteInput;
 
-import java.util.Objects;
+import java.io.IOException;
 
 /**
- * Result of streaming a full object's inflated bytes into its canonical object hash without retaining content.
- * type is COMMIT, TREE, BLOB, or TAG; size is the inflated content length and objectId is the completed hash
- * of the canonical object header followed by that content. A delta instruction hash is never an ObjectId.
- * PackObjectParser produces this result only after successful end-of-entry validation. Content needed later
- * is reopened by offset from the upload. close is a no-op because this value owns no content resources.
- * Future streaming hashing uses CompressedGitObjectRead's shared decompression hook; it does not introduce
- * another inflater path. This scaffold accepts an already computed ObjectId and stores only that result.
+ * Processes a full object's inflated bytes into its canonical ObjectId without retaining its content.
+ * Inherited read performs decompression, then readDecompressed hashes the canonical type/size header and
+ * content incrementally. Types are COMMIT, TREE, BLOB, or TAG. Delta types are rejected: a hash of instructions
+ * is not the reconstructed object's ID, which must be computed by the resolver after applying its base.
+ * No ObjectId, type, size, or input handle is stored in this processor. Hashing remains a placeholder.
  */
-public final class HashedGitObjectRead extends CompressedGitObjectRead {
-    private final ObjectId objectId;
-
-    public HashedGitObjectRead(ObjectType type, long size, ObjectId objectId) {
-        super(type, size);
-        this.objectId = Objects.requireNonNull(objectId, "objectId");
-    }
-
-    public ObjectId objectId() {
-        return objectId;
-    }
-
+public final class HashedGitObjectRead extends CompressedGitObjectRead<ObjectId> {
     @Override
-    public void close() {
+    protected ObjectId readDecompressed(ObjectType type, long size, BufferedByteInput content)
+            throws IOException {
+        throw new UnsupportedOperationException("Object content hashing is not implemented");
     }
 }

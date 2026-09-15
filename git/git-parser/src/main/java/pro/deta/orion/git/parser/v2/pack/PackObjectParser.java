@@ -10,44 +10,40 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
- * Stateless parsing of one physical pack entry, choosing the retained result from its type.
+ * Stateless parsing of one physical pack entry with a caller-selected payload processor.
  * parseEntry consumes the header and complete zlib stream, validating the encoding and inflated length.
- * For COMMIT, TREE, BLOB, and TAG it streams inflated bytes into the canonical object hash and returns
- * HashedGitObjectRead with type, size, and ObjectId, without retaining inflated content.
- * For OFS_DELTA and REF_DELTA it returns ContentGitObjectRead exposing delta instructions for the current
- * reconstruction. That result exposes the delta type and instruction size, not the final object's type
- * or size. The parser never fetches bases, applies deltas, or treats a delta instruction hash as an ObjectId.
- * No mode parameter is needed: both paths consume content, but retain different results.
+ * It calls reader with physical type, declared inflated size, and a bounded borrowed zlib source; Result
+ * contains the returned value alongside Entry metadata. No reader or returned value may retain that source.
+ * HashedGitObjectRead computes IDs for full objects; ContentGitObjectRead processes inflated content or
+ * delta instructions. The parser never fetches bases, applies deltas, or hashes instructions as an ObjectId.
  *
- * <p>Original header, base-reference, and compressed bytes are appended to the borrowed PackByteStore.
- * This same store provides positional reads for ContentGitObjectRead; no separate write-only sink or copy
- * of the payload is required. The caller has already retained the preceding pack prefix up to offset.
- * Parsing uses bounded working buffers. Content reads may rely on retained original pack bytes rather than
- * an object-sized array. No separate inflated-content store or cache for later consumers is required.
- * offset is the absolute entry-header position; dataOffset is the absolute start of its zlib stream.
- * Compressed entry length is not stored in the header, so parsing traverses the stream to locate its end.
- * Prefetched bytes after that boundary stay available through the same buffered input and are not forwarded.
- * Sink writes complete before buffers are reused. Failures and truncated or malformed data are IOException;
- * no successful result is returned, and parser-owned temporary content is released. Partial raw writes may
- * already have happened; the caller owns rollback. Neither source nor byteStore is closed.
+ * <p>Original header, base-reference, and compressed bytes are appended to the borrowed PackByteStore once.
+ * The caller has already retained the pack prefix up to offset. Parsing uses bounded working buffers;
+ * compressed length is absent from the header, so the stream must be traversed to locate its end.
+ * The provider drains and validates payload not consumed by reader before reporting success. Prefetched
+ * bytes after the boundary remain available through the same buffered input and are not appended.
+ * Sink writes complete before buffers are reused. Neither source nor byteStore is closed.
+ * Failures and malformed or truncated data are IOException; partial raw writes require caller rollback.
+ * A resource-bearing result requires cleanup if validation fails before it can be returned to its caller.
  *
- * <p>The caller owns the returned object's read resources. PackUpload retains original pack bytes and offsets
- * for deferred resolution; later consumers reread them instead of retaining this result's inflated content.
- * Result separates transient read ownership from Entry metadata stored in PackIndex: the index does not
- * retain live read handles. Pack header, count, checksum, and index state belong to the caller.
- * Method body remains a placeholder; no parser or content-storage implementation is provided here.
+ * <p>PackUpload uses Optional<ObjectId> as the value: a full object's hash or empty for a delta whose original
+ * bytes remain available for resolver reads. The index retains metadata, never processors or live read handles.
+ * Other callers can select their own result and own any resources it contains. Pack header, count, checksum,
+ * and index state belong to the caller. The method body remains a placeholder.
  */
 public final class PackObjectParser {
     private PackObjectParser() {
     }
 
-    public static Result parseEntry(BufferedByteInput source, long offset, PackByteStore byteStore)
+    public static <R> Result<R> parseEntry(BufferedByteInput source, long offset, PackByteStore byteStore,
+                                            GitObjectRead<R> reader)
             throws IOException {
         throw new UnsupportedOperationException("Pack entry parsing is not implemented");
     }
 
     /**
-     * Physical metadata without live content handles or a resolved ObjectId. inflatedSize counts full content
+     * Physical metadata without live content handles or a resolved ObjectId. offset locates the entry header;
+     * dataOffset locates its zlib stream, both absolute pack offsets. inflatedSize counts full content
      * bytes or delta instructions. OFS_DELTA has only baseOffset, decoded to an absolute earlier entry offset;
      * REF_DELTA has only baseId, which may refer inside or outside the pack. Full entries have neither field.
      * Parsing validates these combinations and boundaries before returning metadata.
@@ -57,11 +53,9 @@ public final class PackObjectParser {
     }
 
     /**
-     * Parsed metadata and the result of consuming its payload. object.type and object.size match entry.type
-     * and entry.inflatedSize. Full entries carry HashedGitObjectRead; deltas carry ContentGitObjectRead.
-     * The caller closes object after use. Closing a result exposed by PackUpload.next releases its read handle,
-     * while the upload retains backing content and index records for subsequent resolution or commit.
+     * Physical metadata and the nonnull value returned by the payload processor. Resource ownership belongs
+     * to the caller only after successful parsing. Entry can be indexed independently of the transient value.
      */
-    public record Result(Entry entry, GitObjectRead object) {
+    public record Result<R>(Entry entry, R value) {
     }
 }

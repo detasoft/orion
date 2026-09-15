@@ -17,7 +17,8 @@ import java.util.Optional;
  *
  * <p>addEntry creates a provisional record keyed by original offset with physical metadata and base links.
  * Upload calls it before returning each parsed result. Every record starts unresolved; upload immediately
- * completes full objects through addObject using HashedGitObjectRead. Delta entries wait for the resolver.
+ * completes full objects through addObject using IDs returned by HashedGitObjectRead.
+ * Delta entries wait for the resolver.
  * addObject completes that same record with ObjectId, logical type, and restored content size; the offset
  * already belongs to entry. Allowed logical types are COMMIT, TREE, BLOB, and TAG. Exact repeats are harmless;
  * conflicting data or completing an unregistered entry fails. Records retain all ObjectIds needed for the

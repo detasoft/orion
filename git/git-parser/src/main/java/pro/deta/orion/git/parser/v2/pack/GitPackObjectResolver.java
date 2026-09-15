@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.data.GitObjectContent;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
@@ -10,15 +10,15 @@ import java.util.Optional;
 /**
  * Resolves objects for one PackUpload and exposes restored content through getObject(objectId).
  * The upload is the only constructor dependency and owns pack parsing and decompression. This resolver
- * opens inflated payloads through upload.readObject(entry.offset()), applies delta instructions,
+ * opens inflated payloads through upload.readObject(entry.offset(), reader), applies delta instructions,
  * computes object IDs, and registers resolved metadata through upload.index().addObject. Ingestor reads no bytes.
  * REF_DELTA bases are located through upload.index().find(objectId), then upload.storage().readObject if needed.
  * OFS_DELTA bases are located through upload.index().find(baseOffset). Base entries may themselves be deltas;
  * the storage-provided index owns their chain metadata and upload retains original pack bytes. Reconstruction
  * follows those chains without keeping a second dependency graph or persistent result cache.
  * It never advances iteration or rereads transport input; upload.next has already retained the entry's bytes.
- * Entry metadata locates each required base by pack offset before opening its ContentGitObjectRead. Read contents
- * on demand for reconstruction and object hashing, closing owned handles after use.
+ * Entry metadata locates each required base by pack offset before invoking a ContentGitObjectRead processor.
+ * Read content on demand for reconstruction and hashing, closing owned handles after use.
  *
  * <p>Current limitation: restored bytes live only for the current reconstruction or open read handle.
  * Once that use finishes, release them without tracking possible future consumers or caching them across
@@ -31,12 +31,11 @@ import java.util.Optional;
  * retain bases after observed use, as a reuse heuristic; misses still follow this reread path. This cache
  * is not implemented or required by the current resolution contract.
  *
- * <p>attemptResolve(result) uses the ObjectId from HashedGitObjectRead when upload already indexed a full
- * object; it does not reopen content just to hash it again. For ContentGitObjectRead it reads the provided
- * delta instructions, obtains bases, reconstructs content, and registers the computed ID, type, and size.
- * The result's read handle is borrowed for this call; the ingestor closes it afterward, including on failure
- * or deferral. Upload retains original pack bytes for rereading on later attempts. Reads opened by this resolver
- * for other entries and external bases belong to it and are closed after use.
+ * <p>attemptResolve(result) uses result.value() when upload already indexed a full object's hash; it does
+ * not reopen content just to hash it again. An empty value identifies a delta. The resolver reads its
+ * instructions through upload.readObject(offset, reader), obtains bases, reconstructs content, and registers
+ * the computed ID, type, and size. The input result contains no read resources. Resources returned by readers
+ * opened by this resolver belong to it and are closed after use, including failure or deferral.
  * When a required base is unavailable, the entry remains waiting in the upload and the method returns normally.
  * Both already hashed objects and newly resolved deltas trigger waiting chains. Entries without IDs are
  * addressed by metadata. For each available result, index.waitingFor(objectId, entryOffset)
@@ -47,7 +46,7 @@ import java.util.Optional;
  * object or retry missing dependencies without a newly available base. No collection of all waiting entries
  * is loaded into memory; the index retains unfinished chains between calls. Temporary traversal state must
  * not accumulate the whole dependency graph. Corrupt cyclic dependencies fail instead of looping indefinitely.
- * getObject(objectId) returns caller-owned ContentGitObjectRead content from the upload or published storage, or
+ * getObject(objectId) returns caller-owned GitObjectContent from the upload or published storage, or
  * absence when unavailable. Returned content is fully restored, with type COMMIT, TREE, BLOB, or TAG.
  * Base availability is established before returning a handle. Payload corruption, invalid delta instructions,
  * and storage failures are IOException, never missing dependencies.
@@ -69,11 +68,11 @@ public final class GitPackObjectResolver implements AutoCloseable {
         this.upload = Objects.requireNonNull(upload, "upload");
     }
 
-    public void attemptResolve(PackObjectParser.Result result) throws IOException {
+    public void attemptResolve(PackObjectParser.Result<Optional<ObjectId>> result) throws IOException {
         throw new UnsupportedOperationException("Pack object resolution is not implemented");
     }
 
-    public Optional<ContentGitObjectRead> getObject(ObjectId objectId) throws IOException {
+    public Optional<GitObjectContent> getObject(ObjectId objectId) throws IOException {
         throw new UnsupportedOperationException("Resolved object lookup is not implemented");
     }
 

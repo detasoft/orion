@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInput;
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Owns one upload's input position, checksum state, retained pack bytes, and storage-provided PackIndex.
@@ -22,13 +24,12 @@ import java.util.Objects;
  *
  * <p>hasNext validates the pack header and tracks its declared entry count. next uses the static
  * PackObjectParser.parseEntry to consume an entry, then calls index.addEntry with its physical metadata.
- * Full objects yield HashedGitObjectRead; upload completes their records through index.addObject immediately.
- * Delta results carry ContentGitObjectRead for the current reconstruction. Original pack bytes and indexed
- * offsets support later reads; upload does not separately store inflated or restored payloads for future use.
- * Delta index records remain unresolved until the resolver completes them.
- * next returns the parsed Result after these steps. The caller closes result.object() after use; upload-owned
- * backing bytes and index records remain available. Sink, retention, or index failures stop the attempt,
- * release any unreturned read handle, and prevent successful completion.
+ * Its processor selects HashedGitObjectRead for full objects and returns their IDs in Optional; upload
+ * completes their records through index.addObject immediately. For deltas it returns Optional.empty;
+ * parsing still consumes and validates their payload, retaining original bytes for subsequent resolver reads.
+ * Delta index records remain unresolved until the resolver completes them. No inflated payload cache is kept.
+ * next returns metadata and Optional<ObjectId>, with no read handle to close. Retention or index failures
+ * stop the attempt and prevent successful completion.
  * next never returns null and throws NoSuchElementException after successful exhaustion. Repeated hasNext
  * calls do not consume another entry. After the declared entries, hasNext verifies the checksum before
  * returning false. Truncation and malformed input are IOException, not normal exhaustion.
@@ -45,19 +46,16 @@ import java.util.Objects;
  * ObjectId before discarding them. Delta instructions are not hashed as objects. Index records contain
  * offsets, types, lengths, base references, and any ObjectId already computed for a full object.
  *
- * <p>readObject(entryOffset) opens a caller-owned ContentGitObjectRead for an indexed entry's inflated payload:
- * object content or delta instructions. The absolute offset identifies an entry already returned by next,
- * whose original bytes are fully retained. A negative or unknown entry offset fails with IllegalArgumentException.
- * The handle exposes entry.type and entry.inflatedSize; its own read offsets address inflated payload bytes.
- * Reads decompress retained data without rereading transport input or advancing iteration. Opening the handle
- * does not require loading the whole payload; content is read as needed through ContentGitObjectRead.
- * Full objects whose first-pass result retained only a hash can be reopened here when needed as bases.
- * A later consumer rereads the same original pack bytes rather than relying on a retained inflated payload.
- * Neither this read nor the static parser applies deltas; handles expose delta instructions even when the index
- * knows the final ObjectId.
- * Close handles before rollback; closing a handle does not close upload. Access after rollback fails with
- * ClosedChannelException. Reconstruction and hashing belong to the resolver, which follows indexed offsets,
- * opens reads for required entries and bases, and records computed ObjectIds. The ingestor reads no payloads.
+ * <p>readObject(entryOffset, reader) invokes the processor with physical type, inflated size, and a bounded
+ * borrowed zlib source from retained bytes, then returns its nonnull result. The absolute offset identifies
+ * an indexed entry already returned by next. Negative or unknown offsets fail with IllegalArgumentException.
+ * RawGitObjectRead forwards compressed bytes; ContentGitObjectRead inflates them before calling its consumer.
+ * Full objects hashed on the first pass can be reread here as bases. Deltas expose instructions even if the
+ * index knows their final ObjectId. Neither this method nor the static parser applies deltas.
+ * Reads never advance iteration or reread transport input. Upload owns and closes the invocation source;
+ * readers cannot retain it. Any returned resource must have independent ownership and be closed before rollback.
+ * Access after rollback fails with ClosedChannelException. The resolver owns reconstruction and base reads;
+ * the ingestor reads no payloads. No additional inflated-content storage is required.
  *
  * <p>commit(packId) requires completed iteration and a matching verified checksum, even for an empty pack.
  * It checks index.hasUnresolved itself and refuses publication with IOException when any unfinished record
@@ -117,7 +115,7 @@ public final class PackUpload {
         throw new UnsupportedOperationException("Pack header and checksum processing is not implemented");
     }
 
-    public PackObjectParser.Result next() throws IOException {
+    public PackObjectParser.Result<Optional<ObjectId>> next() throws IOException {
         throw new UnsupportedOperationException("Pack entry iteration is not implemented");
     }
 
@@ -128,7 +126,7 @@ public final class PackUpload {
         return verifiedPackId;
     }
 
-    public ContentGitObjectRead readObject(long entryOffset) throws IOException {
+    public <R> R readObject(long entryOffset, GitObjectRead<R> reader) throws IOException {
         throw new UnsupportedOperationException("Reading retained pack entries is not implemented");
     }
 

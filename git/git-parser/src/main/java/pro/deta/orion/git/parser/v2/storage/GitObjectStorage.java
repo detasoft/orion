@@ -12,12 +12,13 @@ package pro.deta.orion.git.parser.v2.storage;
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code addEntry(objectId, type, size)} - register an already stored loose object through the facade.</li>
- *   <li>{@code read(objectId)} - open a ContentGitObjectRead for positional reads into caller-owned ByteBuffers,
- *       or return absence; I/O failures remain errors.</li>
+ *   <li>{@code read(objectId, reader)} - invoke GitObjectRead with a bounded stored payload and return its
+ *       result, or absence without invoking the reader; I/O failures remain errors.</li>
  *   <li>{@code readPrefix(objectId, maxDataBytes)} - return type, full size, and a bounded content prefix.</li>
  * </ul>
  * Method names and signatures are provisional. This view includes objects published through GitPackStorage;
- * callers must not need to know which pack contains an object or how its delta bases are resolved.
+ * callers do not select a backing pack. Physical delta payloads still require resolver reconstruction;
+ * access to their base metadata remains to be specified alongside the facade contract.
  */
 final class GitObjectStorage {
 }

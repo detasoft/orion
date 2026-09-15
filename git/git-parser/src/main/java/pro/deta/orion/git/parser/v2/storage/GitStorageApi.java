@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.data.GitObjectRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
@@ -33,8 +33,14 @@ import java.util.Optional;
  * Storage never calls back into the resolver. commit and rollback belong to upload and never close source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
- * ContentGitObjectRead handles belong to the caller and expose restored content with only COMMIT, TREE, BLOB, or TAG
- * types. Absence is Optional.empty(), while I/O failures remain errors.
+ * readObject(objectId, reader) invokes a caller-selected processor with the stored physical type, inflated
+ * payload size, and a bounded borrowed zlib source, excluding pack headers and delta base references.
+ * RawGitObjectRead processes compressed bytes; CompressedGitObjectRead supplies decompression for hash/content.
+ * A delta payload remains instructions, not restored content; processors never apply deltas. Resolving stored
+ * delta bases requires their index metadata; that lookup contract is still to be specified in this scaffold.
+ * Storage closes the source after processing; the reader cannot retain it. Nonnull results belong to the caller,
+ * including any independently owned resources. Absence is Optional.empty() and does not invoke reader;
+ * I/O and processing failures remain errors. Returning early must still respect and validate payload bounds.
  * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
  * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
  * Ref-update failures do not undo pack publication.
@@ -47,7 +53,7 @@ import java.util.Optional;
  *       containing the original update per input, in request order.</li>
  *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing requested objects.</li>
- *   <li>{@code readObject(objectId)} - open resolved object content as a caller-owned ContentGitObjectRead.</li>
+ *   <li>{@code readObject(objectId, reader)} - process stored bytes and return the selected result.</li>
  *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, size, and a bounded prefix.</li>
  * </ul>
  * Methods remain placeholders. Object resolution and operation-specific policy belong to the caller;
@@ -58,7 +64,7 @@ public final class GitStorageApi {
         throw new UnsupportedOperationException("Pack upload is not implemented");
     }
 
-    public Optional<ContentGitObjectRead> readObject(ObjectId objectId) throws IOException {
+    public <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
         throw new UnsupportedOperationException("Object reads are not implemented");
     }
 

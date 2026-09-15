@@ -1,46 +1,29 @@
 package pro.deta.orion.git.parser.v2.data;
 
+import pro.deta.orion.net.io.BufferedByteInput;
+
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.Objects;
 
 /**
- * Provides positional reads of inflated payload without requiring whole-object buffering in memory.
- * During initial pack parsing, OFS_DELTA and REF_DELTA results expose instructions for the current reconstruction.
- * Inflated or restored bytes need only survive their active use or open handle; they are not retained for
- * another entry's future use. PackUpload.readObject reopens original pack bytes by offset when content is
- * needed again. Any required decompression and delta reconstruction are repeated; no consumer counting or
- * cross-entry content cache is required at this stage. Content is not separately persisted alongside the pack.
- * Pack-backed reads borrow the same PackByteStore used by the parser for appends and use its positional read
- * at indexed offsets. They do not close that store, change its append position, or require writes to be forced
- * before reading. FileChannel remains hidden behind the shared byte-store interface.
- * GitStorageApi.readObject and GitPackObjectResolver.getObject return restored content with COMMIT, TREE,
- * BLOB, or TAG type. Only the resolver applies delta instructions; reading a delta payload does not restore it.
- * type, nonnegative size, and payload remain stable while open. Read offsets address inflated bytes, excluding
- * compression and pack or loose-object headers; these differ from the pack offset used to open the handle.
- *
- * <p>read accepts writable heap, direct, and sliced ByteBuffers, advances position, preserves limit, and
- * retains no caller buffer. Partial reads are allowed; an empty destination returns zero, otherwise a read
- * returns a positive count or -1 at or beyond size. Negative offsets fail with IllegalArgumentException,
- * null buffers with NullPointerException, and read-only buffers with ReadOnlyBufferException.
- * No shared cursor or concurrent-use guarantee is required. Positional access promises neither zero-copy
- * nor constant-time access to compressed backing data. It need not materialize the whole payload to read it.
- *
- * <p>close releases this handle's resources and is idempotent; reads afterward fail with ClosedChannelException.
- * It never closes the owning upload, repository, or transport. Callers close handles before their provider.
- * Constructor fields describe the payload; reading, backing storage, and cleanup remain unimplemented.
- * Decompression is shared through CompressedGitObjectRead.readDecompressed; this subclass exposes its output.
+ * Processes inflated content through a caller-provided function after shared decompression.
+ * The consumer receives type, inflated size, and a borrowed inflated source, and returns the required result.
+ * It may process chunks directly or produce independently owned content; no byte array or whole-object
+ * buffering is imposed. Here the consumer's source is already inflated and must not be decompressed again.
+ * Delta content consists of instructions, even when the object's eventual ObjectId is already known.
+ * This handler does not apply deltas, retain invocation metadata, or provide positional reads itself.
+ * Source ownership, nonnull results, and error propagation follow GitObjectRead. A returned GitObjectContent
+ * must remain valid independently of the borrowed invocation stream and belongs to the caller.
  */
-public final class ContentGitObjectRead extends CompressedGitObjectRead {
-    public ContentGitObjectRead(ObjectType type, long size) {
-        super(type, size);
-    }
+public final class ContentGitObjectRead<R> extends CompressedGitObjectRead<R> {
+    private final GitObjectRead<R> consumer;
 
-    public int read(long offset, ByteBuffer destination) throws IOException {
-        return readDecompressed(offset, destination);
+    public ContentGitObjectRead(GitObjectRead<R> consumer) {
+        this.consumer = Objects.requireNonNull(consumer, "consumer");
     }
 
     @Override
-    public void close() throws IOException {
-        throw new UnsupportedOperationException("Object content cleanup is not implemented");
+    protected R readDecompressed(ObjectType type, long size, BufferedByteInput content) throws IOException {
+        return Objects.requireNonNull(consumer.read(type, size, content), "reader result");
     }
 }

@@ -1,67 +1,26 @@
 package pro.deta.orion.git.parser.v2.data;
 
-import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.PackByteStore;
+import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
- * Direct access to an entry's original zlib stream, without decompression, hashing, or delta application.
- * type describes its packed representation and size bounds the raw stream starting at dataOffset in the
- * borrowed PackByteStore. It counts compressed bytes, not the inflated payload length. Pack entry
- * headers and base references are excluded. baseId is empty for full objects and identifies the base for
- * either delta encoding; storage translates an original OFS_DELTA base offset to its ObjectId.
- *
- * <p>read addresses compressed-stream-relative offsets and must not cross size. It accepts any
- * writable ByteBuffer, advances position, preserves limit, and retains no caller buffer. Partial reads are
- * allowed; an empty destination returns zero, otherwise a read returns a positive count or -1 at the stream
- * end. Negative offsets fail with IllegalArgumentException, null buffers with NullPointerException, and
- * read-only buffers with ReadOnlyBufferException. Truncated backing data is IOException, not normal EOF.
- * Writer can reuse these bytes and construct its own entry header and base reference.
- *
- * <p>close releases this read handle only, never the borrowed store. It is idempotent; reads after close fail
- * with ClosedChannelException. Callers close handles before their owning upload or storage resources.
- * Fields describe the raw slice; reading and cleanup remain placeholders. No inflater belongs to this class.
+ * Processes an object's original compressed bytes without decompression, hashing, or delta application.
+ * The supplied consumer receives type, inflated size, and the bounded raw source, and returns the requested
+ * result. For example, it may stream bytes to an output and return a count without collecting them in memory.
+ * There is no separate compressedSize or stored object metadata: the source supplies its boundary and each
+ * invocation supplies its metadata. This processor neither owns nor closes the source or consumer resources.
  */
-public final class RawGitObjectRead implements GitObjectRead {
-    private final ObjectType type;
-    private final long size;
-    private final PackByteStore byteStore;
-    private final long dataOffset;
-    private final Optional<ObjectId> baseId;
+public final class RawGitObjectRead<R> implements GitObjectRead<R> {
+    private final GitObjectRead<R> consumer;
 
-    public RawGitObjectRead(ObjectType type, long size, PackByteStore byteStore, long dataOffset,
-                            Optional<ObjectId> baseId) {
-        this.type = Objects.requireNonNull(type, "type");
-        this.size = size;
-        this.byteStore = Objects.requireNonNull(byteStore, "byteStore");
-        this.dataOffset = dataOffset;
-        this.baseId = Objects.requireNonNull(baseId, "baseId");
+    public RawGitObjectRead(GitObjectRead<R> consumer) {
+        this.consumer = Objects.requireNonNull(consumer, "consumer");
     }
 
     @Override
-    public ObjectType type() {
-        return type;
-    }
-
-    @Override
-    public long size() {
-        return size;
-    }
-
-    public Optional<ObjectId> baseId() {
-        return baseId;
-    }
-
-    public int read(long offset, ByteBuffer destination) throws IOException {
-        throw new UnsupportedOperationException("Raw object reads are not implemented");
-    }
-
-    @Override
-    public void close() throws IOException {
-        throw new UnsupportedOperationException("Raw object read cleanup is not implemented");
+    public R read(ObjectType type, long inflatedSize, BufferedByteInput rawSource) throws IOException {
+        return Objects.requireNonNull(consumer.read(type, inflatedSize, rawSource), "reader result");
     }
 }

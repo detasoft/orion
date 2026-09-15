@@ -10,11 +10,10 @@ package pro.deta.orion.git.parser.v2.storage;
  * PackIndex accumulates provisional metadata, resolved ObjectIds, external bases, and waiting dependencies
  * directly in storage. It need not reside entirely in memory or share the byte store's backing format.
  * Each upload owns a PackByteStore: parsing borrows its combined append and positional-read interface.
- * Content handles borrow that same store, while upload.readObject
- * opens retained entries by offset and exposes inflated payload through caller-owned ContentGitObjectRead handles.
- * Raw reads remain internal to storage. The initial implementation uses a private FileChannel behind
- * PackByteStore, with no public file
- * handles or additional memory tier.
+ * upload.readObject(offset, reader) opens a bounded source from that store and invokes the reader. Raw readers
+ * process compressed bytes; content readers inflate them before invoking the consumer. The upload owns the
+ * invocation source; independently owned result resources belong to the caller. The planned implementation
+ * uses a private FileChannel behind PackByteStore, with no public file handles or additional memory tier.
  * The upload owns its parsing state, sink, index, commit, and rollback without a public upload ID. Rollback releases
  * resources without closing source input or discarding a completed publication or another attempt's data.
  *
