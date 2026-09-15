@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -241,7 +243,7 @@ class SessionCommandsRouteTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
         }
 
         @Override

@@ -155,7 +155,8 @@ class SessionJournalRelayLivePeerTest {
                     "test", "changeit".toCharArray());
             registered = new RegisteredAgentFixture(Files.createTempDirectory("relay-registration"),
                     new AgentLabel("agent-1"), SESSION);
-            replication = new JettySessionReplicationEndpoint(new SessionReplicationService(storage, registered.sessions),
+            SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
+            replication = new JettySessionReplicationEndpoint(() -> service,
                     ignored -> Optional.of(registered.context), LIMITS);
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override

@@ -85,7 +85,13 @@ endpoint rejects an unauthenticated `HELLO`. The frozen five-field
 `SESSION_SYNC`; a null cursor requests the first available event, otherwise
 the agent resumes after the returned committed event ID.
 
-The endpoint is `POST /agent/session/{sessionId}` over HTTP/2. The request path
+The endpoint is `POST /agent/session/{sessionId}` over HTTP/2 on the main Orion
+HTTPS listener. The same physical connection must already have completed the
+`/agent/control` handshake; supplying a label or sharing an address is not
+sufficient. An additional control stream on that connection receives HTTP 409,
+and closing the control stream closes the physical connection and its dependent
+replication streams. Before a completed handshake, replication receives HTTP 401.
+Ordinary client event and command routes remain on the same HTTPS listener. The request path
 ID must match the `SESSION_OPEN` payload, and the response cursor comes only
 from durable server storage. The remaining request body carries the journal's
 original CBOR Sequence records. Multiple disposable physical streams may

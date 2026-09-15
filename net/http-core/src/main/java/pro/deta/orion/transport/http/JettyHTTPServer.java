@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
+import pro.deta.orion.agent.server.AgentSessionServer;
 import jakarta.inject.Singleton;
 import jakarta.servlet.DispatcherType;
 import lombok.Getter;
@@ -52,6 +53,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private final KeyMaterialScope clusterScope;
     private final OrionDesiredState desiredState;
     private final TlsCapability tls;
+    private final AgentSessionServer agentServer;
     private final OrionHttpRouteServlet rootServlet;
     private final OrionAuthorizationFilter authorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
@@ -62,7 +64,8 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             OrionDesiredState desiredState,
             TlsCapability tls,
             OrionHttpRouteServlet rootServlet,
-            OrionAuthorizationFilter authorizationFilter) {
+            OrionAuthorizationFilter authorizationFilter,
+            AgentSessionServer agentServer) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
         this.clusterScope = KeyMaterialScope.cluster(
                 orionConfiguration.getBootstrap().getKeyMaterial().getClusterId());
@@ -70,6 +73,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         this.tls = tls;
         this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
+        this.agentServer = agentServer;
     }
 
     public void onStart() {
@@ -169,8 +173,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
         HttpConfiguration httpConfiguration = new HttpConfiguration();
         HttpConnectionFactory http1 = new HttpConnectionFactory(httpConfiguration);
-        HTTP2ServerConnectionFactory http2 = new HTTP2ServerConnectionFactory(httpConfiguration);
-        ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory(http2.getProtocol(), http1.getProtocol());
+        HTTP2ServerConnectionFactory http2 = new AgentHttp2ConnectionFactory(
+                httpConfiguration, () -> agentServer.replicationService());
+        ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory(http2.getProtocol(), "http/1.1");
         alpn.setDefaultProtocol(http1.getProtocol());
         ServerConnector httpsConnector = new ServerConnector(
                 server,

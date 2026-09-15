@@ -155,7 +155,7 @@ class SessionCommandServiceTest {
                 }
 
                 @Override
-                public void handshakeComplete() {
+                public void handshakeComplete(AuthenticatedConnectionContext context) {
                 }
 
                 @Override
@@ -327,7 +327,7 @@ class SessionCommandServiceTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
         }
 
         @Override

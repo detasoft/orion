@@ -14,6 +14,10 @@ import pro.deta.orion.agent.server.replication.SessionReplicationService;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -22,14 +26,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class JettySessionReplicationEndpoint implements ServerSessionListener, AutoCloseable {
     private static final String SESSION_PATH_PREFIX = "/agent/session/";
 
-    private final SessionReplicationService replication;
+    private final Supplier<SessionReplicationService> replication;
     private final EstablishedAgentContextProvider contexts;
     private final AgentProtocolLimits limits;
     private final ExecutorService executor;
+    private final Set<JettySessionReplicationStream> streams = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public JettySessionReplicationEndpoint(
-            SessionReplicationService replication,
+            Supplier<SessionReplicationService> replication,
             EstablishedAgentContextProvider contexts,
             AgentProtocolLimits limits) {
         this.replication = Objects.requireNonNull(replication, "replication");
@@ -64,27 +69,54 @@ public final class JettySessionReplicationEndpoint implements ServerSessionListe
         if (context.isEmpty()) {
             return reject(stream, 401);
         }
+        SessionReplicationService service;
+        try {
+            service = Objects.requireNonNull(replication.get(), "replication service");
+        } catch (RuntimeException failure) {
+            return reject(stream, 503);
+        }
         JettySessionReplicationStream listener = new JettySessionReplicationStream(
                 stream,
                 sessionId,
                 context.orElseThrow(),
-                replication,
+                service,
                 limits,
-                executor);
+                executor,
+                streams::remove);
+        streams.add(listener);
+        if (closed.get()) {
+            listener.close();
+            return listener;
+        }
         MetaData.Response response = new MetaData.Response(
                 200, null, HttpVersion.HTTP_2, HttpFields.EMPTY);
-        stream.headers(
-                new HeadersFrame(stream.getId(), response, null, false),
-                Callback.from(
-                        () -> listener.accepted(frame.isEndStream()),
-                        listener::admissionFailed));
+        try {
+            stream.headers(
+                    new HeadersFrame(stream.getId(), response, null, false),
+                    Callback.from(
+                            () -> listener.accepted(frame.isEndStream()),
+                            listener::admissionFailed));
+        } catch (RuntimeException failure) {
+            listener.close();
+        }
         return listener;
     }
 
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
-            executor.close();
+            for (JettySessionReplicationStream stream : streams) {
+                stream.close();
+            }
+            executor.shutdownNow();
+            try {
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Session replication operations did not stop");
+                }
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted stopping session replication", failure);
+            }
         }
     }
 

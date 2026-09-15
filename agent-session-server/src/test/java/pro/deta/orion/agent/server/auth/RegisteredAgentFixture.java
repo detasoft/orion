@@ -58,7 +58,7 @@ public final class RegisteredAgentFixture implements AutoCloseable {
                 public CompletionStage<Void> send(AgentMessage message) {
                     return CompletableFuture.completedFuture(null);
                 }
-                public void handshakeComplete() { }
+                public void handshakeComplete(AuthenticatedConnectionContext context) { }
                 public void close() { }
             }).onMessage(new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
                     label, new AgentInstanceId(UUID.randomUUID()), "test",

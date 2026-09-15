@@ -285,10 +285,11 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                 state = State.PUBLISHING;
             }
             Session published;
+            AuthenticatedConnectionContext context;
             try {
                 registry.verifyReconnectToken(
                         hello.agentLabel(), generation, launchId, hello.instanceId(), tokenDigest, clock.instant());
-                AuthenticatedConnectionContext context = new AuthenticatedConnectionContext(
+                context = new AuthenticatedConnectionContext(
                         hello.agentLabel(),
                         generation,
                         launchId,
@@ -337,7 +338,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                 }
             }
             if (accepted) {
-                connection.handshakeComplete();
+                connection.handshakeComplete(context);
                 if (published instanceof AuthenticatedSession authenticatedSession) {
                     authenticatedSession.onAuthenticated();
                 }

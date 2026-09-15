@@ -52,8 +52,47 @@ but may skip numbers, so a cursor before the first available record resumes at
 that record without reporting fabricated data loss. Reliable lost-record
 continuity remains separate unfinished work.
 
-The relay uses the server replication endpoint contract. Composition of that
-endpoint into the full server runtime remains part of server MVP integration.
+The main Orion HTTPS listener serves both `/agent/control` and
+`/agent/session/{sessionId}` on the same HTTP/2 connection. A successful control
+handshake binds its context to that physical connection; an unauthenticated
+connection cannot borrow another connection's label or session ownership.
+Only one control stream is allowed per physical connection. Closing or replacing
+the control connection resets its replication streams. Every replication open
+and append also verifies the current durable label/instance registration.
+
+## Local server acceptance
+
+From the repository root on macOS or Linux, with the repository JDK, Maven,
+Rust toolchain, and frontend Node dependencies available:
+
+```sh
+make run-test MODULE=net/http-core TEST='AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT'
+mvn verify -Pdev -T 4 -pl net/http-core -am \
+  -Dit.test='JettyHTTPServerIT,AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT,JettyHttp2LivePeerIT' \
+  -Dfailsafe.failIfNoSpecifiedTests=false
+cd net/frontend/ui
+./target/node/node/node ./node_modules/vitest/vitest.mjs run src/lib/session-terminal.test.js
+```
+
+The Maven reactor builds the native host at
+`session-host/target/cargo/debug/session-host` and installs the frontend Node
+runtime. Acceptance launches real `AgentdMain` processes with isolated state,
+a test truststore, and server-issued permits over standard input. It starts
+native sessions through the existing server command API, verifies journal
+completion, and drives `createOrionClient` and `followSessionTerminal` against
+actual HTTPS history and live event responses. Recovery recreates server
+services over the same durable directories and replaces AgentD while keeping
+native sessions intact. Native tests fail if the local host binary is missing;
+they are supported only on macOS and Linux. Test reports are in
+`net/http-core/target/{surefire,failsafe}-reports`; process logs and terminal
+results are retained under `net/http-core/target/acceptance`.
+
+The fixture grants its explicit test administrator token access to client routes;
+production deployments use the ordinary Orion authorization filter. AgentD uses
+TLS certificate and hostname validation throughout. No running external Orion
+server, SSH fleet, or packaged deployment is required. Remote administration,
+Windows acceptance, journal continuity proofs, local-session deletion, semantic
+projections, production object storage, and clustering remain deferred.
 
 ## Local terminal
 

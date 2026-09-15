@@ -1,5 +1,7 @@
 package pro.deta.orion.agent.server.connection;
 
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+
 import pro.deta.orion.agent.protocol.AgentMessage;
 
 import java.util.concurrent.CompletionStage;
@@ -11,7 +13,7 @@ public interface AgentControlHandler {
     interface Connection {
         CompletionStage<Void> send(AgentMessage message);
 
-        void handshakeComplete();
+        void handshakeComplete(AuthenticatedConnectionContext context);
 
         void close();
     }

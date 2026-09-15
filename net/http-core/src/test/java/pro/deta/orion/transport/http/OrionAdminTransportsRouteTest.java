@@ -97,7 +97,7 @@ class OrionAdminTransportsRouteTest {
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState, TlsCapability.unavailable(), servlet, null);
+                configuration, desiredState, TlsCapability.unavailable(), servlet, null, null);
         server.onStart();
 
         try {
@@ -140,7 +140,7 @@ class OrionAdminTransportsRouteTest {
                         List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                configuration, desiredState, TlsCapability.unavailable(), null, null) {
+                configuration, desiredState, TlsCapability.unavailable(), null, null, null) {
             @Override
             public int boundHttpsPort() {
                 return 9443;

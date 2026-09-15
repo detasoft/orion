@@ -174,7 +174,7 @@ class AgentdProvisioningControlTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
         }
 
         @Override

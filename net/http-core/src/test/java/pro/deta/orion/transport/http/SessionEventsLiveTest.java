@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CompletableFuture;
 import java.util.Base64;
@@ -222,7 +224,7 @@ class SessionEventsLiveTest {
                 public CompletionStage<Void> send(AgentMessage message) {
                     return CompletableFuture.completedFuture(null);
                 }
-                public void handshakeComplete() { }
+                public void handshakeComplete(AuthenticatedConnectionContext context) { }
                 public void close() { }
             });
             try (var attempt = sessions.provisioningControl(AGENT,

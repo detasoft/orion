@@ -281,7 +281,7 @@ class JettySessionReplicationLivePeerTest {
             registered = new RegisteredAgentFixture(root.resolve("registration-" + peerIds.get()),
                     AGENT_LABEL, new SessionId("session-1"), new SessionId("session-2"));
             SessionReplicationService service = new SessionReplicationService(storage, registered.sessions);
-            endpoint = new JettySessionReplicationEndpoint(service,
+            endpoint = new JettySessionReplicationEndpoint(() -> service,
                     ignored -> agentLabel.map(label -> registered.context), LIMITS);
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override

@@ -179,7 +179,7 @@ class TransportLifecycleStateMachineTest {
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
-                disabled, desiredState, TlsCapability.unavailable(), null, null));
+                disabled, desiredState, TlsCapability.unavailable(), null, null, null));
     }
 
     private static Throwable rootCause(Throwable error) {

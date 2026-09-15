@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.servlet.AsyncContext;
@@ -12,6 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.ee10.servlet.ServletContextResponse;
 import org.eclipse.jetty.ee10.servlet.ServletContextRequest;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ConnectionMetaData;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.LifeCycle;
 import org.eclipse.jetty.util.thread.Scheduler;
@@ -29,6 +32,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -43,6 +47,7 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST
 
 @Singleton
 public final class AgentControlRoute implements OrionHttpRoute {
+    private static final String CONTROL_ATTRIBUTE = AgentControlRoute.class.getName();
     static final String PATH = "/agent/control";
     private static final int INPUT_CHUNK_BYTES = 8 * 1024;
     private static final int MAX_PENDING_MESSAGES = 64;
@@ -86,14 +91,39 @@ public final class AgentControlRoute implements OrionHttpRoute {
         AsyncContext async = request.startAsync();
         async.setTimeout(0);
         response.setStatus(SC_OK);
-        new ControlStream(
+        ControlStream stream = new ControlStream(
                 async,
                 request.getInputStream(),
                 ServletContextRequest.getServletContextRequest(request),
                 ServletContextResponse.getServletContextResponse(response),
                 handler,
                 limits,
-                handshakeTimeoutMillis).start();
+                handshakeTimeoutMillis);
+        ConnectionMetaData physical = stream.request.getConnectionMetaData();
+        synchronized (physical) {
+            if (physical.getAttribute(CONTROL_ATTRIBUTE) != null) {
+                response.setStatus(HttpServletResponse.SC_CONFLICT);
+                async.complete();
+                return;
+            }
+            physical.setAttribute(CONTROL_ATTRIBUTE, stream);
+        }
+        try {
+            stream.start();
+        } catch (IOException | RuntimeException failure) {
+            stream.fail(failure);
+            throw failure;
+        }
+    }
+
+    static Optional<AuthenticatedConnectionContext> contextFor(ConnectionMetaData physical) {
+        synchronized (physical) {
+            Object value = physical.getAttribute(CONTROL_ATTRIBUTE);
+            if (value instanceof ControlStream stream && !stream.closed.get()) {
+                return Optional.ofNullable(stream.context);
+            }
+            return Optional.empty();
+        }
     }
 
     private static final class ControlStream
@@ -117,6 +147,7 @@ public final class AgentControlRoute implements OrionHttpRoute {
         private final Object outputLock = new Object();
         private volatile Scheduler.Task handshakeDeadline;
         private AgentControlHandler.Session session;
+        private AuthenticatedConnectionContext context;
         private int queuedBytes;
         private boolean writing;
         private volatile Throwable terminalFailure;
@@ -202,7 +233,14 @@ public final class AgentControlRoute implements OrionHttpRoute {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
+            Objects.requireNonNull(context, "context");
+            ConnectionMetaData physical = request.getConnectionMetaData();
+            synchronized (physical) {
+                if (!closed.get() && physical.getAttribute(CONTROL_ATTRIBUTE) == this) {
+                    this.context = context;
+                }
+            }
             cancelHandshakeDeadline();
         }
 
@@ -354,6 +392,13 @@ public final class AgentControlRoute implements OrionHttpRoute {
             if (!closed.compareAndSet(false, true)) {
                 return;
             }
+            ConnectionMetaData physical = request.getConnectionMetaData();
+            synchronized (physical) {
+                if (physical.getAttribute(CONTROL_ATTRIBUTE) == this) {
+                    physical.removeAttribute(CONTROL_ATTRIBUTE);
+                }
+                context = null;
+            }
             server.removeEventListener(this);
             cancelHandshakeDeadline();
             terminalFailure = failure;
@@ -380,6 +425,7 @@ public final class AgentControlRoute implements OrionHttpRoute {
                     // The container already completed the asynchronous request.
                 }
             }
+            physical.getConnection().getEndPoint().close();
         }
 
         private static final class PendingWrite {

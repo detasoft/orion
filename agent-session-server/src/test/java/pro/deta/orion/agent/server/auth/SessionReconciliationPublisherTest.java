@@ -252,7 +252,7 @@ class SessionReconciliationPublisherTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
         }
 
         @Override

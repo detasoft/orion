@@ -34,6 +34,7 @@ import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.AgentSessionServer;
+import pro.deta.orion.agent.server.auth.HttpTestConnectionContext;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.agentd.core.AgentControlService;
@@ -213,7 +214,7 @@ class JettyHTTPServerIT {
                             observed.awaitSessionList("live-session", "offline-session");
 
                             try (var replacement = restartedControl.nextAttempt()) {
-                                assertThat(restartedControl.awaitOnline(launchId, Duration.ZERO)).isFalse();
+                                assertThat(restartedControl.awaitOnline(launchId, Duration.ZERO)).isTrue();
                             }
                         } finally {
                             restarted.onStop();
@@ -231,6 +232,62 @@ class JettyHTTPServerIT {
             assertThat(sessions.ownedBy(agentLabel))
                     .extracting(record -> record.reported().sessionId().value())
                     .containsExactly("live-session", "offline-session");
+        }
+    }
+
+    @Test
+    void negotiatesTheHttp11WireProtocolAlongsideHttp2() throws Exception {
+        try (MaterialFixture material = material()) {
+            JettyHTTPServer server = startHttps(material, false,
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), new OkRoute());
+            SslContextFactory.Client tls = agentdTls(material.serverCertificate());
+            tls.start();
+            try (var socket = (javax.net.ssl.SSLSocket) tls.getSslContext().getSocketFactory()
+                    .createSocket("localhost", server.boundHttpsPort())) {
+                socket.setSoTimeout(5_000);
+                var parameters = socket.getSSLParameters();
+                parameters.setApplicationProtocols(new String[]{"http/1.1"});
+                parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                socket.setSSLParameters(parameters);
+                socket.startHandshake();
+                assertThat(socket.getApplicationProtocol()).isEqualTo("http/1.1");
+                socket.getOutputStream().write("GET /ok HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                        .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                assertThat(new String(socket.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
+                        .startsWith("HTTP/1.1 200");
+            } finally {
+                tls.stop();
+                server.onStop();
+            }
+        }
+    }
+
+    @Test
+    void rejectsReplicationBeforeControlHandshakeOnTheMainConnection() throws Exception {
+        try (MaterialFixture material = material()) {
+            JettyHTTPServer server = startHttps(material, false,
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(),
+                    new AgentControlRoute(connection -> new AgentControlHandler.Session() {
+                        public void onMessage(AgentMessage message) { }
+                        public void onClosed(Throwable failure) { }
+                    }));
+            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
+                client.connect();
+                CompletableFuture<Integer> status = new CompletableFuture<>();
+                MetaData.Request request = new MetaData.Request("POST",
+                        HttpURI.from(client.endpoint.resolve("/agent/session/pre-handshake")),
+                        HttpVersion.HTTP_2, HttpFields.EMPTY);
+                client.stream.getSession().newStream(new HeadersFrame(request, null, false),
+                        new Stream.Listener() {
+                            @Override
+                            public void onHeaders(Stream stream, HeadersFrame frame) {
+                                status.complete(((MetaData.Response) frame.getMetaData()).getStatus());
+                            }
+                        }).get(5, TimeUnit.SECONDS);
+                assertThat(status.get(5, TimeUnit.SECONDS)).isEqualTo(401);
+            } finally {
+                server.onStop();
+            }
         }
     }
 
@@ -432,7 +489,7 @@ class JettyHTTPServerIT {
                     if (received.size() == 2) {
                         connection.send(firstReply);
                         connection.send(secondReply).thenRun(() -> {
-                            connection.handshakeComplete();
+                            connection.handshakeComplete(HttpTestConnectionContext.forConnection(connection));
                             handshakeCompleted.complete(null);
                         });
                     } else if (received.size() == 3) {
@@ -671,7 +728,7 @@ class JettyHTTPServerIT {
             return new AgentControlHandler.Session() {
                 @Override
                 public void onMessage(AgentMessage message) {
-                    connection.handshakeComplete();
+                    connection.handshakeComplete(HttpTestConnectionContext.forConnection(connection));
                     admitted.complete(null);
                 }
 
@@ -729,12 +786,12 @@ class JettyHTTPServerIT {
         }
     }
 
-    private static TestAgentClient agentClient(JettyHTTPServer server, X509Certificate certificate)
+    static TestAgentClient agentClient(JettyHTTPServer server, X509Certificate certificate)
             throws Exception {
         return agentClient(server, certificate, true, 65_535);
     }
 
-    private static TestAgentClient agentClient(
+    static TestAgentClient agentClient(
             JettyHTTPServer server, X509Certificate certificate, boolean demandData, int receiveWindow)
             throws Exception {
         KeyStore trust = KeyStore.getInstance("PKCS12");
@@ -745,7 +802,7 @@ class JettyHTTPServerIT {
         return new TestAgentClient(URI.create(server.relativiseHttps("").toString()), tls, demandData, receiveWindow);
     }
 
-    private static SslContextFactory.Client agentdTls(X509Certificate certificate) throws Exception {
+    static SslContextFactory.Client agentdTls(X509Certificate certificate) throws Exception {
         KeyStore trust = KeyStore.getInstance("PKCS12");
         trust.load(null, new char[0]);
         trust.setCertificateEntry("server", certificate);
@@ -962,7 +1019,7 @@ class JettyHTTPServerIT {
         return context;
     }
 
-    private static MaterialFixture material() throws Exception {
+    static MaterialFixture material() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         store.write(SHARED_MATERIAL.snapshot(), null);
         OrionKeyMaterial owner = owner(store);
@@ -1020,13 +1077,13 @@ class JettyHTTPServerIT {
                 true);
     }
 
-    private static OrionDesiredState desiredState(
+    static OrionDesiredState desiredState(
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots) throws IOException {
         return desiredState(mode, clientRoots, NetworkUtils.findAvailablePort());
     }
 
-    private static OrionDesiredState desiredState(
+    static OrionDesiredState desiredState(
             OrionHttpsConfiguration.ClientAuthentication mode,
             List<TrustedCertificateDescriptor> clientRoots,
             int port) {
@@ -1052,11 +1109,11 @@ class JettyHTTPServerIT {
         int next() throws IOException;
     }
 
-    private static OrionDesiredState desiredStateWithoutHttps() {
+    static OrionDesiredState desiredStateWithoutHttps() {
         return desiredState(Optional.empty());
     }
 
-    private static OrionDesiredState desiredState(Optional<OrionHttpsConfiguration> https) {
+    static OrionDesiredState desiredState(Optional<OrionHttpsConfiguration> https) {
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of()),
@@ -1064,7 +1121,7 @@ class JettyHTTPServerIT {
         return desiredState;
     }
 
-    private static OrionConfiguration httpConfiguration(boolean enabled) {
+    static OrionConfiguration httpConfiguration(boolean enabled) {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
         configuration.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", 0));
@@ -1080,7 +1137,7 @@ class JettyHTTPServerIT {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(routes)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        return new JettyHTTPServer(bootstrap, desiredState, tls, servlet, null);
+        return new JettyHTTPServer(bootstrap, desiredState, tls, servlet, null, null);
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
@@ -1222,16 +1279,16 @@ class JettyHTTPServerIT {
         }
     }
 
-    private static final class TestAgentClient implements AutoCloseable {
-        private final URI endpoint;
+    static final class TestAgentClient implements AutoCloseable {
+        final URI endpoint;
         private final SslContextFactory.Client tls;
         private final HTTP2Client client = new HTTP2Client();
         private final AgentProtocolDecoder decoder = new AgentProtocolDecoder(AgentProtocolLimits.defaults());
-        private final LinkedBlockingQueue<AgentMessage> replies = new LinkedBlockingQueue<>();
+        final LinkedBlockingQueue<AgentMessage> replies = new LinkedBlockingQueue<>();
         private final CompletableFuture<Void> accepted = new CompletableFuture<>();
-        private final CompletableFuture<Void> terminal = new CompletableFuture<>();
+        final CompletableFuture<Void> terminal = new CompletableFuture<>();
         private final boolean demandData;
-        private Stream stream;
+        Stream stream;
 
         private TestAgentClient(
                 URI endpoint, SslContextFactory.Client tls, boolean demandData, int receiveWindow) {
@@ -1244,7 +1301,7 @@ class JettyHTTPServerIT {
             client.setInitialStreamRecvWindow(receiveWindow);
         }
 
-        private void connect() throws Exception {
+        void connect() throws Exception {
             tls.start();
             client.start();
             int port = endpoint.getPort() < 0 ? 443 : endpoint.getPort();
@@ -1324,14 +1381,14 @@ class JettyHTTPServerIT {
             accepted.get(5, TimeUnit.SECONDS);
         }
 
-        private void send(byte[] bytes) throws Exception {
+        void send(byte[] bytes) throws Exception {
             CompletableFuture<Void> sent = new CompletableFuture<>();
             stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(bytes), false),
                     Callback.from(() -> sent.complete(null), sent::completeExceptionally));
             sent.get(5, TimeUnit.SECONDS);
         }
 
-        private void reset() throws Exception {
+        void reset() throws Exception {
             CompletableFuture<Void> reset = new CompletableFuture<>();
             stream.reset(new ResetFrame(stream.getId(), 0),
                     Callback.from(() -> reset.complete(null), reset::completeExceptionally));
@@ -1348,13 +1405,19 @@ class JettyHTTPServerIT {
         }
     }
 
-    private record MaterialFixture(
+    record MaterialFixture(
             OrionKeyMaterial owner,
             X509Certificate serverCertificate,
             KeyPair trustedClientKey,
             X509Certificate trustedClientCertificate,
             KeyPair serverIssuerClientKey,
             X509Certificate serverIssuerClientCertificate) implements AutoCloseable {
+        X509Certificate serverRootCertificate() throws java.security.GeneralSecurityException {
+            return owner.tls().serverIssuerTrustAnchor(new pro.deta.orion.keymaterial.TlsMaterialConfiguration(
+                    IDENTITY, Optional.of(SERVER_ROOT), List.of(),
+                    pro.deta.orion.keymaterial.TlsClientAuthentication.DISABLED)).orElseThrow();
+        }
+
         @Override
         public void close() {
             owner.close();

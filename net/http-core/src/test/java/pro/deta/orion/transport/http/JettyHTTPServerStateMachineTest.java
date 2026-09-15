@@ -21,7 +21,7 @@ class JettyHTTPServerStateMachineTest {
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                new OrionConfiguration(), desiredState, TlsCapability.unavailable(), null, null);
+                new OrionConfiguration(), desiredState, TlsCapability.unavailable(), null, null, null);
         JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server);
 
         assertEquals("http", machine.stateMachine().name());

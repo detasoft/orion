@@ -104,7 +104,7 @@ public class ACMECertificateChallengeTest {
                 desiredStateWithoutHttps(),
                 TlsCapability.unavailable(),
                 rootServlet,
-                null);
+                null, null);
         server.onStart();
         return new AcmeHttpTestServer(server, challengeService);
     }
@@ -143,7 +143,7 @@ public class ACMECertificateChallengeTest {
                 desiredStateWithoutHttps(),
                 TlsCapability.unavailable(),
                 rootServlet,
-                null);
+                null, null);
         server.onStart();
 
         try {

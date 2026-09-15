@@ -949,7 +949,7 @@ class AgentControlAuthenticatorTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
             handshakeComplete = true;
         }
 
@@ -977,7 +977,7 @@ class AgentControlAuthenticatorTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
             handshakeComplete = true;
         }
 

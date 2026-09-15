@@ -1,5 +1,7 @@
 package pro.deta.orion.agent.server;
 
+import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
+
 import pro.deta.orion.agent.server.journal.JournalStorageConfig;
 import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import org.junit.jupiter.api.Test;
@@ -247,7 +249,7 @@ class AgentSessionServerTest {
         }
 
         @Override
-        public void handshakeComplete() {
+        public void handshakeComplete(AuthenticatedConnectionContext context) {
             handshakeComplete = true;
         }
 

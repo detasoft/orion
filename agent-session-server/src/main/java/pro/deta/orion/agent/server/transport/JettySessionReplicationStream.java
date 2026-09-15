@@ -23,10 +23,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class JettySessionReplicationStream implements Stream.Listener {
     private final Stream stream;
+    private final Consumer<JettySessionReplicationStream> completed;
     private final SessionId sessionId;
     private final AuthenticatedConnectionContext context;
     private final SessionReplicationService replication;
@@ -42,8 +44,10 @@ final class JettySessionReplicationStream implements Stream.Listener {
             AuthenticatedConnectionContext context,
             SessionReplicationService replication,
             AgentProtocolLimits limits,
-            Executor executor) {
+            Executor executor,
+            Consumer<JettySessionReplicationStream> completed) {
         this.stream = Objects.requireNonNull(stream, "stream");
+        this.completed = Objects.requireNonNull(completed, "completed");
         this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
         this.context = Objects.requireNonNull(context, "context");
         this.replication = Objects.requireNonNull(replication, "replication");
@@ -170,7 +174,7 @@ final class JettySessionReplicationStream implements Stream.Listener {
         }
         if (endStream) {
             write(new DataFrame(stream.getId(), ByteBuffer.allocate(0), true),
-                    () -> terminal.set(true));
+                    this::complete);
         } else {
             demand();
         }
@@ -198,11 +202,22 @@ final class JettySessionReplicationStream implements Stream.Listener {
 
     private void fail(int error) {
         if (terminal.compareAndSet(false, true)) {
+            completed.accept(this);
             try {
                 stream.reset(new ResetFrame(stream.getId(), error), Callback.NOOP);
             } catch (RuntimeException ignored) {
                 // The stream is already terminal; there is no remaining recovery action.
             }
+        }
+    }
+
+    void close() {
+        fail(ErrorCode.CANCEL_STREAM_ERROR.code);
+    }
+
+    private void complete() {
+        if (terminal.compareAndSet(false, true)) {
+            completed.accept(this);
         }
     }
 
@@ -215,12 +230,12 @@ final class JettySessionReplicationStream implements Stream.Listener {
     }
 
     void admissionFailed(Throwable failure) {
-        terminal.set(true);
+        complete();
     }
 
     @Override
     public void onReset(Stream ignored, ResetFrame frame, Callback callback) {
-        terminal.set(true);
+        complete();
         callback.succeeded();
     }
 
@@ -231,13 +246,13 @@ final class JettySessionReplicationStream implements Stream.Listener {
             String reason,
             Throwable failure,
             Callback callback) {
-        terminal.set(true);
+        complete();
         callback.succeeded();
     }
 
     @Override
     public void onClosed(Stream ignored) {
-        terminal.set(true);
+        complete();
     }
 
     private record Work(
