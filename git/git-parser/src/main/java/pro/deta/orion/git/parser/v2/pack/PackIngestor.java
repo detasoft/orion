@@ -12,7 +12,17 @@ import java.io.IOException;
  * already registered in this upload; published external bases are read through repository storage as needed.
  * Deferred delta payloads can also be reread from the upload without advancing the enumerator.
  * Missing indexed IDs do not prove external dependencies because later entries may resolve to those IDs.
+ *
+ * <p>When an entry cannot yet be resolved, lazily create a pending map and group waiting entries by their
+ * required base: ObjectId for REF_DELTA or the base entry's absolute offset for OFS_DELTA. A base can have
+ * multiple waiting entries. Retain entry metadata, not whole payloads; reread bytes through upload.read.
+ * After each input entry, including one added to the pending map, retry waiting entries whose bases are now
+ * available. Each successfully resolved object is added to the upload and unblocks its own dependents by
+ * both ObjectId and offset. Continue this chain until no further progress is possible, then resume parsing.
+ * Remove resolved entries from the map and keep unresolved entries for later bases; do not busy-wait when
+ * nothing changes. A missing base is a deferred dependency, not yet evidence of an invalid pack.
  * After enumeration, finish pending work or fail, then record confirmed dependencies via addExternalBaseId.
+ * Completion requires the pending map to be empty; the confirmed external-base set may remain nonempty.
  *
  * <p>Preliminary methods: resolvePack(upload) drives enumeration and resolution; close() releases owned base
  * reads and resolution resources. PushCommand owns this ingestor, performs policy checks, and commits or
