@@ -1,6 +1,9 @@
 package pro.deta.orion.git.parser.v2.pack;
 
+import pro.deta.orion.git.parser.v2.data.GitObjectRead;
+
 import java.io.IOException;
+import java.util.Objects;
 
 /**
  * Coordinates pack resolution for PushCommand through PackUpload.
@@ -29,19 +32,42 @@ import java.io.IOException;
  * chains; this ingestor does not retrieve a list or duplicate that check. Confirmed external bases may remain
  * nonempty. Failed parsing or resolution must not lead to commit.
  *
- * <p>Preliminary methods: resolvePack(upload) iterates metadata, delegates resolution, and commits the pack;
+ * <p>The constructor borrows one upload and creates the resolver owned by this ingestor. resolvePack()
+ * iterates parsed results, closes their read handles, delegates resolution, and requests upload commit.
+ * recordExternalBases remains a placeholder for final classification through the completed index; until
+ * that work is implemented, ingestion cannot reach publication. No independent pending map is introduced.
  * close() releases owned resolver and ingestion resources. PushCommand performs command policy checks and
  * rolls back upload staging in finally without undoing a successful commit. This consumer borrows the upload
  * and never closes source input.
- * The parser has no storage dependency and never calls back into this class. Method bodies are placeholders.
+ * The parser has no storage dependency and never calls back into this class. The orchestration loop is
+ * present, while parsing, resolution, dependency classification, and publication are still incomplete.
  */
 public final class PackIngestor implements AutoCloseable {
-    public void resolvePack(PackUpload upload) throws IOException {
-        throw new UnsupportedOperationException("Pack resolution is not implemented");
+    private final PackUpload upload;
+    private final GitPackObjectResolver resolver;
+
+    public PackIngestor(PackUpload upload) {
+        this.upload = Objects.requireNonNull(upload, "upload");
+        this.resolver = new GitPackObjectResolver(upload);
+    }
+
+    public void resolvePack() throws IOException {
+        while (upload.hasNext()) {
+            PackObjectParser.Result result = upload.next();
+            try (GitObjectRead object = result.object()) {
+                resolver.attemptResolve(result);
+            }
+        }
+        recordExternalBases();
+        upload.commit(upload.packId());
+    }
+
+    private void recordExternalBases() throws IOException {
+        throw new UnsupportedOperationException("External base classification is not implemented");
     }
 
     @Override
     public void close() throws IOException {
-        throw new UnsupportedOperationException("Pack resolution cleanup is not implemented");
+        resolver.close();
     }
 }

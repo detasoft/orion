@@ -2,8 +2,8 @@ package pro.deta.orion.git.parser.v2.storage;
 
 /**
  * Stores pack bytes and indexes internally behind GitStorageApi; files and paths stay inside storage.
- * Object resolution and operation-specific policy belong to callers. uploadNewPack creates a private
- * implementation of PackUpload with an empty storage-provided PackIndex and an internal raw-byte sink.
+ * Object resolution and operation-specific policy belong to callers. uploadNewPack creates PackUpload with
+ * the owning GitStorageApi, caller-owned input, a PackByteStore, and an empty storage-provided PackIndex.
  * Static PackObjectParser methods consume entries into that sink with bounded buffers. Upload accumulates
  * the pack checksum incrementally, excluding the trailer from the digest. Only bytes through that trailer
  * are retained; later protocol bytes remain available through the caller's source.

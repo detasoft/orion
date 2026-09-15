@@ -3,8 +3,12 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Objects;
 
 /**
  * Owns one upload's input position, checksum state, retained pack bytes, and storage-provided PackIndex.
@@ -68,22 +72,77 @@ import java.io.IOException;
  * <p>rollback releases byte storage and index resources belonging to this attempt and discards only unpublished
  * staging. It is idempotent and safe after commit: published data and other attempts remain intact.
  * Call it in finally without masking the original failure. Neither outcome closes caller-owned source input.
- * Recovery ignores incomplete staging. Methods are sequential. This is a contract for future implementation.
+ * Recovery ignores incomplete staging. Methods are sequential.
+ *
+ * <p>The constructor stores the repository, borrowed input, and owned byte store and index without doing I/O.
+ * checksum is the streaming SHA-1 accumulator for the current GitId representation. offset tracks retained
+ * original bytes; remainingEntries is -1 until the pack header has been parsed. verifiedPackId stays null
+ * until the entry count and trailer have been validated. No object payload cache is kept here.
+ * Construction, dependency access, and commit preconditions are implemented. Header/entry iteration,
+ * content reads, publication, and rollback remain explicit placeholders; this scaffold cannot publish data.
  */
-public interface PackUpload {
-    GitStorageApi storage();
+public final class PackUpload {
+    private final GitStorageApi storage;
+    private final BufferedByteInput source;
+    private final PackByteStore byteStore;
+    private final PackIndex index;
+    private final MessageDigest checksum;
 
-    PackIndex index();
+    private long offset;
+    private long remainingEntries = -1;
+    private PackId verifiedPackId;
 
-    boolean hasNext() throws IOException;
+    public PackUpload(GitStorageApi storage, BufferedByteInput source, PackByteStore byteStore, PackIndex index) {
+        this.storage = Objects.requireNonNull(storage, "storage");
+        this.source = Objects.requireNonNull(source, "source");
+        this.byteStore = Objects.requireNonNull(byteStore, "byteStore");
+        this.index = Objects.requireNonNull(index, "index");
+        try {
+            this.checksum = MessageDigest.getInstance("SHA-1");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-1 is required for Git pack checksums", e);
+        }
+    }
 
-    PackObjectParser.Result next() throws IOException;
+    public GitStorageApi storage() {
+        return storage;
+    }
 
-    PackId packId();
+    public PackIndex index() {
+        return index;
+    }
 
-    ContentGitObjectRead readObject(long entryOffset) throws IOException;
+    public boolean hasNext() throws IOException {
+        throw new UnsupportedOperationException("Pack header and checksum processing is not implemented");
+    }
 
-    void commit(PackId packId) throws IOException;
+    public PackObjectParser.Result next() throws IOException {
+        throw new UnsupportedOperationException("Pack entry iteration is not implemented");
+    }
 
-    void rollback() throws IOException;
+    public PackId packId() {
+        if (verifiedPackId == null) {
+            throw new IllegalStateException("Pack checksum has not been verified");
+        }
+        return verifiedPackId;
+    }
+
+    public ContentGitObjectRead readObject(long entryOffset) throws IOException {
+        throw new UnsupportedOperationException("Reading retained pack entries is not implemented");
+    }
+
+    public void commit(PackId packId) throws IOException {
+        Objects.requireNonNull(packId, "packId");
+        if (!packId.equals(packId())) {
+            throw new IOException("Pack ID does not match the verified checksum");
+        }
+        if (index.hasUnresolved()) {
+            throw new IOException("Pack contains unresolved objects");
+        }
+        throw new UnsupportedOperationException("Pack publication is not implemented");
+    }
+
+    public void rollback() throws IOException {
+        throw new UnsupportedOperationException("Pack upload rollback is not implemented");
+    }
 }

@@ -20,6 +20,7 @@ import java.util.Optional;
  * Commands use this facade; ref, pack, and object stores remain internal implementation details.
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
  * uploadNewPack(source) creates an isolated PackUpload, raw-byte storage, and an empty PackIndex before reading.
+ * It constructs PackUpload(this, source, byteStore, index); backend creation remains internal to storage.
  * Upload uses static PackObjectParser entry parsing and incrementally stores original pack bytes and index
  * metadata. A streaming digest covers the original header and entries, excluding the trailing checksum.
  * Only bytes belonging to this pack enter the sink; subsequent protocol bytes remain available through the

@@ -5,7 +5,8 @@ package pro.deta.orion.git.parser.v2.command;
  * Creates and closes the v2 PackIngestor within execution. Reuses shared receive-pack policy validation;
  * the session and reader do not manage ingestion state or storage resources.
  *
- * <p>Call storage.uploadNewPack(source), then pass the returned upload to ingestor.resolvePack. Iteration
+ * <p>Call storage.uploadNewPack(source), construct PackIngestor(upload), and invoke ingestor.resolvePack()
+ * inside try-with-resources. Iteration
  * retains original bytes in the upload's internal sink and hashes full objects while parsing. The ingestor
  * delegates delta reconstruction, result hashing, and index completion to its resolver, records confirmed
  * external bases, and closes each parsed result without reading payloads itself.
