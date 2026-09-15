@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
+import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.net.io.BufferedByteInput;
@@ -83,14 +84,7 @@ public final class PackObjectIterator implements AutoCloseable {
      * which may refer inside or outside the pack. Full entries have neither base field.
      * The parser validates these combinations and boundaries; this value does not contain a resolved ObjectId.
      */
-    public record Entry(long offset, long dataOffset, long inflatedSize, Type type,
+    public record Entry(long offset, long dataOffset, long inflatedSize, ObjectType type,
                         OptionalLong baseOffset, Optional<ObjectId> baseId) {
-    }
-
-    /**
-     * Encoding found in a pack header; delta values describe storage representation, not logical object type.
-     */
-    public enum Type {
-        COMMIT, TREE, BLOB, TAG, OFS_DELTA, REF_DELTA
     }
 }

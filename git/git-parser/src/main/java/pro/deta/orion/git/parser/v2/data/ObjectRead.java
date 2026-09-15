@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
  * Provides positional access to restored object content obtained through GitStorageApi.
  * The owning command closes this handle to release storage resources, including after partial reads or errors.
  * Type, nonnegative size, and content remain unchanged for the lifetime of the open handle.
+ * type returns only COMMIT, TREE, BLOB, or TAG; delta encodings have already been resolved.
  * Offsets address content bytes, excluding loose-object headers, compression, and delta instructions.
  *
  * <p>read accepts any writable ByteBuffer, including heap, direct, and sliced buffers; implementations must

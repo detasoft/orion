@@ -19,6 +19,7 @@ import java.util.Optional;
  * borrowed facade, not a new connection or resource owned by the resolver. Upload-local reads and find
  * remain separate from published-object lookup through storage.
  * addObject associates a fully consumed entry with its resolved ID, logical type, and content size.
+ * Its type argument must be COMMIT, TREE, BLOB, or TAG, even when entry.type is a delta encoding.
  * Results may arrive in dependency order; identical repeats are harmless and conflicting results fail.
  * addExternalBaseId accumulates confirmed external dependencies, not every encountered REF_DELTA base.
  * Reconstruction, hashing, and dependency ordering belong to the caller.
