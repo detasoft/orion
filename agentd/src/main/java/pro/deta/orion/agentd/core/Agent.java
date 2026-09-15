@@ -45,7 +45,8 @@ public final class Agent implements AutoCloseable {
     }
 
     public static Agent create(AgentConfiguration configuration, AgentLaunchContext context) {
-        SslContextFactory.Client tls = new SslContextFactory.Client();
+        SslContextFactory.Client tls = "https".equalsIgnoreCase(configuration.serverUri().getScheme())
+                ? new SslContextFactory.Client() : null;
         AgentTransport transport = new JettyHttp2Transport(
                 configuration.serverUri(), tls, configuration.protocolLimits(), 64, 64);
         return create(configuration, context, transport, new LocalMachineInfo().read());

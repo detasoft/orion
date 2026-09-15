@@ -46,6 +46,18 @@ class RemoteAgentdProvisionerTest {
     }
 
     @Test
+    void carriesExplicitUnsecureOptInIntoTheAgentCommand() {
+        AgentdLaunchRequest secure = launchRequest("1.2.3");
+        AgentdLaunchRequest request = new AgentdLaunchRequest(
+                URI.create("http://localhost:8000"), secure.stateDirectory(), secure.agentLabel(),
+                secure.generation(), secure.launchId(), secure.maxFrameBytes(), secure.agentVersion(), true);
+        var arguments = RemoteAgentdProvisioner.agentdArguments("/opt/orion/releases/1.2.3", request);
+        assertThat(arguments).contains("--allow-unsecure");
+        assertThat(AgentConfiguration.parse(arguments.toArray(String[]::new)).serverUri())
+                .isEqualTo(request.serverUri());
+    }
+
+    @Test
     void uploadsVerifiesAndAtomicallyActivatesRuntimeBundle(@TempDir Path root) throws Exception {
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle bundle = bundle(artifacts, "1.2.3");
@@ -262,7 +274,7 @@ class RemoteAgentdProvisionerTest {
                 new AgentGeneration(1),
                 new AgentLaunchId(UUID.randomUUID()),
                 1_048_576,
-                version);
+                version, false);
     }
 
     private static ProvisioningOptions options() {

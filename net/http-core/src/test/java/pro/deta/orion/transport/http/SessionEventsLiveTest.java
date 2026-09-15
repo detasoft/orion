@@ -228,7 +228,7 @@ class SessionEventsLiveTest {
                 public void close() { }
             });
             try (var attempt = sessions.provisioningControl(AGENT,
-                    URI.create("https://orion.example/agent/control"), "/tmp/agent", 65536, "test")
+                    URI.create("https://orion.example/agent/control"), "/tmp/agent", 65536, "test", false)
                     .nextAttempt()) {
                 control.onMessage(new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
                         AGENT, new AgentInstanceId(UUID.randomUUID()), "test",

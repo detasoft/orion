@@ -164,7 +164,7 @@ class JettyHTTPServerIT {
             try {
                 URI endpoint = URI.create(firstServer.relativiseHttps("").toString());
                 var control = agentServer.provisioningControl(
-                        agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                        agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0", false);
                 try (var attempt = control.nextAttempt()) {
                     byte[] permit = Base64.getUrlDecoder().decode(attempt.permit().copyBytes());
                     AgentLaunchContext context = new AgentLaunchContext(
@@ -209,7 +209,7 @@ class JettyHTTPServerIT {
                                 new AgentControlRoute(observed));
                         try {
                             var restartedControl = agentServer.provisioningControl(
-                                    agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                                    agentLabel, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0", false);
                             assertThat(restartedControl.awaitOnline(launchId, Duration.ofSeconds(10))).isTrue();
                             observed.awaitSessionList("live-session", "offline-session");
 
@@ -794,6 +794,10 @@ class JettyHTTPServerIT {
     static TestAgentClient agentClient(
             JettyHTTPServer server, X509Certificate certificate, boolean demandData, int receiveWindow)
             throws Exception {
+        if (server.boundHttpsPort() == 0) {
+            return new TestAgentClient(URI.create(server.relativiseHttp("").toString()), null,
+                    demandData, receiveWindow);
+        }
         KeyStore trust = KeyStore.getInstance("PKCS12");
         trust.load(null, new char[0]);
         trust.setCertificateEntry("server", certificate);
@@ -1295,14 +1299,18 @@ class JettyHTTPServerIT {
             this.endpoint = endpoint;
             this.tls = tls;
             this.demandData = demandData;
-            tls.setEndpointIdentificationAlgorithm("HTTPS");
-            client.setProtocols(List.of("h2"));
-            client.setUseALPN(true);
+            if (tls != null) {
+                tls.setEndpointIdentificationAlgorithm("HTTPS");
+            }
+            client.setProtocols(List.of(tls == null ? "h2c" : "h2"));
+            client.setUseALPN(tls != null);
             client.setInitialStreamRecvWindow(receiveWindow);
         }
 
         void connect() throws Exception {
-            tls.start();
+            if (tls != null) {
+                tls.start();
+            }
             client.start();
             int port = endpoint.getPort() < 0 ? 443 : endpoint.getPort();
             Session session = client.connect(
@@ -1401,7 +1409,9 @@ class JettyHTTPServerIT {
                 stream.reset(new ResetFrame(stream.getId(), 0), Callback.NOOP);
             }
             client.stop();
-            tls.stop();
+            if (tls != null) {
+                tls.stop();
+            }
         }
     }
 

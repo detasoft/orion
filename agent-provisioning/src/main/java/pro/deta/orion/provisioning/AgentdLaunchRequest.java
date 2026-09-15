@@ -13,13 +13,15 @@ public record AgentdLaunchRequest(
         AgentGeneration generation,
         AgentLaunchId launchId,
         int maxFrameBytes,
-        String agentVersion
+        String agentVersion,
+        boolean allowUnsecure
 ) {
     public AgentdLaunchRequest {
-        if (serverUri == null || !"https".equalsIgnoreCase(serverUri.getScheme())
+        if (serverUri == null || (!"https".equalsIgnoreCase(serverUri.getScheme())
+                && !(allowUnsecure && "http".equalsIgnoreCase(serverUri.getScheme())))
                 || serverUri.getHost() == null || serverUri.getUserInfo() != null) {
             throw new IllegalArgumentException(
-                    "AgentD server URI must be an absolute HTTPS URI without credentials");
+                    "AgentD server URI must use HTTPS (or HTTP with --allow-unsecure) without credentials");
         }
         stateDirectory = requirePath(stateDirectory);
         if (agentLabel == null || generation == null || launchId == null) {

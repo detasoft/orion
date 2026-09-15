@@ -78,6 +78,6 @@ class RemoteAgentdCurrentSwitchShellTest {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), "/var/lib/orion/agent",
                 new AgentLabel("agent-1"), new AgentGeneration(7),
-                new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")), 1024, "new");
+                new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")), 1024, "new", false);
     }
 }

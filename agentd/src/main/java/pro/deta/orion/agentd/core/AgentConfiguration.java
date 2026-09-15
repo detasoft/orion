@@ -20,10 +20,11 @@ public record AgentConfiguration(
         AgentLaunchId launchId,
         AgentProtocolLimits protocolLimits,
         String agentVersion,
-        Path sessionHostExecutable
+        Path sessionHostExecutable,
+        boolean allowUnsecure
 ) {
     public AgentConfiguration {
-        serverUri = validateServerUri(serverUri);
+        serverUri = validateServerUri(serverUri, allowUnsecure);
         stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory").toAbsolutePath().normalize();
         Objects.requireNonNull(agentLabel, "agentLabel");
         Objects.requireNonNull(generation, "generation");
@@ -47,10 +48,12 @@ public record AgentConfiguration(
         int maxFrameBytes = AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES;
         String agentVersion = null;
         Path sessionHostExecutable = null;
+        boolean allowUnsecure = false;
 
         for (int index = 0; index < arguments.length; index++) {
             String option = arguments[index];
             switch (option) {
+                case "--allow-unsecure" -> allowUnsecure = true;
                 case "--server" -> serverUri = URI.create(nextValue(arguments, ++index, option));
                 case "--state-dir" -> stateDirectory = Path.of(nextValue(arguments, ++index, option));
                 case "--agent-label" -> agentLabel = new AgentLabel(nextValue(arguments, ++index, option));
@@ -86,7 +89,7 @@ public record AgentConfiguration(
                 launchId,
                 AgentProtocolLimits.defaults().withMaxFrameBytes(maxFrameBytes),
                 agentVersion,
-                sessionHostExecutable);
+                sessionHostExecutable, allowUnsecure);
         if (installBundledHost) {
             try {
                 BundledSessionHost.install(configuration.stateDirectory());
@@ -106,10 +109,12 @@ public record AgentConfiguration(
         return stateDirectory.resolve("agentd.lock");
     }
 
-    private static URI validateServerUri(URI serverUri) {
+    private static URI validateServerUri(URI serverUri, boolean allowUnsecure) {
         Objects.requireNonNull(serverUri, "serverUri");
-        if (!"https".equalsIgnoreCase(serverUri.getScheme()) || serverUri.getHost() == null) {
-            throw new IllegalArgumentException("AgentD server URI must be an absolute HTTPS URI");
+        if ((!"https".equalsIgnoreCase(serverUri.getScheme())
+                && !(allowUnsecure && "http".equalsIgnoreCase(serverUri.getScheme())))
+                || serverUri.getHost() == null) {
+            throw new IllegalArgumentException("AgentD server URI must use HTTPS (or HTTP with --allow-unsecure)");
         }
         if (serverUri.getUserInfo() != null) {
             throw new IllegalArgumentException("AgentD server URI must not contain credentials");

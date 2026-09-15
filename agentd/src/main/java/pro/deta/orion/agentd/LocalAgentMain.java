@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit;
 public final class LocalAgentMain {
     private static final String USAGE = """
             Usage: make run-agent [AGENT_ARGS='options']
-              --server HTTPS_URI    server control endpoint (https://localhost:8443)
+              --server URI          server control endpoint (https://localhost:8443)
+              --allow-unsecure      allow HTTP; default server becomes http://localhost:8000
               --state-dir PATH      local state (orion_root/agentd-local)
               --agent-label LABEL   stable server label (local)
               --ssh-port PORT       Orion SSH port (8022)
@@ -33,7 +34,7 @@ public final class LocalAgentMain {
               --ssh-option VALUE    additional ssh -o option; may be repeated
               --help                show this help without requesting a permit
             Enroll your admin key once with make enroll-admin-key.
-            The server HTTPS listener must be enabled and trusted by this JVM.
+            HTTPS requires a listener and a certificate trusted by this JVM.
             """;
 
     private LocalAgentMain() {
@@ -62,10 +63,14 @@ public final class LocalAgentMain {
                 } else {
                     Files.createDirectories(state);
                 }
-                AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
+                var agentArguments = new ArrayList<>(List.of(
                         "--server", options.server().toString(), "--state-dir", state.toString(),
                         "--agent-label", options.label(), "--generation", context.generation().value() + "",
-                        "--launch-id", context.launchId().value().toString(), "--agent-version", "dev"});
+                        "--launch-id", context.launchId().value().toString(), "--agent-version", "dev"));
+                if (options.allowUnsecure()) {
+                    agentArguments.add("--allow-unsecure");
+                }
+                AgentConfiguration configuration = AgentConfiguration.parse(agentArguments.toArray(String[]::new));
                 System.out.println("Starting AgentD " + options.label() + " -> " + options.server());
                 AgentdMain.launch(configuration, context);
             }
@@ -80,7 +85,7 @@ public final class LocalAgentMain {
             Thread.currentThread().interrupt();
             System.err.println("Local AgentD launch interrupted");
         } catch (RuntimeException failure) {
-            System.err.println("Local AgentD launch failed; check server HTTPS and local state permissions");
+            System.err.println("Local AgentD launch failed; check the server endpoint and local state permissions");
         } finally {
             if (response != null) {
                 Arrays.fill(response, (byte) 0);
@@ -92,18 +97,24 @@ public final class LocalAgentMain {
     }
 
     static Options options(String[] arguments) {
-        URI server = URI.create("https://localhost:8443");
+        URI server = null;
+        boolean allowUnsecure = false;
         Path state = Path.of("orion_root/agentd-local").toAbsolutePath().normalize();
         String label = "local";
         String user = "root";
         int port = 8022;
         List<String> sshOptions = new ArrayList<>();
-        for (int index = 0; index < arguments.length; index += 2) {
+        for (int index = 0; index < arguments.length; index++) {
+            if ("--allow-unsecure".equals(arguments[index])) {
+                allowUnsecure = true;
+                continue;
+            }
             if (index + 1 == arguments.length) {
                 throw new IllegalArgumentException("Missing local AgentD option value");
             }
-            String value = arguments[index + 1];
-            switch (arguments[index]) {
+            String option = arguments[index];
+            String value = arguments[++index];
+            switch (option) {
                 case "--server" -> server = URI.create(value);
                 case "--state-dir" -> state = Path.of(value).toAbsolutePath().normalize();
                 case "--agent-label" -> label = new AgentLabel(value).value();
@@ -113,12 +124,17 @@ public final class LocalAgentMain {
                 default -> throw new IllegalArgumentException("Unknown local AgentD option");
             }
         }
-        if (!"https".equalsIgnoreCase(server.getScheme()) || server.getHost() == null
+        if (server == null) {
+            server = URI.create(allowUnsecure ? "http://localhost:8000" : "https://localhost:8443");
+        }
+        if ((!"https".equalsIgnoreCase(server.getScheme())
+                && !(allowUnsecure && "http".equalsIgnoreCase(server.getScheme()))) || server.getHost() == null
                 || server.getUserInfo() != null || server.getQuery() != null || server.getFragment() != null
                 || port < 1 || port > 65535 || user.isBlank() || state.getParent() == null) {
-            throw new IllegalArgumentException("Invalid local AgentD options; server must use HTTPS");
+            throw new IllegalArgumentException(
+                    "Invalid local AgentD options; use HTTPS or allow HTTP with --allow-unsecure");
         }
-        return new Options(server, state, label, user, port, List.copyOf(sshOptions));
+        return new Options(server, state, label, user, port, List.copyOf(sshOptions), allowUnsecure);
     }
 
     static byte[] requestPermit(List<String> command) throws IOException, InterruptedException {
@@ -168,7 +184,8 @@ public final class LocalAgentMain {
         }
     }
 
-    record Options(URI server, Path state, String label, String user, int port, List<String> sshOptions) {
+    record Options(URI server, Path state, String label, String user, int port,
+                   List<String> sshOptions, boolean allowUnsecure) {
         List<String> sshCommand() {
             List<String> command = new ArrayList<>(List.of("ssh", "-T", "-o", "BatchMode=yes",
                     "-o", "PreferredAuthentications=publickey", "-o", "PasswordAuthentication=no",
@@ -179,7 +196,7 @@ public final class LocalAgentMain {
             }
             command.add("localhost");
             command.add("issue-launch-permit " + quote(label) + " " + quote(server.toString())
-                    + " " + quote(state.toString()) + " dev");
+                    + " " + quote(state.toString()) + " dev" + (allowUnsecure ? " --allow-unsecure" : ""));
             return List.copyOf(command);
         }
 

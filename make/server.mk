@@ -1,6 +1,6 @@
 ORION_ROOT ?= $(CURDIR)/orion_root
 ORION_ARGS ?=
-AGENT_ARGS ?=
+AGENT_ARGS ?= --allow-unsecure
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost

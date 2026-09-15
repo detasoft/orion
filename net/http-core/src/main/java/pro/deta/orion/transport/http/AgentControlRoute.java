@@ -83,7 +83,7 @@ public final class AgentControlRoute implements OrionHttpRoute {
     public void handle(OrionHttpExchange exchange) throws IOException {
         HttpServletRequest request = exchange.request();
         HttpServletResponse response = exchange.servletResponse();
-        if (!"HTTP/2.0".equals(request.getProtocol()) || !request.isSecure()) {
+        if (!"HTTP/2.0".equals(request.getProtocol())) {
             exchange.sendError(SC_HTTP_VERSION_NOT_SUPPORTED);
             return;
         }

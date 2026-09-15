@@ -121,7 +121,7 @@ class AgentSessionServerTest {
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
-                "2.4.1").nextAttempt()) {
+                "2.4.1", false).nextAttempt()) {
             AgentControlHandler.Session session = server.open(connection);
             session.onMessage(hello(attempt));
             session.onMessage(new AgentMessage.SessionList(List.of(reported)));
@@ -201,7 +201,7 @@ class AgentSessionServerTest {
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
-                "2.4.1").nextAttempt()) {
+                "2.4.1", false).nextAttempt()) {
             server.open(connection).onMessage(hello(agentLabel, attempt));
         }
         return connection;

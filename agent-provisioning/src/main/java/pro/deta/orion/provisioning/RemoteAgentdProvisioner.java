@@ -734,7 +734,7 @@ public final class RemoteAgentdProvisioner {
     }
 
     static List<String> agentdArguments(String release, AgentdLaunchRequest request) {
-        return List.of(
+        var arguments = new java.util.ArrayList<>(List.of(
                 "--server", request.serverUri().toASCIIString(),
                 "--state-dir", request.stateDirectory(),
                 "--agent-label", request.agentLabel().value(),
@@ -742,7 +742,11 @@ public final class RemoteAgentdProvisioner {
                 "--launch-id", request.launchId().value().toString(),
                 "--max-frame-bytes", Integer.toString(request.maxFrameBytes()),
                 "--agent-version", request.agentVersion(),
-                "--session-host", release + "/session-host");
+                "--session-host", release + "/session-host"));
+        if (request.allowUnsecure()) {
+            arguments.add("--allow-unsecure");
+        }
+        return List.copyOf(arguments);
     }
 
     private static String renderArguments(List<String> arguments) {

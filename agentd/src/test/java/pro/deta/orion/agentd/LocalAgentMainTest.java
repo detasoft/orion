@@ -20,6 +20,21 @@ class LocalAgentMainTest {
     }
 
     @Test
+    void explicitUnsecureFlagSelectsHttpAndPreservesAnExplicitServer() {
+        var defaults = LocalAgentMain.options(new String[]{"--allow-unsecure"});
+        assertThat(defaults.server().toString()).isEqualTo("http://localhost:8000");
+        assertThat(defaults.sshCommand().getLast()).contains("http://localhost:8000", "--allow-unsecure");
+        for (String[] arguments : List.of(
+                new String[]{"--allow-unsecure", "--server", "https://localhost:9443"},
+                new String[]{"--server", "https://localhost:9443", "--allow-unsecure"})) {
+            assertThat(LocalAgentMain.options(arguments).server().toString())
+                    .isEqualTo("https://localhost:9443");
+        }
+        assertThat(LocalAgentMain.options(new String[]{
+                "--server", "http://localhost:9000", "--allow-unsecure"}).server().getPort()).isEqualTo(9000);
+    }
+
+    @Test
     void preservesQuotedPathsAndSshOptionsWithoutExecutingAShell() {
         var options = LocalAgentMain.options(new String[]{
                 "--state-dir", "/tmp/agent's files", "--ssh-port", "9022",
@@ -32,6 +47,8 @@ class LocalAgentMainTest {
     void validatesOptionsBeforeRequestingAPermit() {
         for (String[] arguments : List.of(
                 new String[]{"--server", "http://localhost"},
+                new String[]{"--allow-unsecure", "--server", "ftp://localhost"},
+                new String[]{"--allow-unsecure", "--server", "http://secret@localhost"},
                 new String[]{"--ssh-port", "0"},
                 new String[]{"--ssh-port", "65536"},
                 new String[]{"--generation", "1"},

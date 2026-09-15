@@ -27,6 +27,7 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
     private final String stateDirectory;
     private final int maxFrameBytes;
     private final String agentVersion;
+    private final boolean allowUnsecure;
 
     public AgentdProvisioningControl(
             FileSystemAgentRegistry registry,
@@ -36,7 +37,8 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
             URI serverUri,
             String stateDirectory,
             int maxFrameBytes,
-            String agentVersion) {
+            String agentVersion,
+            boolean allowUnsecure) {
         this.registry = java.util.Objects.requireNonNull(registry, "registry");
         this.authenticator = java.util.Objects.requireNonNull(authenticator, "authenticator");
         this.connections = java.util.Objects.requireNonNull(connections, "connections");
@@ -47,12 +49,13 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
                 new AgentGeneration(1),
                 new AgentLaunchId(new UUID(0, 0)),
                 maxFrameBytes,
-                agentVersion);
+                agentVersion, allowUnsecure);
         this.agentLabel = validated.agentLabel();
         this.serverUri = validated.serverUri();
         this.stateDirectory = validated.stateDirectory();
         this.maxFrameBytes = validated.maxFrameBytes();
         this.agentVersion = validated.agentVersion();
+        this.allowUnsecure = validated.allowUnsecure();
     }
 
     @Override
@@ -72,7 +75,7 @@ public final class AgentdProvisioningControl implements AgentdLaunchAttemptSourc
                 launch.generation(),
                 launch.launchId(),
                 maxFrameBytes,
-                agentVersion);
+                agentVersion, allowUnsecure);
         AgentControlAuthenticator.PermitIssueResult result = authenticator.issueLaunchPermit(
                 agentLabel, launch.generation(), launch.launchId());
         if (result instanceof AgentControlAuthenticator.PermitIssueResult.Issued issued) {

@@ -90,7 +90,7 @@ class RemoteAgentdAdoptionShellTest {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), state.toString(),
                 new AgentLabel("agent-1"), new AgentGeneration(7),
-                new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")), 1024, "1");
+                new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")), 1024, "1", false);
     }
 
     private static String lockText(AgentdProcessIdentity identity) {

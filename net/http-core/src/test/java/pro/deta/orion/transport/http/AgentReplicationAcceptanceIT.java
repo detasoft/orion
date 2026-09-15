@@ -10,6 +10,8 @@ import org.eclipse.jetty.http2.frames.HeadersFrame;
 import org.eclipse.jetty.http2.frames.ResetFrame;
 import org.eclipse.jetty.util.Callback;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,9 +59,10 @@ class AgentReplicationAcceptanceIT {
     private static final SessionEventCodec EVENTS = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
     @TempDir Path directory;
 
-    @Test
-    void bindsAuthenticationToPhysicalConnectionAndPreservesRawIdempotentHistory() throws Exception {
-        try (var fixture = new AgentSessionAcceptanceIT.Fixture(directory);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void bindsAuthenticationToPhysicalConnectionAndPreservesRawIdempotentHistory(boolean allowUnsecure) throws Exception {
+        try (var fixture = new AgentSessionAcceptanceIT.Fixture(directory, allowUnsecure);
              var client = client(fixture);
              var borrowed = client(fixture);
              var foreign = client(fixture)) {
@@ -100,9 +103,10 @@ class AgentReplicationAcceptanceIT {
         }
     }
 
-    @Test
-    void fencesAlreadyOpenStreamsForReconnectTakeoverAndFreshInstanceReplacement() throws Exception {
-        try (var fixture = new AgentSessionAcceptanceIT.Fixture(directory);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void fencesAlreadyOpenStreamsForReconnectTakeoverAndFreshInstanceReplacement(boolean allowUnsecure) throws Exception {
+        try (var fixture = new AgentSessionAcceptanceIT.Fixture(directory, allowUnsecure);
              var old = client(fixture);
              var takeover = client(fixture);
              var replacement = client(fixture);
@@ -181,7 +185,7 @@ class AgentReplicationAcceptanceIT {
                                         JettyHTTPServerIT.TestAgentClient client, AgentLabel label,
                                         List<SessionId> sessions) throws Exception {
         try (var attempt = fixture.owner.provisioningControl(label, fixture.uri(), "/tmp/acceptance", 1024 * 1024,
-                "acceptance").nextAttempt()) {
+                "acceptance", "http".equals(fixture.uri().getScheme())).nextAttempt()) {
             AgentMessage.Hello hello = new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
                     label, new AgentInstanceId(UUID.randomUUID()), "acceptance", new MachineInfo("host", "test", "test"),
                     Map.of(), Optional.of(new AgentAuthentication(attempt.request().generation(),

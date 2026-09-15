@@ -115,7 +115,9 @@ public final class LegacySshCommandCatalog {
         return builder
                 .action(tokenDefinition("issue-token"))
                 .action(tokenDefinition("token"))
-                .action(definition("issue-launch-permit", 4, this::admin, this::issueLaunchPermit))
+                .action(new CommandDefinition("issue-launch-permit", 4, 4, Set.of("allow-unsecure"),
+                        NO_PARAMETERS, context -> true, this::admin, this::issueLaunchPermit,
+                        CommandCompletion.none(), CommandQuery.none()))
                 .action(adminDefinition("state", this::lifecycleStatus))
                 .action(adminDefinition("status", this::lifecycleStatus))
                 .action(adminDefinition("repositories", this::repositories))
@@ -214,7 +216,8 @@ public final class LegacySshCommandCatalog {
             AgentSessionServer server = agentServer.get();
             AgentLabel label = new AgentLabel(arguments.get(0));
             var control = server.provisioningControl(label, URI.create(arguments.get(1)), arguments.get(2),
-                    AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES, arguments.get(3));
+                    AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES, arguments.get(3),
+                    "true".equals(invocation.arguments().named().get("allow-unsecure")));
             server.registerAgent(label, label.value());
             try (var attempt = control.nextAttempt()) {
                 byte[] permit = attempt.permit().copyBytes();

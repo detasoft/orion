@@ -56,6 +56,22 @@ class AgentConfigurationTest {
     }
 
     @Test
+    void allowsHttpOnlyWithAnExplicitFlagAndStillRejectsInvalidUris() {
+        for (String server : new String[]{"http://localhost:8000", "https://localhost:8443"}) {
+            var values = new java.util.ArrayList<>(java.util.List.of(arguments("--server", server)));
+            values.add("--allow-unsecure");
+            assertThat(AgentConfiguration.parse(values.toArray(String[]::new)).serverUri())
+                    .isEqualTo(URI.create(server));
+        }
+        for (String server : new String[]{"ftp://localhost", "http://secret@localhost"}) {
+            var values = new java.util.ArrayList<>(java.util.List.of(arguments("--server", server)));
+            values.add("--allow-unsecure");
+            assertThatIllegalArgumentException()
+                    .isThrownBy(() -> AgentConfiguration.parse(values.toArray(String[]::new)));
+        }
+    }
+
+    @Test
     void rejectsMissingValuesAndOversizedFrames() {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> AgentConfiguration.parse(new String[]{"--server"}))

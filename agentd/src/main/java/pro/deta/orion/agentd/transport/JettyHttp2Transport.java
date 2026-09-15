@@ -39,7 +39,7 @@ import pro.deta.orion.agent.protocol.SequenceDecodeIssue;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
-/** Jetty low-level HTTP/2 TLS transport with reusable generation-scoped connections. */
+/** Jetty low-level HTTP/2 transport with optional TLS and reusable generation-scoped connections. */
 public final class JettyHttp2Transport implements AgentTransport {
     private static final System.Logger LOGGER = System.getLogger(JettyHttp2Transport.class.getName());
     private final URI endpoint;
@@ -70,14 +70,16 @@ public final class JettyHttp2Transport implements AgentTransport {
 
     JettyHttp2Transport(URI endpoint, SslContextFactory.Client tls, HTTP2Client client,
                         AgentProtocolLimits limits, int controlCapacity, int sessionCapacity) {
-        this.endpoint = https(endpoint);
-        this.tls = Objects.requireNonNull(tls, "tls");
+        this.endpoint = endpoint(endpoint, tls);
+        this.tls = tls;
         this.client = Objects.requireNonNull(client, "client");
         this.limits = Objects.requireNonNull(limits, "limits");
         outbound = new OutboundQueues<>(controlCapacity, sessionCapacity);
-        tls.setEndpointIdentificationAlgorithm("HTTPS");
-        client.setProtocols(List.of("h2"));
-        client.setUseALPN(true);
+        if (tls != null) {
+            tls.setEndpointIdentificationAlgorithm("HTTPS");
+        }
+        client.setProtocols(List.of(tls == null ? "h2c" : "h2"));
+        client.setUseALPN(tls != null);
         client.setConnectTimeout(5_000);
     }
 
@@ -110,7 +112,7 @@ public final class JettyHttp2Transport implements AgentTransport {
             failed(generation, TransportSignal.Kind.DISCONNECTED, failure);
             return generation.ready;
         }
-        int port = endpoint.getPort() < 0 ? 443 : endpoint.getPort();
+        int port = endpoint.getPort() < 0 ? (tls == null ? 80 : 443) : endpoint.getPort();
         synchronized (this) {
             if (!current(generation)) {
                 return generation.ready;
@@ -279,7 +281,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         if (!current(generation)) {
             return;
         }
-        if (!tls.isStarted()) {
+        if (tls != null && !tls.isStarted()) {
             managesTls = true;
             tls.start();
         }
@@ -632,9 +634,10 @@ public final class JettyHttp2Transport implements AgentTransport {
                 ? completion.getCause() : error;
     }
 
-    private static URI https(URI uri) {
-        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
-            throw new IllegalArgumentException("AgentD endpoint must be an absolute HTTPS URI");
+    private static URI endpoint(URI uri, SslContextFactory.Client tls) {
+        String scheme = tls == null ? "http" : "https";
+        if (uri == null || !scheme.equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {
+            throw new IllegalArgumentException("AgentD endpoint scheme must match its TLS configuration");
         }
         return uri;
     }

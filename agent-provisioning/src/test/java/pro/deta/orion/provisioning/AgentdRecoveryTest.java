@@ -307,7 +307,7 @@ class AgentdRecoveryTest {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), "/var/lib/orion/agent",
                 new AgentLabel("agent-1"), new AgentGeneration(generation),
-                new AgentLaunchId(new UUID(0, generation)), 1024, Long.toString(generation));
+                new AgentLaunchId(new UUID(0, generation)), 1024, Long.toString(generation), false);
     }
 
     private static AgentdProcessIdentity identity(AgentdLaunchRequest request) {

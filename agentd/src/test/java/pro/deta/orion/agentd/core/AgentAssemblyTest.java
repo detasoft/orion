@@ -198,7 +198,7 @@ class AgentAssemblyTest {
                 URI.create("https://agent.test"), stateDirectory,
                 new AgentLabel("agent-1"), new AgentGeneration(1),
                 new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
-                AgentProtocolLimits.defaults(), "1.0.0", executable);
+                AgentProtocolLimits.defaults(), "1.0.0", executable, false);
     }
 
     private static void stopHostIfLive(Path sessionDirectory) throws Exception {

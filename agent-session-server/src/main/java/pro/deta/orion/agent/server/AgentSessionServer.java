@@ -221,7 +221,8 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             URI serverUri,
             String stateDirectory,
             int maxFrameBytes,
-            String agentVersion) {
+            String agentVersion,
+            boolean allowUnsecure) {
         return new AgentdProvisioningControl(
                 requireAgentRegistry(),
                 authenticator,
@@ -230,7 +231,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
                 serverUri,
                 stateDirectory,
                 maxFrameBytes,
-                agentVersion);
+                agentVersion, allowUnsecure);
     }
 
     private FileSystemAgentRegistry requireAgentRegistry() {

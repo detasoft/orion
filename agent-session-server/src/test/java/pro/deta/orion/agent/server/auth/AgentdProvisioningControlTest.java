@@ -129,7 +129,7 @@ class AgentdProvisioningControlTest {
                 URI.create("https://orion.example/agent/control"),
                 "/var/lib/orion/agent",
                 1024,
-                "2.4.1");
+                "2.4.1", false);
     }
 
     private static AuthenticatedAgentConnections connections() {

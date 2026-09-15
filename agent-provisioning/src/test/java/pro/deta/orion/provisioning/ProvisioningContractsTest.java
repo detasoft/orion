@@ -96,7 +96,7 @@ class ProvisioningContractsTest {
                 new AgentGeneration(3),
                 new AgentLaunchId(UUID.randomUUID()),
                 1_048_576,
-                "1.2.3");
+                "1.2.3", false);
         ProvisioningOptions options = new ProvisioningOptions(
                 Duration.ofSeconds(2), Duration.ofSeconds(3),
                 Duration.ofSeconds(4), Duration.ofSeconds(10));
@@ -106,7 +106,7 @@ class ProvisioningContractsTest {
         assertThatThrownBy(() -> new AgentdLaunchRequest(
                 URI.create("http://orion.example"), request.stateDirectory(),
                 request.agentLabel(), request.generation(), request.launchId(),
-                request.maxFrameBytes(), request.agentVersion()))
+                request.maxFrameBytes(), request.agentVersion(), false))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new ProvisioningOptions(
                 Duration.ZERO, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1)))

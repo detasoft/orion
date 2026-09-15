@@ -189,9 +189,12 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         server.addConnector(httpsConnector);
     }
 
-    private static void enableHttpIfNeeded(Server server, HttpTransportConfig httpTransportConfig) {
+    private void enableHttpIfNeeded(Server server, HttpTransportConfig httpTransportConfig) {
         if (httpTransportConfig != null && httpTransportConfig.isEnabled()) {
-            ServerConnector httpConnector = new ServerConnector(server);
+            HttpConfiguration configuration = new HttpConfiguration();
+            ServerConnector httpConnector = new ServerConnector(server,
+                    new HttpConnectionFactory(configuration),
+                    AgentHttp2ConnectionFactory.cleartext(configuration, () -> agentServer.replicationService()));
             httpConnector.setName("http");
             httpConnector.setHost(httpTransportConfig.getAddress());
             httpConnector.setPort(httpTransportConfig.getPort());

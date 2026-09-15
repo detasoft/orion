@@ -11,6 +11,8 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.agent.protocol.SessionCommandOutcome;
 import pro.deta.orion.agentd.session.JsonSessionManifestReader;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -68,9 +70,10 @@ class AgentSessionAcceptanceIT {
     private static final Path UI = Path.of("../frontend/ui").toAbsolutePath().normalize();
     @TempDir Path directory;
 
-    @Test
-    void productionAgentStartsControlsAndExitsThroughHttpTerminalConsumer() throws Exception {
-        try (Fixture fixture = new Fixture(directory)) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void productionAgentStartsControlsAndExitsThroughHttpTerminalConsumer(boolean allowUnsecure) throws Exception {
+        try (Fixture fixture = new Fixture(directory, allowUnsecure)) {
             fixture.launch();
             fixture.start(SESSION, "printf 'ready\\n'; read line; printf 'received:%s\\n' \"$line\"; "
                     + "while [ ! -f one.exit ]; do sleep 0.02; done; printf 'done\\n'");
@@ -107,9 +110,10 @@ class AgentSessionAcceptanceIT {
         }
     }
 
-    @Test
-    void existingAgentResumesDurableCursorAfterTransportLossAndServerRecreation() throws Exception {
-        try (Fixture fixture = new Fixture(directory)) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void existingAgentResumesDurableCursorAfterTransportLossAndServerRecreation(boolean allowUnsecure) throws Exception {
+        try (Fixture fixture = new Fixture(directory, allowUnsecure)) {
             Process agent = fixture.launch();
             fixture.start(SESSION, "printf before; while [ ! -f offline ]; do sleep 0.02; done; "
                     + "printf after; while [ ! -f one.exit ]; do sleep 0.02; done");
@@ -226,6 +230,7 @@ class AgentSessionAcceptanceIT {
 
     static final class Fixture implements AutoCloseable {
         private final Path directory;
+        private final boolean allowUnsecure;
         private final Path local = Files.createTempDirectory(Path.of("/tmp"), "orion-acceptance-");
         final JettyHTTPServerIT.MaterialFixture material = JettyHTTPServerIT.material();
         private final List<Process> processes = new ArrayList<>();
@@ -237,7 +242,12 @@ class AgentSessionAcceptanceIT {
         private int port = pro.deta.orion.util.NetworkUtils.findAvailablePort();
 
         Fixture(Path directory) throws Exception {
+            this(directory, false);
+        }
+
+        Fixture(Path directory, boolean allowUnsecure) throws Exception {
             this.directory = directory;
+            this.allowUnsecure = allowUnsecure;
             assertThat(HOST).as("native host must be built; acceptance cannot be skipped").isExecutable();
             owner = new AgentSessionServer(directory.resolve("server"));
             owner.onStart();
@@ -273,29 +283,36 @@ class AgentSessionAcceptanceIT {
                     super.service(request, response);
                 }
             };
-            http = new JettyHTTPServer(JettyHTTPServerIT.httpConfiguration(false),
-                    JettyHTTPServerIT.desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED,
-                            List.of(), port), material.owner().tls(), routes, null, owner);
+            var configuration = JettyHTTPServerIT.httpConfiguration(allowUnsecure);
+            configuration.getTransport().getHttp().setPort(port);
+            http = new JettyHTTPServer(configuration,
+                    allowUnsecure ? JettyHTTPServerIT.desiredStateWithoutHttps()
+                            : JettyHTTPServerIT.desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                                    List.of(), port), material.owner().tls(), routes, null, owner);
             http.onStart();
-            port = http.boundHttpsPort();
+            port = allowUnsecure ? http.boundHttpPort() : http.boundHttpsPort();
         }
 
         URI uri() throws Exception {
-            return URI.create(http.relativiseHttps("").toString());
+            return URI.create((allowUnsecure ? "http" : "https") + "://localhost:" + port);
         }
 
         private Process launch() throws Exception {
-            var provisioning = owner.provisioningControl(LABEL, uri(), local.toString(), 1024 * 1024, "acceptance");
+            var provisioning = owner.provisioningControl(
+                    LABEL, uri(), local.toString(), 1024 * 1024, "acceptance", allowUnsecure);
             try (var attempt = provisioning.nextAttempt()) {
-                Process process = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin/java").toString(),
+                var arguments = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin/java").toString(),
                         "-Djavax.net.ssl.trustStore=" + trustStore,
                         "-Djavax.net.ssl.trustStorePassword=acceptance", "-cp", System.getProperty("java.class.path"),
                         "pro.deta.orion.agentd.AgentdMain", "--server", uri().toString(), "--state-dir", local.toString(),
                         "--agent-label", LABEL.value(), "--generation", Long.toString(attempt.request().generation().value()),
                         "--launch-id", attempt.request().launchId().value().toString(),
-                        "--agent-version", "acceptance", "--session-host", HOST.toString())
-                        .redirectErrorStream(true).redirectOutput(directory.resolve("agent-" + processes.size() + ".log")
-                                .toFile()).start();
+                        "--agent-version", "acceptance", "--session-host", HOST.toString()));
+                if (allowUnsecure) {
+                    arguments.add("--allow-unsecure");
+                }
+                Process process = new ProcessBuilder(arguments).redirectErrorStream(true)
+                        .redirectOutput(directory.resolve("agent-" + processes.size() + ".log").toFile()).start();
                 processes.add(process);
                 try (var input = process.getOutputStream()) {
                     input.write(attempt.permit().copyBytes());

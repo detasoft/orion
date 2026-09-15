@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.git.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agent.server.AgentSessionServer;
@@ -92,9 +94,12 @@ class LegacySshCommandCatalogTest {
         assertFailure(dispatch("issue-token 1 extra", user(List.of())), CommandFailureCode.INVALID_ARGUMENTS);
     }
 
-    @Test
-    void launchPermitRequiresAdminAndValidLaunchParameters() throws Exception {
-        String command = "issue-launch-permit local https://localhost:8443 '/tmp/local agent' dev";
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void launchPermitRequiresAdminAndValidLaunchParameters(boolean allowUnsecure) throws Exception {
+        String command = "issue-launch-permit local "
+                + (allowUnsecure ? "http://localhost:8000" : "https://localhost:8443")
+                + " '/tmp/local agent' dev" + (allowUnsecure ? " --allow-unsecure" : "");
         assertFailure(dispatch(command, SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);
         assertFailure(dispatch(command, user(List.of())), CommandFailureCode.ACCESS_DENIED);
         agentServer = new AgentSessionServer(root);

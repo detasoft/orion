@@ -170,7 +170,7 @@ class SessionCommandsRouteTest {
             sessions.registerAgent(AGENT, "terminal agent");
             control = sessions.open(connection);
             try (var attempt = sessions.provisioningControl(AGENT, URI.create("https://orion.example/agent/control"),
-                    "/tmp/agent", 65536, "test").nextAttempt()) {
+                    "/tmp/agent", 65536, "test", false).nextAttempt()) {
                 control.onMessage(new AgentMessage.Hello(AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
                         AGENT, new AgentInstanceId(UUID.randomUUID()), "test",
                         new MachineInfo("test", "linux", "aarch64"), Map.of(),

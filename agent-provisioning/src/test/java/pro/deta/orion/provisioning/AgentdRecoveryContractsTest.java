@@ -70,6 +70,6 @@ class AgentdRecoveryContractsTest {
     private static AgentdLaunchRequest request() {
         return new AgentdLaunchRequest(
                 URI.create("https://orion.example/agent/control"), "/var/lib/orion/agent",
-                new AgentLabel("agent-1"), GENERATION, LAUNCH_ID, 1024, "1");
+                new AgentLabel("agent-1"), GENERATION, LAUNCH_ID, 1024, "1", false);
     }
 }

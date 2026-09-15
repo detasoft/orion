@@ -446,11 +446,30 @@ HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 ACME account and domain private keys remain inside `material.p12`. The ACME
 admin route returns only the public certificate chain.
 
-### AgentD control HTTPS
+### Local AgentD
+
+After `make run-server` and the one-time `make enroll-admin-key`, start the
+agent in another terminal:
+
+```sh
+make run-agent
+```
+
+The alias defaults `AGENT_ARGS` to `--allow-unsecure`, connecting to
+`http://localhost:8000` over HTTP/2 without TLS. The launcher
+obtains a fresh launch permit through the administrative `issue-launch-permit`
+SSH command, using your enrolled key. AgentD state defaults to
+`orion_root/agentd-local`. Use `AGENT_ARGS='--help'` to see endpoint, state,
+label, and SSH options. When overriding `AGENT_ARGS` for HTTP, include
+`--allow-unsecure` explicitly.
+
+### AgentD control transport
 
 AgentD opens its long-lived control stream at `POST /agent/control`. The
-listener accepts this route only over HTTPS with HTTP/2. Set AgentD's `--server`
-to the absolute `publicUrl` origin (for example,
+listener accepts this route over HTTP/2 on both HTTP and HTTPS connectors.
+AgentD requires HTTPS unless `--allow-unsecure` explicitly permits HTTP; the
+flag does not disable certificate validation for an HTTPS endpoint.
+Set AgentD's `--server` to the absolute `publicUrl` origin (for example,
 `https://orion.example.test:8443`); AgentD appends the control path.
 
 The HTTPS identity named by `<identity>` must already exist in Orion's

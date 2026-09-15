@@ -14,12 +14,13 @@ import java.util.Arrays;
 
 public final class AgentdMain {
     private static final String USAGE = """
-            Usage: java -jar agentd.jar --server HTTPS_URI [options]
+            Usage: java -jar agentd.jar --server URI [options]
                    java -jar agentd.jar terminal start [--session-host PATH]
                        --state-dir PATH [options] -- COMMAND...
                    java -jar agentd.jar terminal attach --session-dir PATH
 
             Options:
+              --allow-unsecure       allow HTTP without TLS (HTTPS remains verified)
               --state-dir PATH       persistent AgentD state directory
               --agent-label LABEL     unique stable agent label
               --generation N         server-assigned positive launch generation
