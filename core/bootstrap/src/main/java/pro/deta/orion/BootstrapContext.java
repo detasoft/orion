@@ -1,11 +1,17 @@
 package pro.deta.orion;
 
+import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.acl.storage.AccessControlSaveRequest;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
@@ -16,11 +22,15 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.KeyMaterialConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -28,6 +38,7 @@ import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -134,6 +145,63 @@ public final class BootstrapContext implements AutoCloseable {
 
     public BootstrapRepositorySources repositorySources() {
         return repositorySources;
+    }
+
+    public OrionDocument adoptProxies(AccessControlStorage storage) {
+        Objects.requireNonNull(storage, "configuration storage");
+        RuntimeException lastSaveFailure = null;
+        for (int attempt = 0; attempt <= 3; attempt++) {
+            AccessControlSnapshot snapshot = storage.load().valueOrFailure("Cannot load proxy configuration");
+            OrionDocument current = proxyConfiguration(snapshot, storage.primaryPath());
+            if (snapshot.version().isEmpty()) {
+                throw new IllegalStateException("Proxy adoption requires a configuration revision");
+            }
+            ConfigurationSecrets secrets = new ConfigurationSecrets(
+                    () -> current, keyMaterial.configurationCipher());
+            OrionDocument candidate = repositoryProvider.adoptProvisional(current, secrets);
+            if (candidate == current) {
+                return current;
+            }
+            if (lastSaveFailure != null && !(lastSaveFailure instanceof AccessControlConcurrentUpdateException)) {
+                throw lastSaveFailure;
+            }
+            if (attempt == 3) {
+                throw new IllegalStateException("Proxy configuration kept changing during adoption", lastSaveFailure);
+            }
+            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+            try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                OrionXml.write(candidate, output);
+                updatedFiles.put(storage.primaryPath(), output.toByteArray());
+            } catch (IOException failure) {
+                throw new IllegalStateException("Cannot serialize proxy configuration");
+            }
+            try {
+                storage.save(new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                        new AccessControlSaveRequest("Adopt bootstrap Git proxies", UserEmail.EMPTY));
+                lastSaveFailure = null;
+            } catch (RuntimeException failure) {
+                lastSaveFailure = failure;
+            }
+        }
+        throw new IllegalStateException("Proxy adoption did not converge");
+    }
+
+    private static OrionDocument proxyConfiguration(AccessControlSnapshot snapshot, String primaryPath) {
+        OrionDocument primary = null;
+        for (var entry : snapshot.files().entrySet()) {
+            try (var input = new ByteArrayInputStream(entry.getValue())) {
+                OrionDocument parsed = OrionXml.read(input);
+                if (entry.getKey().equals(primaryPath)) {
+                    primary = parsed;
+                }
+            } catch (IOException failure) {
+                throw new IllegalStateException("Cannot validate proxy configuration");
+            }
+        }
+        if (primary == null) {
+            throw new IllegalStateException("Primary proxy configuration is unavailable");
+        }
+        return primary;
     }
 
     public ServerIdentityCapability serverIdentity() {

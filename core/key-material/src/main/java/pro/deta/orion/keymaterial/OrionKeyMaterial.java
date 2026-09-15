@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Owns runtime key material and its typed capabilities. The configuration cipher is persisted on first seal;
+ * a failed material save invalidates this owner so a caller must reopen the durable state before retrying.
+ */
 public final class OrionKeyMaterial implements AutoCloseable {
     private final KeyMaterialService owner;
     private final KeyMaterialScope.Cluster clusterScope;
@@ -82,6 +86,48 @@ public final class OrionKeyMaterial implements AutoCloseable {
 
     public TlsCapability tls() {
         return tls;
+    }
+
+    public ConfigurationCipherCapability configurationCipher() {
+        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
+                KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,
+                new KeyMaterialVersion(1), clusterScope);
+        return new ConfigurationCipherCapability() {
+            @Override
+            public KeyMaterialDescriptor descriptor() {
+                return descriptor;
+            }
+
+            @Override
+            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context)
+                    throws GeneralSecurityException {
+                if (plaintext == null || plaintext.length == 0 || context == null) {
+                    throw new IllegalArgumentException("Configuration secret and context must not be empty");
+                }
+                synchronized (owner) {
+                    if (!owner.containsAlias(descriptor.alias().value())) {
+                        try {
+                            owner.generateSecretKeyIfMissing(descriptor, 256);
+                            owner.save();
+                        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                            owner.close();
+                            throw new GeneralSecurityException("Cannot persist configuration cipher", failure);
+                        }
+                    }
+                    return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                            .configurationCipher(descriptor).seal(plaintext, context);
+                }
+            }
+
+            @Override
+            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context)
+                    throws GeneralSecurityException {
+                synchronized (owner) {
+                    return KeyMaterialCapabilities.open(owner, List.of(descriptor))
+                            .configurationCipher(descriptor).open(envelope, context);
+                }
+            }
+        };
     }
 
     public SshHostKeyMaterial sshHostKeyMaterial() {

@@ -55,6 +55,31 @@ public final class ConfigurationSecrets {
         return resolve(current.get(), Optional.empty(), id);
     }
 
+    public void validate(OrionDocument document) {
+        validate(document, Optional.empty(), document.system().secrets());
+        for (OrionDocument.Organization organization : document.organizations()) {
+            validate(document, Optional.of(ConfigurationScope.organization(organization.id())),
+                    organization.secrets());
+            for (OrionDocument.Team team : organization.teams()) {
+                for (OrionDocument.Repository repository : team.repositories()) {
+                    ConfigurationScope scope = ConfigurationScope.repository(
+                            new RepositoryAddress(organization.id(), team.id(), repository.id()));
+                    validate(document, Optional.of(scope), repository.secrets());
+                }
+            }
+        }
+    }
+
+    private void validate(
+            OrionDocument document,
+            Optional<ConfigurationScope> owner,
+            List<ConfigurationSecret> entries) {
+        for (ConfigurationSecret entry : entries) {
+            char[] value = resolve(document, owner, entry.id());
+            Arrays.fill(value, '\0');
+        }
+    }
+
     public OrionDocument create(OrionDocument source, ConfigurationScope owner, String id, char[] value) {
         return update(source, checkedOwner(owner, value), id, value, false);
     }

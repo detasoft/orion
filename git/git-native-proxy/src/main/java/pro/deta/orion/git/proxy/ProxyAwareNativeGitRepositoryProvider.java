@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.config.ConfigurationSecrets;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
@@ -12,16 +12,23 @@ import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +40,7 @@ import java.util.concurrent.ConcurrentMap;
 public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     private final NativeGitRepositoryProvider backend;
     private final BootstrapGitTransportFactory transportFactory;
+    private final BootstrapSecretResolver secretResolver;
     private final BootstrapGitFetcher fetcher;
     private final BootstrapGitPusher pusher;
     private final ConcurrentMap<String, RuntimeGitProxyBinding> provisionalBindings = new ConcurrentHashMap<>();
@@ -67,8 +75,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             BootstrapGitFetcher fetcher,
             BootstrapGitPusher pusher) {
         this.backend = Objects.requireNonNull(backend, "backend");
+        this.secretResolver = Objects.requireNonNull(secretResolver, "secretResolver");
         transportFactory = new BootstrapGitTransportFactory(
-                Objects.requireNonNull(secretResolver, "secretResolver"));
+                this.secretResolver);
         this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
@@ -209,6 +218,68 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         provisionalBindings.clear();
         provisionalLocations.clear();
         provisionalSources.clear();
+    }
+
+    public synchronized OrionDocument adoptProvisional(OrionDocument document, ConfigurationSecrets secrets) {
+        Objects.requireNonNull(document, "document");
+        Objects.requireNonNull(secrets, "secrets");
+        if (activePhase) {
+            throw new IllegalStateException("Bootstrap proxy adoption requires the provisional phase");
+        }
+        secrets.validate(document);
+        Map<String, GitProxyBinding> identities = new LinkedHashMap<>();
+        var aliases = new HashSet<RemoteAlias>();
+        var secretIds = new HashSet<String>();
+        for (GitProxyBinding proxy : document.system().proxies()) {
+            identities.put(proxy.upstream().toASCIIString() + "#" + proxy.ref(), proxy);
+            aliases.add(proxy.alias());
+        }
+        for (var secret : document.system().secrets()) {
+            secretIds.add(secret.id());
+        }
+        Map<GitProxyBinding, BootstrapGitLocation> additions = new LinkedHashMap<>();
+        for (var source : new java.util.TreeMap<>(provisionalSources).entrySet()) {
+            BootstrapGitLocation location = provisionalLocations.get(source.getValue());
+            if (location == null) {
+                continue;
+            }
+            var upstream = GitProxyBinding.canonicalUpstream(location.remoteUri());
+            String identity = upstream.toASCIIString() + "#" + location.refName();
+            if (identities.containsKey(identity)) {
+                continue;
+            }
+            RemoteAlias alias = new RemoteAlias(source.getKey());
+            if (!aliases.add(alias)) {
+                throw new IllegalArgumentException("Bootstrap proxy alias is already occupied");
+            }
+            Optional<String> secret = location.credentialKind() == GitProxyBinding.CredentialKind.NONE
+                    ? Optional.empty() : Optional.of(alias.value() + "-credential");
+            if (secret.isPresent() && !secretIds.add(secret.orElseThrow())) {
+                throw new IllegalArgumentException("Bootstrap proxy secret identity is already occupied");
+            }
+            GitProxyBinding binding = new GitProxyBinding(alias, upstream, location.refName(),
+                    location.credentialKind(), secret, Optional.ofNullable(location.credentialUsername()),
+                    Optional.ofNullable(location.knownHosts()).map(Path::toUri));
+            identities.put(identity, binding);
+            additions.put(binding, location);
+        }
+        if (additions.isEmpty()) {
+            return document;
+        }
+        OrionDocument candidate = document;
+        List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
+        for (var addition : additions.entrySet()) {
+            GitProxyBinding binding = addition.getKey();
+            if (binding.secret().isPresent()) {
+                try (BootstrapSecret value = secretResolver.resolve(
+                        "Remote Git credential", addition.getValue().credentialReference())) {
+                    candidate = secrets.createSystem(candidate, binding.secret().orElseThrow(), value.copy());
+                }
+            }
+            bindings.add(binding);
+        }
+        return new OrionDocument(new OrionDocument.SystemConfiguration(candidate.system().accessControl(),
+                candidate.system().https(), candidate.system().secrets(), bindings), candidate.organizations());
     }
 
     private String prepareLocal(String sourceId, String location) {

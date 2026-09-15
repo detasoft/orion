@@ -49,6 +49,22 @@ upstream/ref pairs, missing system secrets, and inconsistent transport/auth fiel
 Bootstrap and persistent bindings share URI/ref canonicalization and credential
 kinds. Organization/repository secret references keep their existing scope rules.
 
+`OrionKeyMaterial` owns the cluster-scoped AES `configuration-v1` cipher. Its
+first seal persists the key before returning an envelope; opening an envelope
+never creates a missing key. Failed material persistence invalidates the owner,
+so another attempt must reopen the durable store and observe any concurrent winner.
+`ConfigurationSecrets.validate` authenticates all envelopes in a supplied
+document without publishing it or retaining decrypted values.
+
+`ProxyAwareNativeGitRepositoryProvider.adoptProvisional` builds an unpublished
+candidate from its existing sources. Source IDs determine aliases only for new
+upstream/ref pairs; existing operator-selected aliases and credentials prevail.
+`BootstrapContext.adoptProxies` persists this candidate through the existing
+`AccessControlStorage` revision check, preserving all secondary files. It confirms
+the result by reloading, recognizes a concurrent winner or a lost save response,
+and bounds conflict retries to three saves. Calling this operation during startup
+and activating bindings from the persisted result remain runtime composition work.
+
 Bootstrap credentials remain external on every launch. Match adoption by
 canonical upstream URI and selected ref, reject duplicate/colliding identities,
 and retain the already-resolved source handles. Add absent metadata/credentials

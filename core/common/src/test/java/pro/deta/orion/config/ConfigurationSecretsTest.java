@@ -121,6 +121,20 @@ class ConfigurationSecretsTest {
     }
 
     @Test
+    void validatesTheSuppliedSnapshotAndClearsDecryptedBuffersWithoutPublishingIt() {
+        OrionDocument candidate = secrets.createSystem(current.get(), "token", "candidate-token".toCharArray());
+        secrets.validate(candidate);
+        assertThat(cipherOutput.get()).containsOnly((byte) 0);
+        assertThat(current.get().system().secrets()).isEmpty();
+        OrionDocument corrupt = new OrionDocument(new OrionDocument.SystemConfiguration(
+                candidate.system().accessControl(), candidate.system().https(),
+                List.of(new ConfigurationSecret("renamed", candidate.system().secrets().getFirst().envelope())),
+                List.of()), candidate.organizations());
+        assertThatThrownBy(() -> secrets.validate(corrupt)).isInstanceOf(IllegalStateException.class);
+        assertThat(current.get().system().secrets()).isEmpty();
+    }
+
+    @Test
     void preservesProxyIdentityWhenCreatingAndRotatingSystemSecrets() {
         current.set(secrets.createSystem(current.get(), "bootstrap-token", "old-token".toCharArray()));
         GitProxyBinding proxy = new GitProxyBinding(new RemoteAlias("configuration"),

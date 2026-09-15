@@ -3,6 +3,11 @@ package pro.deta.orion;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.acl.storage.AccessControlSaveRequest;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -19,16 +24,24 @@ import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -412,6 +425,210 @@ class BootstrapContextTest {
     private static void makeOwnerOnly(Path path) throws Exception {
         if (Files.getFileStore(path).supportsFileAttributeView("posix")) {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
+        }
+    }
+
+    @Test
+    void persistsSharedProxyOnceAndKeepsExistingSourceHandlesOnRetry() throws Exception {
+        OrionConfiguration configuration = configuration();
+        Upstream upstream = upstream("adoption", Map.of("orion.xml", xml(),
+                "material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
+        AdoptionStorage storage = new AdoptionStorage(xml());
+        try (var ignored = upstream.git();
+             BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT,
+                     new InMemoryNativeGitRepositoryProvider())) {
+            var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
+            OrionDocument adopted = context.adoptProxies(storage);
+            assertThat(adopted.system().proxies()).hasSize(1);
+            assertThat(adopted.system().secrets()).isEmpty();
+            assertThat(context.adoptProxies(storage)).isEqualTo(adopted);
+            assertThat(storage.saves).isEqualTo(1);
+            assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION))
+                    .isSameAs(source);
+            assertThat(context.repositoryProvider().repositoryNames()).isEmpty();
+            assertThat(context.repositoryProvider().isPublicRepositoryName(source.repositoryName().orElseThrow()))
+                    .isFalse();
+            assertThat(storage.files.get("extra.xml")).isEqualTo(xml());
+        }
+    }
+
+    @Test
+    void persistsAdoptionThroughNativeGitAndDoesNotRewriteItOnRestart() throws Exception {
+        OrionConfiguration configuration = configuration();
+        Upstream upstream = upstream("durable-adoption", Map.of("orion.xml", xml(),
+                "material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + upstream.bare().toUri());
+        try (var ignored = upstream.git()) {
+            OrionDocument adopted;
+            Optional<String> adoptedRevision;
+            try (BootstrapContext first = BootstrapContext.open(configuration, ENVIRONMENT,
+                    new InMemoryNativeGitRepositoryProvider())) {
+                AccessControlStorage storage = new AccessControlStorageResolver(
+                        first.repositorySources(), first.repositoryProvider()).resolve();
+                Optional<String> initialRevision = storage.load().valueOrFailure("configuration").version();
+                adopted = first.adoptProxies(storage);
+                adoptedRevision = storage.load().valueOrFailure("configuration").version();
+                assertThat(adopted.system().proxies()).hasSize(1);
+                assertThat(adoptedRevision).isNotEqualTo(initialRevision);
+            }
+            try (BootstrapContext restarted = BootstrapContext.open(configuration, ENVIRONMENT,
+                    new InMemoryNativeGitRepositoryProvider())) {
+                AccessControlStorage storage = new AccessControlStorageResolver(
+                        restarted.repositorySources(), restarted.repositoryProvider()).resolve();
+                assertThat(restarted.adoptProxies(storage)).isEqualTo(adopted);
+                assertThat(storage.load().valueOrFailure("configuration").version()).isEqualTo(adoptedRevision);
+                String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                        .repositoryName().orElseThrow();
+                assertThat(restarted.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
+            }
+        }
+    }
+
+    @Test
+    void reloadsAConcurrentWinnersAdoptionWithoutOverwritingIt() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.CONCURRENT_WINNER, true);
+    }
+
+    @Test
+    void recognizesASavedAdoptionAfterItsResponseWasLost() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.LOST_RESPONSE, true);
+    }
+
+    @Test
+    void leavesConfigurationAndPrivateBindingsIntactAfterAFailedSave() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.FAIL_SAVE, false);
+    }
+
+    @Test
+    void retriesAgainstANewerRevisionAndPreservesConcurrentFileEdits() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.CONCURRENT_EDIT, true);
+    }
+
+    @Test
+    void boundsAdoptionRetriesWhenTheConfigurationKeepsChanging() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.REPEATED_CONFLICT, false);
+    }
+
+    @Test
+    void refusesAnUnversionedConfigurationBeforeSavingAdoption() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.UNVERSIONED, false);
+    }
+
+    @Test
+    void validatesSecondaryConfigurationFilesBeforeSavingAdoption() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.INVALID_SECONDARY, false);
+    }
+
+    private void exerciseAdoptionSave(AdoptionStorage.Mode mode, boolean success) throws Exception {
+        OrionConfiguration configuration = configuration();
+        Upstream upstream = upstream("transaction", Map.of("orion.xml", xml()));
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        var backend = repositoryWith(configuration, Map.of("material.p12", materialBytes(configuration)));
+        AdoptionStorage storage = new AdoptionStorage(xml());
+        storage.mode = mode;
+        try (var ignored = upstream.git();
+             BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            if (success) {
+                assertThat(context.adoptProxies(storage).system().proxies()).hasSize(1);
+                assertThat(context.adoptProxies(storage).system().proxies()).hasSize(1);
+                assertThat(storage.saves).isEqualTo(mode == AdoptionStorage.Mode.CONCURRENT_EDIT ? 2 : 1);
+                if (mode == AdoptionStorage.Mode.CONCURRENT_EDIT) {
+                    assertThat(storage.files.get("concurrent.xml")).isEqualTo(xml());
+                }
+            } else {
+                String message = switch (mode) {
+                    case REPEATED_CONFLICT -> "kept changing";
+                    case UNVERSIONED -> "requires a configuration revision";
+                    case INVALID_SECONDARY -> "Cannot validate proxy configuration";
+                    default -> "save failed";
+                };
+                assertThatThrownBy(() -> context.adoptProxies(storage))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining(message);
+                assertThat(OrionXml.read(new ByteArrayInputStream(storage.files.get("orion.xml")))
+                        .system().proxies()).isEmpty();
+                int expectedSaves = switch (mode) {
+                    case UNVERSIONED, INVALID_SECONDARY -> 0;
+                    case REPEATED_CONFLICT -> 3;
+                    default -> 1;
+                };
+                assertThat(storage.saves).isEqualTo(expectedSaves);
+                storage.mode = AdoptionStorage.Mode.NORMAL;
+                assertThat(context.adoptProxies(storage).system().proxies()).hasSize(1);
+            }
+            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                    .repositoryName().orElseThrow();
+            assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
+            assertThat(context.repositoryProvider().repositoryNames()).doesNotContain(cache);
+        }
+    }
+
+    private static byte[] xml() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
+        return output.toByteArray();
+    }
+
+    private static final class AdoptionStorage implements AccessControlStorage {
+        enum Mode {
+            NORMAL, CONCURRENT_WINNER, CONCURRENT_EDIT, LOST_RESPONSE, FAIL_SAVE,
+            REPEATED_CONFLICT, UNVERSIONED, INVALID_SECONDARY
+        }
+
+        private Map<String, byte[]> files;
+        private int version = 1;
+        private int saves;
+        private Mode mode = Mode.NORMAL;
+
+        private AdoptionStorage(byte[] xml) {
+            files = Map.of("orion.xml", xml, "extra.xml", xml);
+        }
+
+        @Override
+        public Result<AccessControlSnapshot> load() {
+            var revision = mode == Mode.UNVERSIONED
+                    ? Optional.<String>empty() : Optional.of(Integer.toString(version));
+            Map<String, byte[]> loaded = new LinkedHashMap<>(files);
+            if (mode == Mode.INVALID_SECONDARY) {
+                loaded.put("extra.xml", bytes("invalid"));
+            }
+            return new Result.Success<>(new AccessControlSnapshot(loaded, revision));
+        }
+
+        @Override
+        public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+            assertThat(snapshot.version()).contains(Integer.toString(version));
+            saves++;
+            if (mode == Mode.FAIL_SAVE) {
+                throw new IllegalStateException("save failed");
+            }
+            if (mode == Mode.REPEATED_CONFLICT) {
+                version++;
+                throw new AccessControlConcurrentUpdateException("concurrent edit", null);
+            }
+            if (mode == Mode.CONCURRENT_EDIT) {
+                Map<String, byte[]> changed = new LinkedHashMap<>(files);
+                changed.put("concurrent.xml", files.get("extra.xml"));
+                files = Map.copyOf(changed);
+                version++;
+                mode = Mode.NORMAL;
+                throw new AccessControlConcurrentUpdateException("concurrent edit", null);
+            }
+            files = snapshot.files();
+            version++;
+            if (mode == Mode.CONCURRENT_WINNER) {
+                throw new AccessControlConcurrentUpdateException("another bootstrap won", null);
+            }
+            if (mode == Mode.LOST_RESPONSE) {
+                throw new IllegalStateException("response lost");
+            }
+        }
+
+        @Override
+        public String primaryPath() {
+            return "orion.xml";
         }
     }
 
