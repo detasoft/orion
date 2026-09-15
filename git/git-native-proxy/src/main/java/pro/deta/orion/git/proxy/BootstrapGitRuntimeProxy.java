@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
+final class BootstrapGitRuntimeProxy {
     private static final String NULL_ID = "0".repeat(40);
 
     private final BootstrapGitLocation location;
@@ -33,11 +33,10 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
 
-    @Override
     public synchronized void refresh() {
         try {
-            transportFactory.withTransport(location, transport -> {
-                fetcher.fetch(location, transport, repository);
+            transportFactory.withTransport(location, (selected, transport) -> {
+                fetcher.fetch(selected, transport, repository);
                 return null;
             });
         } catch (BootstrapGitProxyException error) {
@@ -47,7 +46,6 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
         }
     }
 
-    @Override
     public synchronized List<RefUpdateResult> publish(
             PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
@@ -109,7 +107,7 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
         try {
             return transportFactory.withTransport(
                     location,
-                    transport -> pusher.push(location, transport, repository, received, updates, atomic));
+                    (selected, transport) -> pusher.push(selected, transport, repository, received, updates, atomic));
         } catch (BootstrapGitProxyException error) {
             throw error;
         } catch (Exception error) {

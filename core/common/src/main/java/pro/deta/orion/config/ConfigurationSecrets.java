@@ -52,7 +52,11 @@ public final class ConfigurationSecrets {
     }
 
     public char[] resolveSystem(String id) {
-        return resolve(current.get(), Optional.empty(), id);
+        return resolveSystem(current.get(), id);
+    }
+
+    public char[] resolveSystem(OrionDocument snapshot, String id) {
+        return resolve(snapshot, Optional.empty(), id);
     }
 
     public void validate(OrionDocument document) {

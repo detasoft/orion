@@ -62,8 +62,27 @@ upstream/ref pairs; existing operator-selected aliases and credentials prevail.
 `BootstrapContext.adoptProxies` persists this candidate through the existing
 `AccessControlStorage` revision check, preserving all secondary files. It confirms
 the result by reloading, recognizes a concurrent winner or a lost save response,
-and bounds conflict retries to three saves. Calling this operation during startup
-and activating bindings from the persisted result remain runtime composition work.
+and bounds conflict retries to three saves. A concurrent material-store revision
+change still requires reopening the bootstrap owner before another adoption attempt.
+
+`ProxyAwareNativeGitRepositoryProvider.activate` consumes the current configuration
+supplier and the shared credential owner. It validates all envelopes, requires
+all provisional upstream/ref identities to have been adopted, and refreshes the
+complete candidate before switching bindings. It retains the private cache names
+used by resolved sources, releases external bootstrap credential references after
+activation, and forbids reentering provisional resolution on that provider.
+Failed activation preserves the preceding binding set; removing an active binding
+revokes retained handles without exposing its cache.
+
+The existing HTTP/SSH transport path resolves persistent metadata and credentials
+from one current snapshot for every connection. Secret rotation and changes to
+credential kind/reference take effect on the next connection. Matching remains
+bound to canonical upstream/ref, so reassigning an alias cannot redirect an
+already-resolved source. Plaintext characters are cleared on both successful and
+failed operations. `BootstrapContext.configurationCipher` exposes the existing
+typed capability for the same runtime credential owner.
+Calling adoption and activation from application startup and binding the current
+configuration supplier in runtime composition remain pending.
 
 Bootstrap credentials remain external on every launch. Match adoption by
 canonical upstream URI and selected ref, reject duplicate/colliding identities,

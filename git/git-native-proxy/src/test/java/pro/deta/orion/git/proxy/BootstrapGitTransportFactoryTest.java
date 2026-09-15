@@ -78,7 +78,7 @@ class BootstrapGitTransportFactoryTest {
                     new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", "password")));
             AtomicReference<GitClientTransport> retained = new AtomicReference<>();
             IOException failure = new IOException("operation failed");
-            BootstrapGitTransportFactory.TransportOperation<Void> operation = transport -> {
+            BootstrapGitTransportFactory.TransportOperation<Void> operation = (selected, transport) -> {
                 retained.set(transport);
                 assertThat(new GitUploadPackClient(transport).discover(uri, GitClientOptions.defaults()))
                         .isInstanceOf(GitClientResult.Failed.class);
@@ -142,10 +142,10 @@ class BootstrapGitTransportFactoryTest {
 
         Class<?> passwordTransport = factory.withTransport(
                 sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
-                transport -> transport.getClass());
+                (selected, transport) -> transport.getClass());
         Class<?> privateKeyTransport = factory.withTransport(
                 sshLocation("ssh-private-key", "env:SSH_PRIVATE_KEY", knownHosts),
-                transport -> transport.getClass());
+                (selected, transport) -> transport.getClass());
 
         assertThat(passwordTransport).isEqualTo(GitSshClientTransport.class);
         assertThat(privateKeyTransport).isEqualTo(GitSshClientTransport.class);
@@ -162,7 +162,7 @@ class BootstrapGitTransportFactoryTest {
 
         assertThatThrownBy(() -> factory.withTransport(
                 sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
-                transport -> transport.getClass()))
+                (selected, transport) -> transport.getClass()))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
                 .hasMessageNotContaining(knownHosts.toString());
@@ -184,7 +184,7 @@ class BootstrapGitTransportFactoryTest {
 
         assertThatThrownBy(() -> factory.withTransport(
                 sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
-                transport -> transport.getClass()))
+                (selected, transport) -> transport.getClass()))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
                 .hasMessageNotContaining(knownHosts.toString());
@@ -215,7 +215,7 @@ class BootstrapGitTransportFactoryTest {
 
             GitClientResult<GitRemoteAdvertisement> result = factory.withTransport(
                     location,
-                    transport -> new GitUploadPackClient(transport).discover(
+                    (selected, transport) -> new GitUploadPackClient(transport).discover(
                             location.remoteUri(),
                             GitClientOptions.defaults()));
 

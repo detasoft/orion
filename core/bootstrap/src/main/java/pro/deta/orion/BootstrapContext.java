@@ -13,6 +13,7 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
@@ -202,6 +203,10 @@ public final class BootstrapContext implements AutoCloseable {
             throw new IllegalStateException("Primary proxy configuration is unavailable");
         }
         return primary;
+    }
+
+    public ConfigurationCipherCapability configurationCipher() {
+        return keyMaterial.configurationCipher();
     }
 
     public ServerIdentityCapability serverIdentity() {

@@ -4,6 +4,7 @@ import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitFileClientTransport;
@@ -13,6 +14,7 @@ import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitSshSessionAuthenticator;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
+import pro.deta.orion.schema.orion.OrionDocument;
 
 import java.io.CharArrayReader;
 import java.io.IOException;
@@ -29,42 +31,73 @@ import java.security.spec.RSAPublicKeySpec;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 final class BootstrapGitTransportFactory {
     private static final GitClientOptions OPTIONS = GitClientOptions.defaults();
 
-    private final BootstrapSecretResolver secretResolver;
+    private final Function<BootstrapGitLocation, Connection> connection;
 
     BootstrapGitTransportFactory(BootstrapSecretResolver secretResolver) {
-        this.secretResolver = Objects.requireNonNull(secretResolver, "secretResolver");
+        Objects.requireNonNull(secretResolver, "secretResolver");
+        connection = location -> {
+            if (location.credentialKind() == CredentialKind.NONE) {
+                return new Connection(location, new char[0]);
+            }
+            try (BootstrapSecret secret = secretResolver.resolve(
+                    "Remote Git credential", location.credentialReference())) {
+                return new Connection(location, secret.copy());
+            }
+        };
+    }
+
+    private BootstrapGitTransportFactory(Function<BootstrapGitLocation, Connection> connection) {
+        this.connection = connection;
+    }
+
+    static BootstrapGitTransportFactory persistent(
+            Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
+        Objects.requireNonNull(current, "current configuration");
+        Objects.requireNonNull(secrets, "configuration secrets");
+        return new BootstrapGitTransportFactory(original -> {
+            OrionDocument snapshot = current.get();
+            for (var binding : snapshot.system().proxies()) {
+                BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
+                if (location.proxyName().equals(original.proxyName())) {
+                    char[] credential = binding.secret().isPresent()
+                            ? secrets.resolveSystem(snapshot, binding.secret().orElseThrow()) : new char[0];
+                    return new Connection(location, credential);
+                }
+            }
+            throw new BootstrapGitProxyException("persistent binding lookup");
+        });
     }
 
     <T> T withTransport(
-            BootstrapGitLocation location,
+            BootstrapGitLocation original,
             TransportOperation<T> operation) throws Exception {
-        Objects.requireNonNull(location, "location");
+        Objects.requireNonNull(original, "location");
         Objects.requireNonNull(operation, "operation");
-        if (location.credentialKind() == CredentialKind.NONE) {
-            return operation.run(new GitFileClientTransport());
-        }
-        try (BootstrapSecret secret = secretResolver.resolve(
-                "Remote Git credential",
-                location.credentialReference())) {
-            char[] characters = secret.copy();
-            try {
-                return switch (location.credentialKind()) {
-                    case HTTP_BEARER, HTTP_BASIC -> withHttpTransport(location, characters, operation);
-                    case SSH_PASSWORD, SSH_PRIVATE_KEY -> {
-                        try (GitSshClientTransport transport = sshTransport(location, characters)) {
-                            yield operation.run(transport);
-                        }
+        Connection selected = connection.apply(original);
+        BootstrapGitLocation location = selected.location();
+        char[] characters = selected.credential();
+        try {
+            return switch (location.credentialKind()) {
+                case HTTP_BEARER, HTTP_BASIC -> withHttpTransport(location, characters, operation);
+                case SSH_PASSWORD, SSH_PRIVATE_KEY -> {
+                    try (GitSshClientTransport transport = sshTransport(location, characters)) {
+                        yield operation.run(location, transport);
                     }
-                    case NONE -> operation.run(new GitFileClientTransport());
-                };
-            } finally {
-                Arrays.fill(characters, '\0');
-            }
+                }
+                case NONE -> operation.run(location, new GitFileClientTransport());
+            };
+        } finally {
+            Arrays.fill(characters, '\0');
         }
+    }
+
+    private record Connection(BootstrapGitLocation location, char[] credential) {
     }
 
     private static <T> T withHttpTransport(
@@ -78,7 +111,7 @@ final class BootstrapGitTransportFactory {
                 .connectTimeout(OPTIONS.connectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build()) {
-            return operation.run(new GitSmartHttpClientTransport(
+            return operation.run(location, new GitSmartHttpClientTransport(
                     client,
                     authentication,
                     "http".equals(location.remoteUri().getScheme())));
@@ -177,6 +210,6 @@ final class BootstrapGitTransportFactory {
 
     @FunctionalInterface
     interface TransportOperation<T> {
-        T run(GitClientTransport transport) throws Exception;
+        T run(BootstrapGitLocation location, GitClientTransport transport) throws Exception;
     }
 }

@@ -1,6 +1,14 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretContext;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RemoteAlias;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
@@ -11,17 +19,17 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.util.Result;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,49 +94,27 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(provider.isPublicRepositoryName(name.replace("/", "%2F"))).isFalse();
         assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
         assertThat(provider.isPublicRepositoryName("team/repo")).isTrue();
-        provider.activate(() -> Map.of());
+        activateAdopted(provider);
         assertThat(provider.isPublicRepositoryName(name)).isFalse();
     }
 
     @Test
     void canonicalizesBeforeProxyBindingLookupAndBackendAccess() throws Exception {
-        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        backend.create("team/repo").valueOrFailure("repository");
         AtomicInteger refreshes = new AtomicInteger();
         AtomicInteger publishes = new AtomicInteger();
-        RuntimeGitProxyBinding binding = new RuntimeGitProxyBinding() {
-            @Override
-            public void refresh() {
-                refreshes.incrementAndGet();
-            }
+        ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, publishes);
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        activateAdopted(provider);
+        refreshes.set(0);
 
-            @Override
-            public List<RefUpdateResult> publish(
-                    PackIngestionResult.Complete received,
-                    List<LooseRefStore.Update> updates,
-                    boolean atomic) {
-                publishes.incrementAndGet();
-                return java.util.Collections.nCopies(updates.size(), RefUpdateResult.CREATED);
-            }
-        };
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
-                backend,
-                new BootstrapSecretResolver(Map.of()),
-                (location, transport, repository) -> { },
-                (location, transport, repository, received, updates, atomic) -> List.of());
-        provider.activate(() -> Map.of("team/repo", binding));
-
-        NativeGitRepository repository = provider.openForRead("team%2Frepo")
+        NativeGitRepository repository = provider.openForRead(name.replace("/", "%2F"))
                 .valueOrFailure("proxy repository");
-        provider.saveFiles(
-                "team%5Crepo",
-                "refs/heads/main",
+        provider.saveFiles(name.replace("/", "%5C"), "refs/heads/main",
                 Map.of("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8)),
-                "save through proxy",
-                GitCommitAuthor.EMPTY);
+                "save through proxy", GitCommitAuthor.EMPTY);
 
-        assertThat(repository.name()).isEqualTo("team/repo");
-        assertThat(refreshes).hasValue(1);
+        assertThat(repository.name()).isEqualTo(name);
+        assertThat(refreshes).hasValue(2);
         assertThat(publishes).hasValue(1);
     }
 
@@ -328,55 +314,62 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void activeProviderCannotReenterExternalBootstrapResolution() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
+        provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        activateAdopted(provider);
+
+        assertThatThrownBy(() -> provider.prepareProvisional("configuration", remoteSource("orion.xml")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
+        assertThatThrownBy(() -> provider.resolveProvisional("local", localSource("ordinary"), true))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
+    }
+
+    @Test
     void activationAtomicallyReplacesPersistentBindingCatalog() {
-        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        backend.create("persistent/first").valueOrFailure("first repository");
-        backend.create("persistent/second").valueOrFailure("second repository");
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
-                backend,
-                new BootstrapSecretResolver(Map.of()),
-                (location, transport, repository) -> { },
-                (location, transport, repository, received, updates, atomic) -> List.of());
-        RecordingBinding first = new RecordingBinding();
-        RecordingBinding second = new RecordingBinding();
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
+        OrionDocument first = proxyDocument("first", "file:///first.git");
+        OrionDocument second = proxyDocument("second", "file:///second.git");
+        String firstName = BootstrapGitLocation.persistent(first.system().proxies().getFirst()).proxyName();
+        String secondName = BootstrapGitLocation.persistent(second.system().proxies().getFirst()).proxyName();
 
-        provider.activate(() -> Map.of("persistent/first", first));
-        provider.openForRead("persistent/first").valueOrFailure("first proxy");
-        provider.activate(() -> Map.of("persistent/second", second));
-        provider.openForRead("persistent/first").valueOrFailure("direct first repository");
-        provider.openForRead("persistent/second").valueOrFailure("second proxy");
+        provider.activate(() -> first, secrets(first));
+        assertThat(provider.openForRead(firstName)).isInstanceOf(Result.Success.class);
+        provider.activate(() -> second, secrets(second));
 
-        assertThat(first.refreshes).hasValue(1);
-        assertThat(second.refreshes).hasValue(1);
+        assertUnavailableCache(provider, firstName);
+        assertThat(provider.openForRead(secondName)).isInstanceOf(Result.Success.class);
     }
 
     @Test
-    void activationRejectsNonCanonicalPersistentBindingNames() {
-        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        backend.create("team/repo").valueOrFailure("repository");
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
-                backend,
-                new BootstrapSecretResolver(Map.of()),
-                (location, transport, repository) -> { },
-                (location, transport, repository, received, updates, atomic) -> List.of());
+    void activationRejectsAnUnadoptedSourceAmongMultipleBindings() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
+        String first = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        BootstrapSourceConfig material = remoteSource("material.p12");
+        material.setLocation("git+file:///material.git");
+        String second = provider.prepareProvisional("material", material);
+        OrionDocument incomplete = proxyDocument("configuration", "file:///upstream.git");
 
-        assertThatThrownBy(() -> provider.activate(
-                () -> Map.of("team%2Frepo", new RecordingBinding())))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not canonical");
+        assertThatThrownBy(() -> provider.activate(() -> incomplete, secrets(incomplete)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("adopted");
+        assertThat(provider.openForRead(first)).isInstanceOf(Result.Success.class);
+        assertThat(provider.openForRead(second)).isInstanceOf(Result.Success.class);
+        assertThat(provider.repositoryNames()).isEmpty();
     }
 
     @Test
-    void activationMakesUnadoptedProvisionalCachesUnavailable() {
+    void removingAnAdoptedBindingMakesItsCacheUnavailable() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, new AtomicInteger());
         provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         String repositoryName = provider.provisionalRepositoryName("configuration");
 
-        provider.activate(() -> Map.of());
+        activateAdopted(provider);
+        OrionDocument empty = OrionDocument.withAccessControl(new AccessControl());
+        provider.activate(() -> empty, secrets(empty));
         assertUnavailableCache(provider, repositoryName);
 
-        assertThat(refreshes).hasValue(1);
+        assertThat(refreshes).hasValue(2);
     }
 
     @Test
@@ -385,7 +378,9 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), pushes);
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository retained = provider.openForWrite(name).valueOrFailure("proxy handle");
-        provider.activate(() -> Map.of());
+        activateAdopted(provider);
+        OrionDocument empty = OrionDocument.withAccessControl(new AccessControl());
+        provider.activate(() -> empty, secrets(empty));
 
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> retained.saveFiles(
@@ -499,7 +494,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                     spelling, "refs/heads/main", Map.of("orion.xml", new byte[]{1}),
                     "save", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> provider.resolveProvisional("local", localSource(spelling), true))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOfAny(IllegalArgumentException.class, IllegalStateException.class);
         }
         assertThat(provider.repositoryNames()).doesNotContain(name);
     }
@@ -564,20 +559,36 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         return source;
     }
 
-    private static final class RecordingBinding implements RuntimeGitProxyBinding {
-        private final AtomicInteger refreshes = new AtomicInteger();
+    private static void activateAdopted(ProxyAwareNativeGitRepositoryProvider provider) {
+        OrionDocument empty = OrionDocument.withAccessControl(new AccessControl());
+        ConfigurationSecrets secrets = secrets(empty);
+        OrionDocument adopted = provider.adoptProvisional(empty, secrets);
+        provider.activate(() -> adopted, secrets);
+    }
 
-        @Override
-        public void refresh() {
-            refreshes.incrementAndGet();
-        }
+    private static OrionDocument proxyDocument(String alias, String upstream) {
+        var binding = new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
+                GitProxyBinding.CredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
+                List.of(), List.of(binding)), List.of());
+    }
 
-        @Override
-        public List<RefUpdateResult> publish(
-                PackIngestionResult.Complete received,
-                List<LooseRefStore.Update> updates,
-                boolean atomic) {
-            return java.util.Collections.nCopies(updates.size(), RefUpdateResult.STALE);
-        }
+    private static ConfigurationSecrets secrets(OrionDocument document) {
+        return new ConfigurationSecrets(() -> document, new ConfigurationCipherCapability() {
+            @Override
+            public KeyMaterialDescriptor descriptor() {
+                throw new AssertionError("File transport does not need a cipher");
+            }
+
+            @Override
+            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context) {
+                throw new AssertionError("File transport does not need a cipher");
+            }
+
+            @Override
+            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context) {
+                throw new AssertionError("File transport does not need a cipher");
+            }
+        });
     }
 }

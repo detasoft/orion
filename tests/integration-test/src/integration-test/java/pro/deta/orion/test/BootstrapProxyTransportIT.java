@@ -6,6 +6,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
+import pro.deta.orion.acl.storage.AccessControlStorageResolver;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -18,6 +22,8 @@ import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +32,7 @@ import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,59 +70,99 @@ class BootstrapProxyTransportIT {
             String upstreamCache = upstreamProvider.prepareProvisional(
                     "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
-            upstreamProvider.activate(() -> Map.of());
-            assertCacheIsNotRoutable(configuration, environment, upstreamCache);
+            try (var probeMaterial = OrionKeyMaterialFactory.open(configuration, environment,
+                    new InMemoryKeyMaterialContentStore(), true)) {
+                var probeConfiguration = new AtomicReference<>(OrionXml.read(
+                        new ByteArrayInputStream(originalConfiguration)));
+                var probeSecrets = new ConfigurationSecrets(probeConfiguration::get, probeMaterial.configurationCipher());
+                probeConfiguration.set(upstreamProvider.adoptProvisional(probeConfiguration.get(), probeSecrets));
+                upstreamProvider.activate(probeConfiguration::get, probeSecrets);
+                assertCacheIsNotRoutable(configuration, environment, upstreamCache);
 
-            byte[] payload = bytes("bootstrap identity survives restart");
-            byte[] signature;
-            try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment)) {
-                var provider = bootstrap.repositoryProvider();
-                String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName().orElseThrow();
-                assertThat(bootstrap.repositorySources().required(BootstrapRepositorySources.MATERIAL)
-                        .repositoryName()).contains(cache);
-                assertThat(provider.repositoryNames()).doesNotContain(cache);
-                signature = bootstrap.serverIdentity().sign(payload);
+                byte[] payload = bytes("bootstrap identity survives restart");
+                byte[] signature;
+                try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment)) {
+                    var provider = bootstrap.repositoryProvider();
+                    String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                            .repositoryName().orElseThrow();
+                    assertThat(bootstrap.repositorySources().required(BootstrapRepositorySources.MATERIAL)
+                            .repositoryName()).contains(cache);
+                    assertThat(provider.repositoryNames()).doesNotContain(cache);
+                    signature = bootstrap.serverIdentity().sign(payload);
 
-                byte[] updatedConfiguration = bytes(
-                        new String(originalConfiguration, StandardCharsets.UTF_8) + "\n");
-                repository.saveFiles(REF, Map.of("orion.xml", updatedConfiguration),
-                        "upstream edit", GitCommitAuthor.EMPTY);
-                NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                assertThat(retained.loadFiles(REF, List.of("orion.xml")).files())
-                        .containsEntry("orion.xml", updatedConfiguration);
+                    NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
-                retained.saveFiles(REF, Map.of("marker.txt", bytes("proxy edit")),
-                        "proxy edit", GitCommitAuthor.EMPTY);
-                assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
-                        .containsEntry("marker.txt", bytes("proxy edit"));
+                    var storage = new AccessControlStorageResolver(bootstrap.repositorySources(), provider).resolve();
+                    var current = new AtomicReference<>(bootstrap.adoptProxies(storage));
+                    var secrets = new ConfigurationSecrets(current::get, bootstrap.configurationCipher());
+                    provider.activate(current::get, secrets);
+                    assertThat(current.get().system().proxies()).hasSize(1);
+                    assertThat(current.get().system().secrets()).hasSize(1);
+                    assertThat(provider.repositoryNames()).doesNotContain(cache);
+                    assertThat(provider.isPublicRepositoryName(cache)).isFalse();
 
-                var stale = retained.prepareFileUpdate(
-                        REF, Map.of("marker.txt", bytes("stale edit")),
-                        "stale candidate", GitCommitAuthor.EMPTY);
-                repository.saveFiles(REF, Map.of("marker.txt", bytes("concurrent upstream edit")),
-                        "concurrent edit", GitCommitAuthor.EMPTY);
-                String upstreamRevision = repository.refs().get(REF);
-                assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
-                        GitNativeRepositoryAccessHook.ALLOW_ALL))
-                        .extracting(ReceivePackStatus::ok).containsExactly(false);
-                assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
-                assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
-                        .containsEntry("marker.txt", bytes("concurrent upstream edit"));
-            }
+                    ByteArrayOutputStream xml = new ByteArrayOutputStream();
+                    OrionXml.write(current.get(), xml);
+                    byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
+                    repository.saveFiles(REF, Map.of("orion.xml", updatedConfiguration),
+                            "upstream edit", GitCommitAuthor.EMPTY);
+                    provider.openForRead(cache).valueOrFailure("refreshed proxy");
+                    assertThat(retained.loadFiles(REF, List.of("orion.xml")).files())
+                            .containsEntry("orion.xml", updatedConfiguration);
 
-            try (BootstrapContext restarted = BootstrapContext.open(configuration, environment)) {
-                assertThat(restarted.serverIdentity().verify(
-                        restarted.serverIdentity().activeKeyId(), payload, signature)).isTrue();
-                String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName().orElseThrow();
-                stopped = true;
-                upstream.close();
-                assertThatThrownBy(() -> restarted.repositoryProvider().openForRead(cache))
-                        .isInstanceOf(IllegalStateException.class);
-                assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
-                        .isInstanceOf(IllegalStateException.class)
-                        .hasMessage("Bootstrap inputs are unavailable or invalid");
+                    Path credentialFile = Path.of(java.net.URI.create(configuration.getBootstrap()
+                            .getAccessControl().getAuth().get("credential")));
+                    String external = Files.readString(credentialFile);
+                    Files.writeString(credentialFile, "invalid-external-credential");
+                    try {
+                        provider.openForRead(cache).valueOrFailure("stored credential");
+                        assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                                .isInstanceOf(IllegalStateException.class)
+                                .hasMessage("Bootstrap inputs are unavailable or invalid");
+                    } finally {
+                        Files.writeString(credentialFile, external);
+                    }
+
+                    retained.saveFiles(REF, Map.of("marker.txt", bytes("proxy edit")),
+                            "proxy edit", GitCommitAuthor.EMPTY);
+                    assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
+                            .containsEntry("marker.txt", bytes("proxy edit"));
+
+                    var stale = retained.prepareFileUpdate(
+                            REF, Map.of("marker.txt", bytes("stale edit")),
+                            "stale candidate", GitCommitAuthor.EMPTY);
+                    repository.saveFiles(REF, Map.of("marker.txt", bytes("concurrent upstream edit")),
+                            "concurrent edit", GitCommitAuthor.EMPTY);
+                    String upstreamRevision = repository.refs().get(REF);
+                    assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
+                            GitNativeRepositoryAccessHook.ALLOW_ALL))
+                            .extracting(ReceivePackStatus::ok).containsExactly(false);
+                    assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
+                    assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
+                            .containsEntry("marker.txt", bytes("concurrent upstream edit"));
+                }
+
+                try (BootstrapContext restarted = BootstrapContext.open(configuration, environment)) {
+                    assertThat(restarted.serverIdentity().verify(
+                            restarted.serverIdentity().activeKeyId(), payload, signature)).isTrue();
+                    String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                            .repositoryName().orElseThrow();
+                    var provider = restarted.repositoryProvider();
+                    var storage = new AccessControlStorageResolver(restarted.repositorySources(), provider).resolve();
+                    var before = storage.load().valueOrFailure("configuration before adoption").version();
+                    OrionDocument current = restarted.adoptProxies(storage);
+                    assertThat(storage.load().valueOrFailure("configuration after adoption").version()).isEqualTo(before);
+                    var secrets = new ConfigurationSecrets(() -> current, restarted.configurationCipher());
+                    provider.activate(() -> current, secrets);
+                    assertThat(provider.openForRead(cache)).isNotNull();
+                    stopped = true;
+                    upstream.close();
+                    assertThatThrownBy(() -> restarted.repositoryProvider().openForRead(cache))
+                            .isInstanceOf(IllegalStateException.class);
+                    assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
+                            .isInstanceOf(IllegalStateException.class)
+                            .hasMessage("Bootstrap inputs are unavailable or invalid");
+                }
             }
         } finally {
             if (!stopped) {

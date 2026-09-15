@@ -106,8 +106,19 @@ record BootstrapGitLocation(
                 credential,
                 credentialUsername,
                 knownHosts,
-                CACHE_PREFIX + sha256(canonicalIdentity(remote) + "#" + refName),
+                cacheName(remote, refName),
                 safe);
+    }
+
+    static BootstrapGitLocation persistent(GitProxyBinding binding) {
+        return new BootstrapGitLocation(binding.upstream(), binding.ref(), binding.credentialKind(),
+                binding.secret().orElse(null), binding.username().orElse(null),
+                binding.knownHosts().map(Path::of).orElse(null),
+                cacheName(binding.upstream(), binding.ref()), binding.upstream().toASCIIString());
+    }
+
+    private static String cacheName(URI upstream, String ref) {
+        return CACHE_PREFIX + sha256(canonicalIdentity(upstream) + "#" + ref);
     }
 
     private static String canonicalIdentity(URI remote) {

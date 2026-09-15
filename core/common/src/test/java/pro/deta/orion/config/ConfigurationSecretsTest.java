@@ -121,6 +121,20 @@ class ConfigurationSecretsTest {
     }
 
     @Test
+    void resolvesSystemCredentialFromTheSelectedSnapshotDespiteConcurrentReplacement() {
+        OrionDocument selected = secrets.createSystem(current.get(), "proxy", "selected-token".toCharArray());
+        current.set(secrets.replaceSystem(selected, "proxy", "new-token".toCharArray()));
+
+        char[] value = secrets.resolveSystem(selected, "proxy");
+        try {
+            assertThat(value).isEqualTo("selected-token".toCharArray());
+            assertThat(cipherOutput.get()).containsOnly((byte) 0);
+        } finally {
+            java.util.Arrays.fill(value, '\0');
+        }
+    }
+
+    @Test
     void validatesTheSuppliedSnapshotAndClearsDecryptedBuffersWithoutPublishingIt() {
         OrionDocument candidate = secrets.createSystem(current.get(), "token", "candidate-token".toCharArray());
         secrets.validate(candidate);
