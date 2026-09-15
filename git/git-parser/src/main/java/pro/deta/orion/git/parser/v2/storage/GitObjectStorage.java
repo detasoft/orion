@@ -12,7 +12,7 @@ package pro.deta.orion.git.parser.v2.storage;
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code addEntry(objectId, type, size)} - register an already stored loose object through the facade.</li>
- *   <li>{@code read(objectId)} - open an ObjectRead for positional reads into caller-owned ByteBuffers,
+ *   <li>{@code read(objectId)} - open a GitObjectRead for positional reads into caller-owned ByteBuffers,
  *       or return absence; I/O failures remain errors.</li>
  *   <li>{@code readPrefix(objectId, maxDataBytes)} - return type, full size, and a bounded content prefix.</li>
  * </ul>

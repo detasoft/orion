@@ -8,9 +8,10 @@ package pro.deta.orion.git.parser.v2.command;
  * <p>Call storage.uploadNewPack(source), then pass the returned upload to ingestor.resolvePack. Iteration
  * retains original bytes in the upload's internal sink. The ingestor delegates reconstruction, hashing,
  * and index registration to its resolver and records confirmed external bases without reading payloads.
- * The ingestor determines the verified PackId and calls upload.commit(packId) after successful resolution.
+ * The ingestor obtains upload.packId() and calls upload.commit(packId), which checks the index for unresolved
+ * entries before publishing the pack and its accumulated index.
  * Command policy and ref checks remain here. Always call upload.rollback() in finally to release resources
- * without undoing a completed commit or masking an earlier failure. The upload owns its parser and sink;
+ * without undoing a completed commit or masking an earlier failure. Upload owns parsing state, sink, and index;
  * the caller retains ownership of the transport input.
  * Ref updates remain conditional and run after pack publication; their failure does not undo that publication.
  *
