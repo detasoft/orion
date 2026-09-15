@@ -19,7 +19,7 @@ import java.util.OptionalLong;
 
 /**
  * Owns fetch request parsing and the wire loop around an object-based FetchNegotiatorIterator.
- * parseV0Request and parseV1Request share the legacy want-section grammar and stop at its flush without
+ * parseLegacyRequest handles the v0/v1 want-section grammar and stops at its flush without
  * consuming haves. parseV2Request starts after the command/capability header delimiter and consumes fetch
  * arguments through their flush; already parsed haves/done are retained in FetchRequest for the iterator.
  * None of these methods consumes another request or closes the borrowed BufferedByteInput.
@@ -57,8 +57,7 @@ public final class FetchNegotiator {
 
     public NegotiationContext negotiate() throws IOException {
         FetchRequest request = switch (version) {
-            case V0 -> parseV0Request(input);
-            case V1 -> parseV1Request(input);
+            case V0, V1 -> parseLegacyRequest(input);
             case V2 -> parseV2Request(input);
         };
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request);
@@ -88,76 +87,77 @@ public final class FetchNegotiator {
     }
 
     public static NegotiationMessage readNegotiationMessage(GitReader reader) throws IOException {
-        ControlState packet = reader.readControlState();
-        if (packet.type() == ControlState.ControlType.FLUSH) {
-            return NegotiationMessage.Control.END_ROUND;
-        }
-        String line = reader.readText(packet);
-        if (line.equals(GitCapability.DONE.wireName())) {
-            return NegotiationMessage.Control.DONE;
-        }
-        if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
-            try {
-                return new NegotiationMessage.Have(
-                        new ObjectId(line.substring(GitCapability.HAVE.wireName().length() + 1)));
-            } catch (IllegalArgumentException error) {
-                throw new IOException("Invalid have object ID", error);
+        ControlState packet = reader.readPacket();
+        return switch (packet) {
+            case ControlState.Control.FLUSH -> NegotiationMessage.Control.END_ROUND;
+            case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+                    throw invalid("Expected a data packet");
+            case ControlState.Data data -> {
+                String line = data.text();
+                if (line.equals(GitCapability.DONE.wireName())) {
+                    yield NegotiationMessage.Control.DONE;
+                }
+                if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
+                    try {
+                        yield new NegotiationMessage.Have(
+                                new ObjectId(line.substring(GitCapability.HAVE.wireName().length() + 1)));
+                    } catch (IllegalArgumentException error) {
+                        throw new IOException("Invalid have object ID", error);
+                    }
+                }
+                throw new IOException("Unexpected negotiation message: " + line);
             }
-        }
-        throw new IOException("Unexpected negotiation message: " + line);
-    }
-
-
-    public static FetchRequest parseV0Request(GitReader input) throws IOException {
-        return parseLegacyRequest(input);
-    }
-
-    public static FetchRequest parseV1Request(GitReader input) throws IOException {
-        return parseLegacyRequest(input);
+        };
     }
 
     public static FetchRequest parseV2Request(GitReader reader) throws IOException {
         FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
-            ControlState packet = reader.readControlState();
-            if (packet.type() == ControlState.ControlType.FLUSH) {
-                if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
-                    throw invalid("Fetch requires want or want-ref");
-                }
-                request.initialMessages().add(NegotiationMessage.Control.END_ROUND);
-                validate(request);
-                return request;
-            }
-            String line = reader.readText(packet);
-            if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
-                request.wants().add(objectId(line.substring(GitCapability.WANT.wireName().length() + 1)));
-            } else if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
-                request.initialMessages().add(new NegotiationMessage.Have(
-                        objectId(line.substring(GitCapability.HAVE.wireName().length() + 1))));
-            } else if (line.equals(GitCapability.DONE.wireName())) {
-                if (request.initialMessages().contains(NegotiationMessage.Control.DONE)) {
-                    throw invalid("Duplicate done");
-                }
-                request.initialMessages().add(NegotiationMessage.Control.DONE);
-            } else if (line.startsWith(GitCapability.WANT_REF.wireName() + " ")) {
-                String ref = token(line.substring(GitCapability.WANT_REF.wireName().length() + 1));
-                validateWantedRef(ref);
-                request.wantRefs().add(ref);
-            } else if (line.startsWith("packfile-uris ")) {
-                if (!request.packfileUriProtocols().isEmpty()) {
-                    throw invalid("Duplicate packfile-uris");
-                }
-                for (String protocol : line.substring(14).split(",", -1)) {
-                    if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
-                        throw invalid("Invalid packfile URI protocol");
+            ControlState packet = reader.readPacket();
+            switch (packet) {
+                case ControlState.Control.FLUSH -> {
+                    if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
+                        throw invalid("Fetch requires want or want-ref");
                     }
-                    request.packfileUriProtocols().add(protocol);
+                    request.initialMessages().add(NegotiationMessage.Control.END_ROUND);
+                    validate(request);
+                    return request;
                 }
-            } else if (isV2Flag(line)) {
-                request.capabilities().add(GitCapability.parse(line, GitObjectFormat.SHA1));
-            } else {
-                acceptShared(request, line);
+                case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+                        throw invalid("Expected a data packet");
+                case ControlState.Data data -> {
+                    String line = data.text();
+                    if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
+                        request.wants().add(objectId(line.substring(GitCapability.WANT.wireName().length() + 1)));
+                    } else if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
+                        request.initialMessages().add(new NegotiationMessage.Have(
+                                objectId(line.substring(GitCapability.HAVE.wireName().length() + 1))));
+                    } else if (line.equals(GitCapability.DONE.wireName())) {
+                        if (request.initialMessages().contains(NegotiationMessage.Control.DONE)) {
+                            throw invalid("Duplicate done");
+                        }
+                        request.initialMessages().add(NegotiationMessage.Control.DONE);
+                    } else if (line.startsWith(GitCapability.WANT_REF.wireName() + " ")) {
+                        String ref = token(line.substring(GitCapability.WANT_REF.wireName().length() + 1));
+                        validateWantedRef(ref);
+                        request.wantRefs().add(ref);
+                    } else if (line.startsWith("packfile-uris ")) {
+                        if (!request.packfileUriProtocols().isEmpty()) {
+                            throw invalid("Duplicate packfile-uris");
+                        }
+                        for (String protocol : line.substring(14).split(",", -1)) {
+                            if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
+                                throw invalid("Invalid packfile URI protocol");
+                            }
+                            request.packfileUriProtocols().add(protocol);
+                        }
+                    } else if (isV2Flag(line)) {
+                        request.capabilities().add(GitCapability.parse(line, GitObjectFormat.SHA1));
+                    } else {
+                        acceptShared(request, line);
+                    }
+                }
             }
         }
     }
@@ -175,45 +175,51 @@ public final class FetchNegotiator {
         return false;
     }
 
-    private static FetchRequest parseLegacyRequest(GitReader reader) throws IOException {
+    public static FetchRequest parseLegacyRequest(GitReader reader) throws IOException {
         FetchRequest request = new FetchRequest();
         boolean receivedLine = false;
         boolean wantsEnded = false;
         while (true) {
-            ControlState packet = reader.readControlState();
-            if (packet.type() == ControlState.ControlType.FLUSH) {
-                if (receivedLine && request.wants().isEmpty()) {
-                    throw invalid("Legacy fetch requires want");
+            ControlState packet = reader.readPacket();
+            switch (packet) {
+                case ControlState.Control.FLUSH -> {
+                    if (receivedLine && request.wants().isEmpty()) {
+                        throw invalid("Legacy fetch requires want");
+                    }
+                    FetchRequest.Mode mode = request.capabilities().contains(GitCapability.MULTI_ACK_DETAILED.entry())
+                            ? FetchRequest.Mode.MULTI_ACK_DETAILED
+                            : request.capabilities().contains(GitCapability.MULTI_ACK.entry())
+                                    ? FetchRequest.Mode.MULTI_ACK : FetchRequest.Mode.SINGLE_ACK;
+                    request.setMode(mode);
+                    validate(request);
+                    return request;
                 }
-                FetchRequest.Mode mode = request.capabilities().contains(GitCapability.MULTI_ACK_DETAILED.entry())
-                        ? FetchRequest.Mode.MULTI_ACK_DETAILED
-                        : request.capabilities().contains(GitCapability.MULTI_ACK.entry())
-                                ? FetchRequest.Mode.MULTI_ACK : FetchRequest.Mode.SINGLE_ACK;
-                request.setMode(mode);
-                validate(request);
-                return request;
-            }
-            String line = reader.readText(packet);
-            receivedLine = true;
-            if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
-                if (wantsEnded) {
-                    throw invalid("Want after legacy request options");
+                case ControlState.Control.DELIMITER, ControlState.Control.RESPONSE_END ->
+                        throw invalid("Expected a data packet");
+                case ControlState.Data data -> {
+                    String line = data.text();
+                    receivedLine = true;
+                    if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
+                        if (wantsEnded) {
+                            throw invalid("Want after legacy request options");
+                        }
+                        String[] values = line.substring(GitCapability.WANT.wireName().length() + 1).split(" ", -1);
+                        boolean firstWant = request.wants().isEmpty();
+                        if (!firstWant && values.length != 1) {
+                            throw invalid("Capabilities are only allowed on the first want");
+                        }
+                        request.wants().add(objectId(values[0]));
+                        for (int i = 1; i < values.length; i++) {
+                            request.capabilities().add(GitCapability.parse(values[i], GitObjectFormat.SHA1));
+                        }
+                    } else {
+                        if (request.wants().isEmpty()) {
+                            throw invalid("Legacy request must start with want");
+                        }
+                        wantsEnded = true;
+                        acceptShared(request, line);
+                    }
                 }
-                String[] values = line.substring(GitCapability.WANT.wireName().length() + 1).split(" ", -1);
-                boolean firstWant = request.wants().isEmpty();
-                if (!firstWant && values.length != 1) {
-                    throw invalid("Capabilities are only allowed on the first want");
-                }
-                request.wants().add(objectId(values[0]));
-                for (int i = 1; i < values.length; i++) {
-                    request.capabilities().add(GitCapability.parse(values[i], GitObjectFormat.SHA1));
-                }
-            } else {
-                if (request.wants().isEmpty()) {
-                    throw invalid("Legacy request must start with want");
-                }
-                wantsEnded = true;
-                acceptShared(request, line);
             }
         }
     }

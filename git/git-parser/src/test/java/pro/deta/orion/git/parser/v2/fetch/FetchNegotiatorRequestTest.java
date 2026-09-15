@@ -24,30 +24,27 @@ class FetchNegotiatorRequestTest {
     private static final String HAVE = "cd".repeat(20);
 
     @Test
-    void legacyVersionsShareGrammarAndLeaveNegotiationUnread() throws Exception {
+    void legacyRequestLeavesNegotiationUnread() throws Exception {
         String request = packet("want " + WANT.toUpperCase() + " multi_ack_detailed thin-pack ofs-delta\n")
                 + packet("want " + WANT) + packet("shallow " + HAVE + "\n") + "0000";
-        for (boolean v1 : new boolean[]{false, true}) {
-            try (var input = input(request + packet("have " + HAVE + "\n") + packet("done\n"))) {
-                FetchRequest result = v1 ? FetchNegotiator.parseV1Request(new GitReader(input))
-                        : FetchNegotiator.parseV0Request(new GitReader(input));
-                assertThat(result.wants()).containsExactly(new ObjectId(WANT));
-                assertThat(result.shallowCommits()).containsExactly(new ObjectId(HAVE));
-                assertThat(result.mode()).isEqualTo(FetchRequest.Mode.MULTI_ACK_DETAILED);
-                assertThat(result.capabilities()).contains(GitCapability.THIN_PACK.entry(), GitCapability.OFS_DELTA.entry());
-                assertThat(result.initialMessages()).isEmpty();
-                GitReader reader = new GitReader(input);
-                assertThat(FetchNegotiator.readNegotiationMessage(reader))
-                        .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
-                assertThat(FetchNegotiator.readNegotiationMessage(reader)).isEqualTo(NegotiationMessage.Control.DONE);
-            }
+        try (var input = input(request + packet("have " + HAVE + "\n") + packet("done\n"))) {
+            FetchRequest result = FetchNegotiator.parseLegacyRequest(new GitReader(input));
+            assertThat(result.wants()).containsExactly(new ObjectId(WANT));
+            assertThat(result.shallowCommits()).containsExactly(new ObjectId(HAVE));
+            assertThat(result.mode()).isEqualTo(FetchRequest.Mode.MULTI_ACK_DETAILED);
+            assertThat(result.capabilities()).contains(GitCapability.THIN_PACK.entry(), GitCapability.OFS_DELTA.entry());
+            assertThat(result.initialMessages()).isEmpty();
+            GitReader reader = new GitReader(input);
+            assertThat(FetchNegotiator.readNegotiationMessage(reader))
+                    .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+            assertThat(FetchNegotiator.readNegotiationMessage(reader)).isEqualTo(NegotiationMessage.Control.DONE);
         }
     }
 
     @Test
     void legacyEmptyFlushEndsWithoutReadingAnotherRequest() throws Exception {
         try (var input = input("0000NEXT")) {
-            FetchRequest request = FetchNegotiator.parseV0Request(new GitReader(input));
+            FetchRequest request = FetchNegotiator.parseLegacyRequest(new GitReader(input));
             assertThat(request.wants()).isEmpty();
             assertThat(input.readUnsignedByte()).isEqualTo('N');
         }
@@ -57,7 +54,7 @@ class FetchNegotiatorRequestTest {
     void rejectsLegacyCapabilitiesAfterFirstWantAndPrematureHaves() throws Exception {
         for (String line : new String[]{"want " + HAVE + " multi_ack", "have " + HAVE}) {
             try (var input = input(packet("want " + WANT) + packet(line) + "0000")) {
-                assertThatThrownBy(() -> FetchNegotiator.parseV1Request(new GitReader(input))).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> FetchNegotiator.parseLegacyRequest(new GitReader(input))).isInstanceOf(IOException.class);
             }
         }
     }
@@ -65,10 +62,10 @@ class FetchNegotiatorRequestTest {
     @Test
     void choosesLegacyAckModeFromFirstWant() throws Exception {
         try (var input = input(packet("want " + WANT + " multi_ack") + "0000")) {
-            assertThat(FetchNegotiator.parseV0Request(new GitReader(input)).mode()).isEqualTo(FetchRequest.Mode.MULTI_ACK);
+            assertThat(FetchNegotiator.parseLegacyRequest(new GitReader(input)).mode()).isEqualTo(FetchRequest.Mode.MULTI_ACK);
         }
         try (var input = input(packet("want " + WANT) + "0000")) {
-            assertThat(FetchNegotiator.parseV1Request(new GitReader(input)).mode()).isEqualTo(FetchRequest.Mode.SINGLE_ACK);
+            assertThat(FetchNegotiator.parseLegacyRequest(new GitReader(input)).mode()).isEqualTo(FetchRequest.Mode.SINGLE_ACK);
         }
     }
 
@@ -109,7 +106,7 @@ class FetchNegotiatorRequestTest {
     void parsesRelativeDepthInBothGrammars() throws Exception {
         try (var input = input(packet("want " + WANT + " deepen-relative")
                 + packet("deepen 3") + "0000")) {
-            assertThat(FetchNegotiator.parseV0Request(new GitReader(input)).depth().getAsInt()).isEqualTo(3);
+            assertThat(FetchNegotiator.parseLegacyRequest(new GitReader(input)).depth().getAsInt()).isEqualTo(3);
         }
         try (var input = input(packet("want " + WANT) + packet("deepen-relative")
                 + packet("deepen 3") + "0000")) {
@@ -199,8 +196,8 @@ class FetchNegotiatorRequestTest {
         String wire = packet("want " + WANT
                 + " multi_ack agent=client/1 object-format=sha1 custom-feature=value") + "0000";
         try (var firstInput = input(wire); var secondInput = input(wire)) {
-            FetchRequest first = FetchNegotiator.parseV0Request(new GitReader(firstInput));
-            FetchRequest second = FetchNegotiator.parseV0Request(new GitReader(secondInput));
+            FetchRequest first = FetchNegotiator.parseLegacyRequest(new GitReader(firstInput));
+            FetchRequest second = FetchNegotiator.parseLegacyRequest(new GitReader(secondInput));
             assertThat(first.capabilities()).contains(GitCapability.MULTI_ACK.entry(),
                     GitCapability.AGENT.withValue("client/1"), GitCapability.OBJECT_FORMAT.withValue("sha1"),
                     GitCapability.Entry.custom("custom-feature", "value"));
@@ -219,12 +216,12 @@ class FetchNegotiatorRequestTest {
     @Test
     void valuedAckCapabilityDoesNotEnableBareFlagAndUnsupportedObjectFormatFails() throws Exception {
         try (var input = input(packet("want " + WANT + " multi_ack=custom") + "0000")) {
-            FetchRequest request = FetchNegotiator.parseV0Request(new GitReader(input));
+            FetchRequest request = FetchNegotiator.parseLegacyRequest(new GitReader(input));
             assertThat(request.mode()).isEqualTo(FetchRequest.Mode.SINGLE_ACK);
             assertThat(request.capabilities()).contains(GitCapability.MULTI_ACK.withValue("custom"));
         }
         try (var input = input(packet("want " + WANT + " object-format=sha256") + "0000")) {
-            assertThatThrownBy(() -> FetchNegotiator.parseV0Request(new GitReader(input)))
+            assertThatThrownBy(() -> FetchNegotiator.parseLegacyRequest(new GitReader(input)))
                     .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
         }
     }

@@ -12,6 +12,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class InputStreamBufferedByteInputTest {
     @Test
+    void readBytesReturnsExactlyTheRequestedBytesAndPreservesUnsignedValues() throws Exception {
+        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(
+                new byte[]{0, (byte) 0x80, (byte) 0xff, 42}))) {
+            assertThat(input.readBytes(0)).isEmpty();
+            assertThat(input.readBytes(3)).containsExactly((byte) 0, (byte) 0x80, (byte) 0xff);
+            assertThat(input.readUnsignedByte()).isEqualTo(42);
+        }
+    }
+
+    @Test
+    void readBytesRejectsNegativeLengthWithoutConsumingInputAndFailsOnTruncation() throws Exception {
+        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(new byte[]{1, 2}))) {
+            assertThatThrownBy(() -> input.readBytes(-1)).isInstanceOf(IllegalArgumentException.class);
+            assertThat(input.available()).isEqualTo(2);
+            assertThatThrownBy(() -> input.readBytes(3)).isInstanceOf(java.io.EOFException.class);
+            assertThat(input.readBytes(0)).isEmpty();
+        }
+    }
+
+    @Test
     void readIntoReturnsAvailableBytesWithoutFillingRequestedLength()
             throws Exception {
         InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(

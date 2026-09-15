@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.UnpooledByteBufAllocator;
+import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
@@ -17,7 +17,6 @@ import pro.deta.orion.git.parser.wire.serialization.PacketListSerialization;
 import pro.deta.orion.git.parser.wire.serialization.PktLineSerialization;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,28 +51,21 @@ public final class GitBlockingWireTransport {
     }
 
     public ControlState readControlState() throws IOException {
-        int headerValue = 0;
-        for (int i = 0; i < PKT_LINE_HEADER_SIZE; i++) {
-            headerValue = (headerValue << 8) | requireInput().readUnsignedByte();
-        }
-        Result<ControlState> control = ControlState.readControlType(headerValue);
-        if (control instanceof Result.Success<ControlState> success) {
-            return success.value();
-        }
-        Result.Failure<ControlState> failure = (Result.Failure<ControlState>) control;
-        throw new GitPktLineFormatException(
-                "Invalid Git pkt-line header: " + failure.getMessage(),
-                failure.throwable());
+        return ControlState.readFrom(requireInput());
     }
 
-    public ByteBuf readPayload(ControlState control) throws IOException {
+    public Optional<ControlState> readNextControlState() throws IOException {
+        return ControlState.readNextFrom(requireInput());
+    }
+
+    public ByteBuf payloadBuffer(ControlState control) {
         Objects.requireNonNull(control, "control");
-        return requireInput().readCopy(control.payloadLength(), UnpooledByteBufAllocator.DEFAULT);
+        return control instanceof ControlState.Data data ? Unpooled.wrappedBuffer(data.content()) : Unpooled.EMPTY_BUFFER;
     }
 
     public GitPktLine readPacket() throws IOException {
         ControlState control = readControlState();
-        return new GitPktLine(control, readPayload(control));
+        return new GitPktLine(control, payloadBuffer(control));
     }
 
     public int readRawInto(ByteBuf target, int maxLength) throws IOException {

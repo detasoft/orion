@@ -53,7 +53,7 @@ class GitBlockingWireTransportTest {
         GitBlockingWireTransport transport = input("000ahello\n0000");
 
         ControlState data = transport.readControlState();
-        ByteBuf payload = transport.readPayload(data);
+        ByteBuf payload = transport.payloadBuffer(data);
         try {
             assertThat(data.type()).isEqualTo(ControlState.ControlType.DATA);
             assertThat(payload.toString(StandardCharsets.UTF_8))

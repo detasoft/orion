@@ -142,15 +142,14 @@ public final class GitBlockingWireSession {
             throws IOException {
         V2Command command = null;
         while (true) {
-            ControlState control;
-            try {
-                control = wire.readControlState();
-            } catch (EOFException error) {
+            var next = wire.readNextControlState();
+            if (next.isEmpty()) {
                 if (command == null) {
                     return;
                 }
-                throw error;
+                throw new EOFException("Incomplete protocol v2 command");
             }
+            ControlState control = next.get();
             switch (control.type()) {
                 case DATA -> {
                     String payload = readAsciiPayload(control);
@@ -223,7 +222,7 @@ public final class GitBlockingWireSession {
     }
 
     private String readAsciiPayload(ControlState control) throws IOException {
-        ByteBuf payload = wire.readPayload(control);
+        ByteBuf payload = wire.payloadBuffer(control);
         try {
             return asciiLine(payload);
         } finally {
@@ -642,7 +641,7 @@ public final class GitBlockingWireSession {
                         shallowObjectIds,
                         capabilities,
                         refNames,
-                        readPayloadBytes(wire, control));
+                        ((ControlState.Data) control).content());
                 case FLUSH -> {
                     if (commands.isEmpty()) {
                         return null;
@@ -817,22 +816,6 @@ public final class GitBlockingWireSession {
                         GitWireError.Kind.EMPTY_LEGACY_RECEIVE_CAPABILITY);
             }
             capabilities.add(capability);
-        }
-    }
-
-    private byte[] readPayloadBytes(
-            GitBlockingWireTransport wire,
-            ControlState control) throws IOException {
-        if (control.payloadLength() == 0) {
-            return new byte[0];
-        }
-        ByteBuf payload = wire.readPayload(control);
-        try {
-            byte[] bytes = new byte[payload.readableBytes()];
-            payload.readBytes(bytes);
-            return bytes;
-        } finally {
-            payload.release();
         }
     }
 

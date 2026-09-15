@@ -6,8 +6,8 @@ import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.EOFException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,7 +20,7 @@ class GitReaderTest {
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
                 String expected = line.endsWith("\n") ? line.substring(0, line.length() - 1) : line;
-                assertThat(reader.readText(data(payload.length))).isEqualTo(expected);
+                assertThat(((ControlState.Data) reader.readPacket()).text()).isEqualTo(expected);
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
         }
@@ -31,7 +31,7 @@ class GitReaderTest {
         for (byte[] payload : new byte[][]{{(byte) 0xc3, 0x28}, {(byte) 0xe2, (byte) 0x82}, {(byte) 0x80, '\n'}}) {
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
-                assertThatThrownBy(() -> reader.readText(data(payload.length)))
+                assertThatThrownBy(() -> ((ControlState.Data) reader.readPacket()).text())
                         .isInstanceOf(IOException.class).hasMessageContaining("Invalid UTF-8");
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
@@ -44,20 +44,63 @@ class GitReaderTest {
             byte[] payload = line.getBytes(StandardCharsets.UTF_8);
             try (var input = inputWithMarker(payload)) {
                 GitReader reader = new GitReader(input);
-                assertThatThrownBy(() -> reader.readText(data(payload.length)))
+                assertThatThrownBy(() -> ((ControlState.Data) reader.readPacket()).text())
                         .isInstanceOf(IOException.class).hasMessageContaining("Control character");
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
             }
         }
     }
 
-    private static ControlState data(int length) {
-        return new ControlState(ControlState.ControlType.DATA, length + ControlState.PKT_LINE_HEADER_SIZE);
+    @Test
+    void controlPacketsHaveNoTextAndDoNotConsumeTheFollowingPacket() throws Exception {
+        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(
+                "0000000100020004".getBytes(StandardCharsets.US_ASCII)))) {
+            var reader = new GitReader(input);
+            for (var type : new ControlState.ControlType[]{ControlState.ControlType.FLUSH,
+                    ControlState.ControlType.DELIMITER, ControlState.ControlType.RESPONSE_END}) {
+                var packet = reader.readPacket();
+                assertThat(packet.type()).isEqualTo(type);
+                assertThat(packet).isInstanceOf(ControlState.Control.class);
+                assertThat(packet.payloadLength()).isZero();
+            }
+            var packet = reader.readPacket();
+            assertThat(packet.type()).isEqualTo(ControlState.ControlType.DATA);
+            assertThat(((ControlState.Data) packet).text()).isEmpty();
+            assertThat(input.available()).isZero();
+        }
+    }
+
+    @Test
+    void dataContainsRawBytesBeforeAnyTextDecoding() throws Exception {
+        byte[] raw = {(byte) 0xff, 0, (byte) 0x80};
+        try (var input = inputWithMarker(raw)) {
+            var data = (ControlState.Data) new GitReader(input).readPacket();
+            assertThat(data.content()).containsExactly(raw);
+            assertThat(input.readUnsignedByte()).isEqualTo('N');
+            assertThatThrownBy(data::text).isInstanceOf(IOException.class);
+        }
+    }
+
+    @Test
+    void optionalPacketReadAllowsOnlyCleanEof() throws Exception {
+        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(new byte[0]))) {
+            assertThat(ControlState.readNextFrom(input)).isEmpty();
+            assertThatThrownBy(() -> ControlState.readFrom(input)).isInstanceOf(EOFException.class);
+        }
+        for (String truncated : new String[]{"0", "000", "0006a"}) {
+            try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(
+                    truncated.getBytes(StandardCharsets.US_ASCII)))) {
+                assertThatThrownBy(() -> ControlState.readNextFrom(input)).isInstanceOf(EOFException.class);
+            }
+        }
     }
 
     private static InputStreamBufferedByteInput inputWithMarker(byte[] payload) {
-        byte[] bytes = Arrays.copyOf(payload, payload.length + 1);
-        bytes[payload.length] = 'N';
+        byte[] header = "%04x".formatted(payload.length + 4).getBytes(StandardCharsets.US_ASCII);
+        byte[] bytes = new byte[header.length + payload.length + 1];
+        System.arraycopy(header, 0, bytes, 0, header.length);
+        System.arraycopy(payload, 0, bytes, header.length, payload.length);
+        bytes[bytes.length - 1] = 'N';
         return new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes) {
             @Override
             public synchronized int read(byte[] target, int offset, int length) {
