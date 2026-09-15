@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
@@ -13,6 +14,9 @@ import java.util.OptionalLong;
 /**
  * Sequentially parses one pack from caller-owned input, independently of repository storage and resolution.
  * next returns the next physical entry, or null only after the declared entries and checksum are verified.
+ * packId returns that verified checksum after next has successfully returned null, including for an empty pack.
+ * It performs no I/O; calling it before successful completion fails with IllegalStateException.
+ * Truncated input, a checksum mismatch, or a sink failure cannot produce a successfully completed pack ID.
  * read streams the current entry's inflated payload into a writable ByteBuffer: full object content or delta
  * instructions, never an automatically resolved delta. Partial reads advance position and preserve limit;
  * an empty destination returns zero and payload EOF returns -1. Buffers are not retained.
@@ -53,6 +57,10 @@ public final class PackEnumerator implements AutoCloseable {
 
     public int read(ByteBuffer destination) throws IOException {
         throw new UnsupportedOperationException("Pack payload reads are not implemented");
+    }
+
+    public PackId packId() {
+        throw new UnsupportedOperationException("Verified pack identity is not implemented");
     }
 
     @Override

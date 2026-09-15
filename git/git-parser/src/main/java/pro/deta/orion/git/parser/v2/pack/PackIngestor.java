@@ -23,8 +23,9 @@ import java.io.IOException;
  * nothing changes. A missing base is a deferred dependency, not yet evidence of an invalid pack.
  * After enumeration, finish pending work or fail, then record confirmed dependencies via addExternalBaseId.
  * Completion requires the pending map to be empty; the confirmed external-base set may remain nonempty.
- * The ingestor determines the verified PackId for the received bytes and calls upload.commit(packId) only
- * after complete resolution and dependency recording. Failed enumeration or resolution must not commit.
+ * After next returns null, the ingestor obtains the verified PackId from enumerator.packId() and calls
+ * upload.commit(packId) only after complete resolution and dependency recording. Failed enumeration or
+ * resolution must not commit.
  *
  * <p>Preliminary methods: resolvePack(upload) enumerates, resolves, and commits the pack; close() releases owned
  * base reads and resolution resources. PushCommand owns this ingestor, performs command policy checks, and
