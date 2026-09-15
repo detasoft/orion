@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.v2.data;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Objects;
 
 /**
  * Provides positional reads of inflated payload without requiring whole-object buffering in memory.
@@ -29,28 +28,15 @@ import java.util.Objects;
  * <p>close releases this handle's resources and is idempotent; reads afterward fail with ClosedChannelException.
  * It never closes the owning upload, repository, or transport. Callers close handles before their provider.
  * Constructor fields describe the payload; reading, backing storage, and cleanup remain unimplemented.
+ * Decompression is shared through CompressedGitObjectRead.readDecompressed; this subclass exposes its output.
  */
-public final class ContentGitObjectRead implements GitObjectRead {
-    private final ObjectType type;
-    private final long size;
-
+public final class ContentGitObjectRead extends CompressedGitObjectRead {
     public ContentGitObjectRead(ObjectType type, long size) {
-        this.type = Objects.requireNonNull(type, "type");
-        this.size = size;
-    }
-
-    @Override
-    public ObjectType type() {
-        return type;
-    }
-
-    @Override
-    public long size() {
-        return size;
+        super(type, size);
     }
 
     public int read(long offset, ByteBuffer destination) throws IOException {
-        throw new UnsupportedOperationException("Object content reads are not implemented");
+        return readDecompressed(offset, destination);
     }
 
     @Override
