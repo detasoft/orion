@@ -41,6 +41,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
     @Test
+    void retriesOnlyTheSelectedAliasAndRetainsFailedBindingsForRecovery() {
+        var visited = new java.util.ArrayList<String>();
+        var unavailable = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var provider = new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(),
+                new BootstrapSecretResolver(Map.of()), (location, transport, repository) -> {
+                    visited.add(location.remoteUri().getPath());
+                    if (location.remoteUri().getPath().equals("/other.git") && unavailable.get()) {
+                        throw new BootstrapGitProxyException("authentication", AUTHENTICATION_FAILED);
+                    }
+                }, (location, transport, repository, received, updates, atomic) -> List.of());
+        OrionDocument initial = proxyDocument("configuration", "file:///upstream.git");
+        var current = new AtomicReference<>(initial);
+        provider.activate(current::get, secrets(initial));
+        visited.clear();
+        var added = proxyDocument("other", "file:///other.git").system().proxies().getFirst();
+        current.set(new OrionDocument(new OrionDocument.SystemConfiguration(initial.system().accessControl(),
+                Optional.empty(), List.of(), List.of(initial.system().proxies().getFirst(), added)), List.of()));
+
+        assertThat(provider.retry(added.alias(), current::get, secrets(current.get())).status())
+                .isEqualTo(AUTHENTICATION_FAILED);
+        assertThat(provider.syncObservation(added).status()).isEqualTo(AUTHENTICATION_FAILED);
+        unavailable.set(false);
+        assertThat(provider.retry(added.alias(), current::get, secrets(current.get())).status()).isEqualTo(SUCCESS);
+        assertThat(visited).containsExactly("/other.git", "/other.git");
+        assertThat(provider.syncObservation(initial.system().proxies().getFirst()).status()).isEqualTo(SUCCESS);
+        assertThat(provider.repositoryNames()).isEmpty();
+    }
+
+    @Test
     void observesActiveBindingsWithoutRefreshingOrPublishingAndTracksConfigurationIdentity() {
         AtomicInteger refreshes = new AtomicInteger();
         AtomicInteger pushes = new AtomicInteger();

@@ -215,6 +215,47 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         NOT_CHECKED, SUCCESS, UNAVAILABLE, AUTHENTICATION_FAILED, CONFLICT
     }
 
+    public synchronized SyncObservation retry(RemoteAlias alias, Supplier<OrionDocument> current,
+            ConfigurationSecrets secrets) {
+        if (!activePhase) {
+            throw new IllegalStateException("Proxy runtime is not active");
+        }
+        OrionDocument document = current.get();
+        GitProxyBinding selected = null;
+        for (GitProxyBinding binding : document.system().proxies()) {
+            if (binding.alias().equals(alias)) {
+                selected = binding;
+            }
+        }
+        if (selected == null) {
+            throw new IllegalArgumentException("Proxy alias is unavailable");
+        }
+        secrets.validate(document);
+        var persistent = BootstrapGitTransportFactory.persistent(current, secrets);
+        Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
+        for (GitProxyBinding binding : document.system().proxies()) {
+            BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
+            BootstrapGitRuntimeProxy runtime = activeBindings.get(location.proxyName());
+            if (runtime == null) {
+                runtime = new BootstrapGitRuntimeProxy(location, findOrCreate(location.proxyName()),
+                        persistent, fetcher, pusher);
+            }
+            candidate.put(location.proxyName(), runtime);
+        }
+        activeBindings = Map.copyOf(candidate);
+        BootstrapGitRuntimeProxy runtime = candidate.get(BootstrapGitLocation.persistent(selected).proxyName());
+        try {
+            runtime.refresh();
+        } catch (BootstrapGitProxyException failure) {
+            // The runtime retains the safe result so the operator can retry after recovery.
+        }
+        return runtime.syncObservation();
+    }
+
+    public boolean isBootstrapSource(GitProxyBinding binding, BootstrapRepositorySources sources) {
+        return sources.referencesRepository(BootstrapGitLocation.persistent(binding).proxyName());
+    }
+
     public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
         Objects.requireNonNull(current, "current configuration");
         Objects.requireNonNull(secrets, "configuration secrets");

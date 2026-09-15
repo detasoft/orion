@@ -39,6 +39,17 @@ revision must not overwrite another operator's changes. Credential replacement
 is explicit and write-only; ordinary metadata edits retain the existing secret.
 Reload the saved document and apply bindings through the existing proxy runtime.
 
+The running configuration and material stores retain their bootstrap source
+handles. Reject upstream/ref changes to those source bindings at runtime;
+credential replacement remains supported. Determine that constraint from the
+resolved bootstrap sources. Ordinary aliases may change their upstream/ref.
+
+Report durable save success separately from the subsequent connection result.
+A failed connection remains observable and retryable without another XML write.
+After a save conflict, reload the current configuration so subsequent reads can
+supply its revision. Replacing a credential shared by several aliases gives the
+selected alias its own secret and preserves the other aliases' credential.
+
 Present Remote aliases as a separate UI section with system scope, alias,
 sanitized upstream, transport, selected ref, and synchronization observation.
 The current runtime has no public alias endpoint; report its absence explicitly

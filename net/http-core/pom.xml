@@ -35,6 +35,10 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>acl</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>authorization</artifactId>
         </dependency>
         <dependency>

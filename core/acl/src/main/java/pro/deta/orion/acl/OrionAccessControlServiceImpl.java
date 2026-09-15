@@ -1568,6 +1568,29 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         reload(author + " " + message);
     }
 
+    public OrionDesiredState.Snapshot updatePrimaryConfiguration(String expectedRevision,
+            java.util.function.UnaryOperator<OrionDocument> update, AccessControlSaveRequest request) {
+        if (expectedRevision == null || expectedRevision.isBlank()) {
+            throw new IllegalArgumentException("Configuration revision is required");
+        }
+        Objects.requireNonNull(update, "configuration update");
+        Objects.requireNonNull(request, "save request");
+        AccessControlSnapshot loaded = loadValidatedAccessControlSnapshot()
+                .valueOrFailure("Cannot load configuration for update");
+        if (!loaded.version().equals(Optional.of(expectedRevision))) {
+            throw new AccessControlConcurrentUpdateException("Configuration revision changed", null);
+        }
+        Map<String, byte[]> files = new LinkedHashMap<>(loaded.files());
+        String primaryPath = accessControlStorage.primaryPath();
+        OrionDocument primary = parseOrionConfiguration(files.get(primaryPath), primaryPath);
+        files.put(primaryPath, serializeOrionConfiguration(
+                Objects.requireNonNull(update.apply(primary), "updated configuration")));
+        AccessControlSnapshot candidate = new AccessControlSnapshot(files, loaded.version());
+        documentFrom(candidate).valueOrFailure("Invalid updated configuration");
+        saveAccessControlSnapshotAndReload(candidate, request.message(), request.author());
+        return desiredState.current();
+    }
+
     public void reload(String initiator) {
         synchronized (reloadLock) {
             switch (loadValidatedAccessControlSnapshot()) {

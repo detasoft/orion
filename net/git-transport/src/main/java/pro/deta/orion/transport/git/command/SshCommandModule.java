@@ -80,10 +80,16 @@ public final class SshCommandModule {
 
     @Provides
     @Singleton
+    static pro.deta.orion.command.audit.CommandAuditSink commandAuditSink(Slf4jCommandAuditSink sink) {
+        return sink;
+    }
+
+    @Provides
+    @Singleton
     static CommandDispatcher commandDispatcher(
             DefaultCommandDispatcher dispatcher,
             CommandAuditDescriber describer,
-            Slf4jCommandAuditSink auditSink) {
+            pro.deta.orion.command.audit.CommandAuditSink auditSink) {
         return new AuditingCommandDispatcher(
                 dispatcher,
                 describer,

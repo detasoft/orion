@@ -62,6 +62,35 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void updatesPrimaryConfigurationAtTheReadRevisionAndPreservesSecondaryFiles() throws Exception {
+        try (var fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            byte[] secondary = fixture.storage.snapshot.files().get(EXTRA_ACL_PATH);
+            var result = fixture.service.updatePrimaryConfiguration("version-one", document ->
+                    new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
+                            document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
+                            "credential", "opaque-envelope")), document.system().proxies()), document.organizations()),
+                    new AccessControlSaveRequest("update proxy", null));
+
+            assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
+            assertThat(fixture.storage.snapshot.files().get(EXTRA_ACL_PATH)).isEqualTo(secondary);
+            assertThat(parseDocument(fixture.storage.snapshot.files().get(ACL_PATH)).system().secrets())
+                    .isEqualTo(result.document().system().secrets());
+        }
+    }
+
+    @Test
+    void rejectsStalePrimaryConfigurationBeforeInvokingTheMutation() {
+        try (var fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            int saves = fixture.storage.saveCount;
+            assertThatThrownBy(() -> fixture.service.updatePrimaryConfiguration("stale", document -> {
+                throw new AssertionError("A stale mutation must not consume credentials");
+            }, new AccessControlSaveRequest("update proxy", null)))
+                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
+            assertThat(fixture.storage.saveCount).isEqualTo(saves);
+        }
+    }
+
+    @Test
     void publishesAndPreservesTheWholeDesiredStateWhenAclChanges() throws Exception {
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 true,

@@ -34,7 +34,7 @@ class OrionAdminProxiesRouteTest {
     private final OrionDesiredState desired = new OrionDesiredState();
     private final InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
     private final ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
-    private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(desired, provider);
+    private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(desired, provider, null, null, null, null, mapper);
     private final OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
             new OrionHttpRouteRegistry(Set.of(route)), new OrionHttpResponseWriter(mapper));
 

@@ -20,6 +20,15 @@ public final class BootstrapRepositorySources {
         resolved = Map.copyOf(candidate);
     }
 
+    public boolean referencesRepository(String repositoryName) {
+        for (ResolvedBootstrapSource source : resolved.values()) {
+            if (source.repositoryName().filter(repositoryName::equals).isPresent()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public ResolvedBootstrapSource required(String sourceId) {
         ResolvedBootstrapSource source = resolved.get(sourceId);
         if (source == null) {
