@@ -14,20 +14,27 @@ import java.util.Optional;
  * computes object IDs, and registers resolved metadata through upload.index().addObject. Ingestor reads no bytes.
  * REF_DELTA bases are located through upload.index().find(objectId), then upload.storage().readObject if needed.
  * OFS_DELTA bases are located through upload.index().find(baseOffset). Base entries may themselves be deltas;
- * the storage-provided index owns their chain metadata and upload retains content. This class executes
- * reconstruction through those chains without keeping a second dependency graph or persistent result cache.
+ * the storage-provided index owns their chain metadata and upload retains original pack bytes. Reconstruction
+ * follows those chains without keeping a second dependency graph or persistent result cache.
  * It never advances iteration or rereads transport input; upload.next has already retained the entry's bytes.
  * Entry metadata locates each required base by pack offset before opening its ContentGitObjectRead. Read contents
- * on demand for reconstruction and object hashing, closing owned handles after use. Ordinary objects can
- * be hashed in chunks; caching content for delta chains is an implementation choice, not a requirement to
- * materialize every object during the first pass.
+ * on demand for reconstruction and object hashing, closing owned handles after use.
+ *
+ * <p>Current limitation: restored bytes live only for the current reconstruction or open read handle.
+ * Once that use finishes, release them without tracking possible future consumers or caching them across
+ * entries. If another entry in this same pack later needs the same base, reread the original pack at its
+ * indexed offset and repeat decompression and any required delta reconstruction, even if it was restored
+ * earlier in the same attemptResolve call. Dependency metadata remains indexed, but no reference counts or
+ * future-use analysis retain restored payloads. Keep bytes needed by an active reconstruction or open handle
+ * alive until that use ends. Publish the original pack as-is with its index and external-base metadata;
+ * do not separately persist restored object content. Reuse and caching are deferred optimizations.
  *
  * <p>attemptResolve(result) uses the ObjectId from HashedGitObjectRead when upload already indexed a full
  * object; it does not reopen content just to hash it again. For ContentGitObjectRead it reads the provided
  * delta instructions, obtains bases, reconstructs content, and registers the computed ID, type, and size.
  * The result's read handle is borrowed for this call; the ingestor closes it afterward, including on failure
- * or deferral. Upload retains backing delta content for later attempts. Reads opened by this resolver for
- * other entries and external bases belong to it and are closed after use.
+ * or deferral. Upload retains original pack bytes for rereading on later attempts. Reads opened by this resolver
+ * for other entries and external bases belong to it and are closed after use.
  * When a required base is unavailable, the entry remains waiting in the upload and the method returns normally.
  * Both already hashed objects and newly resolved deltas trigger waiting chains. Entries without IDs are
  * addressed by metadata. For each available result, index.waitingFor(objectId, entryOffset)

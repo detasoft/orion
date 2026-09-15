@@ -15,14 +15,14 @@ import java.util.OptionalLong;
  * parseEntry consumes the header and complete zlib stream, validating the encoding and inflated length.
  * For COMMIT, TREE, BLOB, and TAG it streams inflated bytes into the canonical object hash and returns
  * HashedGitObjectRead with type, size, and ObjectId, without retaining inflated content.
- * For OFS_DELTA and REF_DELTA it returns ContentGitObjectRead retaining the inflated delta instructions
- * for reconstruction. That result exposes the delta type and instruction size, not the final object's type
+ * For OFS_DELTA and REF_DELTA it returns ContentGitObjectRead exposing delta instructions for the current
+ * reconstruction. That result exposes the delta type and instruction size, not the final object's type
  * or size. The parser never fetches bases, applies deltas, or treats a delta instruction hash as an ObjectId.
  * No mode parameter is needed: both paths consume content, but retain different results.
  *
  * <p>Original header, base-reference, and compressed bytes are forwarded to the borrowed rawSink.
- * Parsing uses bounded working buffers. Retained delta content may use backing storage rather than one
- * object-sized byte array; this contract prescribes no file, path, or in-memory-only representation.
+ * Parsing uses bounded working buffers. Content reads may rely on retained original pack bytes rather than
+ * an object-sized array. No separate inflated-content store or cache for later consumers is required.
  * offset is the absolute entry-header position; dataOffset is the absolute start of its zlib stream.
  * Compressed entry length is not stored in the header, so parsing traverses the stream to locate its end.
  * Prefetched bytes after that boundary stay available through the same buffered input and are not forwarded.
@@ -30,8 +30,8 @@ import java.util.OptionalLong;
  * no successful result is returned, and parser-owned temporary content is released. Partial raw writes may
  * already have happened; the caller owns rollback. Neither source nor rawSink is closed.
  *
- * <p>The caller owns the returned object's read resources. PackUpload adopts any retained delta backing
- * content into its upload storage before exposing the result, preserving it for deferred resolution.
+ * <p>The caller owns the returned object's read resources. PackUpload retains original pack bytes and offsets
+ * for deferred resolution; later consumers reread them instead of retaining this result's inflated content.
  * Result separates transient read ownership from Entry metadata stored in PackIndex: the index does not
  * retain live read handles. Pack header, count, checksum, and index state belong to the caller.
  * Method body remains a placeholder; no parser or content-storage implementation is provided here.

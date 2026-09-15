@@ -6,7 +6,7 @@ import java.io.IOException;
  * Coordinates pack resolution for PushCommand through PackUpload.
  * While upload.hasNext(), obtain upload.next(), delegate the parsed result to resolver.attemptResolve,
  * and close result.object() in finally without masking a primary failure. This closes a read handle, not
- * upload-owned backing content needed by deferred chains. Hashed results have no content resources to release.
+ * upload-owned original pack bytes needed by deferred chains. Hashed results have no content resources to release.
  * This is a consumer of storage and parsing, not part of either API or a required callback implementation.
  * Create and close a GitPackObjectResolver for this upload. Delegate every entry, including full objects,
  * to attemptResolve(result), which uses full-object hashes or resolves delta content and follows waiting chains.

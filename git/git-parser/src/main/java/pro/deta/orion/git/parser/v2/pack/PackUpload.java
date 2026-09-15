@@ -16,8 +16,9 @@ import java.io.IOException;
  * <p>hasNext validates the pack header and tracks its declared entry count. next uses the static
  * PackObjectParser.parseEntry to consume an entry, then calls index.addEntry with its physical metadata.
  * Full objects yield HashedGitObjectRead; upload completes their records through index.addObject immediately.
- * Delta results carry ContentGitObjectRead; upload adopts their backing payload into its storage for later
- * reconstruction, without requiring an in-memory map of all payloads. Delta index records remain unresolved.
+ * Delta results carry ContentGitObjectRead for the current reconstruction. Original pack bytes and indexed
+ * offsets support later reads; upload does not separately store inflated or restored payloads for future use.
+ * Delta index records remain unresolved until the resolver completes them.
  * next returns the parsed Result after these steps. The caller closes result.object() after use; upload-owned
  * backing bytes and index records remain available. Sink, retention, or index failures stop the attempt,
  * release any unreturned read handle, and prevent successful completion.
@@ -44,8 +45,9 @@ import java.io.IOException;
  * Reads decompress retained data without rereading transport input or advancing iteration. Opening the handle
  * does not require loading the whole payload; content is read as needed through ContentGitObjectRead.
  * Full objects whose first-pass result retained only a hash can be reopened here when needed as bases.
- * Retained delta payload can be reused. Neither this read nor the static parser applies deltas; delta handles
- * expose instructions even when the index knows the final ObjectId.
+ * A later consumer rereads the same original pack bytes rather than relying on a retained inflated payload.
+ * Neither this read nor the static parser applies deltas; handles expose delta instructions even when the index
+ * knows the final ObjectId.
  * Close handles before rollback; closing a handle does not close upload. Access after rollback fails with
  * ClosedChannelException. Reconstruction and hashing belong to the resolver, which follows indexed offsets,
  * opens reads for required entries and bases, and records computed ObjectIds. The ingestor reads no payloads.
