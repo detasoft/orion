@@ -1,7 +1,10 @@
 # Integrate and Verify the Server-Side MVP Acceptance Flow
 
 - Owner: codex, session 01a09f52-b1d0-7522-bbed-2c6c389576b6, branch `codex/server-mvp-acceptance-b1d0`,
-  worktree `.worktrees/server-mvp-acceptance-b1d0`, started 2026-09-15 10:58 Europe/Amsterdam.
+  worktree `.worktrees/server-mvp-acceptance-b1d0`, paused 2026-09-15 12:52 Europe/Amsterdam;
+  next: finish the pending outside-sandbox frontend test, then prepare the reviewed task commit.
+  Implementation and review are ready; full Maven test passed (2288 tests), and the targeted
+  verify run passed (49 integration tests), both with zero failures, errors, or skips.
 
 ## Dependencies and acceptance boundary
 
