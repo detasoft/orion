@@ -2,13 +2,14 @@ package pro.deta.orion.git.parser.v2.command;
 
 /**
  * Owns fetch negotiation, object-access checks, and the native pack producer for one fetch operation.
- * Retains haves, common haves, and readiness state; the session controls wire exchange order and the writer
- * encodes responses. The command releases its producer on success, failure, or cancellation.
+ * Owns FetchNegotiator, which retains common objects and negotiation progress. The session controls wire
+ * exchange order and consumes FetchNegotiationOutput events; the writer encodes replies.
+ * The command releases its producer on success, failure, or cancellation.
  *
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code begin(FetchRequest)} - initialize the fetch and check requested-object access.</li>
- *   <li>{@code negotiate(NegotiationMessage)} - update negotiation and return the next response.</li>
+ *   <li>{@code negotiate(FetchNegotiationInput, FetchNegotiator.Output)} - delegate one event and emit replies.</li>
  *   <li>{@code prepareResponse()} - prepare pack production and return response metadata.</li>
  *   <li>{@code writePack(BufferedByteOutput)} - stream the producer into writer-provided output.</li>
  *   <li>{@code close()} - release command-owned production resources.</li>
