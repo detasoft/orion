@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -31,9 +32,10 @@ import java.util.Optional;
  * any matching entry. Absence is Optional.empty(), not proof that a base is external: it may resolve later.
  * Lookup errors remain IOException. Neither lookup nor raw reads resolve objects or query other packs.
  *
- * <p>commit requires enumeration through the verified checksum, a result for every physical entry, and
- * confirmed external dependencies. Empty packs also require completed enumeration. Storage preserves
- * external bases and durably publishes bytes, index, and manifest under the verified PackId lock.
+ * <p>commit(packId) accepts the verified checksum supplied by the caller for the accumulated pack bytes.
+ * The caller completes enumeration, resolves every physical entry, and records confirmed external dependencies
+ * before committing. Empty packs also require completed enumeration and checksum verification. Storage
+ * preserves external bases and durably publishes bytes, index, and manifest under the supplied PackId lock.
  * An I/O error can have an uncertain commit outcome; retries inspect the durable manifest.
  * rollback releases the owned parser and sink and discards only this attempt's unpublished staging.
  * It is idempotent and never removes committed data or another attempt's resources. The caller invokes
@@ -53,7 +55,7 @@ public interface PackUpload {
 
     void addExternalBaseId(ObjectId externalBase) throws IOException;
 
-    void commit() throws IOException;
+    void commit(PackId packId) throws IOException;
 
     void rollback() throws IOException;
 }
