@@ -58,6 +58,20 @@ explicitly authorized restart may atomically replace its current instance.
   changing their format. Use one canonical production model; do not retain an
   AgentId alias, dual authentication path, or compatibility mode.
 
+### Target-format decision
+
+Implement the target label/instance format directly. Existing AgentId-based
+persisted formats are unsupported and must fail explicitly without deleting or
+rewriting their files. No migration, conversion, transition mode, or legacy
+reader is required. Old credentials must never acquire authority in the new
+model. This applies to agent registration, session ownership, and command-ledger
+representations affected by the identity replacement.
+
+Retain the existing recovery approach for a lost initial WELCOME: the
+provisioner obtains a fresh authorized launch against the current registration.
+The consumed startup token remains unusable. Reconnect within a running process
+keeps its instance ID and uses its separate instance-bound credential.
+
 ## Scope and dependencies
 
 Build on the implemented agent registry, launch authorization, authenticated
