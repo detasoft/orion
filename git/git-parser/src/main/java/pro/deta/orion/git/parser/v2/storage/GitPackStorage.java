@@ -8,8 +8,9 @@ package pro.deta.orion.git.parser.v2.storage;
  * checksum are retained; later protocol bytes remain available through the caller's source.
  * Resolved metadata and external base IDs accumulate separately.
  * Each upload owns a PackByteStore: the iterator borrows its WritableByteChannel view, while upload.read
- * delegates positional reads to the same accumulator. The initial implementation uses a private FileChannel
- * behind PackByteStore, with no public file handles or additional memory tier.
+ * parses retained entry bytes and exposes inflated payloads to the resolver. Raw reads remain internal to
+ * storage. The initial implementation uses a private FileChannel behind PackByteStore, with no public file
+ * handles or additional memory tier.
  * The upload owns its parser, sink, commit, and rollback without a public upload ID. Rollback releases those
  * resources without closing source input or discarding a completed publication or another attempt's data.
  *

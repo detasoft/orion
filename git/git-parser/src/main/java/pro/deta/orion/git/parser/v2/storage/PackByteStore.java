@@ -10,7 +10,12 @@ import java.nio.channels.WritableByteChannel;
  * buffer by the accepted count, preserves limit, and does not retain the buffer. Partial writes are allowed;
  * a nonempty write makes progress or throws IOException. Earlier bytes are never overwritten or discarded.
  * read provides positional access to all accepted bytes, including any buffered writes, without changing
- * the append position. It follows PackUpload.read's ByteBuffer and current-end contract using long offsets.
+ * the append position. Long offsets are relative to the pack header. Reads accept any writable ByteBuffer,
+ * advance its position, preserve its limit, and do not retain it. Partial reads are allowed; an empty buffer
+ * returns zero, otherwise a read returns a positive count or -1 at or beyond the currently retained prefix.
+ * That prefix grows as writes append bytes. Negative offsets fail with IllegalArgumentException, null buffers
+ * with NullPointerException, and read-only buffers with ReadOnlyBufferException. Raw bytes remain internal;
+ * PackUpload parses and decompresses them to provide entry payloads to its resolver.
  * All operations are sequential within one upload; no concurrent-use guarantee is required.
  *
  * <p>The initial implementation will use a private FileChannel opened for reading and writing. Sequential
