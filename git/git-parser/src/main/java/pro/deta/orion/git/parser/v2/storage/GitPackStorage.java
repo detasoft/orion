@@ -1,40 +1,27 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 /**
- * Stores validated packs internally behind GitStorageApi for reuse and delivery.
- * Callers outside this package access these operations only through GitStorageApi.
- * Receives bytes into quarantine and checks physical pack format and checksum without reading external bases.
- * The calling operation owns object resolution and receive policy; storing a pack does not update refs or
- * imply that a push was accepted.
+ * Stores pack bytes and indexes internally behind GitStorageApi; files and paths stay inside storage.
+ * Object resolution and operation-specific policy belong to callers. The reception API remains to be defined.
  *
- * <p>Reception returns a PackScanIndex with the verified PackId, full pack size, and entries in physical order
- * after all pack bytes are stored. Entry metadata includes payload offsets, inflated sizes, CRC32, and encoding.
- * Incomplete reception is identified only inside storage. Callers address quarantined packs by PackId;
- * concurrent receptions of identical content require storage-owned coordination and cleanup so one operation
- * cannot discard another operation's data. No upload identifiers, files, or paths cross the API.
- * Open PackRead handles retain unchanged original bytes until closed, including during publication or cleanup.
- * openPack uses the same read contract for quarantined and published bytes without changing publication state.
- * Object lookup and published-pack listing expose only published data; direct pack access also serves resolution.
- * A checked checksum does not imply that all objects are resolved. Publication requires the final object
- * index and external-base dependencies produced by resolution. Different pack IDs publish independently.
- * Refs remain subject to each operation's own checks and conditional updates even when pack data is reused.
+ * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified PackId,
+ * then check the manifest and reuse an existing publication or commit the prepared bytes, index, and manifest.
+ * Release ownership after publication writes and cleanup. Different pack IDs publish independently; a waiter
+ * rechecks the manifest rather than assuming the preceding attempt succeeded. Retry after an uncertain I/O
+ * outcome also checks the manifest. Complete publications survive recovery; incomplete staging stays invisible.
  *
- * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified packId,
- * then check the manifest and either reuse the published pack or publish the prepared data. Release ownership
- * after all publication writes and failure cleanup finish. Awakening after another attempt does not prove
- * success; only the owner rechecks the manifest and may retry publication using its own prepared pack.
+ * <p>Only published packs contribute to object lookup and outgoing pack selection. Open PackRead handles pin
+ * unchanged bytes through publication or cleanup. Published objects and their external bases stay readable
+ * after ingestion closes. Store only externalBaseIds; locate and preserve backing objects without storing
+ * externalPackIds. Ref rejection never undoes an already committed publication.
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code quarantine(BufferedByteInput source)} - receive one raw pack through its checksum and return
- *       PackScanIndex without closing the caller's input, consuming subsequent bytes, or waiting for EOF.</li>
  *   <li>{@code openPack(packId)} - open original quarantined or published bytes as a caller-owned PackRead.</li>
- *   <li>{@code publish(packId)} - publish the quarantined pack after object resolution and index preparation.</li>
- *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
+ *   <li>{@code publish(packId)} - durably publish a prepared pack and its dependencies.</li>
+ *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
  * </ul>
- * Method names and signatures are provisional. Storage locates prepared data and external-base dependencies
- * by PackId. Stored objects must remain readable after the ingestion session closes, including when a
- * thin pack depends on existing objects. A later ref rejection need not remove an already published pack.
+ * Methods remain placeholders.
  */
 final class GitPackStorage {
 }

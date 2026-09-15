@@ -1,14 +1,13 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 import pro.deta.orion.git.parser.v2.data.ObjectRead;
+import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.data.PackRead;
-import pro.deta.orion.git.parser.v2.data.PackScanIndex;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -18,47 +17,42 @@ import java.util.Optional;
 
 /**
  * Provides the single external API for storage operations belonging to one repository.
- * Commands use this API directly; ref, pack, and object stores remain internal implementation details.
- * Storage receives pack bytes into quarantine and checks physical format and checksum before returning PackId.
+ * Commands use this facade; ref, pack, and object stores remain internal implementation details.
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
- * quarantinePack consumes one raw pack, including its checksum, from a caller-owned BufferedByteInput after
- * protocol framing has been removed. Bytes following that pack remain available through the same input;
- * storage neither waits for connection EOF nor closes the input. It returns only after storing the pack and
- * checking format and checksum, without resolving external bases or publishing objects. Reception failures
- * are IOException and release only resources owned by that attempt, preserving other operations' data.
- * Pack reads return caller-owned PackRead handles that keep original pack bytes available until closed.
- * Absence is Optional.empty(); opening or reading failures are IOException rather than absence.
- * openPack reads either quarantined or published bytes without changing publication state. It is used inside
- * resolution, not as a separate push lifecycle step. Only published packs contribute objects to readObject,
- * findPacksByObjectIds, and publishedPacks; outgoing pack selection must respect that publication boundary.
- * PushCommand coordinates quarantinePack(source), ingestor.resolvePack(index), and publishPack(index.packId()).
+ *
+ * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
+ * openPack reads original quarantined or published bytes without changing publication state.
+ * ObjectRead and PackRead handles belong to the caller; absence is Optional.empty(), while I/O failures
+ * remain errors. Open PackRead handles retain their bytes until closed.
+ * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
+ * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
+ * Ref-update failures do not undo pack publication.
+ * addObjectEntry registers an already verified, durably stored loose object by ID, logical type, and size;
+ * it does not receive bytes and preserves other locations of that object.
  *
  * <p>Preliminary methods:
  * <ul>
+ *   <li>{@code publishPack(packId)} - publish a prepared pack and its dependencies.</li>
+ *   <li>{@code addObjectEntry(objectId, type, size)} - register an already stored loose object.</li>
+ *   <li>{@code openPack(packId)} - open original pack bytes as a caller-owned PackRead.</li>
  *   <li>{@code snapshotRefs()} - return refs and symbolic or detached HEAD from one consistent state.</li>
- *   <li>{@code updateRefs(List<RefUpdate> updates, boolean atomic)} - conditionally update refs
- *       and return one RefUpdateResult containing the original update per input, in request order.</li>
- *   <li>{@code quarantinePack(BufferedByteInput source)} - store one pack and return its PackScanIndex
- *       for subsequent resolution by the calling operation.</li>
- *   <li>{@code openPack(packId)} - open original quarantined or published pack bytes as a PackRead.</li>
- *   <li>{@code publishPack(PackId packId)} - publish a quarantined pack after object resolution and final
- *       index preparation; callers pass no upload identifiers, files, or paths.</li>
- *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
- *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
- *   <li>{@code readObject(objectId)} - open an ObjectRead owned and closed by the caller, or return absence;
- *       opening and reading failures are IOException, not absence.</li>
- *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, full size, and a bounded prefix.</li>
+ *   <li>{@code updateRefs(updates, atomic)} - conditionally update refs and return one RefUpdateResult
+ *       containing the original update per input, in request order.</li>
+ *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
+ *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing requested objects.</li>
+ *   <li>{@code readObject(objectId)} - open resolved object content as a caller-owned ObjectRead.</li>
+ *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, size, and a bounded prefix.</li>
  * </ul>
- * Method names and signatures are provisional. All operations must address the same repository;
- * objects needed by a ref update must be available before that update becomes visible.
+ * Methods remain placeholders. Object resolution and operation-specific policy belong to the caller;
+ * all operations address the same repository, and ref targets must be available before updates become visible.
  */
 public final class GitStorageApi {
-    public PackScanIndex quarantinePack(BufferedByteInput source) throws IOException {
-        throw new UnsupportedOperationException("Pack quarantine is not implemented");
-    }
-
     public Optional<PackRead> openPack(PackId packId) throws IOException {
         throw new UnsupportedOperationException("Pack reads are not implemented");
+    }
+
+    public void addObjectEntry(ObjectId objectId, ObjectType type, long size) throws IOException {
+        throw new UnsupportedOperationException("Loose object registration is not implemented");
     }
 
     public void publishPack(PackId packId) throws IOException {
