@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.GitReader;
 import pro.deta.orion.git.parser.v2.GitWriter;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -37,8 +38,9 @@ import java.util.OptionalLong;
  * and returns the accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
  * V2 feeds only already parsed initialMessages; legacy reads one message at a time and flushes replies
  * before reading more. An empty legacy request finishes without reading negotiation messages.
- * Input/output are borrowed and never closed here. FetchCommand supplies Checks; storage never enters this
- * wire loop. stateless ends a legacy exchange at its round boundary without equating it to pack readiness.
+ * Input/output are borrowed and never closed here. NegotiationContext delegates checks to FetchCommand;
+ * storage never enters this wire loop. stateless ends a legacy exchange at its round boundary without
+ * equating it to pack readiness.
  * GitWriter frames replies; only v2 sideband-all prefixes negotiation data with a channel byte.
  * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
  */
@@ -53,12 +55,13 @@ public final class FetchNegotiator {
         this.version = Objects.requireNonNull(version, "version");
     }
 
-    public NegotiationContext negotiate(FetchNegotiatorIterator.Checks checks, boolean stateless) throws IOException {
+    public NegotiationContext negotiate(FetchCommand command, boolean stateless) throws IOException {
         FetchRequest request = switch (version) {
             case V0, V1 -> parseLegacyRequest(input);
             case V2 -> parseV2Request(input);
         };
-        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request, checks, stateless);
+        var context = new NegotiationContext(request, command);
+        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, stateless);
         if (version == ProtocolVersion.V2) {
             for (NegotiationMessage message : request.initialMessages()) {
                 boolean more = iterator.next(message);

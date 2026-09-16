@@ -27,5 +27,5 @@ package pro.deta.orion.git.parser.v2.command;
  * command parsing, preserving buffered bytes. Deletion-only pushes do not require a pack; this command closes
  * its ingestion resources but does not own the transport input.
  */
-public final class PushCommand {
+public final class PushCommand implements GitCommand {
 }

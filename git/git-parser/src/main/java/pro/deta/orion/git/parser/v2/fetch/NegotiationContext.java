@@ -1,8 +1,10 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Objects;
@@ -10,7 +12,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Accumulates one negotiation's result independently of bytes, packet encoding, and repository storage.
+ * Accumulates one negotiation's result independently of bytes and packet encoding.
+ * Borrows its FetchCommand for isCommon and isReady checks; storage remains owned by that command.
+ * isReady evaluates this context's wants, common objects, and shallow boundaries. Checks must not mutate
+ * the context; repository failures propagate as IOException rather than becoming negative results.
  * The iterator owns mutations; callers inspect the parsed request, confirmed common IDs, and progress.
  * Client have claims are not automatically common: addCommon is called only after successful repository
  * lookup. Duplicate IDs occupy one entry, while lastCommon follows the last confirmed claim for final ACK.
@@ -25,13 +30,23 @@ import java.util.Set;
  */
 public final class NegotiationContext {
     private final FetchRequest request;
+    private final FetchCommand command;
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
     private ObjectId lastCommon;
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request) {
+    public NegotiationContext(FetchRequest request, FetchCommand command) {
         this.request = Objects.requireNonNull(request, "request");
+        this.command = Objects.requireNonNull(command, "command");
+    }
+
+    public boolean isCommon(ObjectId objectId) throws IOException {
+        return command.isCommon(objectId);
+    }
+
+    public boolean isReady() throws IOException {
+        return command.isReady(this);
     }
 
     public FetchRequest request() {

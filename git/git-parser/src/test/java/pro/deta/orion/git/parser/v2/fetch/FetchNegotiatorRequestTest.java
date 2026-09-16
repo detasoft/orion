@@ -186,7 +186,7 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
                     new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
-            var checks = new FetchNegotiatorIterator.Checks() {
+            var checks = new FetchCommand(new GitStorageApi()) {
                 @Override
                 public boolean isCommon(ObjectId objectId) {
                     assertThat(objectId).isEqualTo(common);
@@ -336,8 +336,8 @@ class FetchNegotiatorRequestTest {
         }
     }
 
-    private static FetchNegotiatorIterator.Checks checks(boolean ready) {
-        return new FetchNegotiatorIterator.Checks() {
+    private static FetchCommand checks(boolean ready) {
+        return new FetchCommand(new GitStorageApi()) {
             @Override
             public boolean isCommon(ObjectId objectId) {
                 return objectId.equals(new ObjectId(HAVE));

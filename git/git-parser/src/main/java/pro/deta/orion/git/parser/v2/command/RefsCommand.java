@@ -14,5 +14,5 @@ package pro.deta.orion.git.parser.v2.command;
  * </ul>
  * Method names and signatures are provisional; existing peeling helpers can remain private implementation.
  */
-public final class RefsCommand {
+public final class RefsCommand implements GitCommand {
 }

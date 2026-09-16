@@ -1,6 +1,8 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
@@ -18,7 +20,7 @@ class NegotiationContextTest {
     void clientClaimsDoNotBecomeCommonWithoutConfirmation() {
         FetchRequest request = request(List.of(new NegotiationMessage.Have(FIRST),
                 NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND));
-        NegotiationContext context = new NegotiationContext(request);
+        NegotiationContext context = new NegotiationContext(request, new FetchCommand(new GitStorageApi()));
         assertThat(context.commonObjects()).isEmpty();
         assertThat(context.lastCommon()).isEmpty();
         assertThat(context.doneReceived()).isFalse();
@@ -32,7 +34,7 @@ class NegotiationContextTest {
     @Test
     void accumulatesConfirmedObjectsAcrossRoundsWithoutLeakingMutableState() {
         FetchRequest request = request(List.of());
-        NegotiationContext context = new NegotiationContext(request);
+        NegotiationContext context = new NegotiationContext(request, new FetchCommand(new GitStorageApi()));
         context.addCommon(FIRST);
         Set<ObjectId> firstRound = context.commonObjects();
         context.addCommon(SECOND);
@@ -44,7 +46,7 @@ class NegotiationContextTest {
         assertThatThrownBy(() -> firstRound.add(SECOND)).isInstanceOf(UnsupportedOperationException.class);
         assertThat(context.ready()).isTrue();
         assertThat(context.doneReceived()).isFalse();
-        assertThat(new NegotiationContext(request).commonObjects()).isEmpty();
+        assertThat(new NegotiationContext(request, new FetchCommand(new GitStorageApi())).commonObjects()).isEmpty();
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {
