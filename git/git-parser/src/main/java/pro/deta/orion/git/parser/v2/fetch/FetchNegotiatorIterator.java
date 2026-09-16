@@ -11,7 +11,7 @@ import java.util.Objects;
 
 /**
  * Processes decoded negotiation messages without owning storage or byte streams. NegotiationContext supplies
- * common-object and graph-readiness checks through its FetchCommand. Each next(message) replaces the reply
+ * object-presence and graph-readiness checks using its borrowed storage. Each next(message) replaces the reply
  * batch; true asks for another message, false ends this exchange. The terminal batch must still be sent. Reply snapshots are
  * immutable and non-draining. Calls after completion or a failed check throw IllegalStateException.
  *
@@ -34,7 +34,7 @@ public final class FetchNegotiatorIterator {
     public FetchNegotiatorIterator(NegotiationContext context, boolean stateless) {
         this.context = Objects.requireNonNull(context, "context");
         this.stateless = stateless;
-        if (has(GitCapability.NO_DONE)
+        if (context.hasRequest(GitCapability.NO_DONE)
                 && (!stateless || context.request().mode() != FetchRequest.Mode.MULTI_ACK_DETAILED)) {
             throw new IllegalArgumentException("no-done requires stateless multi_ack_detailed negotiation");
         }
@@ -63,7 +63,7 @@ public final class FetchNegotiatorIterator {
     private void acceptHave(ObjectId objectId) throws IOException {
         FetchRequest.Mode mode = context.request().mode();
         boolean firstCommon = context.lastCommon().isEmpty();
-        if (context.hasCommon(objectId) || context.isCommon(objectId)) {
+        if (context.hasCommon(objectId) || context.objectExists(objectId)) {
             context.addCommon(objectId);
             switch (mode) {
                 case SINGLE_ACK -> {
@@ -108,7 +108,7 @@ public final class FetchNegotiatorIterator {
                     for (ObjectId common : context.commonObjects()) {
                         ack(common, NegotiationResponse.Status.PLAIN);
                     }
-                    if (!has(GitCapability.WAIT_FOR_DONE) && checkReady()) {
+                    if (!context.hasRequest(GitCapability.WAIT_FOR_DONE) && checkReady()) {
                         responsesToSend.add(NegotiationResponse.Control.READY);
                     }
                 }
@@ -122,7 +122,7 @@ public final class FetchNegotiatorIterator {
         if (mode != FetchRequest.Mode.SINGLE_ACK || context.lastCommon().isEmpty()) {
             responsesToSend.add(NegotiationResponse.Control.NAK);
         }
-        if (has(GitCapability.NO_DONE) && context.ready()) {
+        if (context.hasRequest(GitCapability.NO_DONE) && context.ready()) {
             ack(context.lastCommon().orElseThrow(), NegotiationResponse.Status.PLAIN);
         }
         finished = stateless;
@@ -133,10 +133,6 @@ public final class FetchNegotiatorIterator {
             context.markReady();
         }
         return context.ready();
-    }
-
-    private boolean has(GitCapability capability) {
-        return context.request().capabilities().contains(capability.entry());
     }
 
     private void ack(ObjectId objectId, NegotiationResponse.Status status) {

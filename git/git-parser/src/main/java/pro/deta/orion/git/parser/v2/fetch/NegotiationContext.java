@@ -1,8 +1,9 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
-import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -13,9 +14,10 @@ import java.util.Set;
 
 /**
  * Accumulates one negotiation's result independently of bytes and packet encoding.
- * Borrows its FetchCommand for isCommon and isReady checks; storage remains owned by that command.
- * isReady evaluates this context's wants, common objects, and shallow boundaries. Checks must not mutate
- * the context; repository failures propagate as IOException rather than becoming negative results.
+ * Borrows GitStorageApi from the command; objectExists checks published-object presence through storage.exists.
+ * isReady will evaluate this context's wants, common objects, and shallow boundaries; graph traversal remains
+ * an explicit unsupported operation until implemented. Presence alone does not establish readiness or authorize wants.
+ * Checks must not mutate the context; repository failures propagate as IOException rather than negative results.
  * The iterator owns mutations; callers inspect the parsed request, confirmed common IDs, and progress.
  * Client have claims are not automatically common: addCommon is called only after successful repository
  * lookup. Duplicate IDs occupy one entry, while lastCommon follows the last confirmed claim for final ACK.
@@ -28,25 +30,25 @@ import java.util.Set;
  * No payloads, unknown-have set, or second graph is retained.
  * Mutation methods are package-private for the iterator; this object is not safe for concurrent mutation.
  */
-public final class NegotiationContext {
+public class NegotiationContext {
     private final FetchRequest request;
-    private final FetchCommand command;
+    private final GitStorageApi storage;
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
     private ObjectId lastCommon;
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request, FetchCommand command) {
+    public NegotiationContext(FetchRequest request, GitStorageApi storage) {
         this.request = Objects.requireNonNull(request, "request");
-        this.command = Objects.requireNonNull(command, "command");
+        this.storage = Objects.requireNonNull(storage, "storage");
     }
 
-    public boolean isCommon(ObjectId objectId) throws IOException {
-        return command.isCommon(objectId);
+    public boolean objectExists(ObjectId objectId) throws IOException {
+        return storage.exists(objectId);
     }
 
     public boolean isReady() throws IOException {
-        return command.isReady(this);
+        throw new UnsupportedOperationException("Fetch graph readiness is not implemented");
     }
 
     public FetchRequest request() {
@@ -76,6 +78,10 @@ public final class NegotiationContext {
     void addCommon(ObjectId objectId) {
         commonObjects.add(Objects.requireNonNull(objectId, "objectId"));
         lastCommon = objectId;
+    }
+
+    boolean hasRequest(GitCapability capability) {
+        return request().capabilities().contains(capability.entry());
     }
 
     void markReady() {

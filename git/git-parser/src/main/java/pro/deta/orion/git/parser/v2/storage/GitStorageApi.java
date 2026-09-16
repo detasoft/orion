@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackUpload;
+import pro.deta.orion.git.parser.v2.read.PresenceGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
@@ -41,6 +42,7 @@ import java.util.Optional;
  * Storage closes the source after processing; the reader cannot retain it. Nonnull results belong to the caller,
  * including any independently owned resources. Absence is Optional.empty() and does not invoke reader;
  * I/O and processing failures remain errors. Returning early must still respect and validate payload bounds.
+ * exists uses PresenceGitObjectRead to check presence without decoding content; read failures still propagate.
  * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
  * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
  * Ref-update failures do not undo pack publication.
@@ -66,6 +68,10 @@ public final class GitStorageApi {
 
     public <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
         throw new UnsupportedOperationException("Object reads are not implemented");
+    }
+
+    public boolean exists(ObjectId objectId) throws IOException {
+        return readObject(objectId, new PresenceGitObjectRead()).isPresent();
     }
 
     public RefsSnapshot snapshotRefs() {

@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.GitReader;
 import pro.deta.orion.git.parser.v2.GitWriter;
-import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -34,12 +33,12 @@ import java.util.OptionalLong;
  * Capability advertisement, object access, ref resolution, and filter execution belong to FetchCommand;
  * parsing does not imply that an extension is enabled or that any requested object exists.
  *
- * <p>negotiate parses the request, creates the iterator, writes replies including the terminal batch,
+ * <p>negotiate fills the fresh context's request, creates the iterator, writes replies including the terminal batch,
  * and returns the accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
  * V2 feeds only already parsed initialMessages; legacy reads one message at a time and flushes replies
  * before reading more. An empty legacy request finishes without reading negotiation messages.
- * Input/output are borrowed and never closed here. NegotiationContext delegates checks to FetchCommand;
- * storage never enters this wire loop. stateless ends a legacy exchange at its round boundary without
+ * Input/output are borrowed and never closed here. NegotiationContext owns checks through its borrowed storage;
+ * the wire loop does not access storage. stateless ends a legacy exchange at its round boundary without
  * equating it to pack readiness.
  * GitWriter frames replies; only v2 sideband-all prefixes negotiation data with a channel byte.
  * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
@@ -55,12 +54,12 @@ public final class FetchNegotiator {
         this.version = Objects.requireNonNull(version, "version");
     }
 
-    public NegotiationContext negotiate(FetchCommand command, boolean stateless) throws IOException {
-        FetchRequest request = switch (version) {
-            case V0, V1 -> parseLegacyRequest(input);
-            case V2 -> parseV2Request(input);
-        };
-        var context = new NegotiationContext(request, command);
+    public NegotiationContext negotiate(NegotiationContext context, boolean stateless) throws IOException {
+        FetchRequest request = context.request();
+        switch (version) {
+            case V0, V1 -> parseLegacyRequest(input, request);
+            case V2 -> parseV2Request(input, request);
+        }
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, stateless);
         if (version == ProtocolVersion.V2) {
             for (NegotiationMessage message : request.initialMessages()) {
@@ -107,8 +106,7 @@ public final class FetchNegotiator {
         };
     }
 
-    public static FetchRequest parseV2Request(GitReader reader) throws IOException {
-        FetchRequest request = new FetchRequest();
+    public static FetchRequest parseV2Request(GitReader reader, FetchRequest request) throws IOException {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
             GitPktLine packet = reader.readGitPktLine();
@@ -160,8 +158,7 @@ public final class FetchNegotiator {
         }
     }
 
-    public static FetchRequest parseLegacyRequest(GitReader reader) throws IOException {
-        FetchRequest request = new FetchRequest();
+    public static FetchRequest parseLegacyRequest(GitReader reader, FetchRequest request) throws IOException {
         boolean receivedLine = false;
         boolean wantsEnded = false;
         while (true) {

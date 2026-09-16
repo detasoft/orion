@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -27,8 +26,8 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void singleAckAcknowledgesOnlyTheFirstCommonObjectAndWaitsForDone() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST, SECOND));
-        var context = new NegotiationContext(request(FetchRequest.Mode.SINGLE_ACK), checks);
+        var checks = new TestContext(Set.of(FIRST, SECOND));
+        var context = checks;
         var iterator = new FetchNegotiatorIterator(context, false);
         assertThat(iterator.getContext()).isSameAs(context);
         assertThat(iterator.next(have(UNKNOWN))).isTrue();
@@ -50,7 +49,7 @@ class FetchNegotiatorIteratorTest {
     void legacyCloneWithoutCommonObjectsEndsWithNakInEveryAckMode() throws Exception {
         for (FetchRequest.Mode mode : List.of(FetchRequest.Mode.SINGLE_ACK,
                 FetchRequest.Mode.MULTI_ACK, FetchRequest.Mode.MULTI_ACK_DETAILED)) {
-            var iterator = iterator(mode, new TestFetchCommand(Set.of()), false);
+            var iterator = iterator(mode, new TestContext(Set.of()), false);
             assertThat(iterator.next(DONE)).isFalse();
             assertThat(iterator.getResponsesToSend()).containsExactly(NAK);
             assertThat(iterator.getContext().ready()).isFalse();
@@ -61,7 +60,7 @@ class FetchNegotiatorIteratorTest {
     @Test
     void multiAckKeepsCommonObjectsAcrossRoundsAndFinalAckUsesLastConfirmedHave() throws Exception {
         for (FetchRequest.Mode mode : List.of(FetchRequest.Mode.MULTI_ACK, FetchRequest.Mode.MULTI_ACK_DETAILED)) {
-            var iterator = iterator(mode, new TestFetchCommand(Set.of(FIRST, SECOND)), false);
+            var iterator = iterator(mode, new TestContext(Set.of(FIRST, SECOND)), false);
             var suffix = mode == FetchRequest.Mode.MULTI_ACK ? CONTINUE : COMMON;
             iterator.next(have(FIRST));
             assertThat(iterator.getResponsesToSend()).containsExactly(ack(FIRST, suffix));
@@ -80,7 +79,7 @@ class FetchNegotiatorIteratorTest {
     @Test
     void readinessSignalsForUnknownHavesNeverMakeThemCommon() throws Exception {
         for (FetchRequest.Mode mode : List.of(FetchRequest.Mode.MULTI_ACK, FetchRequest.Mode.MULTI_ACK_DETAILED)) {
-            var checks = new TestFetchCommand(Set.of(FIRST));
+            var checks = new TestContext(Set.of(FIRST));
             var iterator = iterator(mode, checks, false);
             iterator.next(have(FIRST));
             checks.ready = true;
@@ -97,7 +96,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void detailedAckAtRoundEndSignalsReadyButStillWaitsForDone() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST));
+        var checks = new TestContext(Set.of(FIRST));
         checks.ready = true;
         var iterator = iterator(FetchRequest.Mode.MULTI_ACK_DETAILED, checks, false);
         iterator.next(have(FIRST));
@@ -109,10 +108,10 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void noDoneFinishesStatelessDetailedNegotiationWithItsTerminalAck() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST));
-        checks.ready = true;
         var request = request(FetchRequest.Mode.MULTI_ACK_DETAILED, GitCapability.NO_DONE);
-        var iterator = new FetchNegotiatorIterator(new NegotiationContext(request, checks), true);
+        var checks = new TestContext(request, Set.of(FIRST));
+        checks.ready = true;
+        var iterator = new FetchNegotiatorIterator(checks, true);
         iterator.next(have(FIRST));
         assertThat(iterator.next(END_ROUND)).isFalse();
         assertThat(iterator.getResponsesToSend())
@@ -123,7 +122,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void statelessRoundCanFinishWithoutReadinessOrDone() throws Exception {
-        var iterator = iterator(FetchRequest.Mode.MULTI_ACK_DETAILED, new TestFetchCommand(Set.of(FIRST)), true);
+        var iterator = iterator(FetchRequest.Mode.MULTI_ACK_DETAILED, new TestContext(Set.of(FIRST)), true);
         iterator.next(have(FIRST));
         assertThat(iterator.next(END_ROUND)).isFalse();
         assertThat(iterator.getResponsesToSend()).containsExactly(NAK);
@@ -133,7 +132,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void v2BatchesUniqueCommonAcksInClaimOrderAndExcludesUnknownObjects() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST, SECOND));
+        var checks = new TestContext(Set.of(FIRST, SECOND));
         var iterator = iterator(FetchRequest.Mode.PROTOCOL_V2, checks, true);
         for (ObjectId id : List.of(SECOND, UNKNOWN, FIRST, SECOND)) {
             assertThat(iterator.next(have(id))).isTrue();
@@ -141,14 +140,14 @@ class FetchNegotiatorIteratorTest {
         }
         assertThat(iterator.next(END_ROUND)).isFalse();
         assertThat(iterator.getResponsesToSend()).containsExactly(ack(SECOND, PLAIN), ack(FIRST, PLAIN));
-        assertThat(checks.checkedContext).isSameAs(iterator.getContext());
-        assertThat(checks.checkedContext.request().wants()).containsExactly(WANT);
-        assertThat(checks.checkedContext.request().shallowCommits()).containsExactly(FIRST);
+        assertThat(checks).isSameAs(iterator.getContext());
+        assertThat(checks.request().wants()).containsExactly(WANT);
+        assertThat(checks.request().shallowCommits()).containsExactly(FIRST);
     }
 
     @Test
     void v2ProducesNakWithoutCommonObjectsAndDoesNotGuessReadiness() throws Exception {
-        var checks = new TestFetchCommand(Set.of());
+        var checks = new TestContext(Set.of());
         checks.ready = true;
         var iterator = iterator(FetchRequest.Mode.PROTOCOL_V2, checks, true);
         iterator.next(have(UNKNOWN));
@@ -160,13 +159,13 @@ class FetchNegotiatorIteratorTest {
     @Test
     void v2ReadyIsSuppressedByWaitForDone() throws Exception {
         for (boolean wait : List.of(false, true)) {
-            var checks = new TestFetchCommand(Set.of(FIRST));
-            checks.ready = true;
             var request = request(FetchRequest.Mode.PROTOCOL_V2);
+            var checks = new TestContext(request, Set.of(FIRST));
+            checks.ready = true;
             if (wait) {
                 request.capabilities().add(GitCapability.WAIT_FOR_DONE.entry());
             }
-            var iterator = new FetchNegotiatorIterator(new NegotiationContext(request, checks), true);
+            var iterator = new FetchNegotiatorIterator(checks, true);
             iterator.next(have(FIRST));
             assertThat(iterator.next(END_ROUND)).isFalse();
             assertThat(iterator.getResponsesToSend()).containsExactlyElementsOf(wait
@@ -178,7 +177,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void v2DoneStillConsumesTheRequestBoundaryButOmitsAllAcknowledgments() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST));
+        var checks = new TestContext(Set.of(FIRST));
         var iterator = iterator(FetchRequest.Mode.PROTOCOL_V2, checks, true);
         iterator.next(have(FIRST));
         assertThat(iterator.next(DONE)).isTrue();
@@ -192,7 +191,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void replySnapshotsAreStableAndTheNextStepClearsPreviousReplies() throws Exception {
-        var iterator = iterator(FetchRequest.Mode.MULTI_ACK, new TestFetchCommand(Set.of(FIRST)), false);
+        var iterator = iterator(FetchRequest.Mode.MULTI_ACK, new TestContext(Set.of(FIRST)), false);
         iterator.next(have(FIRST));
         var previous = iterator.getResponsesToSend();
         assertThat(iterator.getResponsesToSend()).isEqualTo(previous);
@@ -204,7 +203,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void failedLookupPropagatesAndCannotLeaveAnOldAckPending() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST));
+        var checks = new TestContext(Set.of(FIRST));
         var iterator = iterator(FetchRequest.Mode.MULTI_ACK, checks, false);
         iterator.next(have(FIRST));
         checks.failure = new IOException("lookup failed");
@@ -216,7 +215,7 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void failedReadinessDiscardsTheWholeV2ReplyBatch() throws Exception {
-        var checks = new TestFetchCommand(Set.of(FIRST));
+        var checks = new TestContext(Set.of(FIRST));
         var iterator = iterator(FetchRequest.Mode.PROTOCOL_V2, checks, true);
         iterator.next(have(FIRST));
         checks.failure = new IOException("graph unavailable");
@@ -228,15 +227,15 @@ class FetchNegotiatorIteratorTest {
 
     @Test
     void rejectsDuplicateDoneAndUnsupportedNoDoneCombinations() throws Exception {
-        var checks = new TestFetchCommand(Set.of());
+        var checks = new TestContext(Set.of());
         var iterator = iterator(FetchRequest.Mode.PROTOCOL_V2, checks, true);
         assertThat(iterator.next(DONE)).isTrue();
         assertThatThrownBy(() -> iterator.next(DONE)).isInstanceOf(IOException.class);
         assertThatThrownBy(() -> new FetchNegotiatorIterator(
-                new NegotiationContext(request(FetchRequest.Mode.MULTI_ACK, GitCapability.NO_DONE), checks), true))
+                new TestContext(request(FetchRequest.Mode.MULTI_ACK, GitCapability.NO_DONE), Set.of()), true))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new FetchNegotiatorIterator(
-                new NegotiationContext(request(FetchRequest.Mode.MULTI_ACK_DETAILED, GitCapability.NO_DONE), checks), false))
+                new TestContext(request(FetchRequest.Mode.MULTI_ACK_DETAILED, GitCapability.NO_DONE), Set.of()), false))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -251,8 +250,9 @@ class FetchNegotiatorIteratorTest {
         return request;
     }
 
-    private static FetchNegotiatorIterator iterator(FetchRequest.Mode mode, TestFetchCommand checks, boolean stateless) {
-        return new FetchNegotiatorIterator(new NegotiationContext(request(mode), checks), stateless);
+    private static FetchNegotiatorIterator iterator(FetchRequest.Mode mode, TestContext checks, boolean stateless) {
+        checks.request().setMode(mode);
+        return new FetchNegotiatorIterator(checks, stateless);
     }
 
     private static NegotiationMessage.Have have(ObjectId id) {
@@ -263,20 +263,23 @@ class FetchNegotiatorIteratorTest {
         return new NegotiationResponse.Ack(id, status);
     }
 
-    private static final class TestFetchCommand extends FetchCommand {
+    private static final class TestContext extends NegotiationContext {
         private final Set<ObjectId> existing;
         private boolean ready;
         private int readinessCalls;
-        private NegotiationContext checkedContext;
         private IOException failure;
 
-        private TestFetchCommand(Set<ObjectId> existing) {
-            super(new GitStorageApi());
+        private TestContext(Set<ObjectId> existing) {
+            this(FetchNegotiatorIteratorTest.request(FetchRequest.Mode.SINGLE_ACK), existing);
+        }
+
+        private TestContext(FetchRequest request, Set<ObjectId> existing) {
+            super(request, new GitStorageApi());
             this.existing = existing;
         }
 
         @Override
-        public boolean isCommon(ObjectId id) throws IOException {
+        public boolean objectExists(ObjectId id) throws IOException {
             if (failure != null) {
                 throw failure;
             }
@@ -284,9 +287,8 @@ class FetchNegotiatorIteratorTest {
         }
 
         @Override
-        public boolean isReady(NegotiationContext context) throws IOException {
+        public boolean isReady() throws IOException {
             readinessCalls++;
-            checkedContext = context;
             if (failure != null) {
                 throw failure;
             }
