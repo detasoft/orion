@@ -75,7 +75,7 @@ rerun the affected check. A failed required check blocks the commit.
 | Changed content | Required pre-commit verification |
 | --- | --- |
 | Documentation only | No automated check required; inspect the diff. |
-| Maven/JVM source or build input | `mvn test -Pdev -T 4` from the repository root. |
+| Maven/JVM source or build input | `make test` from the repository root. |
 | Rust source or build input under `session-host/` | `make session-host-test`. |
 | Both Maven/JVM and `session-host/` source or build inputs | `make test`. |
 | `Makefile` or `*.mk` | Run each affected real goal. |
@@ -95,7 +95,9 @@ environment itself is what the check must validate.
 
 Use `make run-test MODULE=<module> TEST='<test-locator>'` for focused Maven tests
 during development. Focused tests do not replace the table's full pre-commit
-check. Use `make test` for routine verification after Change integration.
+check. Use `make test` for the full quiet Maven/JVM suite and for routine
+verification after Change integration. Both goals enable Maven's `-q`; prefer
+them over direct `mvn test` invocations.
 
 ### Quick workflow
 

@@ -58,16 +58,17 @@
 - Use `make help` as the entry point for repository commands and prefer a
   documented Make goal. Run tools directly only when no suitable goal exists or
   a more specific instruction requires the exact command.
-- Direct `mvn test` invocation is discouraged. Prefer `make run-test` for focused
-  tests and `make test` for the full suite, except where these instructions
-  explicitly require an exact Maven command, such as the full pre-commit check.
+- Prefer `make run-test` for focused tests and `make test` for the full quiet
+  Maven/JVM suite, including the pre-commit check. Both goals use Maven's `-q`.
+  Direct `mvn test` invocation is discouraged; use it only when no Make goal
+  supports the required invocation or the user explicitly requests it.
 - Do not capture build or test logs with shell redirection (`>`, `>>`, `2>&1`)
   or shell wrappers. These can prevent saved command-prefix approvals from matching.
   For focused tests, pass `LOG=/tmp/<session-specific-name>.log` to `make run-test`;
   for required direct Maven runs, use Maven's `-l /tmp/<session-specific-name>.log`.
   Otherwise limit tool output and inspect test reports instead of adding redirection.
 - Run all tests outside the sandbox because they may need loopback sockets.
-- Use `mvn test -Pdev -T 4` for the full Maven/JVM pre-commit check.
+- Use `make test` for the full Maven/JVM pre-commit check.
 - Use `make session-host-test` for the Rust `session-host` pre-commit check.
 - Use `make test` when both Maven/JVM and `session-host` must be checked and
   for routine Change-workflow verification after integration.
