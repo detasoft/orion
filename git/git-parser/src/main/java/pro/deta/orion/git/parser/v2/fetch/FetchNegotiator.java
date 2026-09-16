@@ -35,8 +35,9 @@ import java.util.OptionalLong;
  * and returns the accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
  * V2 feeds only already parsed initialMessages; legacy reads one message at a time and flushes replies
  * before reading more. An empty legacy request finishes without reading negotiation messages.
- * Input/output are borrowed and never closed here. Iterator processing and response framing remain
- * placeholders; request parsing and NegotiationContext are implemented, not a complete fetch exchange.
+ * Input/output are borrowed and never closed here. FetchCommand supplies Checks; storage never enters this
+ * wire loop. stateless ends a legacy exchange at its round boundary without equating it to pack readiness.
+ * Response framing and production repository checks remain placeholders, not a complete fetch exchange.
  */
 public final class FetchNegotiator {
     private static final GitCapability[] V2_FLAGS = {
@@ -55,12 +56,12 @@ public final class FetchNegotiator {
         this.version = Objects.requireNonNull(version, "version");
     }
 
-    public NegotiationContext negotiate() throws IOException {
+    public NegotiationContext negotiate(FetchNegotiatorIterator.Checks checks, boolean stateless) throws IOException {
         FetchRequest request = switch (version) {
             case V0, V1 -> parseLegacyRequest(input);
             case V2 -> parseV2Request(input);
         };
-        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request);
+        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(request, checks, stateless);
         if (version == ProtocolVersion.V2) {
             for (NegotiationMessage message : request.initialMessages()) {
                 boolean more = iterator.next(message);

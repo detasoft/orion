@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.v2.fetch;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Optional;
@@ -18,7 +19,8 @@ import java.util.Set;
  * <p>ready records the algorithm's readiness decision; doneReceived records the client's explicit DONE.
  * Neither fact substitutes for the other or proves that pack production succeeded. A context can be returned
  * after a stateless response with both false. Each new request has its own context; stateful rounds share one.
- * Collection getters return immutable snapshots. No payloads, unknown-have set, or second graph is retained.
+ * Collection getters return immutable snapshots in first-confirmation order.
+ * No payloads, unknown-have set, or second graph is retained.
  * Mutation methods are package-private for the iterator; this object is not safe for concurrent mutation.
  */
 public final class NegotiationContext {
@@ -37,7 +39,7 @@ public final class NegotiationContext {
     }
 
     public Set<ObjectId> commonObjects() {
-        return Set.copyOf(commonObjects);
+        return Collections.unmodifiableSet(new LinkedHashSet<>(commonObjects));
     }
 
     public Optional<ObjectId> lastCommon() {
@@ -50,6 +52,10 @@ public final class NegotiationContext {
 
     public boolean doneReceived() {
         return doneReceived;
+    }
+
+    boolean hasCommon(ObjectId objectId) {
+        return commonObjects.contains(objectId);
     }
 
     void addCommon(ObjectId objectId) {

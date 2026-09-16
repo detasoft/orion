@@ -1,6 +1,8 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.GitReader;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.GitWriter;
@@ -167,10 +169,40 @@ class FetchNegotiatorRequestTest {
                 var bytes = new ByteArrayOutputStream();
                 var negotiator = new FetchNegotiator(new GitReader(input),
                         new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
-                assertThat(negotiator.negotiate().request().wants()).isEmpty();
+                assertThat(negotiator.negotiate(new FetchCommand(new GitStorageApi()), false)
+                        .request().wants()).isEmpty();
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.size()).isZero();
             }
+        }
+    }
+
+    @Test
+    void v2DoneFeedsParsedHavesAndEndsWithoutReadingOrWritingAnotherExchange() throws Exception {
+        ObjectId common = new ObjectId(HAVE);
+        try (var input = input(packet("want " + WANT) + packet("have " + HAVE)
+                + packet("done") + "0000NEXT")) {
+            var bytes = new ByteArrayOutputStream();
+            var negotiator = new FetchNegotiator(new GitReader(input),
+                    new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
+            var checks = new FetchNegotiatorIterator.Checks() {
+                @Override
+                public boolean isCommon(ObjectId objectId) {
+                    assertThat(objectId).isEqualTo(common);
+                    return true;
+                }
+
+                @Override
+                public boolean isReady(NegotiationContext context) {
+                    throw new AssertionError("DONE must not require early readiness");
+                }
+            };
+            NegotiationContext context = negotiator.negotiate(checks, true);
+            assertThat(context.commonObjects()).containsExactly(common);
+            assertThat(context.doneReceived()).isTrue();
+            assertThat(context.ready()).isFalse();
+            assertThat(input.readUnsignedByte()).isEqualTo('N');
+            assertThat(bytes.size()).isZero();
         }
     }
 
