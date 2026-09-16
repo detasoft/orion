@@ -41,6 +41,85 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
     @Test
+    void publicAliasRefreshesAndPublishesUsingItsOwnAuthorizationIdentity() throws Exception {
+        var refreshes = new AtomicInteger();
+        var pushes = new AtomicInteger();
+        var provider = provider(refreshes, pushes);
+        var document = proxyDocument("configuration", "file:///upstream.git");
+        String endpoint = "proxy/system/configuration";
+        assertThat(provider.isPublicRepositoryName(endpoint)).isFalse();
+        provider.activate(() -> document, secrets(document));
+
+        assertThat(provider.isPublicRepositoryName(endpoint)).isTrue();
+        assertThat(provider.exists(endpoint)).isTrue();
+        var repository = provider.openForWrite(endpoint).valueOrFailure("public proxy");
+        assertThat(repository.name()).isEqualTo(endpoint);
+        assertThat(refreshes).hasValue(2);
+        var update = repository.prepareFileUpdate("refs/heads/main", Map.of("file", new byte[]{1}),
+                "public push", GitCommitAuthor.EMPTY);
+        var authorizedNames = new java.util.ArrayList<String>();
+        var statuses = provider.publishPack(endpoint, update.pack(), update.refUpdates(), true,
+                new GitNativeRepositoryAccessHook() {
+                    @Override
+                    public void beforeUpdate(String repositoryName, String refName, boolean force) {
+                        authorizedNames.add(repositoryName);
+                    }
+                });
+        assertThat(statuses).extracting(ReceivePackStatus::ok).containsExactly(true);
+        assertThat(authorizedNames).containsExactly(endpoint);
+        assertThat(pushes).hasValue(1);
+        assertThat(repository.loadFiles("refs/heads/main", List.of("file")).files())
+                .containsEntry("file", new byte[]{1});
+        assertThat(provider.isPublicRepositoryName(
+                BootstrapGitLocation.persistent(document.system().proxies().getFirst()).proxyName())).isFalse();
+    }
+
+    @Test
+    void removedOrReboundAliasCannotUseItsOldHandleOrCreateALocalRepository() throws Exception {
+        var provider = provider(new AtomicInteger(), new AtomicInteger());
+        String endpoint = "proxy/system/configuration";
+        var first = proxyDocument("configuration", "file:///first.git");
+        provider.activate(() -> first, secrets(first));
+        var retained = provider.openForWrite(endpoint).valueOrFailure("original proxy");
+        var second = proxyDocument("configuration", "file:///second.git");
+        provider.retry(new RemoteAlias("configuration"), () -> second, secrets(second));
+        assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> retained.saveFiles("refs/heads/main", Map.of("file", new byte[]{1}),
+                "stale handle", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
+        var replacement = provider.openForRead(endpoint).valueOrFailure("rebound proxy");
+        var empty = OrionDocument.withAccessControl(new AccessControl());
+        provider.activate(() -> empty, secrets(empty));
+        assertThatThrownBy(replacement::refs).isInstanceOf(IllegalStateException.class);
+        for (String name : List.of(endpoint, "proxy/system/missing", "proxy%2fsystem%2fmissing")) {
+            assertThat(provider.isPublicRepositoryName(name)).isFalse();
+            assertThat(provider.exists(name)).isFalse();
+            assertThat(provider.create(name)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.openForRead(name)).isInstanceOf(Result.Failure.class);
+        }
+    }
+
+    @Test
+    void aliasCollisionLeavesTheActiveProxyAndLocalRepositoryIntact() throws Exception {
+        var backend = new InMemoryNativeGitRepositoryProvider();
+        var provider = provider(backend);
+        var first = proxyDocument("first", "file:///first.git");
+        provider.activate(() -> first, secrets(first));
+        var retained = provider.openForRead("proxy/system/first").valueOrFailure("active proxy");
+        var local = backend.create("proxy/system/occupied").valueOrFailure("existing local repository");
+        local.saveFiles("refs/heads/main", Map.of("local", new byte[]{2}), "local content", GitCommitAuthor.EMPTY);
+        var collision = proxyDocument("occupied", "file:///other.git");
+
+        assertThatThrownBy(() -> provider.activate(() -> collision, secrets(collision)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already exists");
+        assertThatThrownBy(() -> provider.retry(new RemoteAlias("occupied"), () -> collision, secrets(collision)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already exists");
+        assertThat(provider.exists("proxy/system/first")).isTrue();
+        assertThat(retained.refs()).isEmpty();
+        assertThat(local.loadFiles("refs/heads/main", List.of("local")).files())
+                .containsEntry("local", new byte[]{2});
+    }
+
+    @Test
     void retriesOnlyTheSelectedAliasAndRetainsFailedBindingsForRecovery() {
         var visited = new java.util.ArrayList<String>();
         var unavailable = new java.util.concurrent.atomic.AtomicBoolean(true);

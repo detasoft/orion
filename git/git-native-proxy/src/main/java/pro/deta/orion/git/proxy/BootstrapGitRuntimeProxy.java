@@ -41,6 +41,10 @@ final class BootstrapGitRuntimeProxy {
         return observation;
     }
 
+    String repositoryName() {
+        return repository.name();
+    }
+
     private void observed(SyncStatus status) {
         observation = new SyncObservation(status, Instant.now());
     }

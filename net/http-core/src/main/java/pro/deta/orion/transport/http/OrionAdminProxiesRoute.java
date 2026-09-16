@@ -226,7 +226,8 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
 
     private static AliasResponse project(GitProxyBinding binding, SyncObservation observation) {
         return new AliasResponse("system", binding.alias().value(), sanitizedUpstream(binding.upstream()),
-                binding.upstream().getScheme(), binding.ref(), null, wireStatus(observation),
+                binding.upstream().getScheme(), binding.ref(), "/r/" + binding.publicRepositoryName() + ".git",
+                wireStatus(observation),
                 observation.observedAt() == null ? null : observation.observedAt().toString());
     }
 

@@ -341,7 +341,7 @@ public final class DefaultGitNativeRepositoryService
         boolean atomic = receivePack.commandSection().negotiated(GitCapability.ATOMIC);
         return NativeGitReceivePack.complete(
                 repositoryPath, repository, receivePack.pack().quarantine(), updates, atomic, accessHook,
-                valid -> repositoryProvider.publish(repositoryPath, receivePack.pack(), valid, atomic));
+                valid -> repositoryProvider.publish(repository, receivePack.pack(), valid, atomic));
     }
 
     @Override

@@ -53,7 +53,7 @@ class OrionAdminProxiesRouteTest {
         assertThat(body.get("aliases").size()).isEqualTo(1);
         assertThat(body.get("aliases").get(0)).isEqualTo(mapper.readTree("""
                 {"scope":"system","alias":"configuration","upstream":"ssh://git.example:2222/config.git",
-                 "transport":"ssh","ref":"refs/heads/main","endpoint":null,
+                 "transport":"ssh","ref":"refs/heads/main","endpoint":"/r/proxy/system/configuration.git",
                  "status":"not-checked","observedAt":null}
                 """));
         assertThat(response.body.toString()).doesNotContain("private-", "known_hosts", "ciphertext", "cache");

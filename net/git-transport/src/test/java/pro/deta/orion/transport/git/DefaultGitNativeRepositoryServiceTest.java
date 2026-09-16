@@ -539,6 +539,31 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     @Test
+    void receivePublishesTheRepositoryOpenedBeforeRefAuthorization() {
+        var original = new InMemoryNativeGitRepositoryProvider();
+        var replacement = new InMemoryNativeGitRepositoryProvider();
+        var repository = original.create("demo").valueOrFailure("original repository");
+        var other = replacement.create("demo").valueOrFailure("replacement repository");
+        var provider = new RecordingProvider(original);
+        var service = new DefaultGitNativeRepositoryService(provider);
+        var quarantine = new LooseObjectStore();
+        var object = quarantine.write(ObjectType.BLOB, new byte[]{1});
+        var received = receivePack(service, List.of(new LegacyReceiveCommand(
+                GitObjectId.of(NULL_ID), object, "refs/heads/main")), Set.of(), quarantine);
+
+        var statuses = service.completeLegacyReceivePack(received, new GitNativeRepositoryAccessHook() {
+            @Override
+            public void beforeUpdate(String name, String ref, boolean force) {
+                provider.backend = replacement;
+            }
+        });
+
+        assertThat(statuses).extracting(ReceivePackStatus::ok).containsExactly(true);
+        assertThat(repository.refs()).containsEntry("refs/heads/main", object.value());
+        assertThat(other.refs()).isEmpty();
+    }
+
+    @Test
     void receiveRejectsUnauthorizedRefWithoutPublishingIt() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
@@ -1266,7 +1291,7 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     private static final class RecordingProvider implements NativeGitRepositoryProvider {
-        private final NativeGitRepositoryProvider backend;
+        private NativeGitRepositoryProvider backend;
         private int readCalls;
         private int publishCalls;
         private boolean rejectPublication;
@@ -1309,14 +1334,14 @@ class DefaultGitNativeRepositoryServiceTest {
 
         @Override
         public List<RefUpdateResult> publish(
-                String repositoryName,
+                NativeGitRepository repository,
                 PackIngestionResult.Complete received,
                 List<LooseRefStore.Update> updates,
                 boolean atomic) {
             publishCalls++;
             if (!rejectPublication) {
                 return NativeGitRepositoryProvider.super.publish(
-                        repositoryName,
+                        repository,
                         received,
                         updates,
                         atomic);

@@ -68,12 +68,10 @@ public interface NativeGitRepositoryProvider {
     }
 
     default List<RefUpdateResult> publish(
-            String repositoryName,
+            NativeGitRepository repository,
             PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
-        return openForWrite(repositoryName)
-                .valueOrFailure("Cannot open native repository " + repositoryName)
-                .publishReceivedPack(received, updates, atomic);
+        return repository.publishReceivedPack(received, updates, atomic);
     }
 }

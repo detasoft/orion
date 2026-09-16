@@ -62,10 +62,10 @@ class GitBlockingWireSessionTest {
             }
 
             @Override
-            public List<RefUpdateResult> publish(String name, PackIngestionResult.Complete received,
+            public List<RefUpdateResult> publish(NativeGitRepository selected, PackIngestionResult.Complete received,
                     List<LooseRefStore.Update> updates, boolean atomic) {
                 assertThat(received.packBytes()).isEqualTo(original);
-                return NativeGitRepositoryProvider.super.publish(name, received, updates, atomic);
+                return NativeGitRepositoryProvider.super.publish(selected, received, updates, atomic);
             }
         };
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(Duration.ofSeconds(1))) {

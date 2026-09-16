@@ -8,15 +8,8 @@ import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitProxyBinding;
@@ -235,12 +228,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding binding : document.system().proxies()) {
             BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
-            BootstrapGitRuntimeProxy runtime = activeBindings.get(location.proxyName());
+            BootstrapGitRuntimeProxy runtime = candidate.get(location.proxyName());
+            if (runtime == null) {
+                runtime = activeBindings.get(location.proxyName());
+            }
             if (runtime == null) {
                 runtime = new BootstrapGitRuntimeProxy(location, findOrCreate(location.proxyName()),
                         persistent, fetcher, pusher);
             }
-            candidate.put(location.proxyName(), runtime);
+            addActiveBinding(candidate, binding, runtime);
         }
         activeBindings = Map.copyOf(candidate);
         BootstrapGitRuntimeProxy runtime = candidate.get(BootstrapGitLocation.persistent(selected).proxyName());
@@ -271,11 +267,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
         BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(current, secrets);
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
-        for (BootstrapGitLocation location : locations.values()) {
-            BootstrapGitRuntimeProxy binding = new BootstrapGitRuntimeProxy(location,
-                    findOrCreate(location.proxyName()), persistent, fetcher, pusher);
-            binding.refresh();
-            candidate.put(location.proxyName(), binding);
+        for (GitProxyBinding configured : document.system().proxies()) {
+            BootstrapGitLocation location = locations.get(BootstrapGitLocation.persistent(configured).proxyName());
+            BootstrapGitRuntimeProxy runtime = candidate.get(location.proxyName());
+            if (runtime == null) {
+                runtime = new BootstrapGitRuntimeProxy(location,
+                        findOrCreate(location.proxyName()), persistent, fetcher, pusher);
+                runtime.refresh();
+            }
+            addActiveBinding(candidate, configured, runtime);
         }
         activeBindings = Map.copyOf(candidate);
         activePhase = true;
@@ -284,6 +284,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         provisionalBindings.clear();
         provisionalLocations.clear();
         provisionalSources.clear();
+    }
+
+    private void addActiveBinding(Map<String, BootstrapGitRuntimeProxy> candidate,
+            GitProxyBinding configured, BootstrapGitRuntimeProxy runtime) {
+        if (backend.exists(configured.publicRepositoryName())) {
+            throw new IllegalArgumentException("Proxy endpoint repository already exists");
+        }
+        candidate.put(runtime.repositoryName(), runtime);
+        candidate.put(configured.publicRepositoryName(), runtime);
     }
 
     public synchronized OrionDocument adoptProvisional(OrionDocument document, ConfigurationSecrets secrets) {
@@ -392,13 +401,18 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
 
     @Override
     public boolean isPublicRepositoryName(String repositoryName) {
-        return !isBootstrapCache(repositoryName(repositoryName));
+        String name = repositoryName(repositoryName);
+        return !isBootstrapCache(name) && (!isProxyEndpoint(name) || activeBindings.containsKey(name));
     }
 
     @Override
     public boolean exists(String repositoryName) {
         String canonicalName = repositoryName(repositoryName);
-        return (!isBootstrapCache(canonicalName) || binding(canonicalName) != null)
+        BootstrapGitRuntimeProxy proxy = binding(canonicalName);
+        if (proxy != null) {
+            return backend.exists(proxy.repositoryName());
+        }
+        return !isBootstrapCache(canonicalName) && !isProxyEndpoint(canonicalName)
                 && backend.exists(canonicalName);
     }
 
@@ -412,6 +426,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         String canonicalName = repositoryName(repositoryName);
         if (isBootstrapCache(canonicalName)) {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal");
+        }
+        if (isProxyEndpoint(canonicalName)) {
+            return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Proxy endpoints require a binding");
         }
         return backend.create(canonicalName);
     }
@@ -439,55 +456,46 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             NativeGitRepositoryProvider.super.saveFiles(canonicalName, refName, files, message, author);
             return;
         }
-        NativeGitRepository repository = backend.find(canonicalName)
+        NativeGitRepository repository = backend.find(proxy.repositoryName())
                 .valueOrFailure("Cannot open native repository " + canonicalName);
-        NativeGitFileUpdate update = repository.prepareProxyFileUpdate(refName, files, message, author);
-        List<ReceivePackStatus> results = new PolicyBoundNativeGitRepository(this, repository)
-                .publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
-        ReceivePackStatus.requireSuccess(results);
-    }
-
-    @Override
-    public List<RefUpdateResult> publish(
-            String repositoryName,
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
-            boolean atomic) {
-        String canonicalName = repositoryName(repositoryName);
-        BootstrapGitRuntimeProxy proxy = binding(canonicalName);
-        if (proxy == null) {
-            return NativeGitRepositoryProvider.super.publish(canonicalName, received, updates, atomic);
-        }
-        return proxy.publish(received, updates, atomic);
+        new PolicyBoundNativeGitRepository(this, canonicalName, repository)
+                .saveFiles(refName, files, message, author);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {
         String canonicalName = repositoryName(repositoryName);
         BootstrapGitRuntimeProxy proxy = binding(canonicalName);
         if (proxy == null) {
-            if (isBootstrapCache(canonicalName)) {
+            if (isBootstrapCache(canonicalName) || isProxyEndpoint(canonicalName)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Bootstrap binding is unavailable");
             }
             return backend.find(canonicalName);
         }
         proxy.refresh();
-        return switch (backend.find(canonicalName)) {
+        return switch (backend.find(proxy.repositoryName())) {
             case Result.Success(NativeGitRepository repository) ->
                     new Result.Success<>(new PolicyBoundNativeGitRepository(
                             this,
+                            canonicalName,
                             repository));
             case Result.Failure<NativeGitRepository> failure -> failure;
         };
     }
 
-    void requireBinding(String repositoryName) {
-        if (binding(repositoryName) == null) {
+    BootstrapGitRuntimeProxy requireBinding(String repositoryName, String cacheName) {
+        BootstrapGitRuntimeProxy proxy = binding(repositoryName);
+        if (proxy == null || !proxy.repositoryName().equals(cacheName)) {
             throw new IllegalStateException("Proxy binding is unavailable");
         }
+        return proxy;
     }
 
     private static boolean isBootstrapCache(String repositoryName) {
         return repositoryName.startsWith(BootstrapGitLocation.CACHE_PREFIX);
+    }
+
+    private static boolean isProxyEndpoint(String repositoryName) {
+        return repositoryName.startsWith(GitProxyBinding.REPOSITORY_PREFIX);
     }
 
     private BootstrapGitRuntimeProxy binding(String repositoryName) {

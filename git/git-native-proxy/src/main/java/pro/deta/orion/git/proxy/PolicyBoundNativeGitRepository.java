@@ -6,6 +6,8 @@ import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
@@ -35,16 +37,18 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
 
     PolicyBoundNativeGitRepository(
             ProxyAwareNativeGitRepositoryProvider provider,
+            String repositoryName,
             NativeGitRepository repository) {
-        super(repository.name(), new LooseRefStore(), new LooseObjectStore(), repository.defaultHead());
+        super(repositoryName, new LooseRefStore(), new LooseObjectStore(), repository.defaultHead());
         this.provider = provider;
-        this.repositoryName = repository.name();
+        this.repositoryName = repositoryName;
         this.repository = repository;
     }
 
     @Override
     public String description() {
-        return repository().description();
+        repository();
+        return repositoryName;
     }
 
     @Override
@@ -59,8 +63,9 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             Map<String, byte[]> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        provider.requireBinding(repositoryName);
-        provider.saveFiles(repositoryName, branch, files, message, author);
+        var update = repository().prepareProxyFileUpdate(branch, files, message, author);
+        ReceivePackStatus.requireSuccess(publishPack(
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL));
     }
 
     @Override
@@ -115,9 +120,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
 
     @Override
     public RefUpdateResult updateRef(String refName, String expectedOldId, String newId) {
-        provider.requireBinding(repositoryName);
-        return provider.publish(
-                repositoryName,
+        return provider.requireBinding(repositoryName, repository.name()).publish(
                 new PackIngestionResult.Complete(new LooseObjectStore()),
                 List.of(new LooseRefStore.Update(refName, expectedOldId, newId)),
                 true).getFirst();
@@ -163,16 +166,14 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
-        provider.requireBinding(repositoryName);
-        return provider.publish(repositoryName, received, updates, atomic);
+        return provider.requireBinding(repositoryName, repository.name()).publish(received, updates, atomic);
     }
 
     @Override
     public List<RefUpdateResult> publishObjectsAndRefs(
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates) {
-        provider.requireBinding(repositoryName);
-        return provider.publish(repositoryName, new PackIngestionResult.Complete(objects), updates, true);
+        return publishReceivedPack(new PackIngestionResult.Complete(objects), updates, true);
     }
 
     @Override
@@ -180,8 +181,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
-        provider.requireBinding(repositoryName);
-        return provider.publish(repositoryName, new PackIngestionResult.Complete(objects), updates, atomic);
+        return publishReceivedPack(new PackIngestionResult.Complete(objects), updates, atomic);
     }
 
     @Override
@@ -230,7 +230,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     }
 
     private NativeGitRepository repository() {
-        provider.requireBinding(repositoryName);
+        provider.requireBinding(repositoryName, repository.name());
         return repository;
     }
 }

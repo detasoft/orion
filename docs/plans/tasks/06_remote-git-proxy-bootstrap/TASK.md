@@ -31,6 +31,12 @@ source handles (`a8cf31a5`, `8750c1ee`). Application startup adopts and activate
 bindings after ACL loading and before Agent authentication or public transports.
 Native `BootstrapProxyTransportIT` verifies stored HTTP/SSH credential rotation,
 restart without rewriting bindings, and private-cache isolation through that lifecycle.
+`RemoteBootstrapConfigurationIT` verifies independent native HTTP/SSH upstreams,
+isolated publication, and rejection of invalid inputs with an existing cache.
+`BootstrapProxyEndpointIT` verifies clone and push through public aliases,
+repository and branch ACLs, restart, and cache denial even with explicit root grants.
+These scenarios and the separate Orion/JGit SSH interoperability test passed the
+full `mvn verify -Pdev -T 4` on 2026-09-16.
 `BootstrapContextTest` also covers local configuration with remote material and
 startup rejection of invalid stored secrets. Configuration updates check revisions
 in both Git and local directories; Git material revisions track material content
@@ -59,7 +65,10 @@ conflicts require manual resolution; no automatic rebase, force push, or choice
 of one side discards the other. Runtime behavior is owned by
 [stream 07](../07_external-git-repository-sync/TASK.md).
 
-A stable scoped proxy alias may be exposed through authorized Git HTTP/SSH routes.
+Active system proxy aliases are exposed through HTTP `/r/proxy/system/<alias>.git`
+and SSH `/proxy/system/<alias>.git`, with ordinary Git ACLs on `proxy/system/<alias>`.
+Publication uses the repository opened for authorization, so alias rebinding cannot
+redirect an already resolved write to another upstream.
 Its private cache name must never be accepted as a public repository identifier,
 including after restart or failed adoption. An internal proxy reference is not
 an endpoint for ordinary Git clients. Bootstrap hashes are not user-facing ids.

@@ -512,6 +512,26 @@ leaves the last valid ACL active. The internal repository is returned by
 Remote storage credentials, for example S3 credentials, should come from the
 backend's normal environment or provider-specific mechanisms.
 
+## Remote Git Proxy Endpoints
+
+An active system proxy with alias `configuration` is available at
+`https://<host>/r/proxy/system/configuration.git` and
+`ssh://<user>@<host>:<ssh-port>/proxy/system/configuration.git`.
+`GET /api/admin/proxies` reports the relative HTTP endpoint for each alias.
+
+Grant repository access to `proxy/system/configuration` and the required branches
+using the ordinary Git ACL rules. Push also requires write permission; force
+updates require force permission. The repository pattern `*` matches one path
+segment, so it does not grant access to this nested name. Application admin
+permission alone does not grant Git access.
+
+Reads refresh from upstream, and a push succeeds only after upstream publication
+succeeds. Aliases remain stable across restart. The `proxy/system/` namespace is
+reserved for configured proxies: pushing to an unknown alias cannot create a
+local repository, and activation rejects an existing local repository at the
+same name. Private `bootstrap/proxy-*` cache names are never public Git endpoints,
+including for administrators with matching repository grants.
+
 ## Development
 
 Run routine local tests with the `dev` Maven profile:

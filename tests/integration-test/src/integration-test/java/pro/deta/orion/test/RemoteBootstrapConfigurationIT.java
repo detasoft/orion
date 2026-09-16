@@ -9,6 +9,7 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -24,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -84,13 +86,7 @@ class RemoteBootstrapConfigurationIT {
             String authorized = Files.readString(credential);
             Files.writeString(credential, unauthorizedCredential(transport));
             try {
-                assertThatThrownBy(() -> {
-                    try (var ignored = BootstrapContext.open(configuration, environment)) {
-                        throw new AssertionError("Unauthorized bootstrap must fail");
-                    }
-                }).isInstanceOf(IllegalStateException.class)
-                        .hasMessage("Bootstrap inputs are unavailable or invalid");
-                assertPortsAvailable(configuration);
+                assertBootstrapRejected(configuration, environment, "unauthorized first launch");
             } finally {
                 Files.writeString(credential, authorized);
             }
@@ -134,7 +130,148 @@ class RemoteBootstrapConfigurationIT {
                     lifecycle.waitForShutdown();
                 }
             }
+
+            var refsBeforeFailures = repository.refs();
+            for (var source : List.of(configuration.getBootstrap().getAccessControl(),
+                    configuration.getBootstrap().getKeyMaterial())) {
+                String ref = source.getRef();
+                source.setRef("refs/heads/missing");
+                try {
+                    assertBootstrapRejected(configuration, environment, "missing ref for " + source.getPath());
+                } finally {
+                    source.setRef(ref);
+                }
+                String path = source.getPath();
+                source.setPath("missing/input");
+                try {
+                    assertBootstrapRejected(configuration, environment, "missing path for " + path);
+                } finally {
+                    source.setPath(path);
+                }
+            }
+            assertBootstrapRejected(configuration, Map.of(PASSWORD_ENV, "wrong-password"),
+                    "wrong material password with a populated cache");
+            Files.writeString(credential, unauthorizedCredential(transport));
+            try {
+                assertBootstrapRejected(configuration, environment, "unauthorized restart with a populated cache");
+            } finally {
+                Files.writeString(credential, authorized);
+            }
+            assertThat(repository.refs()).isEqualTo(refsBeforeFailures);
+            try (var recovered = BootstrapContext.open(configuration, environment)) {
+                assertThat(recovered.serverIdentity().activeKeyId()).isNotBlank();
+            }
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http", "ssh"})
+    void adoptsIndependentUpstreamsAndKeepsTheirWritesSeparateAcrossRestart(String configurationTransport)
+            throws Exception {
+        var configurationUpstream = RuntimeHttpTestSupport.httpOnlyConfiguration(
+                tempDir.resolve("configuration-upstream"), config -> config.getTransport().getSsh().setEnabled(true));
+        var materialUpstream = RuntimeHttpTestSupport.httpOnlyConfiguration(
+                tempDir.resolve("material-upstream"), config -> config.getTransport().getSsh().setEnabled(true));
+        var target = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("target"));
+        target.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+        target.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
+        try (var configurationServer = RuntimeHttpTestSupport.start(configurationUpstream);
+             var materialServer = RuntimeHttpTestSupport.start(materialUpstream)) {
+            var environment = configureSources(Files.createDirectory(tempDir.resolve("configuration-auth")),
+                    target, configurationServer, configurationTransport);
+            var materialSource = new OrionConfiguration();
+            configureSources(Files.createDirectory(tempDir.resolve("material-auth")), materialSource,
+                    materialServer, "http".equals(configurationTransport) ? "ssh" : "http");
+            var acl = target.getBootstrap().getAccessControl();
+            var material = target.getBootstrap().getKeyMaterial();
+            material.setLocation(materialSource.getBootstrap().getKeyMaterial().getLocation());
+            material.setAuth(materialSource.getBootstrap().getKeyMaterial().getAuth());
+            acl.setRef("refs/heads/configuration");
+            material.setRef("refs/heads/keys");
+            var configurationRepository = configurationServer.repositoryProvider().create("bootstrap-inputs")
+                    .valueOrFailure("configuration upstream");
+            var materialRepository = materialServer.repositoryProvider().create("bootstrap-inputs")
+                    .valueOrFailure("material upstream");
+            configurationRepository.saveFiles(acl.getRef(),
+                    Map.of(acl.getPath(), configurationServer.accessControlService().accessControlConfigurationFile()),
+                    "seed configuration", GitCommitAuthor.EMPTY);
+            materialRepository.saveFiles(material.getRef(), Map.of(material.getPath(), materialBytes(target, environment)),
+                    "seed material", GitCommitAuthor.EMPTY);
+
+            String configurationRevision = null;
+            String materialRevision = null;
+            byte[] payload = "independent upstream identity".getBytes(StandardCharsets.UTF_8);
+            byte[] signature = null;
+            for (int launch = 0; launch < 2; launch++) {
+                try (var bootstrap = BootstrapContext.open(target, environment)) {
+                    var provider = bootstrap.repositoryProvider();
+                    String configurationCache = bootstrap.repositorySources()
+                            .required(BootstrapRepositorySources.CONFIGURATION).repositoryName().orElseThrow();
+                    String materialCache = bootstrap.repositorySources()
+                            .required(BootstrapRepositorySources.MATERIAL).repositoryName().orElseThrow();
+                    assertThat(configurationCache).isNotEqualTo(materialCache);
+                    var component = runtimeComponent(target, bootstrap);
+                    var lifecycle = component.orionApplicationLifecycle();
+                    try {
+                        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                        lifecycle.waitForStarting();
+                        byte[] xml = component.orionAccessControlService().accessControlConfigurationFile();
+                        var document = OrionXml.read(new ByteArrayInputStream(xml));
+                        assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
+                                .containsExactlyInAnyOrder("configuration", "material");
+                        assertThat(document.system().proxies()).extracting(binding -> binding.upstream().toString())
+                                .containsExactlyInAnyOrder(acl.getLocation().substring(4),
+                                        material.getLocation().substring(4));
+                        assertThat(document.system().secrets()).hasSize(2);
+                        for (var source : List.of(acl, material)) {
+                            String credential = Files.readString(Path.of(URI.create(source.getAuth().get("credential"))));
+                            assertThat(new String(xml, StandardCharsets.UTF_8)).doesNotContain(credential);
+                        }
+                        assertThat(provider.repositoryNames()).doesNotContain(configurationCache, materialCache);
+                        assertThat(provider.isPublicRepositoryName(configurationCache)).isFalse();
+                        assertThat(provider.isPublicRepositoryName(materialCache)).isFalse();
+                        if (launch == 0) {
+                            signature = bootstrap.serverIdentity().sign(payload);
+                            var materialRefs = materialRepository.refs();
+                            provider.openForWrite(configurationCache).valueOrFailure("configuration proxy")
+                                    .saveFiles(acl.getRef(), Map.of("configuration-marker", payload),
+                                            "write configuration upstream", GitCommitAuthor.EMPTY);
+                            assertThat(configurationRepository.loadFiles(acl.getRef(), List.of("configuration-marker"))
+                                    .files()).containsEntry("configuration-marker", payload);
+                            assertThat(materialRepository.refs()).isEqualTo(materialRefs);
+                            var configurationRefs = configurationRepository.refs();
+                            provider.openForWrite(materialCache).valueOrFailure("material proxy")
+                                    .saveFiles(material.getRef(), Map.of("material-marker", payload),
+                                            "write material upstream", GitCommitAuthor.EMPTY);
+                            assertThat(materialRepository.loadFiles(material.getRef(), List.of("material-marker"))
+                                    .files()).containsEntry("material-marker", payload);
+                            assertThat(configurationRepository.refs()).isEqualTo(configurationRefs);
+                            configurationRevision = configurationRepository.refs().get(acl.getRef());
+                            materialRevision = materialRepository.refs().get(material.getRef());
+                        } else {
+                            assertThat(bootstrap.serverIdentity().verify(bootstrap.serverIdentity().activeKeyId(),
+                                    payload, signature)).isTrue();
+                            assertThat(configurationRepository.refs()).containsEntry(acl.getRef(), configurationRevision);
+                            assertThat(materialRepository.refs()).containsEntry(material.getRef(), materialRevision);
+                        }
+                    } finally {
+                        lifecycle.shutdownApplication();
+                        lifecycle.waitForShutdown();
+                    }
+                }
+            }
+        }
+    }
+
+    private static void assertBootstrapRejected(
+            OrionConfiguration configuration, Map<String, String> environment, String scenario) throws Exception {
+        assertThatThrownBy(() -> {
+            try (var ignored = BootstrapContext.open(configuration, environment)) {
+                throw new AssertionError("Invalid bootstrap must fail");
+            }
+        }).as(scenario).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid");
+        assertPortsAvailable(configuration);
     }
 
     private static String unauthorizedCredential(String transport) throws Exception {

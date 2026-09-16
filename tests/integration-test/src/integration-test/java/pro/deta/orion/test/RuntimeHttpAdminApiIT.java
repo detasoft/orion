@@ -52,7 +52,7 @@ class RuntimeHttpAdminApiIT {
             JsonNode result = OBJECT_MAPPER.readTree(saved.body());
             assertThat(result.get("status").asText()).isEqualTo("saved");
             assertThat(result.at("/alias/status").asText()).isEqualTo("success");
-            assertThat(result.at("/alias/endpoint").isNull()).isTrue();
+            assertThat(result.at("/alias/endpoint").asText()).isEqualTo("/r/proxy/system/archive.git");
             assertThat(saved.body()).doesNotContain("bootstrap/proxy-", "secret", "credential");
             String savedRevision = result.get("revision").asText();
             assertThat(savedRevision).isNotEqualTo(revision);

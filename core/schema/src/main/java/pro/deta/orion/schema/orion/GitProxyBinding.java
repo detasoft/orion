@@ -16,6 +16,12 @@ public record GitProxyBinding(
         Optional<String> secret,
         Optional<String> username,
         Optional<URI> knownHosts) {
+    public static final String REPOSITORY_PREFIX = "proxy/system/";
+
+    public String publicRepositoryName() {
+        return REPOSITORY_PREFIX + alias.value();
+    }
+
     public GitProxyBinding {
         Objects.requireNonNull(alias, "proxy alias");
         upstream = canonicalUpstream(upstream);
