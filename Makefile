@@ -7,8 +7,8 @@ TEST_ANALYTICS_TOP ?= 50
 TEST_ANALYTICS_REPORT_ARGS ?=
 TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
 TEST_JFR_MAVEN_ARGS ?=
-RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>'
-RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>'
+RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>' [LOG=<log-file>]
+RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=<log-file>]
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
 	help skill-check skills-check \
@@ -130,7 +130,7 @@ session-host-linux-test: ## Run session-host tests on the configured Linux host
 		SESSION_HOST_LINUX_SCP="$(SESSION_HOST_LINUX_SCP)" \
 		sh make/session-host-linux-test.sh
 
-run-test: ## Run one focused Maven test; set MODULE and TEST
+run-test: ## Run focused Maven tests; set MODULE and TEST, optionally LOG for Maven's log file
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \
 		if [ -z '$(strip $(value MODULE))' ] || [ -z '$(strip $(value TEST))' ]; then \
 			printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
@@ -147,7 +147,7 @@ run-test: ## Run one focused Maven test; set MODULE and TEST
 	fi
 	$(MAVEN) test -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
 		-Dtest='$(RUN_TEST_LOCATOR)' \
-		-Dsurefire.failIfNoSpecifiedTests=false
+		-Dsurefire.failIfNoSpecifiedTests=false $(if $(strip $(value LOG)),-l '$(value LOG)')
 
 test-jfr: ## Run Maven tests with JFR analytics
 	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
