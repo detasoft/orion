@@ -162,11 +162,11 @@ public final class PackUpload {
             throw new NoSuchElementException("Pack is exhausted");
         }
         try {
-            var result = PackObjectParser.parseEntry(source, offset, entryStore, (type, size, raw) ->
+            var result = PackObjectParser.parseEntry(source, offset, entryStore, (type, size, baseId, raw) ->
                     switch (type) {
                         case OFS_DELTA, REF_DELTA -> Optional.<ObjectId>empty();
                         case COMMIT, TREE, BLOB, TAG ->
-                                Optional.of(new HashedGitObjectRead().read(type, size, raw));
+                                Optional.of(new HashedGitObjectRead().read(type, size, baseId, raw));
                     });
             index.addEntry(result.entry());
             if (result.value().isPresent()) {
@@ -207,7 +207,7 @@ public final class PackUpload {
         R value = null;
         try (var zlib = new ZlibBoundaryInputStream(new StoredInput(entry.dataOffset(), offset),
                 entry.inflatedSize())) {
-            value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(),
+            value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
                     new InputStreamBufferedByteInput(zlib)), "reader result");
             byte[] discard = new byte[8192];
             while (zlib.read(discard) != -1) {

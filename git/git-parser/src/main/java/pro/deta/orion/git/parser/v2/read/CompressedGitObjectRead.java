@@ -1,11 +1,13 @@
 package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Shared streaming decompression processor, separate from RawGitObjectRead's direct byte processing.
@@ -15,22 +17,25 @@ import java.util.Objects;
  * On failure after a resource-bearing result was produced, the implementation must release that unreturned
  * result's owned resources as well. Processing state belongs to the invocation, not to this reusable handler.
  *
- * <p>For OFS_DELTA and REF_DELTA, readDecompressed receives delta instructions. It never fetches bases or
- * restores an object from a delta. HashedGitObjectRead hashes full content; ContentGitObjectRead delegates
- * inflated content to a consumer. ZlibInflatedInputStream owns zlib decoding and boundary validation.
+ * <p>For OFS_DELTA and REF_DELTA, readDecompressed receives delta instructions and the optional base ID.
+ * Subclasses choose whether to resolve them. HashedGitObjectRead hashes full content;
+ * ContentGitObjectRead delegates inflated content to a consumer. ZlibInflatedInputStream owns zlib decoding
+ * and boundary validation.
  */
 public abstract sealed class CompressedGitObjectRead<R> implements GitObjectRead<R>
-        permits HashedGitObjectRead, ContentGitObjectRead {
+        permits HashedGitObjectRead, ContentGitObjectRead, ResolvedGitObjectRead {
     @Override
-    public final R read(ObjectType type, long inflatedSize, BufferedByteInput rawSource) throws IOException {
+    public final R read(ObjectType type, long inflatedSize, Optional<ObjectId> baseId,
+            BufferedByteInput rawSource) throws IOException {
         Objects.requireNonNull(type, "type");
+        Objects.requireNonNull(baseId, "baseId");
         Objects.requireNonNull(rawSource, "rawSource");
         if (inflatedSize < 0) {
             throw new IOException("Negative inflated object size");
         }
         R value = null;
         try (var inflated = new ZlibInflatedInputStream(rawSource, inflatedSize)) {
-            value = Objects.requireNonNull(readDecompressed(type, inflatedSize,
+            value = Objects.requireNonNull(readDecompressed(type, inflatedSize, baseId,
                     new InputStreamBufferedByteInput(inflated)), "reader result");
             byte[] discard = new byte[8192];
             while (inflated.read(discard) != -1) {
@@ -51,6 +56,7 @@ public abstract sealed class CompressedGitObjectRead<R> implements GitObjectRead
         }
     }
 
-    protected abstract R readDecompressed(ObjectType type, long size, BufferedByteInput content)
+    protected abstract R readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+            BufferedByteInput content)
             throws IOException;
 }

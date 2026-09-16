@@ -1,5 +1,11 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+
+import java.io.IOException;
+import java.util.Optional;
+
 /**
  * Reads Git objects internally behind GitStorageApi independently of their loose or packed representation.
  * Callers outside this package access these operations only through GitStorageApi.
@@ -18,7 +24,11 @@ package pro.deta.orion.git.parser.v2.storage;
  * </ul>
  * Method names and signatures are provisional. This view includes objects published through GitPackStorage;
  * callers do not select a backing pack. Physical delta payloads still require resolver reconstruction;
- * access to their base metadata remains to be specified alongside the facade contract.
+ * read supplies the REF_DELTA base ObjectId alongside the bounded zlib payload as defined by GitObjectRead.
+ * Backend implementations own source bounds, final validation, and cleanup; absence never invokes the reader.
  */
-final class GitObjectStorage {
+class GitObjectStorage {
+    <R> Optional<R> read(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
+        throw new UnsupportedOperationException("Object reads are not implemented");
+    }
 }

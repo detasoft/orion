@@ -1,10 +1,12 @@
 package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Processes inflated content through a caller-provided function after shared decompression.
@@ -24,7 +26,8 @@ public final class ContentGitObjectRead<R> extends CompressedGitObjectRead<R> {
     }
 
     @Override
-    protected R readDecompressed(ObjectType type, long size, BufferedByteInput content) throws IOException {
-        return Objects.requireNonNull(consumer.read(type, size, content), "reader result");
+    protected R readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+            BufferedByteInput content) throws IOException {
+        return Objects.requireNonNull(consumer.read(type, size, baseId, content), "reader result");
     }
 }

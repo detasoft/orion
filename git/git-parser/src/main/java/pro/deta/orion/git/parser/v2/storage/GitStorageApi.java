@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -35,10 +36,11 @@ import java.util.Optional;
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
  * readObject(objectId, reader) invokes a caller-selected processor with the stored physical type, inflated
- * payload size, and a bounded borrowed zlib source, excluding pack headers and delta base references.
+ * payload size, optional REF_DELTA base ObjectId from the index, and a bounded borrowed zlib source,
+ * excluding pack headers and delta base references. Other physical types receive an empty baseId.
  * RawGitObjectRead processes compressed bytes; CompressedGitObjectRead supplies decompression for hash/content.
- * A delta payload remains instructions, not restored content; processors never apply deltas. Resolving stored
- * delta bases requires their index metadata; that lookup contract is still to be specified in this scaffold.
+ * A delta payload remains instructions unless the caller supplies ResolvedGitObjectRead, which restores
+ * REF_DELTA through recursive storage reads. That reader currently rejects OFS_DELTA explicitly.
  * Storage closes the source after processing; the reader cannot retain it. Nonnull results belong to the caller,
  * including any independently owned resources. Absence is Optional.empty() and does not invoke reader;
  * I/O and processing failures remain errors. Returning early must still respect and validate payload bounds.
@@ -58,16 +60,30 @@ import java.util.Optional;
  *   <li>{@code readObject(objectId, reader)} - process stored bytes and return the selected result.</li>
  *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, size, and a bounded prefix.</li>
  * </ul>
- * Methods remain placeholders. Object resolution and operation-specific policy belong to the caller;
+ * Object and ref reads delegate to internal backends supplied at construction, without exposing them to callers.
+ * The default constructor retains placeholder backends until persistent storage wiring is implemented.
+ * Object resolution and operation-specific policy belong to the caller;
  * all operations address the same repository, and ref targets must be available before updates become visible.
  */
 public final class GitStorageApi {
+    private final GitObjectStorage objects;
+    private final GitRefsStorage refs;
+
+    public GitStorageApi() {
+        this(new GitObjectStorage(), new GitRefsStorage());
+    }
+
+    GitStorageApi(GitObjectStorage objects, GitRefsStorage refs) {
+        this.objects = Objects.requireNonNull(objects, "objects");
+        this.refs = Objects.requireNonNull(refs, "refs");
+    }
+
     public PackUpload uploadNewPack(BufferedByteInput source) throws IOException {
         throw new UnsupportedOperationException("Pack upload is not implemented");
     }
 
     public <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
-        throw new UnsupportedOperationException("Object reads are not implemented");
+        return objects.read(Objects.requireNonNull(objectId, "objectId"), Objects.requireNonNull(reader, "reader"));
     }
 
     public boolean exists(ObjectId objectId) throws IOException {
@@ -75,7 +91,7 @@ public final class GitStorageApi {
     }
 
     public RefsSnapshot snapshotRefs() {
-        throw new UnsupportedOperationException("Ref snapshots are not implemented");
+        return refs.snapshot();
     }
 
     public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {

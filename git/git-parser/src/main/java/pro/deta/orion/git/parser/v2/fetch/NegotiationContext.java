@@ -2,7 +2,10 @@ package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.GitTransport;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
@@ -10,6 +13,8 @@ import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -35,12 +40,18 @@ import java.util.Set;
  * V2 base arguments need no individual advertisement. The caller must advertise only implemented features;
  * this check grants no object access and does not implement filtering, shallow traversal, or pack production.
  * The dispatcher must validate v2 command-header capabilities before fetch arguments reach this context.
+ * During preparation, resolveWantedRefs resolves all requested names against one supplied snapshot.
+ * HEAD uses that snapshot's symbolic or detached target. Missing refs, including unborn HEAD, fail the request.
+ * wantedRefs preserves requested names and order for the wanted-refs response; resolution publishes no partial map.
+ * wantedObjects derives the deduplicated union of explicit wants and resolved targets without changing the request.
+ * Resolution must finish before negotiation starts. It establishes neither object availability nor access rights.
  */
 public class NegotiationContext {
     private final FetchRequest request;
     private final GitStorageApi storage;
     private final Set<GitCapability> advertisedCapabilities;
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
+    private Map<RefId, ObjectId> wantedRefs = Map.of();
     private ObjectId lastCommon;
     private boolean ready;
     private boolean doneReceived;
@@ -159,6 +170,43 @@ public class NegotiationContext {
 
     public boolean objectExists(ObjectId objectId) throws IOException {
         return storage.exists(objectId);
+    }
+
+    public void resolveWantedRefs(RefsSnapshot snapshot) throws IOException {
+        Objects.requireNonNull(snapshot, "snapshot");
+        var resolved = new LinkedHashMap<RefId, ObjectId>();
+        for (String name : request.wantRefs()) {
+            var ref = new RefId(name);
+            ObjectId target;
+            if (name.equals("HEAD")) {
+                target = switch (snapshot.head()) {
+                    case Head.Symbolic head -> snapshot.refs().get(head.target());
+                    case Head.Detached head -> new ObjectId(head.target().toBytes());
+                };
+            } else {
+                target = snapshot.refs().get(ref);
+            }
+            if (target == null) {
+                throw new IOException("Unknown wanted ref: " + name);
+            }
+            resolved.put(ref, target);
+        }
+        wantedRefs = Collections.unmodifiableMap(resolved);
+    }
+
+    public Map<RefId, ObjectId> wantedRefs() {
+        return wantedRefs;
+    }
+
+    public Set<ObjectId> wantedObjects() {
+        for (String name : request.wantRefs()) {
+            if (!wantedRefs.containsKey(new RefId(name))) {
+                throw new IllegalStateException("Wanted refs must be resolved before reading wanted objects");
+            }
+        }
+        var objects = new LinkedHashSet<>(request.wants());
+        objects.addAll(wantedRefs.values());
+        return Collections.unmodifiableSet(objects);
     }
 
     public boolean isReady() throws IOException {

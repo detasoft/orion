@@ -112,8 +112,9 @@ class PackUploadTest {
             assertThat(upload.hasNext()).isFalse();
             for (var result : List.of(ofs, reference)) {
                 assertThat(upload.readObject(result.entry().offset(), new ContentGitObjectRead<byte[]>(
-                        (type, size, source) -> {
+                        (type, size, baseId, source) -> {
                             assertThat(type).isEqualTo(result.entry().type());
+                            assertThat(baseId).isEqualTo(result.entry().baseId());
                             assertThat(size).isEqualTo(instructions.length);
                             return readAll(source);
                         }))).containsExactly(instructions);
@@ -134,9 +135,9 @@ class PackUploadTest {
             int available = attempt.source.available();
             byte[] retained = attempt.store.bytes();
             assertThat(upload.readObject(12, new HashedGitObjectRead())).isEqualTo(first.value().orElseThrow());
-            assertThat(upload.readObject(12, new RawGitObjectRead<byte[]>((type, size, raw) -> readAll(raw))))
+            assertThat(upload.readObject(12, new RawGitObjectRead<byte[]>((type, size, baseId, raw) -> readAll(raw))))
                     .containsExactly(compressed(content));
-            var contentReader = new ContentGitObjectRead<byte[]>((type, size, data) -> readAll(data));
+            var contentReader = new ContentGitObjectRead<byte[]>((type, size, baseId, data) -> readAll(data));
             assertThat(upload.readObject(12, contentReader)).containsExactly(content);
             assertThat(attempt.source.available()).isEqualTo(available);
             assertThat(attempt.store.bytes()).containsExactly(retained);
@@ -247,7 +248,7 @@ class PackUploadTest {
             var entry = attempt.upload.next().entry();
             attempt.store.channel.write(ByteBuffer.wrap(new byte[]{0}), entry.dataOffset());
             boolean[] closed = {false};
-            assertThatThrownBy(() -> attempt.upload.readObject(12, (type, size, raw) ->
+            assertThatThrownBy(() -> attempt.upload.readObject(12, (type, size, baseId, raw) ->
                     (AutoCloseable) () -> closed[0] = true)).isInstanceOf(IOException.class);
             assertThat(closed[0]).isTrue();
             assertThat(attempt.store.isOpen()).isTrue();

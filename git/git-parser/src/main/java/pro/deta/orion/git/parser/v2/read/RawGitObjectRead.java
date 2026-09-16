@@ -1,10 +1,12 @@
 package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Processes an object's original compressed bytes without decompression, hashing, or delta application.
@@ -21,7 +23,8 @@ public final class RawGitObjectRead<R> implements GitObjectRead<R> {
     }
 
     @Override
-    public R read(ObjectType type, long inflatedSize, BufferedByteInput rawSource) throws IOException {
-        return Objects.requireNonNull(consumer.read(type, inflatedSize, rawSource), "reader result");
+    public R read(ObjectType type, long inflatedSize, Optional<ObjectId> baseId,
+            BufferedByteInput rawSource) throws IOException {
+        return Objects.requireNonNull(consumer.read(type, inflatedSize, baseId, rawSource), "reader result");
     }
 }

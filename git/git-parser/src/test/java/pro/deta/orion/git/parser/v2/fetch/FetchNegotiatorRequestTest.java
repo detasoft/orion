@@ -3,6 +3,8 @@ package pro.deta.orion.git.parser.v2.fetch;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.InMemoryGitStorage;
+import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.GitReader;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.GitWriter;
@@ -202,12 +204,43 @@ class FetchNegotiatorRequestTest {
     }
 
     @Test
+    void missingWantsFailBeforeAcknowledgingHavesInEveryWireVersion() throws Exception {
+        for (ProtocolVersion version : ProtocolVersion.values()) {
+            boolean v2 = version == ProtocolVersion.V2;
+            String wire = packet("want " + WANT) + (v2 ? "" : "0000")
+                    + packet("have " + HAVE) + packet("done") + (v2 ? "0000" : "") + "NEXT";
+            try (var input = input(wire)) {
+                var bytes = new ByteArrayOutputStream();
+                var reader = new GitReader(input);
+                var negotiator = new FetchNegotiator(reader,
+                        new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
+                var storage = new InMemoryGitStorage();
+                var command = new FetchCommand(storage.api, Set.of());
+
+                assertThatThrownBy(() -> command.negotiate(negotiator, HTTP))
+                        .isInstanceOf(IOException.class).hasMessageContaining(WANT);
+                assertThat(storage.lookups).containsExactly(new ObjectId(WANT));
+
+                assertThat(bytes.size()).isZero();
+                if (v2) {
+                    assertThat(input.readUnsignedByte()).isEqualTo('N');
+                } else {
+                    assertThat(FetchNegotiator.readNegotiationMessage(reader))
+                            .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                }
+            }
+        }
+    }
+
+    @Test
     void commandPassesAdvertisedFeaturesIntoTheParsedRequestContext() throws Exception {
         try (var input = input(packet("want " + WANT) + packet("wait-for-done") + packet("done") + "0000")) {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
                     new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
-            var command = new FetchCommand(new GitStorageApi(), Set.of(GitCapability.WAIT_FOR_DONE));
+            var storage = new InMemoryGitStorage();
+            storage.put(new ObjectId(WANT), ObjectType.BLOB, java.util.Optional.empty(), new byte[]{42});
+            var command = new FetchCommand(storage.api, Set.of(GitCapability.WAIT_FOR_DONE));
             NegotiationContext context = command.negotiate(negotiator, HTTP);
             assertThat(context.request().waitForDone()).isTrue();
             assertThat(context.doneReceived()).isTrue();

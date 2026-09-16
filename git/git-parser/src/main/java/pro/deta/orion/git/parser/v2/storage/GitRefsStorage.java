@@ -1,5 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+
 /**
  * Implements ref reads and conditional updates internally behind GitStorageApi.
  * Callers outside this package access these operations only through GitStorageApi.
@@ -17,5 +19,8 @@ package pro.deta.orion.git.parser.v2.storage;
  * Previously published packs remain stored if ref updates fail. Non-atomic commands may succeed independently.
  * Access and ancestry checks belong to the calling operation. Crash durability is a separate backend guarantee.
  */
-final class GitRefsStorage {
+class GitRefsStorage {
+    RefsSnapshot snapshot() {
+        throw new UnsupportedOperationException("Ref snapshots are not implemented");
+    }
 }

@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Optional;
 
 /**
  * Processes a full object's inflated bytes into its canonical ObjectId without retaining its content.
@@ -20,7 +21,8 @@ import java.security.NoSuchAlgorithmException;
  */
 public final class HashedGitObjectRead extends CompressedGitObjectRead<ObjectId> {
     @Override
-    protected ObjectId readDecompressed(ObjectType type, long size, BufferedByteInput content)
+    protected ObjectId readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+            BufferedByteInput content)
             throws IOException {
         String name = switch (type) {
             case COMMIT -> "commit";

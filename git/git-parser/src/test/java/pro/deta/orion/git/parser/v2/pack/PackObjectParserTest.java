@@ -15,6 +15,7 @@ import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Optional;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
@@ -69,9 +70,11 @@ class PackObjectParserTest {
             byte[] entry = join(header(type, instructions.length), base, compressed(instructions));
             try (var source = input(join(entry, new byte[]{42})); var store = new ByteStore()) {
                 var result = PackObjectParser.parseEntry(source, 312, store,
-                        new ContentGitObjectRead<>((physicalType, size, content) -> {
+                        new ContentGitObjectRead<>((physicalType, size, reference, content) -> {
                             assertThat(physicalType).isEqualTo(type);
                             assertThat(size).isEqualTo(instructions.length);
+                            assertThat(reference).isEqualTo(type == ObjectType.REF_DELTA
+                                    ? Optional.of(baseId) : Optional.empty());
                             return readAll(content);
                         }));
                 assertThat(result.value()).containsExactly(instructions);
@@ -97,7 +100,7 @@ class PackObjectParserTest {
         byte[] entry = join(header(ObjectType.BLOB, content.length), zlib);
         try (var source = input(join(entry, new byte[]{42})); var store = new ByteStore()) {
             var result = PackObjectParser.parseEntry(source, 12, store,
-                    new RawGitObjectRead<>((type, size, raw) -> readAll(raw)));
+                    new RawGitObjectRead<>((type, size, baseId, raw) -> readAll(raw)));
             assertThat(result.value()).containsExactly(zlib);
             assertThat(result.entry().inflatedSize()).isEqualTo(content.length);
             assertThat(result.entry().dataOffset())
@@ -197,7 +200,7 @@ class PackObjectParserTest {
         };
         try (var source = input(entry); var store = new ByteStore()) {
             assertThatThrownBy(() -> PackObjectParser.parseEntry(source, 12, store,
-                    (type, size, raw) -> resource)).isInstanceOf(IOException.class)
+                    (type, size, baseId, raw) -> resource)).isInstanceOf(IOException.class)
                     .satisfies(error -> assertThat(error.getSuppressed()).hasSize(1));
             assertThat(closed[0]).isTrue();
         }
@@ -220,7 +223,7 @@ class PackObjectParserTest {
         int[] closed = {0};
         AutoCloseable resource = () -> closed[0]++;
         try (var source = input(entry); var store = new ByteStore()) {
-            assertThatThrownBy(() -> PackObjectParser.parseEntry(source, 12, store, (type, size, raw) -> {
+            assertThatThrownBy(() -> PackObjectParser.parseEntry(source, 12, store, (type, size, baseId, raw) -> {
                 readAll(raw);
                 store.failWrites = true;
                 return resource;

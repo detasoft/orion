@@ -96,7 +96,7 @@ public final class PackObjectParser {
         R value = null;
         try (var zlib = new ZlibBoundaryInputStream(input, size)) {
             var raw = new InputStreamBufferedByteInput(zlib);
-            value = Objects.requireNonNull(reader.read(type, size, raw), "reader result");
+            value = Objects.requireNonNull(reader.read(type, size, baseId, raw), "reader result");
             byte[] discard = new byte[8192];
             while (zlib.read(discard) != -1) {
                 // Finish validating and retaining the caller's unread payload.

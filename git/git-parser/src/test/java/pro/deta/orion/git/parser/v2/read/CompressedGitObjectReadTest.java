@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.Optional;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 
@@ -29,14 +30,14 @@ class CompressedGitObjectReadTest {
         byte[] zlib = compressed(content);
         boolean[] closed = {false};
         AutoCloseable resource = () -> closed[0] = true;
-        var reader = new ContentGitObjectRead<>((type, size, input) -> {
+        var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
             assertThat(type).isEqualTo(ObjectType.BLOB);
             assertThat(size).isEqualTo(content.length);
             assertThat(input.readUnsignedByte()).isEqualTo(42);
             return resource;
         });
         try (var source = new BorrowedSource(zlib)) {
-            assertThat(reader.read(ObjectType.BLOB, content.length, source)).isSameAs(resource);
+            assertThat(reader.read(ObjectType.BLOB, content.length, Optional.empty(), source)).isSameAs(resource);
             assertThat(source.closed).isFalse();
             assertThat(source.available()).isZero();
             assertThat(closed[0]).isFalse();
@@ -50,12 +51,12 @@ class CompressedGitObjectReadTest {
         corrupt[corrupt.length - 1] ^= 1;
         for (byte[] bytes : new byte[][]{zlib, Arrays.copyOf(zlib, zlib.length - 1), corrupt}) {
             boolean[] closed = {false};
-            var reader = new ContentGitObjectRead<>((type, size, input) -> (AutoCloseable) () -> {
+            var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> (AutoCloseable) () -> {
                 closed[0] = true;
                 throw new IOException("cleanup failure");
             });
             try (var source = new BorrowedSource(bytes)) {
-                assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 4, source))
+                assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 4, Optional.empty(), source))
                         .isInstanceOf(IOException.class)
                         .satisfies(error -> assertThat(error.getSuppressed()).hasSize(1));
                 assertThat(closed[0]).isTrue();
@@ -67,12 +68,12 @@ class CompressedGitObjectReadTest {
     @Test
     void rejectsExcessInflatedDataAndBytesAfterTheBoundedZlibStream() throws Exception {
         byte[] zlib = compressed(new byte[]{1, 2, 3});
-        var reader = new ContentGitObjectRead<>((type, size, input) -> Boolean.TRUE);
+        var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> Boolean.TRUE);
         try (var source = new BorrowedSource(zlib)) {
-            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 2, source)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 2, Optional.empty(), source)).isInstanceOf(IOException.class);
         }
         try (var source = new BorrowedSource(Arrays.copyOf(zlib, zlib.length + 1))) {
-            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 3, source)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 3, Optional.empty(), source)).isInstanceOf(IOException.class);
         }
     }
 
@@ -80,7 +81,7 @@ class CompressedGitObjectReadTest {
     void neverHashesDeltaInstructionsAsObjects() throws Exception {
         for (ObjectType type : new ObjectType[]{ObjectType.OFS_DELTA, ObjectType.REF_DELTA}) {
             try (var source = new BorrowedSource(compressed(new byte[]{1, 2, 3}))) {
-                assertThatThrownBy(() -> new HashedGitObjectRead().read(type, 3, source))
+                assertThatThrownBy(() -> new HashedGitObjectRead().read(type, 3, Optional.empty(), source))
                         .isInstanceOf(IOException.class);
             }
         }
@@ -90,7 +91,7 @@ class CompressedGitObjectReadTest {
     void propagatesConsumerFailureAndReusesTheProcessorAfterFailure() throws Exception {
         IOException expected = new IOException("consumer failure");
         int[] calls = {0};
-        var reader = new ContentGitObjectRead<>((type, size, input) -> {
+        var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
             if (calls[0]++ == 0) {
                 throw expected;
             }
@@ -98,8 +99,8 @@ class CompressedGitObjectReadTest {
         });
         try (var first = new BorrowedSource(compressed(new byte[]{42}));
              var second = new BorrowedSource(compressed(new byte[]{43}))) {
-            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 1, first)).isSameAs(expected);
-            assertThat(reader.read(ObjectType.BLOB, 1, second)).isEqualTo(43);
+            assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 1, Optional.empty(), first)).isSameAs(expected);
+            assertThat(reader.read(ObjectType.BLOB, 1, Optional.empty(), second)).isEqualTo(43);
             assertThat(first.closed).isFalse();
             assertThat(second.closed).isFalse();
         }
@@ -113,7 +114,7 @@ class CompressedGitObjectReadTest {
         hash.update(("blob " + content.length + "\0").getBytes(StandardCharsets.US_ASCII));
         try (var source = new BorrowedSource(compressed(content))) {
             source.chunkSize = 3;
-            assertThat(new HashedGitObjectRead().read(ObjectType.BLOB, content.length, source))
+            assertThat(new HashedGitObjectRead().read(ObjectType.BLOB, content.length, Optional.empty(), source))
                     .isEqualTo(new ObjectId(hash.digest(content)));
         }
     }
@@ -128,8 +129,8 @@ class CompressedGitObjectReadTest {
                 compressor.write(new byte[]{1, 2, 3});
             }
             try (var source = new BorrowedSource(output.toByteArray())) {
-                var reader = new ContentGitObjectRead<>((type, size, input) -> Boolean.TRUE);
-                assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 3, source))
+                var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> Boolean.TRUE);
+                assertThatThrownBy(() -> reader.read(ObjectType.BLOB, 3, Optional.empty(), source))
                         .isInstanceOf(IOException.class).hasMessageContaining("dictionary");
             }
         } finally {
@@ -141,7 +142,7 @@ class CompressedGitObjectReadTest {
     void supportsExactReadsAndEmptyReadsAtExhaustion() throws Exception {
         byte[] content = {1, 2, 3};
         try (var source = new BorrowedSource(compressed(content))) {
-            var reader = new ContentGitObjectRead<>((type, size, input) -> {
+            var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
                 ByteBuf bytes = input.readCopy(3, ByteBufAllocator.DEFAULT);
                 try {
                     assertThat(bytes.readUnsignedByte()).isEqualTo((short) 1);
@@ -157,7 +158,7 @@ class CompressedGitObjectReadTest {
                 }
                 return Boolean.TRUE;
             });
-            assertThat(reader.read(ObjectType.BLOB, 3, source)).isTrue();
+            assertThat(reader.read(ObjectType.BLOB, 3, Optional.empty(), source)).isTrue();
         }
     }
 
