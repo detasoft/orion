@@ -136,6 +136,7 @@ class FetchNegotiatorRequestTest {
     @Test
     void rejectsMalformedIdsTextAndUnknownArguments() throws Exception {
         for (String argument : new String[]{"want invalid", "have " + HAVE + " ", "future-option", "multi_ack", "atomic",
+                "want  " + WANT, "want=" + WANT, "thin-pack extra", "thin-pack ", "done extra", "done ",
                 "want-ref refs/heads/.hidden", "want-ref refs/heads/main.lock", "have " + HAVE + "\nextra"}) {
             assertInvalidV2(packet(argument));
         }

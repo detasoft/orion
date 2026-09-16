@@ -26,7 +26,8 @@ import java.util.OptionalLong;
  * None of these methods consumes another request or closes the borrowed BufferedByteInput.
  *
  * <p>Version is supplied by bootstrap, not inferred from wants. Parsing uses GitReader and the existing
- * pkt-line decoder. It accepts an optional trailing LF, validates IDs and argument combinations, preserves
+ * pkt-line decoder; NegotiationCapability extracts argument names and values. Parsing accepts an optional
+ * trailing LF, validates IDs and argument combinations, preserves
  * pack options, and reports malformed/truncated requests as IOException. Legacy's empty initial flush is
  * an orderly no-fetch request. V2 requires at least one want or want-ref. Unknown v2 arguments are rejected.
  * Capability advertisement, object access, ref resolution, and filter execution belong to FetchCommand;
@@ -42,12 +43,6 @@ import java.util.OptionalLong;
  * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
  */
 public final class FetchNegotiator {
-    private static final GitCapability[] V2_FLAGS = {
-            GitCapability.THIN_PACK, GitCapability.OFS_DELTA, GitCapability.INCLUDE_TAG,
-            GitCapability.NO_PROGRESS, GitCapability.WAIT_FOR_DONE, GitCapability.SIDEBAND_ALL,
-            GitCapability.DEEPEN_RELATIVE
-    };
-
     private final GitReader input;
     private final GitWriter output;
     private final ProtocolVersion version;
@@ -99,19 +94,12 @@ public final class FetchNegotiator {
             case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                     throw invalid("Expected a data packet");
             case GitPktLine.Data data -> {
-                String line = data.text();
-                if (line.equals(GitCapability.DONE.wireName())) {
-                    yield NegotiationMessage.Control.DONE;
-                }
-                if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
-                    try {
-                        yield new NegotiationMessage.Have(
-                                new ObjectId(line.substring(GitCapability.HAVE.wireName().length() + 1)));
-                    } catch (IllegalArgumentException error) {
-                        throw new IOException("Invalid have object ID", error);
-                    }
-                }
-                throw new IOException("Unexpected negotiation message: " + line);
+                NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
+                yield switch (argument.cap()) {
+                    case DONE -> NegotiationMessage.Control.DONE;
+                    case HAVE -> new NegotiationMessage.Have(objectId(argument.value()));
+                    default -> throw invalid("Unexpected negotiation message: " + argument.cap().wireName());
+                };
             }
         };
     }
@@ -133,53 +121,40 @@ public final class FetchNegotiator {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    String line = data.text();
-                    if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
-                        request.wants().add(objectId(line.substring(GitCapability.WANT.wireName().length() + 1)));
-                    } else if (line.startsWith(GitCapability.HAVE.wireName() + " ")) {
-                        request.initialMessages().add(new NegotiationMessage.Have(
-                                objectId(line.substring(GitCapability.HAVE.wireName().length() + 1))));
-                    } else if (line.equals(GitCapability.DONE.wireName())) {
-                        if (request.initialMessages().contains(NegotiationMessage.Control.DONE)) {
-                            throw invalid("Duplicate done");
-                        }
-                        request.initialMessages().add(NegotiationMessage.Control.DONE);
-                    } else if (line.startsWith(GitCapability.WANT_REF.wireName() + " ")) {
-                        String ref = token(line.substring(GitCapability.WANT_REF.wireName().length() + 1));
-                        validateWantedRef(ref);
-                        request.wantRefs().add(ref);
-                    } else if (line.startsWith(GitCapability.PACKFILE_URIS.wireName() + " ")) {
-                        if (!request.packfileUriProtocols().isEmpty()) {
-                            throw invalid("Duplicate packfile-uris");
-                        }
-                        String protocols = line.substring(GitCapability.PACKFILE_URIS.wireName().length() + 1);
-                        for (String protocol : protocols.split(",", -1)) {
-                            if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
-                                throw invalid("Invalid packfile URI protocol");
+                    NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
+                    switch (argument.cap()) {
+                        case WANT -> request.wants().add(objectId(argument.value()));
+                        case HAVE -> request.initialMessages().add(
+                                new NegotiationMessage.Have(objectId(argument.value())));
+                        case DONE -> {
+                            if (request.initialMessages().contains(NegotiationMessage.Control.DONE)) {
+                                throw invalid("Duplicate done");
                             }
-                            request.packfileUriProtocols().add(protocol);
+                            request.initialMessages().add(NegotiationMessage.Control.DONE);
                         }
-                    } else if (isV2Flag(line)) {
-                        request.capabilities().add(GitCapability.parse(line, GitObjectFormat.SHA1));
-                    } else {
-                        acceptShared(request, line);
+                        case WANT_REF -> {
+                            String ref = token(argument.value());
+                            validateWantedRef(ref);
+                            request.wantRefs().add(ref);
+                        }
+                        case PACKFILE_URIS -> {
+                            if (!request.packfileUriProtocols().isEmpty()) {
+                                throw invalid("Duplicate packfile-uris");
+                            }
+                            for (String protocol : argument.value().split(",", -1)) {
+                                if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
+                                    throw invalid("Invalid packfile URI protocol");
+                                }
+                                request.packfileUriProtocols().add(protocol);
+                            }
+                        }
+                        case THIN_PACK, OFS_DELTA, INCLUDE_TAG, NO_PROGRESS, WAIT_FOR_DONE,
+                             SIDEBAND_ALL, DEEPEN_RELATIVE -> request.capabilities().add(argument.cap().entry());
+                        default -> acceptShared(request, argument);
                     }
                 }
             }
         }
-    }
-
-    private static boolean isV2Flag(String name) {
-        GitCapability capability = GitCapability.fromWireName(name).orElse(null);
-        if (capability == null) {
-            return false;
-        }
-        for (GitCapability allowed : V2_FLAGS) {
-            if (capability == allowed) {
-                return true;
-            }
-        }
-        return false;
     }
 
     public static FetchRequest parseLegacyRequest(GitReader reader) throws IOException {
@@ -204,13 +179,13 @@ public final class FetchNegotiator {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    String line = data.text();
+                    NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
                     receivedLine = true;
-                    if (line.startsWith(GitCapability.WANT.wireName() + " ")) {
+                    if (argument.cap() == GitCapability.WANT) {
                         if (wantsEnded) {
                             throw invalid("Want after legacy request options");
                         }
-                        String[] values = line.substring(GitCapability.WANT.wireName().length() + 1).split(" ", -1);
+                        String[] values = argument.value().split(" ", -1);
                         boolean firstWant = request.wants().isEmpty();
                         if (!firstWant && values.length != 1) {
                             throw invalid("Capabilities are only allowed on the first want");
@@ -224,7 +199,7 @@ public final class FetchNegotiator {
                             throw invalid("Legacy request must start with want");
                         }
                         wantsEnded = true;
-                        acceptShared(request, line);
+                        acceptShared(request, argument);
                     }
                 }
             }
@@ -283,18 +258,9 @@ public final class FetchNegotiator {
         return new IOException(message);
     }
 
-    private static void acceptShared(FetchRequest request, String line) throws IOException {
-        int separator = line.indexOf(' ');
-        String name = separator < 0 ? line : line.substring(0, separator);
-        if (separator < 0) {
-            throw invalid("Unsupported fetch argument: " + line);
-        }
-        String value = line.substring(separator + 1);
-        GitCapability capability = GitCapability.fromWireName(name).orElse(null);
-        if (capability == null) {
-            throw invalid("Unsupported fetch argument: " + line);
-        }
-        switch (capability) {
+    private static void acceptShared(FetchRequest request, NegotiationCapabilityValue argument) throws IOException {
+        String value = argument.value();
+        switch (argument.cap()) {
             case SHALLOW -> request.shallowCommits().add(objectId(value));
             case DEEPEN -> {
                 if (request.depth().isPresent()) {
@@ -319,7 +285,7 @@ public final class FetchNegotiator {
                 }
                 request.setFilter(Optional.of(token(value)));
             }
-            default -> throw invalid("Unsupported fetch argument: " + line);
+            default -> throw invalid("Unsupported fetch argument: " + argument.cap().wireName());
         }
     }
 
