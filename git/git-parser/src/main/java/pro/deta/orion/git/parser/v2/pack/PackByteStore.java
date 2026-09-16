@@ -28,7 +28,7 @@ import java.nio.channels.WritableByteChannel;
  * close is idempotent and releases the backing channel; it does not delete or publish the pack. Reads and
  * writes after close fail with ClosedChannelException. The upload owns close and staging-file cleanup;
  * the parser and content handles borrow this store and never close it. Handles are closed before the owning
- * upload releases the store. This is a contract; no accumulator implementation exists yet.
+ * upload releases the store. The file backend is internal to the storage package.
  */
 public interface PackByteStore extends WritableByteChannel {
     @Override

@@ -58,7 +58,7 @@ import java.util.Optional;
  * between the pack and this already populated index. Temporary waiting structures may then be discarded.
  * Rollback discards only this attempt's unpublished resources. Methods are sequential; mutations after commit
  * fail with IllegalStateException and access after rollback with ClosedChannelException. I/O errors propagate
- * as IOException, never absence or false. This is a contract only; no index backend is implemented here.
+ * as IOException, never absence or false. The disk backend and its finalization remain internal to storage.
  */
 public interface PackIndex {
     void addEntry(PackObjectParser.Entry entry) throws IOException;
