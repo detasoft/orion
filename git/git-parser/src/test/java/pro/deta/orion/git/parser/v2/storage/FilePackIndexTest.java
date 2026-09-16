@@ -35,7 +35,7 @@ class FilePackIndexTest {
         Path path = directory.resolve("incoming.index");
         var first = full(12);
         var duplicate = full(64);
-        try (var index = FilePackIndex.create(path)) {
+        try (var index = create(path)) {
             assertThat(index.hasUnresolved()).isFalse();
             assertThat(index.find(12)).isEmpty();
             assertThat(index.find(id(1))).isEmpty();
@@ -54,17 +54,16 @@ class FilePackIndexTest {
             assertThat(index.find(64)).contains(duplicate);
             index.finish();
         }
-        try (var index = FilePackIndex.open(path)) {
+        try (var index = StoredPackIndex.open(path)) {
             assertThat(index.find(12)).contains(first);
             assertThat(index.find(64)).contains(duplicate);
             assertThat(index.find(id(1))).contains(first);
-            assertThat(index.hasUnresolved()).isFalse();
         }
     }
 
     @Test
     void walksWaitingBranchesAndChainsOneDependentAtATime() throws Exception {
-        try (var index = FilePackIndex.create(directory.resolve("incoming.index"))) {
+        try (var index = create(directory.resolve("incoming.index"))) {
             var base = full(12);
             var byId = ref(64, id(1));
             var byOffset = ofs(128, 12);
@@ -85,50 +84,47 @@ class FilePackIndexTest {
             assertThat(index.waitingFor(id(2), 64)).isEmpty();
             assertThat(index.hasUnresolved()).isFalse();
             index.finish();
-            assertThat(index.externalBaseIds()).isEmpty();
         }
     }
 
     @Test
-    void classifiesExternalBasesOnlyAfterLateInternalObjectsHaveBeenResolved() throws Exception {
-        Path path = directory.resolve("incoming.index");
+    void suppliesMissingBasesOneAtATimeAndRequiresTheirRegistrationBeforeFinalization() throws Exception {
+        Path path = directory.resolve("incoming.mv");
         var lateInternal = full(256);
-        try (var index = FilePackIndex.create(path)) {
-            var first = ref(12, id(10));
-            var second = ref(64, id(20));
-            var sameExternal = ref(128, id(20));
-            for (var entry : List.of(first, second, sameExternal)) {
+        var appendedBase = full(320);
+        try (var index = create(path)) {
+            for (var entry : List.of(ref(12, id(10)), ref(64, id(20)), ref(128, id(20)))) {
                 index.addEntry(entry);
                 index.addObject(entry, id((int) entry.offset()), ObjectType.BLOB, 99);
             }
-            assertThatThrownBy(index::externalBaseIds).isInstanceOf(IllegalStateException.class);
             index.addEntry(lateInternal);
             index.addObject(lateInternal, id(10), ObjectType.BLOB, 3);
+            assertThat(index.nextExternalBase()).contains(id(20));
+            assertThat(index.nextExternalBase()).contains(id(20));
+            assertThatThrownBy(index::finish).isInstanceOf(IOException.class).hasMessageContaining("external");
+            index.addEntry(appendedBase);
+            index.addObject(appendedBase, id(20), ObjectType.BLOB, 3);
+            assertThat(index.nextExternalBase()).isEmpty();
             index.finish();
-            assertThat(index.externalBaseIds()).containsExactly(id(20));
-            assertThatThrownBy(() -> index.externalBaseIds().add(id(30)))
-                    .isInstanceOf(UnsupportedOperationException.class);
         }
-        try (var index = FilePackIndex.open(path)) {
-            assertThat(index.externalBaseIds()).containsExactly(id(20));
+        try (var index = StoredPackIndex.open(path)) {
             assertThat(index.find(id(10))).contains(lateInternal);
-            assertThat(index.find(12).orElseThrow().baseId()).contains(id(10));
+            assertThat(index.find(id(20))).contains(appendedBase);
             assertThat(index.find(64).orElseThrow().baseId()).contains(id(20));
         }
     }
 
     @Test
     void refusesToFinalizeCyclesWithoutEvidenceOfWhichExternalBaseBreaksThem() throws Exception {
-        try (var index = FilePackIndex.create(directory.resolve("self.index"))) {
+        try (var index = create(directory.resolve("self.index"))) {
             var self = ref(12, id(1));
             index.addEntry(self);
             index.addObject(self, id(1), ObjectType.BLOB, 3);
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class).hasMessageContaining("cycle");
-            assertThatThrownBy(index::externalBaseIds).isInstanceOf(IllegalStateException.class);
             assertThat(index.hasUnresolved()).isFalse();
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class).hasMessageContaining("cycle");
         }
-        try (var index = FilePackIndex.create(directory.resolve("mixed.index"))) {
+        try (var index = create(directory.resolve("mixed.index"))) {
             var first = ref(12, id(2));
             var second = ofs(64, 12);
             index.addEntry(first);
@@ -136,31 +132,28 @@ class FilePackIndexTest {
             index.addEntry(second);
             index.addObject(second, id(2), ObjectType.BLOB, 3);
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class).hasMessageContaining("cycle");
-            assertThatThrownBy(index::externalBaseIds).isInstanceOf(IllegalStateException.class);
         }
     }
 
     @Test
     void finalizesDeepForwardChainsWithoutAnInMemoryTraversalStack() throws Exception {
         Path path = directory.resolve("deep.index");
-        try (var index = FilePackIndex.create(path)) {
+        try (var index = create(path)) {
             for (int i = 1; i <= 2000; i++) {
                 var entry = i == 2000 ? full(12L + 64L * i) : ref(12L + 64L * i, id(i + 1));
                 index.addEntry(entry);
                 index.addObject(entry, id(i), ObjectType.BLOB, 3);
             }
             index.finish();
-            assertThat(index.externalBaseIds()).isEmpty();
         }
-        try (var index = FilePackIndex.open(path)) {
+        try (var index = StoredPackIndex.open(path)) {
             assertThat(index.find(id(1))).contains(ref(76, id(2)));
-            assertThat(index.externalBaseIds()).isEmpty();
         }
     }
 
     @Test
     void rejectsConflictingCompletionWithoutRemovingTheWaitingDependency() throws Exception {
-        try (var index = FilePackIndex.create(directory.resolve("incoming.index"))) {
+        try (var index = create(directory.resolve("incoming.index"))) {
             var base = full(12);
             var delta = ref(64, id(1));
             index.addEntry(base);
@@ -185,7 +178,7 @@ class FilePackIndexTest {
 
     @Test
     void rejectsMalformedMetadataAndFullObjectCompletionWithDifferentTypeOrSize() throws Exception {
-        try (var index = FilePackIndex.create(directory.resolve("incoming.index"))) {
+        try (var index = create(directory.resolve("incoming.index"))) {
             for (var invalid : List.of(new PackObjectParser.Entry(12, 12, 3, ObjectType.BLOB,
                             OptionalLong.empty(), Optional.empty()),
                     new PackObjectParser.Entry(12, 13, -1, ObjectType.BLOB,
@@ -216,10 +209,9 @@ class FilePackIndexTest {
     void cannotFinalizeUnresolvedStateAndFreezesAllMutationsAfterSuccessfulFinalization() throws Exception {
         Path path = directory.resolve("incoming.index");
         var entry = full(12);
-        try (var index = FilePackIndex.create(path)) {
+        try (var index = create(path)) {
             index.addEntry(entry);
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class);
-            assertThatThrownBy(index::externalBaseIds).isInstanceOf(IllegalStateException.class);
             index.addObject(entry, id(1), ObjectType.BLOB, 3);
             index.finish();
             index.finish();
@@ -227,7 +219,7 @@ class FilePackIndexTest {
             assertThatThrownBy(() -> index.addObject(entry, id(1), ObjectType.BLOB, 3))
                     .isInstanceOf(IllegalStateException.class);
         }
-        try (var index = FilePackIndex.open(path)) {
+        try (var index = StoredPackIndex.open(path)) {
             assertThatThrownBy(() -> index.addEntry(full(64))).isInstanceOf(IllegalStateException.class);
             assertThat(index.find(id(1))).contains(entry);
         }
@@ -236,7 +228,7 @@ class FilePackIndexTest {
     @Test
     void closesIdempotentlyWithoutDeletingTheIndex() throws Exception {
         Path path = directory.resolve("incoming.index");
-        var index = FilePackIndex.create(path);
+        var index = create(path);
         index.finish();
         index.close();
         index.close();
@@ -244,36 +236,34 @@ class FilePackIndexTest {
         assertThatThrownBy(() -> index.find(id(1))).isInstanceOf(ClosedChannelException.class);
         assertThatThrownBy(() -> index.waitingFor(id(1), 12)).isInstanceOf(ClosedChannelException.class);
         assertThatThrownBy(index::hasUnresolved).isInstanceOf(ClosedChannelException.class);
-        assertThatThrownBy(index::externalBaseIds).isInstanceOf(ClosedChannelException.class);
+        assertThatThrownBy(index::nextExternalBase).isInstanceOf(ClosedChannelException.class);
         assertThatThrownBy(index::finish).isInstanceOf(ClosedChannelException.class);
         assertThat(Files.size(path)).isPositive();
-        try (var reopened = FilePackIndex.open(path)) {
-            assertThat(reopened.hasUnresolved()).isFalse();
-            assertThat(reopened.externalBaseIds()).isEmpty();
+        try (var reopened = StoredPackIndex.open(path)) {
+            assertThat(reopened.find(id(1))).isEmpty();
         }
     }
 
     @Test
-    void refusesExistingCreationTargetsAndMissingCorruptOrUnfinishedIndexes() throws Exception {
+    void refusesExistingCreationTargetsAndMissingOrCorruptIndexes() throws Exception {
         Path path = directory.resolve("incoming.index");
-        assertThatThrownBy(() -> FilePackIndex.open(path)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> StoredPackIndex.open(path)).isInstanceOf(IOException.class);
         assertThat(Files.exists(path)).isFalse();
-        try (var index = FilePackIndex.create(path)) {
+        try (var index = create(path)) {
             index.addEntry(full(12));
-            assertThatThrownBy(() -> FilePackIndex.create(path)).isInstanceOf(FileAlreadyExistsException.class);
+            assertThatThrownBy(() -> create(path)).isInstanceOf(FileAlreadyExistsException.class);
             assertThat(index.find(12)).contains(full(12));
         }
-        assertThatThrownBy(() -> FilePackIndex.open(path)).isInstanceOf(IOException.class);
         Path corrupt = directory.resolve("corrupt.index");
         Files.write(corrupt, new byte[]{1, 2, 3, 4});
-        assertThatThrownBy(() -> FilePackIndex.open(corrupt)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> StoredPackIndex.open(corrupt)).isInstanceOf(IOException.class);
     }
 
     @Test
     void persistsIndexedLookupsForManyRecordsAndKeepsDifferentAttemptsIsolated() throws Exception {
         Path first = directory.resolve("first.index");
         Path second = directory.resolve("second.index");
-        try (var index = FilePackIndex.create(first); var other = FilePackIndex.create(second)) {
+        try (var index = create(first); var other = create(second)) {
             for (int i = 1; i <= 1000; i++) {
                 var entry = full(12L + 64L * i);
                 index.addEntry(entry);
@@ -283,13 +273,12 @@ class FilePackIndexTest {
             index.finish();
             other.finish();
         }
-        try (var index = FilePackIndex.open(first)) {
+        try (var index = StoredPackIndex.open(first)) {
             for (int i : new int[]{1, 500, 1000}) {
                 assertThat(index.find(id(i))).contains(full(12L + 64L * i));
                 assertThat(index.find(12L + 64L * i)).contains(full(12L + 64L * i));
             }
             assertThat(index.find(id(1001))).isEmpty();
-            assertThat(index.waitingFor(id(500), 12L + 64L * 500)).isEmpty();
         }
     }
 
@@ -301,7 +290,7 @@ class FilePackIndexTest {
         ObjectId objectId;
         try (var source = new InputStreamBufferedByteInput(new ByteArrayInputStream(pack));
              var bytes = new FilePackByteStore(packPath);
-             var index = FilePackIndex.create(indexPath)) {
+             var index = create(indexPath)) {
             var upload = new PackUpload(new GitStorageApi(), source, bytes, index);
             var result = upload.next();
             objectId = result.value().orElseThrow();
@@ -311,12 +300,15 @@ class FilePackIndexTest {
             bytes.force();
             index.finish();
         }
-        try (var index = FilePackIndex.open(indexPath)) {
+        try (var index = StoredPackIndex.open(indexPath)) {
             assertThat(index.find(objectId)).contains(new PackObjectParser.Entry(12, 13, 3, ObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty()));
-            assertThat(index.externalBaseIds()).isEmpty();
             assertThat(Files.readAllBytes(packPath)).containsExactly(pack);
         }
+    }
+
+    private static FilePackIndex create(Path path) throws IOException {
+        return FilePackIndex.create(path, path.resolveSibling(path.getFileName() + ".tmv"));
     }
 
     private static PackObjectParser.Entry full(long offset) {

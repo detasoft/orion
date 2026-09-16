@@ -31,7 +31,7 @@ import java.util.Optional;
  * Resolution completes records through upload.index(). Storage controls placement of index records and waiting
  * chains; the API requires neither whole-index memory storage nor paths, files, or a final bulk transfer.
  * commit checks index.hasUnresolved, completes pending writes, and durably attaches pack to the existing index.
- * The index itself builds its externalBaseIds list during commit from the completed records and base links.
+ * The index identifies missing bases for completion of a self-contained pack before publication.
  * Storage never calls back into the resolver. commit and rollback belong to upload and never close source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
@@ -45,8 +45,8 @@ import java.util.Optional;
  * including any independently owned resources. Absence is Optional.empty() and does not invoke reader;
  * I/O and processing failures remain errors. Returning early must still respect and validate payload bounds.
  * exists uses PresenceGitObjectRead to check presence without decoding content; read failures still propagate.
- * Published objects and external bases must remain readable after ingestion closes. Dependencies are stored
- * as externalBaseIds; storage locates their backing objects without persisted externalPackIds.
+ * Missing bases are appended before publication, updating the pack header and checksum to its final PackId.
+ * Published packs retain no external-base dependency list and remain readable after ingestion closes.
  * Ref-update failures do not undo pack publication.
  *
  * <p>Preliminary methods:
@@ -99,11 +99,11 @@ public final class GitStorageApi {
     }
 
     /**
-     * Planned lookup of published packs containing each requested object, including external delta bases.
+     * Planned lookup of published packs containing each requested object.
      * Returns object IDs mapped to lists of containing pack IDs; an object can occur in multiple packs.
      * Objects absent from published packs are omitted, but may still exist as loose objects.
      * Index read failures must be reported as errors, not treated as absent objects. Results are derived
-     * from storage and do not introduce persisted externalPackIds in pack manifests.
+     * from published per-pack indexes; a shared lookup index is not required.
      *
      * @param objectIds object IDs to locate, not pack IDs
      * @return containing pack IDs grouped by object ID

@@ -26,8 +26,8 @@ import java.util.Objects;
  * the ingestor neither scans all unresolved entries after each object nor manages chain removal.
  * Missing bases are deferred dependencies, not yet evidence of an invalid pack. After hasNext returns false, obtain
  * upload.packId() and call upload.commit(packId). Commit itself checks index.hasUnresolved and rejects unfinished
- * chains. The index itself builds its externalBaseIds list during commit; this ingestor neither collects
- * that list nor reports external bases. Failed parsing or resolution must not lead to commit.
+ * chains. The index supplies missing bases one at a time for pack completion before publication;
+ * this ingestor keeps no external-base collection. Failed parsing or resolution must not lead to commit.
  *
  * <p>The constructor borrows one upload and creates the resolver owned by this ingestor. resolvePack()
  * iterates parsed results, delegates resolution, and requests upload commit.

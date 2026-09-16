@@ -486,8 +486,8 @@ class PackUploadTest {
         }
 
         @Override
-        public List<ObjectId> externalBaseIds() {
-            throw new IllegalStateException("Index is not finalized");
+        public Optional<ObjectId> nextExternalBase() {
+            throw new UnsupportedOperationException("Pack completion is outside this test fixture");
         }
     }
 }

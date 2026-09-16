@@ -26,8 +26,8 @@ import java.util.Optional;
  * indexed offset and repeat decompression and any required delta reconstruction, even if it was restored
  * earlier in the same attemptResolve call. Dependency metadata remains indexed, but no reference counts or
  * future-use analysis retain restored payloads. Keep bytes needed by an active reconstruction or open handle
- * alive until that use ends. Publish the original pack as-is with its index and external-base metadata;
- * do not separately persist restored object content. A future optional byte-bounded LRU in PackIndex may
+ * alive until that use ends. Publication completes thin packs by appending missing bases; restored delta content
+ * is not separately persisted. A future optional byte-bounded LRU in PackIndex may
  * retain bases after observed use, as a reuse heuristic; misses still follow this reread path. This cache
  * is not implemented or required by the current resolution contract.
  *
@@ -54,7 +54,7 @@ import java.util.Optional;
  * that the base must be recorded as external; final classification accounts for the completed upload index.
  * Returned handles retain the resources needed to read their content until closed. Callers close those
  * handles before closing this resolver. The ingestor supplies newly encountered entries; the index determines
- * its externalBaseIds list during commit. Neither resolver nor ingestor separately records external bases.
+ * missing bases for pack completion. Neither resolver nor ingestor keeps a separate external-base list.
  * This class owns neither retained pending state nor commit or rollback.
  *
  * <p>Preliminary methods: attemptResolve(result) resolves an entry and unblocked chains; getObject(objectId)
