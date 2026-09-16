@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.GitTransport;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -17,8 +18,12 @@ import java.util.Objects;
  *
  * <p>Legacy SINGLE_ACK acknowledges only the first common object; multi-ACK modes acknowledge individual
  * haves and finish rounds with NAK. Readiness replies for unknown haves never make those IDs common.
- * Detailed readiness does not replace DONE unless stateless HTTP negotiated no-done. Stateless legacy ends
- * at END_ROUND even when no pack can yet be sent; stateful legacy retains common objects across rounds.
+ * Detailed readiness does not replace DONE unless HTTP negotiated no-done. Legacy HTTP ends
+ * at END_ROUND even when no pack can yet be sent; legacy SSH retains common objects across rounds.
+ * GitTransport identifies the transport exchange, not storage access or pack readiness. In legacy HTTP the
+ * next round arrives in a new request; the client carries negotiation state between requests.
+ * finished stops reading this exchange only: next returns false even if ready and doneReceived are false.
+ * In v2 END_ROUND always finishes the command request, on both HTTP and SSH.
  *
  * <p>V2 buffers acknowledgments until END_ROUND, then ends the request. DONE suppresses that entire section
  * but does not skip the request's remaining messages. wait-for-done suppresses early readiness checks and
@@ -27,17 +32,14 @@ import java.util.Objects;
  */
 public final class FetchNegotiatorIterator {
     private final NegotiationContext context;
-    private final boolean stateless;
+    private final GitTransport transport;
     private final List<NegotiationResponse> responsesToSend = new ArrayList<>();
     private boolean finished;
 
-    public FetchNegotiatorIterator(NegotiationContext context, boolean stateless) {
+    public FetchNegotiatorIterator(NegotiationContext context, GitTransport transport) throws IOException {
         this.context = Objects.requireNonNull(context, "context");
-        this.stateless = stateless;
-        if (context.hasRequest(GitCapability.NO_DONE)
-                && (!stateless || context.request().mode() != FetchRequest.Mode.MULTI_ACK_DETAILED)) {
-            throw new IllegalArgumentException("no-done requires stateless multi_ack_detailed negotiation");
-        }
+        this.transport = Objects.requireNonNull(transport, "transport");
+        context.validateCapabilities(transport);
     }
 
     public boolean next(NegotiationMessage message) throws IOException {
@@ -125,7 +127,7 @@ public final class FetchNegotiatorIterator {
         if (context.hasRequest(GitCapability.NO_DONE) && context.ready()) {
             ack(context.lastCommon().orElseThrow(), NegotiationResponse.Status.PLAIN);
         }
-        finished = stateless;
+        finished = transport == GitTransport.HTTP;
     }
 
     private boolean checkReady() throws IOException {

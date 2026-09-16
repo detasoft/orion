@@ -33,12 +33,13 @@ import java.util.OptionalLong;
  * Capability advertisement, object access, ref resolution, and filter execution belong to FetchCommand;
  * parsing does not imply that an extension is enabled or that any requested object exists.
  *
- * <p>negotiate fills the fresh context's request, creates the iterator, writes replies including the terminal batch,
+ * <p>readRequest returns a fresh parsed request without processing negotiation messages or writing replies.
+ * FetchCommand prepares that request before passing its iterator to negotiate, which drives the wire loop
  * and returns the accumulated context. The iterator owns common-object and readiness decisions without parsing bytes.
  * V2 feeds only already parsed initialMessages; legacy reads one message at a time and flushes replies
  * before reading more. An empty legacy request finishes without reading negotiation messages.
  * Input/output are borrowed and never closed here. NegotiationContext owns checks through its borrowed storage;
- * the wire loop does not access storage. stateless ends a legacy exchange at its round boundary without
+ * the wire loop does not access storage. HTTP ends a legacy exchange at its round boundary without
  * equating it to pack readiness.
  * GitWriter frames replies; only v2 sideband-all prefixes negotiation data with a channel byte.
  * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
@@ -54,13 +55,16 @@ public final class FetchNegotiator {
         this.version = Objects.requireNonNull(version, "version");
     }
 
-    public NegotiationContext negotiate(NegotiationContext context, boolean stateless) throws IOException {
-        FetchRequest request = context.request();
-        switch (version) {
+    public FetchRequest readRequest() throws IOException {
+        var request = new FetchRequest();
+        return switch (version) {
             case V0, V1 -> parseLegacyRequest(input, request);
             case V2 -> parseV2Request(input, request);
-        }
-        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, stateless);
+        };
+    }
+
+    public NegotiationContext negotiate(FetchNegotiatorIterator iterator) throws IOException {
+        FetchRequest request = iterator.getContext().request();
         if (version == ProtocolVersion.V2) {
             for (NegotiationMessage message : request.initialMessages()) {
                 boolean more = iterator.next(message);

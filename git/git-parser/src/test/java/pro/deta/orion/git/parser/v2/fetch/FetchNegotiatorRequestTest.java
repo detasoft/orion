@@ -17,7 +17,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
 
+import static pro.deta.orion.git.parser.v2.GitTransport.HTTP;
+import static pro.deta.orion.git.parser.v2.GitTransport.SSH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -173,13 +176,81 @@ class FetchNegotiatorRequestTest {
     }
 
     @Test
+    void rejectsUnadvertisedCapabilitiesBeforeHavesOrRepliesInEveryWireVersion() throws Exception {
+        for (ProtocolVersion version : ProtocolVersion.values()) {
+            boolean v2 = version == ProtocolVersion.V2;
+            String wire = v2
+                    ? packet("want " + WANT) + packet("sideband-all") + packet("have " + HAVE) + "0000NEXT"
+                    : packet("want " + WANT + " thin-pack") + "0000" + packet("have " + HAVE);
+            try (var input = input(wire)) {
+                var bytes = new ByteArrayOutputStream();
+                var reader = new GitReader(input);
+                var negotiator = new FetchNegotiator(reader,
+                        new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
+                var command = new FetchCommand(new GitStorageApi(), Set.of());
+                assertThatThrownBy(() -> command.negotiate(negotiator, HTTP))
+                        .isInstanceOf(IOException.class).hasMessageContaining("not advertised");
+                assertThat(bytes.size()).isZero();
+                if (v2) {
+                    assertThat(input.readUnsignedByte()).isEqualTo('N');
+                } else {
+                    assertThat(FetchNegotiator.readNegotiationMessage(reader))
+                            .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                }
+            }
+        }
+    }
+
+    @Test
+    void commandPassesAdvertisedFeaturesIntoTheParsedRequestContext() throws Exception {
+        try (var input = input(packet("want " + WANT) + packet("wait-for-done") + packet("done") + "0000")) {
+            var bytes = new ByteArrayOutputStream();
+            var negotiator = new FetchNegotiator(new GitReader(input),
+                    new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
+            var command = new FetchCommand(new GitStorageApi(), Set.of(GitCapability.WAIT_FOR_DONE));
+            NegotiationContext context = command.negotiate(negotiator, HTTP);
+            assertThat(context.request().waitForDone()).isTrue();
+            assertThat(context.doneReceived()).isTrue();
+            assertThat(bytes.size()).isZero();
+        }
+    }
+
+    @Test
+    void readRequestStopsAtItsBoundaryWithoutStartingNegotiation() throws Exception {
+        for (ProtocolVersion version : ProtocolVersion.values()) {
+            String arguments = packet("want " + WANT);
+            if (version == ProtocolVersion.V2) {
+                arguments += packet("have " + HAVE) + packet("done");
+            }
+            try (var input = input(arguments + "0000NEXT")) {
+                var bytes = new ByteArrayOutputStream();
+                var negotiator = new FetchNegotiator(new GitReader(input),
+                        new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
+
+                FetchRequest request = negotiator.readRequest();
+
+                assertThat(request.wants()).containsExactly(new ObjectId(WANT));
+                assertThat(bytes.size()).isZero();
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+                if (version == ProtocolVersion.V2) {
+                    assertThat(request.initialMessages()).containsExactly(
+                            new NegotiationMessage.Have(new ObjectId(HAVE)),
+                            NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND);
+                } else {
+                    assertThat(request.initialMessages()).isEmpty();
+                }
+            }
+        }
+    }
+
+    @Test
     void emptyLegacyNegotiationDoesNotReadOrWriteAnotherExchange() throws Exception {
         for (ProtocolVersion version : new ProtocolVersion[]{ProtocolVersion.V0, ProtocolVersion.V1}) {
             try (var input = input("0000NEXT")) {
                 var bytes = new ByteArrayOutputStream();
                 var negotiator = new FetchNegotiator(new GitReader(input),
                         new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
-                assertThat(new FetchCommand(new GitStorageApi()).negotiate(negotiator, false)
+                assertThat(new FetchCommand(new GitStorageApi(), Set.of()).negotiate(negotiator, SSH)
                         .request().wants()).isEmpty();
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.size()).isZero();
@@ -195,7 +266,7 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
                     new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
-            var checks = new NegotiationContext(new FetchRequest(), new GitStorageApi()) {
+            var checks = new NegotiationContext(negotiator.readRequest(), new GitStorageApi(), Set.of()) {
                 @Override
                 public boolean objectExists(ObjectId objectId) {
                     assertThat(objectId).isEqualTo(common);
@@ -207,7 +278,7 @@ class FetchNegotiatorRequestTest {
                     throw new AssertionError("DONE must not require early readiness");
                 }
             };
-            NegotiationContext context = negotiator.negotiate(checks, true);
+            NegotiationContext context = negotiator.negotiate(new FetchNegotiatorIterator(checks, HTTP));
             assertThat(context).isSameAs(checks);
             assertThat(context.request().wants()).containsExactly(new ObjectId(WANT));
             assertThat(context.commonObjects()).containsExactly(common);
@@ -246,7 +317,9 @@ class FetchNegotiatorRequestTest {
             try (var input = new InputStreamBufferedByteInput(source)) {
                 var negotiator = new FetchNegotiator(new GitReader(input),
                         new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
-                NegotiationContext context = negotiator.negotiate(checks(false), false);
+                FetchRequest request = negotiator.readRequest();
+                var checks = checks(request, false, GitCapability.MULTI_ACK_DETAILED, GitCapability.SIDE_BAND_64K);
+                NegotiationContext context = negotiator.negotiate(new FetchNegotiatorIterator(checks, SSH));
                 assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
                 assertThat(context.doneReceived()).isTrue();
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
@@ -264,7 +337,8 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
                     new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
-            NegotiationContext context = negotiator.negotiate(checks(true), true);
+            var checks = checks(negotiator.readRequest(), true, GitCapability.SIDEBAND_ALL);
+            NegotiationContext context = negotiator.negotiate(new FetchNegotiatorIterator(checks, HTTP));
             assertThat(context.ready()).isTrue();
             assertThat(context.doneReceived()).isFalse();
             assertThat(input.readUnsignedByte()).isEqualTo('N');
@@ -280,7 +354,8 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
                     new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
-            NegotiationContext context = negotiator.negotiate(checks(true), true);
+            var checks = checks(negotiator.readRequest(), true, GitCapability.WAIT_FOR_DONE);
+            NegotiationContext context = negotiator.negotiate(new FetchNegotiatorIterator(checks, HTTP));
             assertThat(context.ready()).isFalse();
             assertThat(context.doneReceived()).isFalse();
             assertThat(input.readUnsignedByte()).isEqualTo('N');
@@ -350,8 +425,8 @@ class FetchNegotiatorRequestTest {
         }
     }
 
-    private static NegotiationContext checks(boolean ready) {
-        return new NegotiationContext(new FetchRequest(), new GitStorageApi()) {
+    private static NegotiationContext checks(FetchRequest request, boolean ready, GitCapability... advertised) {
+        return new NegotiationContext(request, new GitStorageApi(), Set.of(advertised)) {
             @Override
             public boolean objectExists(ObjectId objectId) {
                 return objectId.equals(new ObjectId(HAVE));

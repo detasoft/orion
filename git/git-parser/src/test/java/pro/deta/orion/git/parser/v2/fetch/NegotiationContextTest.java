@@ -19,7 +19,7 @@ class NegotiationContextTest {
     void clientClaimsDoNotBecomeCommonWithoutConfirmation() {
         FetchRequest request = request(List.of(new NegotiationMessage.Have(FIRST),
                 NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND));
-        NegotiationContext context = new NegotiationContext(request, new GitStorageApi());
+        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), Set.of());
         assertThat(context.commonObjects()).isEmpty();
         assertThat(context.lastCommon()).isEmpty();
         assertThat(context.doneReceived()).isFalse();
@@ -33,7 +33,7 @@ class NegotiationContextTest {
     @Test
     void accumulatesConfirmedObjectsAcrossRoundsWithoutLeakingMutableState() {
         FetchRequest request = request(List.of());
-        NegotiationContext context = new NegotiationContext(request, new GitStorageApi());
+        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), Set.of());
         context.addCommon(FIRST);
         Set<ObjectId> firstRound = context.commonObjects();
         context.addCommon(SECOND);
@@ -45,7 +45,7 @@ class NegotiationContextTest {
         assertThatThrownBy(() -> firstRound.add(SECOND)).isInstanceOf(UnsupportedOperationException.class);
         assertThat(context.ready()).isTrue();
         assertThat(context.doneReceived()).isFalse();
-        assertThat(new NegotiationContext(request, new GitStorageApi()).commonObjects()).isEmpty();
+        assertThat(new NegotiationContext(request, new GitStorageApi(), Set.of()).commonObjects()).isEmpty();
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {
