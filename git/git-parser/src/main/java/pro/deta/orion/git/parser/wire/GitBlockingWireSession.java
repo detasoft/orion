@@ -1170,7 +1170,7 @@ public final class GitBlockingWireSession {
                 acceptRef(value);
                 return;
             }
-            if (value.startsWith("packfile-uris ")) {
+            if (value.startsWith(GitCapability.PACKFILE_URIS.wireName() + " ")) {
                 acceptPackfileUriProtocols(value);
                 return;
             }
@@ -1347,7 +1347,7 @@ public final class GitBlockingWireSession {
                 return;
             }
             String rawProtocols = value.substring(
-                    "packfile-uris ".length());
+                    GitCapability.PACKFILE_URIS.wireName().length() + 1);
             if (rawProtocols.isEmpty()) {
                 throw invalidV2FetchRequest();
             }

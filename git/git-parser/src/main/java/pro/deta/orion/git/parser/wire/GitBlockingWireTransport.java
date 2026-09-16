@@ -163,7 +163,7 @@ public final class GitBlockingWireTransport {
                 fetchOptions.add("sideband-all");
             }
             if (configuration.packfileUris()) {
-                fetchOptions.add("packfile-uris");
+                fetchOptions.add(GitCapability.PACKFILE_URIS.wireName());
             }
             capabilities.add(fetchOptions.isEmpty() ? "fetch\n" : "fetch=" + String.join(" ", fetchOptions) + "\n");
         }
@@ -865,7 +865,7 @@ public final class GitBlockingWireTransport {
                 packets.add(GitPktLine.Control.DELIMITER);
             }
             if (!packfileUris.isEmpty()) {
-                packets.add(encodeAsciiPacket("packfile-uris\n", sidebandAll));
+                packets.add(encodeAsciiPacket(GitCapability.PACKFILE_URIS.wireName() + "\n", sidebandAll));
                 for (NativePackfileUri packfileUri : packfileUris) {
                     Objects.requireNonNull(packfileUri, "packfileUri");
                     packets.add(encodeAsciiPacket(packfileUri.packHash() + " " + packfileUri.uri() + "\n", sidebandAll));

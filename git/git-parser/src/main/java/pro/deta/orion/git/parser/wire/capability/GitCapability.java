@@ -23,6 +23,7 @@ public enum GitCapability {
     NO_DONE("no-done"),
     WAIT_FOR_DONE("wait-for-done"),
     SIDEBAND_ALL("sideband-all"),
+    PACKFILE_URIS("packfile-uris"),
     THIN_PACK("thin-pack"),
     NO_THIN("no-thin"),
     SIDE_BAND("side-band"),
@@ -52,7 +53,7 @@ public enum GitCapability {
     SESSION_ID("session-id");
 
     private static final Set<GitCapability> STANDARD_NAMES = Set.of(
-            MULTI_ACK, MULTI_ACK_DETAILED, NO_DONE, WAIT_FOR_DONE, SIDEBAND_ALL,
+            MULTI_ACK, MULTI_ACK_DETAILED, NO_DONE, WAIT_FOR_DONE, SIDEBAND_ALL, PACKFILE_URIS,
             THIN_PACK, NO_THIN, SIDE_BAND, SIDE_BAND_64K, OFS_DELTA, AGENT, OBJECT_FORMAT,
             SYMREF, SHALLOW, DEEPEN_SINCE, DEEPEN_NOT, DEEPEN_RELATIVE, NO_PROGRESS, INCLUDE_TAG,
             REPORT_STATUS, REPORT_STATUS_V2, DELETE_REFS, QUIET, ATOMIC, PUSH_OPTIONS,

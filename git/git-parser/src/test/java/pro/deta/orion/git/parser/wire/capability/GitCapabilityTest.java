@@ -111,6 +111,7 @@ class GitCapabilityTest {
         assertThat(GitCapability.SIDEBAND_ALL.wireName()).isEqualTo("sideband-all");
         assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("wait-for-done"));
         assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("sideband-all"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("packfile-uris"));
     }
 
     @Test
@@ -129,6 +130,7 @@ class GitCapabilityTest {
         assertThat(GitCapability.fromWireName("multi_ack")).contains(GitCapability.MULTI_ACK);
         assertThat(GitCapability.fromWireName("side-band-64k")).contains(GitCapability.SIDE_BAND_64K);
         assertThat(GitCapability.fromWireName("agent")).contains(GitCapability.AGENT);
+        assertThat(GitCapability.fromWireName("packfile-uris")).contains(GitCapability.PACKFILE_URIS);
         assertThat(GitCapability.fromWireName("MULTI_ACK")).isEmpty();
         assertThat(GitCapability.fromWireName("agent=orion")).isEmpty();
         assertThat(GitCapability.fromWireName("vendor-option")).isEmpty();

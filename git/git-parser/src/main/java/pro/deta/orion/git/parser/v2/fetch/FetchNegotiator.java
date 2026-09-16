@@ -143,11 +143,12 @@ public final class FetchNegotiator {
                         String ref = token(line.substring(GitCapability.WANT_REF.wireName().length() + 1));
                         validateWantedRef(ref);
                         request.wantRefs().add(ref);
-                    } else if (line.startsWith("packfile-uris ")) {
+                    } else if (line.startsWith(GitCapability.PACKFILE_URIS.wireName() + " ")) {
                         if (!request.packfileUriProtocols().isEmpty()) {
                             throw invalid("Duplicate packfile-uris");
                         }
-                        for (String protocol : line.substring(14).split(",", -1)) {
+                        String protocols = line.substring(GitCapability.PACKFILE_URIS.wireName().length() + 1);
+                        for (String protocol : protocols.split(",", -1)) {
                             if (!protocol.matches("[A-Za-z][A-Za-z0-9+.-]*")) {
                                 throw invalid("Invalid packfile URI protocol");
                             }
