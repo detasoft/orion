@@ -88,7 +88,7 @@ public final class FetchNegotiator {
     }
 
     public static NegotiationMessage readNegotiationMessage(GitReader reader) throws IOException {
-        GitPktLine packet = reader.readPacket();
+        GitPktLine packet = reader.readGitPktLine();
         return switch (packet) {
             case GitPktLine.Control.FLUSH -> NegotiationMessage.Control.END_ROUND;
             case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
@@ -115,7 +115,7 @@ public final class FetchNegotiator {
         FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
-            GitPktLine packet = reader.readPacket();
+            GitPktLine packet = reader.readGitPktLine();
             switch (packet) {
                 case GitPktLine.Control.FLUSH -> {
                     if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
@@ -182,7 +182,7 @@ public final class FetchNegotiator {
         boolean receivedLine = false;
         boolean wantsEnded = false;
         while (true) {
-            GitPktLine packet = reader.readPacket();
+            GitPktLine packet = reader.readGitPktLine();
             switch (packet) {
                 case GitPktLine.Control.FLUSH -> {
                     if (receivedLine && request.wants().isEmpty()) {

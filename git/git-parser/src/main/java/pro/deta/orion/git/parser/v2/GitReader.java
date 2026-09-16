@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * Reads complete Git pkt-lines from a borrowed BufferedByteInput through GitPktLine.readNextFrom.
- * readPacket returns either Data with all payload bytes or a payload-free Control marker.
+ * readGitPktLine returns either Data with all payload bytes or a payload-free Control marker.
  * Commands obtain validated UTF-8 through Data.text when their grammar requires text; binary packets stay raw.
  * No stream is closed. Header/payload truncation is an IOException, never an implicit end of negotiation.
  */
@@ -20,7 +20,7 @@ public final class GitReader {
         this.input = Objects.requireNonNull(input, "input");
     }
 
-    public GitPktLine readPacket() throws IOException {
+    public GitPktLine readGitPktLine() throws IOException {
         return GitPktLine.readNextFrom(input).orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
     }
 }
