@@ -4,8 +4,12 @@ import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -29,16 +33,125 @@ import java.util.OptionalLong;
  * <p>PackUpload uses Optional<ObjectId> as the value: a full object's hash or empty for a delta whose original
  * bytes remain available for resolver reads. The index retains metadata, never processors or live read handles.
  * Other callers can select their own result and own any resources it contains. Pack header, count, checksum,
- * and index state belong to the caller. The method body remains a placeholder.
+ * and index state belong to the caller. ZlibBoundaryInputStream owns compressed stream validation and
+ * boundary detection; the parser buffers retained writes separately.
  */
 public final class PackObjectParser {
     private PackObjectParser() {
     }
 
     public static <R> Result<R> parseEntry(BufferedByteInput source, long offset, PackByteStore byteStore,
-                                            GitObjectRead<R> reader)
+                                         GitObjectRead<R> reader)
             throws IOException {
-        throw new UnsupportedOperationException("Pack entry parsing is not implemented");
+        Objects.requireNonNull(reader, "reader");
+        if (offset < 12) {
+            throw new IllegalArgumentException("Entry offset must follow the pack header");
+        }
+        var input = new RetainedInput(source, offset, byteStore);
+        int first = input.read();
+        ObjectType type = switch ((first >>> 4) & 7) {
+            case 1 -> ObjectType.COMMIT;
+            case 2 -> ObjectType.TREE;
+            case 3 -> ObjectType.BLOB;
+            case 4 -> ObjectType.TAG;
+            case 6 -> ObjectType.OFS_DELTA;
+            case 7 -> ObjectType.REF_DELTA;
+            default -> throw new IOException("Invalid pack object type");
+        };
+        long size = first & 15;
+        int part = first;
+        int shift = 4;
+        while ((part & 128) != 0) {
+            part = input.read();
+            if (shift > 60 || shift == 60 && (part & 127) > 7) {
+                throw new IOException("Pack object size overflows a signed long");
+            }
+            size |= (long) (part & 127) << shift;
+            shift += 7;
+        }
+        OptionalLong baseOffset = OptionalLong.empty();
+        Optional<ObjectId> baseId = Optional.empty();
+        if (type == ObjectType.OFS_DELTA) {
+            part = input.read();
+            long distance = part & 127;
+            while ((part & 128) != 0) {
+                part = input.read();
+                if (distance >= (Long.MAX_VALUE >>> 7)) {
+                    throw new IOException("Pack delta offset overflows a signed long");
+                }
+                distance = ((distance + 1) << 7) | (part & 127);
+            }
+            if (distance == 0 || distance > offset - 12) {
+                throw new IOException("Pack delta base must precede the entry and follow the pack header");
+            }
+            baseOffset = OptionalLong.of(offset - distance);
+        } else if (type == ObjectType.REF_DELTA) {
+            byte[] id = new byte[20];
+            for (int i = 0; i < id.length; i++) {
+                id[i] = (byte) input.read();
+            }
+            baseId = Optional.of(new ObjectId(id));
+        }
+        var entry = new Entry(offset, input.offset, size, type, baseOffset, baseId);
+        R value = null;
+        try (var zlib = new ZlibBoundaryInputStream(input, size)) {
+            var raw = new InputStreamBufferedByteInput(zlib);
+            value = Objects.requireNonNull(reader.read(type, size, raw), "reader result");
+            byte[] discard = new byte[8192];
+            while (zlib.read(discard) != -1) {
+                // Finish validating and retaining the caller's unread payload.
+            }
+            input.flush();
+            return new Result<>(entry, value);
+        } catch (IOException | RuntimeException | Error failure) {
+            if (value instanceof AutoCloseable resource) {
+                try {
+                    resource.close();
+                } catch (Throwable cleanup) {
+                    if (cleanup != failure) {
+                        failure.addSuppressed(cleanup);
+                    }
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private static final class RetainedInput extends InputStream {
+        private final BufferedByteInput source;
+        private final PackByteStore store;
+        private final ByteBuffer pending = ByteBuffer.allocate(8192);
+        private long offset;
+
+        private RetainedInput(BufferedByteInput source, long offset, PackByteStore store) {
+            this.source = Objects.requireNonNull(source, "source");
+            this.store = Objects.requireNonNull(store, "byteStore");
+            this.offset = offset;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (offset == Long.MAX_VALUE) {
+                throw new IOException("Pack offset overflows a signed long");
+            }
+            int value = source.readUnsignedByte();
+            pending.put((byte) value);
+            offset++;
+            if (!pending.hasRemaining()) {
+                flush();
+            }
+            return value;
+        }
+
+        private void flush() throws IOException {
+            pending.flip();
+            while (pending.hasRemaining()) {
+                if (store.write(pending) <= 0) {
+                    throw new IOException("Pack byte store made no write progress");
+                }
+            }
+            pending.clear();
+        }
     }
 
     /**
