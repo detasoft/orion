@@ -97,7 +97,7 @@ public final class FetchNegotiator {
             case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                     throw invalid("Expected a data packet");
             case GitPktLine.Data data -> {
-                NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
+                NegotiationCapability argument = NegotiationCapability.parse(data.text());
                 yield switch (argument.cap()) {
                     case DONE -> NegotiationMessage.Control.DONE;
                     case HAVE -> new NegotiationMessage.Have(objectId(argument.value()));
@@ -124,7 +124,7 @@ public final class FetchNegotiator {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
+                    NegotiationCapability argument = NegotiationCapability.parse(data.text());
                     switch (argument.cap()) {
                         case WANT -> request.wants().add(objectId(argument.value()));
                         case HAVE -> request.initialMessages().add(
@@ -182,7 +182,7 @@ public final class FetchNegotiator {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    NegotiationCapabilityValue argument = NegotiationCapability.parse(data.text());
+                    NegotiationCapability argument = NegotiationCapability.parse(data.text());
                     receivedLine = true;
                     if (argument.cap() == GitCapability.WANT) {
                         if (wantsEnded) {
@@ -261,7 +261,7 @@ public final class FetchNegotiator {
         return new IOException(message);
     }
 
-    private static void acceptShared(FetchRequest request, NegotiationCapabilityValue argument) throws IOException {
+    private static void acceptShared(FetchRequest request, NegotiationCapability argument) throws IOException {
         String value = argument.value();
         switch (argument.cap()) {
             case SHALLOW -> request.shallowCommits().add(objectId(value));
