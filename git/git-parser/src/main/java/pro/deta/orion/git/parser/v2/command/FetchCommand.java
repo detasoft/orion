@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.command;
 
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.read.PresenceGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
@@ -37,7 +38,7 @@ public class FetchCommand implements GitCommand {
     }
 
     public boolean isCommon(ObjectId objectId) throws IOException {
-        return storage.readObject(objectId, (type, size, source) -> Boolean.TRUE).isPresent();
+        return storage.readObject(objectId, new PresenceGitObjectRead()).isPresent();
     }
 
     public boolean isReady(NegotiationContext context) throws IOException {
