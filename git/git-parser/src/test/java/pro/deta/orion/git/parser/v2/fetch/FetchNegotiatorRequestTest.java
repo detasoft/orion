@@ -207,6 +207,77 @@ class FetchNegotiatorRequestTest {
     }
 
     @Test
+    void legacyFlushesEachReplyBeforeReadingMoreAndKeepsNegotiationOutsideSideband() throws Exception {
+        for (ProtocolVersion version : new ProtocolVersion[]{ProtocolVersion.V0, ProtocolVersion.V1}) {
+            String throughHave = packet("want " + WANT + " multi_ack_detailed side-band-64k")
+                    + "0000" + packet("have " + HAVE);
+            String wire = throughHave + "0000" + packet("done") + "NEXT";
+            var bytes = new ByteArrayOutputStream() {
+                private int flushes;
+
+                @Override
+                public void flush() {
+                    flushes++;
+                }
+            };
+            var source = new ByteArrayInputStream(wire.getBytes(StandardCharsets.US_ASCII)) {
+                @Override
+                public synchronized int read() {
+                    if (pos == throughHave.length()) {
+                        assertThat(bytes.flushes).isEqualTo(1);
+                    } else if (pos == throughHave.length() + 4) {
+                        assertThat(bytes.flushes).isEqualTo(2);
+                    }
+                    return super.read();
+                }
+            };
+            try (var input = new InputStreamBufferedByteInput(source)) {
+                var negotiator = new FetchNegotiator(new GitReader(input),
+                        new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
+                NegotiationContext context = negotiator.negotiate(checks(false), false);
+                assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
+                assertThat(context.doneReceived()).isTrue();
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+                assertThat(bytes.flushes).isEqualTo(3);
+                assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                        .isEqualTo("0038ACK " + HAVE + " common\n0008NAK\n0031ACK " + HAVE + "\n");
+            }
+        }
+    }
+
+    @Test
+    void v2WritesReadySectionUsingNegotiatedSidebandWithoutReadingAnotherRequest() throws Exception {
+        try (var input = input(packet("want " + WANT) + packet("sideband-all")
+                + packet("have " + HAVE) + "0000NEXT")) {
+            var bytes = new ByteArrayOutputStream();
+            var negotiator = new FetchNegotiator(new GitReader(input),
+                    new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
+            NegotiationContext context = negotiator.negotiate(checks(true), true);
+            assertThat(context.ready()).isTrue();
+            assertThat(context.doneReceived()).isFalse();
+            assertThat(input.readUnsignedByte()).isEqualTo('N');
+            assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
+                    "0015\u0001acknowledgments\n0032\u0001ACK " + HAVE + "\n000b\u0001ready\n0001");
+        }
+    }
+
+    @Test
+    void v2WaitForDoneEndsAcknowledgmentsWithFlushEvenIfCommonGraphIsReady() throws Exception {
+        try (var input = input(packet("want " + WANT) + packet("wait-for-done")
+                + packet("have " + HAVE) + "0000NEXT")) {
+            var bytes = new ByteArrayOutputStream();
+            var negotiator = new FetchNegotiator(new GitReader(input),
+                    new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
+            NegotiationContext context = negotiator.negotiate(checks(true), true);
+            assertThat(context.ready()).isFalse();
+            assertThat(context.doneReceived()).isFalse();
+            assertThat(input.readUnsignedByte()).isEqualTo('N');
+            assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("0014acknowledgments\n0031ACK " + HAVE + "\n0000");
+        }
+    }
+
+    @Test
     void legacyMessageParsingPreservesBoundariesAndRejectsInvalidInput() throws Exception {
         try (var input = input("0000" + packet("done") + "NEXT")) {
             var reader = new GitReader(input);
@@ -262,6 +333,20 @@ class FetchNegotiatorRequestTest {
         try (var input = input(packet("want " + WANT) + arguments + "0000")) {
             assertThatThrownBy(() -> FetchNegotiator.parseV2Request(new GitReader(input))).isInstanceOf(IOException.class);
         }
+    }
+
+    private static FetchNegotiatorIterator.Checks checks(boolean ready) {
+        return new FetchNegotiatorIterator.Checks() {
+            @Override
+            public boolean isCommon(ObjectId objectId) {
+                return objectId.equals(new ObjectId(HAVE));
+            }
+
+            @Override
+            public boolean isReady(NegotiationContext context) {
+                return ready;
+            }
+        };
     }
 
     private static String packet(String payload) {

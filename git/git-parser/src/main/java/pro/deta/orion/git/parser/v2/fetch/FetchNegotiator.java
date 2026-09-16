@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData.ProtocolVersion;
 
 import java.io.IOException;
@@ -37,7 +38,8 @@ import java.util.OptionalLong;
  * before reading more. An empty legacy request finishes without reading negotiation messages.
  * Input/output are borrowed and never closed here. FetchCommand supplies Checks; storage never enters this
  * wire loop. stateless ends a legacy exchange at its round boundary without equating it to pack readiness.
- * Response framing and production repository checks remain placeholders, not a complete fetch exchange.
+ * GitWriter frames replies; only v2 sideband-all prefixes negotiation data with a channel byte.
+ * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
  */
 public final class FetchNegotiator {
     private static final GitCapability[] V2_FLAGS = {
@@ -65,7 +67,7 @@ public final class FetchNegotiator {
         if (version == ProtocolVersion.V2) {
             for (NegotiationMessage message : request.initialMessages()) {
                 boolean more = iterator.next(message);
-                writeResponses(iterator.getResponsesToSend());
+                writeResponses(iterator.getResponsesToSend(), request);
                 if (!more) {
                     break;
                 }
@@ -74,15 +76,18 @@ public final class FetchNegotiator {
             boolean more;
             do {
                 more = iterator.next(readNegotiationMessage(input));
-                writeResponses(iterator.getResponsesToSend());
+                writeResponses(iterator.getResponsesToSend(), request);
             } while (more);
         }
         return iterator.getContext();
     }
 
-    private void writeResponses(List<NegotiationResponse> responsesToSend) throws IOException {
+    private void writeResponses(List<NegotiationResponse> responsesToSend, FetchRequest request) throws IOException {
         if (!responsesToSend.isEmpty()) {
-            output.writeNegotiationRound(responsesToSend);
+            SideBand sideBand = version == ProtocolVersion.V2
+                    && request.capabilities().contains(GitCapability.SIDEBAND_ALL.entry())
+                    ? SideBand.DATA : SideBand.NONE;
+            output.writeNegotiationRound(responsesToSend, version, sideBand);
             output.flush();
         }
     }
