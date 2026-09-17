@@ -28,7 +28,8 @@ import java.util.Objects;
  * the wire loop does not access storage. HTTP ends a legacy exchange at its round boundary without
  * equating it to pack readiness.
  * GitWriter frames replies; only v2 sideband-all prefixes negotiation data with a channel byte.
- * Production repository readiness checks and pack transfer remain pending; this is not a complete fetch exchange.
+ * FetchCommand converts the returned context into an optional FetchPlan. Pack transfer remains a subsequent step;
+ * this loop delivers negotiation responses only.
  */
 public final class FetchNegotiator {
     private final GitReader input;

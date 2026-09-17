@@ -233,7 +233,7 @@ class FetchNegotiatorRequestTest {
     }
 
     @Test
-    void commandPassesAdvertisedFeaturesIntoTheParsedRequestContext() throws Exception {
+    void commandPassesNegotiatedFeaturesIntoThePlanAfterDone() throws Exception {
         try (var input = input(packet("want " + WANT) + packet("wait-for-done") + packet("done") + "0000")) {
             var bytes = new ByteArrayOutputStream();
             var negotiator = new FetchNegotiator(new GitReader(input),
@@ -241,10 +241,27 @@ class FetchNegotiatorRequestTest {
             var storage = new InMemoryGitStorage();
             storage.put(new ObjectId(WANT), ObjectType.BLOB, java.util.Optional.empty(), new byte[]{42});
             var command = new FetchCommand(storage.api, Set.of(GitCapability.WAIT_FOR_DONE));
-            NegotiationContext context = command.negotiate(negotiator, HTTP);
-            assertThat(context.request().waitForDone()).isTrue();
-            assertThat(context.doneReceived()).isTrue();
+            var plan = command.negotiate(negotiator, HTTP).orElseThrow();
+            assertThat(plan.capabilities()).contains(GitCapability.WAIT_FOR_DONE.entry());
+            assertThat(plan.wantedObjects()).containsExactly(new ObjectId(WANT));
+            assertThat(plan.commonObjects()).isEmpty();
             assertThat(bytes.size()).isZero();
+        }
+    }
+
+    @Test
+    void unfinishedCommandWritesTheRoundAndReturnsNoPlan() throws Exception {
+        try (var input = input(packet("want " + WANT) + packet("have " + HAVE) + "0000NEXT")) {
+            var bytes = new ByteArrayOutputStream();
+            var negotiator = new FetchNegotiator(new GitReader(input),
+                    new GitWriter(new OutputStreamBufferedByteOutput(bytes)), ProtocolVersion.V2);
+            var storage = new InMemoryGitStorage();
+            storage.put(new ObjectId(WANT), ObjectType.BLOB, java.util.Optional.empty(), new byte[]{42});
+            var command = new FetchCommand(storage.api, Set.of());
+            assertThat(command.negotiate(negotiator, HTTP)).isEmpty();
+            assertThat(bytes.toString(StandardCharsets.UTF_8))
+                    .isEqualTo(packet("acknowledgments\n") + packet("NAK\n") + "0000");
+            assertThat(input.readUnsignedByte()).isEqualTo('N');
         }
     }
 
@@ -283,8 +300,7 @@ class FetchNegotiatorRequestTest {
                 var bytes = new ByteArrayOutputStream();
                 var negotiator = new FetchNegotiator(new GitReader(input),
                         new GitWriter(new OutputStreamBufferedByteOutput(bytes)), version);
-                assertThat(new FetchCommand(new GitStorageApi(), Set.of()).negotiate(negotiator, SSH)
-                        .request().wants()).isEmpty();
+                assertThat(new FetchCommand(new GitStorageApi(), Set.of()).negotiate(negotiator, SSH)).isEmpty();
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.size()).isZero();
             }
