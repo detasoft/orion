@@ -3,18 +3,25 @@ package pro.deta.orion.git.parser.v2.fetch;
 import pro.deta.orion.git.parser.v2.GitTransport;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
+import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -22,8 +29,13 @@ import java.util.Set;
 /**
  * Accumulates one negotiation's result independently of bytes and packet encoding.
  * Borrows GitStorageApi from the command; objectExists checks published-object presence through storage.exists.
- * isReady will evaluate this context's wants, common objects, and shallow boundaries; graph traversal remains
- * an explicit unsupported operation until implemented. Presence alone does not establish readiness or authorize wants.
+ * isReady requires each wanted commit to reach an explicitly confirmed common object. It peels tags and
+ * traverses commit parents, stopping at client shallow boundaries. Trees and blobs need no history negotiation.
+ * This conservative check does not infer additional common ancestors from a have and can require extra rounds.
+ * Each call uses a local iterative traversal; no object contents or graph cache survive it. Only bounded
+ * header prefixes and parent IDs are retained while reading restored objects through ResolvedGitObjectRead.
+ * Presence alone does not establish readiness or authorize wants. Depth, time, exclusion, and filter arguments
+ * control subsequent pack selection; this check does not calculate the outgoing shallow boundary.
  * Checks must not mutate the context; repository failures propagate as IOException rather than negative results.
  * The iterator owns mutations; callers inspect the parsed request, confirmed common IDs, and progress.
  * Client have claims are not automatically common: addCommon is called only after successful repository
@@ -210,8 +222,113 @@ public class NegotiationContext {
     }
 
     public boolean isReady() throws IOException {
-        throw new UnsupportedOperationException("Fetch graph readiness is not implemented");
+        Set<ObjectId> wants = wantedObjects();
+        if (wants.isEmpty() || commonObjects.isEmpty()) {
+            return false;
+        }
+        var reader = new ResolvedGitObjectRead<>(storage, NegotiationContext::readGraphLinks);
+        for (ObjectId want : wants) {
+            if (!reachesCommon(want, reader)) {
+                return false;
+            }
+        }
+        return true;
     }
+
+    private boolean reachesCommon(ObjectId want, ResolvedGitObjectRead<GraphLinks> reader) throws IOException {
+        var pending = new ArrayDeque<GraphVisit>();
+        var visited = new HashSet<ObjectId>();
+        pending.add(new GraphVisit(want, false));
+        while (!pending.isEmpty()) {
+            GraphVisit visit = pending.removeFirst();
+            ObjectId id = visit.id();
+            if (commonObjects.contains(id)) {
+                return true;
+            }
+            if (!visited.add(id)) {
+                continue;
+            }
+            GraphLinks links = storage.readObject(id, reader)
+                    .orElseThrow(() -> new IOException("Missing fetch history object: " + id.toHex()));
+            if (visit.commitOnly() && links.type() != ObjectType.COMMIT) {
+                throw new IOException("Commit parent is not a commit: " + id.toHex());
+            }
+            switch (links.type()) {
+                case TREE, BLOB -> {
+                    return true;
+                }
+                case COMMIT -> {
+                    if (!request.shallowCommits().contains(id)) {
+                        for (ObjectId parent : links.targets()) {
+                            pending.addLast(new GraphVisit(parent, true));
+                        }
+                    }
+                }
+                case TAG -> pending.addLast(new GraphVisit(links.targets().getFirst(), false));
+                case OFS_DELTA, REF_DELTA -> throw new IOException("Fetch history object was not resolved");
+            }
+        }
+        return false;
+    }
+
+    private static GraphLinks readGraphLinks(ObjectType type, long size, Optional<ObjectId> baseId,
+                                             BufferedByteInput input) throws IOException {
+        if (type == ObjectType.BLOB || type == ObjectType.TREE) {
+            return new GraphLinks(type, List.of());
+        }
+        if (type != ObjectType.COMMIT && type != ObjectType.TAG) {
+            throw new IOException("Fetch history object was not resolved");
+        }
+        var targets = new ArrayList<ObjectId>();
+        var prefix = new StringBuilder(47);
+        long lineLength = 0;
+        boolean firstLine = true;
+        for (long remaining = size; remaining > 0; remaining--) {
+            int next = input.readUnsignedByte();
+            if (next != '\n') {
+                if (prefix.length() < 47) {
+                    prefix.append((char) next);
+                }
+                lineLength++;
+                continue;
+            }
+            if (lineLength == 0) {
+                if (firstLine) {
+                    throw new IOException("Missing Git object header");
+                }
+                return new GraphLinks(type, targets);
+            }
+            String line = prefix.toString();
+            if (firstLine) {
+                String field = type == ObjectType.COMMIT ? "tree " : "object ";
+                ObjectId target = graphHeaderId(line, lineLength, field);
+                if (type == ObjectType.TAG) {
+                    targets.add(target);
+                }
+                firstLine = false;
+            } else if (type == ObjectType.COMMIT && line.startsWith("parent ")) {
+                targets.add(graphHeaderId(line, lineLength, "parent "));
+            }
+            prefix.setLength(0);
+            lineLength = 0;
+        }
+        throw new IOException("Missing Git object header terminator");
+    }
+
+    private static ObjectId graphHeaderId(String line, long length, String field) throws IOException {
+        if (!line.startsWith(field) || length != field.length() + 40) {
+            throw new IOException("Invalid Git object " + field.strip() + " header");
+        }
+        try {
+            return new ObjectId(line.substring(field.length()));
+        } catch (IllegalArgumentException error) {
+            throw new IOException("Invalid Git object " + field.strip() + " ID", error);
+        }
+    }
+
+    private record GraphVisit(ObjectId id, boolean commitOnly) {}
+
+    private record GraphLinks(ObjectType type, List<ObjectId> targets) {}
 
     public FetchRequest request() {
         return request;
