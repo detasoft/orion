@@ -5,6 +5,10 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.util.Collection;
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Coordinates storage writes within one repository whose writes are owned by one JVM.
@@ -17,23 +21,64 @@ import java.util.Collection;
  * so a future implementation can narrow locking without changing callers. Pack and object locks are per ID
  * and do not conflict with the refs lock or with one another's namespace.
  *
- * <p>The planned implementation uses a ConcurrentHashMap of internal keys to CompletableFuture signals.
+ * <p>The implementation uses a ConcurrentHashMap of internal keys to CompletableFuture signals.
  * Register a fresh signal with putIfAbsent. The winner owns publication; a competitor waits on the existing
- * signal with get() in its virtual thread, then retries registration. Storage I/O runs outside map operations.
+ * signal with get() in the calling thread, then retries registration. Storage I/O runs outside map operations.
  *
  * <p>After publication writes and failure cleanup finish, the owner removes its own mapping with
  * remove(key, signal) and completes the signal normally when its Lease closes, on success or failure.
  * Completion means ownership was released, not that publication succeeded. The caller must check published
  * state or expected-old refs after acquiring ownership. Cancelling a waiter must not cancel the shared signal
  * or its owner. Acquisition waits interruptibly; callers close the lease in all outcomes. No filesystem lock,
- * polling, sleeps, executor, or extra thread is needed.
+ * polling, sleeps, executor, or extra thread is needed. Active keys include the canonical repository path,
+ * so distinct facade instances share ownership without retaining idle repositories in a registry.
  */
-interface GitLock {
-    Lease lockRefs(Collection<RefId> refs) throws InterruptedException;
+final class GitLock {
+    private static final ConcurrentHashMap<Key, CompletableFuture<Void>> OWNERS = new ConcurrentHashMap<>();
+    private final Path repository;
 
-    Lease lockPack(PackId packId) throws InterruptedException;
+    GitLock(Path canonicalRepository) {
+        repository = canonicalRepository;
+    }
 
-    Lease lockObject(ObjectId objectId) throws InterruptedException;
+    Lease lockRefs(Collection<RefId> refs) throws InterruptedException {
+        if (refs.isEmpty()) {
+            throw new IllegalArgumentException("Ref lock requires at least one ref");
+        }
+        return acquire("refs");
+    }
+
+    Lease lockPack(PackId packId) throws InterruptedException {
+        return acquire(packId);
+    }
+
+    Lease lockObject(ObjectId objectId) throws InterruptedException {
+        return acquire(objectId);
+    }
+
+    private Lease acquire(Object identity) throws InterruptedException {
+        var key = new Key(repository, identity);
+        var signal = new CompletableFuture<Void>();
+        for (;;) {
+            if (Thread.interrupted()) {
+                throw new InterruptedException("Interrupted while acquiring repository lock");
+            }
+            var owner = OWNERS.putIfAbsent(key, signal);
+            if (owner == null) {
+                return () -> {
+                    OWNERS.remove(key, signal);
+                    signal.complete(null);
+                };
+            }
+            try {
+                owner.get();
+            } catch (ExecutionException impossible) {
+                throw new IllegalStateException("Lock release signal failed", impossible);
+            }
+        }
+    }
+
+    private record Key(Path repository, Object identity) { }
 
     interface Lease extends AutoCloseable {
         @Override

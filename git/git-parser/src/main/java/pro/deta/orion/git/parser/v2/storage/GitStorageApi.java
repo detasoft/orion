@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.read.PresenceGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +23,7 @@ import java.util.Optional;
  * Commands use this facade; ref, pack, and object stores remain internal implementation details.
  * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
  * uploadNewPack(source) creates an isolated PackUpload, raw-byte storage, and an empty PackIndex before reading.
- * It constructs PackUpload(this, source, byteStore, index); backend creation remains internal to storage.
+ * It supplies PackUpload with an owned Backend; file creation and publication remain internal to storage.
  * Upload uses static PackObjectParser entry parsing and incrementally stores original pack bytes and index
  * metadata. A streaming digest covers the original header and entries, excluding the trailing checksum.
  * Only bytes belonging to this pack enter the sink; subsequent protocol bytes remain available through the
@@ -32,7 +33,8 @@ import java.util.Optional;
  * chains; the API requires neither whole-index memory storage nor paths, files, or a final bulk transfer.
  * commit checks index.hasUnresolved, completes pending writes, and durably attaches pack to the existing index.
  * The index identifies missing bases for completion of a self-contained pack before publication.
- * Storage never calls back into the resolver. commit and rollback belong to upload and never close source input.
+ * Storage uses the object reader to restore any missing published bases.
+ * commit and rollback belong to upload and never close source input.
  *
  * <p>Only published packs contribute objects to readObject, findPacksByObjectIds, and publishedPacks.
  * readObject(objectId, reader) invokes a caller-selected processor with the stored physical type, inflated
@@ -61,25 +63,34 @@ import java.util.Optional;
  *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, size, and a bounded prefix.</li>
  * </ul>
  * Object and ref reads delegate to internal backends supplied at construction, without exposing them to callers.
- * The default constructor retains placeholder backends until persistent storage wiring is implemented.
+ * The Path constructor opens pack storage in an existing repository directory. Loose objects and refs
+ * remain unimplemented; the no-argument constructor provides an unconfigured facade for command scaffolds.
  * Object resolution and operation-specific policy belong to the caller;
  * all operations address the same repository, and ref targets must be available before updates become visible.
  */
 public final class GitStorageApi {
     private final GitObjectStorage objects;
     private final GitRefsStorage refs;
+    private final GitPackStorage packs;
 
     public GitStorageApi() {
         this(new GitObjectStorage(), new GitRefsStorage());
     }
 
+    public GitStorageApi(Path repository) throws IOException {
+        packs = new GitPackStorage(Objects.requireNonNull(repository, "repository"));
+        objects = new GitObjectStorage(packs);
+        refs = new GitRefsStorage();
+    }
+
     GitStorageApi(GitObjectStorage objects, GitRefsStorage refs) {
+        this.packs = null;
         this.objects = Objects.requireNonNull(objects, "objects");
         this.refs = Objects.requireNonNull(refs, "refs");
     }
 
     public PackUpload uploadNewPack(BufferedByteInput source) throws IOException {
-        throw new UnsupportedOperationException("Pack upload is not implemented");
+        return requirePacks().upload(this, source);
     }
 
     public <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
@@ -99,7 +110,7 @@ public final class GitStorageApi {
     }
 
     /**
-     * Planned lookup of published packs containing each requested object.
+     * Scans published pack indexes for each requested object.
      * Returns object IDs mapped to lists of containing pack IDs; an object can occur in multiple packs.
      * Objects absent from published packs are omitted, but may still exist as loose objects.
      * Index read failures must be reported as errors, not treated as absent objects. Results are derived
@@ -107,9 +118,16 @@ public final class GitStorageApi {
      *
      * @param objectIds object IDs to locate, not pack IDs
      * @return containing pack IDs grouped by object ID
-     * @throws UnsupportedOperationException until the lookup is implemented
+     * @throws IOException if a published pack or index cannot be read
      */
-    public Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) {
-        throw new UnsupportedOperationException("Pack lookup by object IDs is not implemented");
+    public Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException {
+        return requirePacks().find(Objects.requireNonNull(objectIds, "objectIds"));
+    }
+
+    private GitPackStorage requirePacks() {
+        if (packs == null) {
+            throw new IllegalStateException("Persistent pack storage requires a repository path");
+        }
+        return packs;
     }
 }

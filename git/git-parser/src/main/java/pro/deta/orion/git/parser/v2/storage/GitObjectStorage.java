@@ -28,7 +28,20 @@ import java.util.Optional;
  * Backend implementations own source bounds, final validation, and cleanup; absence never invokes the reader.
  */
 class GitObjectStorage {
+    private final GitPackStorage packs;
+
+    GitObjectStorage() {
+        packs = null;
+    }
+
+    GitObjectStorage(GitPackStorage packs) {
+        this.packs = packs;
+    }
+
     <R> Optional<R> read(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
-        throw new UnsupportedOperationException("Object reads are not implemented");
+        if (packs == null) {
+            throw new UnsupportedOperationException("Object storage is not configured");
+        }
+        return packs.read(objectId, reader);
     }
 }

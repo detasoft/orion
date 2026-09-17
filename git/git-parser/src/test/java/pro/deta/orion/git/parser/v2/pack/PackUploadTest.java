@@ -363,7 +363,7 @@ class PackUploadTest {
         private Attempt(byte[] bytes, Path path) throws IOException {
             source = new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes));
             store = new FileStore(path);
-            upload = new PackUpload(storage, source, store, index);
+            upload = new PackUpload(storage, source, new TestPackBackend(store, index));
         }
 
         @Override

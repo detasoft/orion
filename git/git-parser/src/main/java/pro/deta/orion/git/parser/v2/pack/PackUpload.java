@@ -6,10 +6,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.security.MessageDigest;
@@ -85,15 +83,17 @@ import java.util.Optional;
  * original bytes; remainingEntries is -1 until the pack header has been parsed. verifiedPackId stays null
  * until the entry count and trailer have been validated. No object payload cache is kept here.
  * Pack version 2, header/entry iteration, checksum validation, index registration, and positional content
- * reads are implemented. Publication and rollback remain explicit placeholders pending the storage backend;
- * this scaffold cannot publish data or release backend staging. The supplied resources need external cleanup
- * until that lifecycle is implemented.
+ * reads are implemented. Backend owns finalization, publication, and rollback of this attempt.
+ * After commit, packId returns the final checksum, which may differ when thin-pack bases were appended.
+ * Parsing and content access end at commit; rollback remains safe and never removes published data.
  */
 public final class PackUpload {
     private final GitStorageApi storage;
     private final BufferedByteInput source;
     private final PackByteStore byteStore;
     private final PackIndex index;
+    private final Backend backend;
+    private PackId committedPackId;
     private final MessageDigest checksum;
     private final PackByteStore entryStore = new ChecksummedStore();
 
@@ -102,11 +102,12 @@ public final class PackUpload {
     private PackId verifiedPackId;
     private Throwable failure;
 
-    public PackUpload(GitStorageApi storage, BufferedByteInput source, PackByteStore byteStore, PackIndex index) {
+    public PackUpload(GitStorageApi storage, BufferedByteInput source, Backend backend) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.source = Objects.requireNonNull(source, "source");
-        this.byteStore = Objects.requireNonNull(byteStore, "byteStore");
-        this.index = Objects.requireNonNull(index, "index");
+        this.backend = Objects.requireNonNull(backend, "backend");
+        this.byteStore = Objects.requireNonNull(backend.bytes(), "byteStore");
+        this.index = Objects.requireNonNull(backend.index(), "index");
         try {
             this.checksum = MessageDigest.getInstance("SHA-1");
         } catch (NoSuchAlgorithmException e) {
@@ -185,7 +186,7 @@ public final class PackUpload {
         if (verifiedPackId == null || failure != null) {
             throw new IllegalStateException("Pack checksum has not been verified");
         }
-        return verifiedPackId;
+        return committedPackId == null ? verifiedPackId : committedPackId;
     }
 
     public <R> R readObject(long entryOffset, GitObjectRead<R> reader) throws IOException {
@@ -204,26 +205,9 @@ public final class PackUpload {
         if (entry == null) {
             throw new IllegalArgumentException("Unknown pack entry offset: " + entryOffset);
         }
-        R value = null;
-        try (var zlib = new ZlibBoundaryInputStream(new StoredInput(entry.dataOffset(), offset),
-                entry.inflatedSize())) {
-            value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
-                    new InputStreamBufferedByteInput(zlib)), "reader result");
-            byte[] discard = new byte[8192];
-            while (zlib.read(discard) != -1) {
-                // Validate the rest of the stored payload without revisiting transport input.
-            }
-            return value;
+        try {
+            return PackObjectParser.readStored(entry, byteStore, offset, reader);
         } catch (IOException | RuntimeException | Error error) {
-            if (value instanceof AutoCloseable resource) {
-                try {
-                    resource.close();
-                } catch (Throwable cleanup) {
-                    if (cleanup != error) {
-                        error.addSuppressed(cleanup);
-                    }
-                }
-            }
             failure = error;
             throw error;
         }
@@ -238,16 +222,24 @@ public final class PackUpload {
         if (index.hasUnresolved()) {
             throw new IOException("Pack contains unresolved objects");
         }
-        throw new UnsupportedOperationException("Pack publication is not implemented");
+        try {
+            committedPackId = Objects.requireNonNull(backend.commit(packId), "committed pack ID");
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        }
     }
 
     public void rollback() throws IOException {
-        throw new UnsupportedOperationException("Pack upload rollback is not implemented");
+        backend.rollback();
     }
 
     private void requireUsable() throws IOException {
         if (!byteStore.isOpen()) {
             throw new ClosedChannelException();
+        }
+        if (committedPackId != null) {
+            throw new IllegalStateException("Pack upload is already committed");
         }
         if (failure != null) {
             throw new IOException("Pack upload failed and cannot continue", failure);
@@ -307,36 +299,18 @@ public final class PackUpload {
         }
     }
 
-    private final class StoredInput extends InputStream {
-        private final ByteBuffer buffer = ByteBuffer.allocate(8192);
-        private final long end;
-        private long position;
+    /**
+     * Owns one attempt's byte store and index across parsing, publication, and cleanup.
+     * commit returns the final PackId and releases writable handles; rollback is idempotent,
+     * closes both handles, and removes only this attempt's unpublished files. Neither closes input.
+     */
+    public interface Backend {
+        PackByteStore bytes();
 
-        private StoredInput(long position, long end) {
-            this.position = position;
-            this.end = end;
-            buffer.limit(0);
-        }
+        PackIndex index();
 
-        @Override
-        public int read() throws IOException {
-            if (!buffer.hasRemaining()) {
-                if (position >= end) {
-                    return -1;
-                }
-                buffer.clear();
-                buffer.limit((int) Math.min(buffer.capacity(), end - position));
-                int count = byteStore.read(position, buffer);
-                if (count == -1) {
-                    return -1;
-                }
-                if (count == 0) {
-                    throw new IOException("Pack byte store made no read progress");
-                }
-                position += count;
-                buffer.flip();
-            }
-            return buffer.get() & 255;
-        }
+        PackId commit(PackId receivedId) throws IOException;
+
+        void rollback() throws IOException;
     }
 }

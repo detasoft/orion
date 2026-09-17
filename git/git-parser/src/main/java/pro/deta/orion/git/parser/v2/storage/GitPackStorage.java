@@ -6,6 +6,8 @@ import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackObjectParser;
+import pro.deta.orion.git.parser.v2.pack.PackUpload;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInput;
 
@@ -13,62 +15,256 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.zip.DeflaterOutputStream;
 
 /**
- * Stores pack bytes and indexes internally behind GitStorageApi; files and paths stay inside storage.
- * Object resolution and operation-specific policy belong to callers. uploadNewPack creates PackUpload with
- * the owning GitStorageApi, caller-owned input, a PackByteStore, and an empty storage-provided PackIndex.
- * Static PackObjectParser methods consume entries into that sink with bounded buffers. Upload accumulates
- * the pack checksum incrementally, excluding the trailer from the digest. Only bytes through that trailer
- * are retained; later protocol bytes remain available through the caller's source.
- * PackIndex accumulates provisional metadata, resolved ObjectIds, candidate bases, and waiting dependencies
- * directly in storage. It need not reside entirely in memory or share the byte store's backing format.
- * Each upload owns a PackByteStore: parsing borrows its combined append and positional-read interface.
- * upload.readObject(offset, reader) opens a bounded source from that store and invokes the reader. Raw readers
- * process compressed bytes; content readers inflate them before invoking the consumer. The upload owns the
- * invocation source; independently owned result resources belong to the caller. The planned implementation
- * uses a private FileChannel behind PackByteStore, with no public file handles or additional memory tier.
- * The upload owns its parsing state, sink, index, commit, and rollback without a public upload ID. Rollback releases
- * resources without closing source input or discarding a completed publication or another attempt's data.
+ * Owns repository pack staging, completion, publication, and scans of published indexes.
+ * Each attempt has private files under incoming; publication uses packs/ab/cdef.pack and cdef.mv.
+ * The finalized, closed index is moved last and is the publication marker. The pack rename is synced
+ * before that marker, then the directory is synced again before commit returns. Orphan pack files and
+ * staging are invisible; a subsequent verified upload can replace an orphan under the final PackId lock.
+ * Published pairs are immutable, and rollback deletes only the attempt directory, never final paths.
+ * One JVM owns repository writes; canonical-path GitLock coordinates all its facade instances.
  *
- * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified PackId,
- * then check durable publication metadata and reuse an existing publication or publish this pack and index.
- * Before publication, require completed parsing and index.hasUnresolved() == false. Finish pending byte and
- * index writes before publishing their durable association. The populated index stays in storage; no complete
- * collection must be transferred at commit. Waiting lookup structures can be discarded after publication.
- * Release ownership after publication writes and cleanup. Different pack IDs publish independently; a waiter
- * rechecks the manifest rather than assuming the preceding attempt succeeded. Retry after an uncertain I/O
- * outcome also checks the manifest. Complete publications survive recovery; incomplete staging stays invisible.
- *
- * <p>Only published packs contribute to object lookup and outgoing pack selection.
- * Before publication, missing delta bases are appended as full objects and registered in the index.
- * Updating the pack header and checksum yields its final PackId. Published packs are self-contained;
- * candidate bases and waiting dependencies are temporary state. Ref rejection never undoes an already
- * committed publication.
- *
- * <p>Preliminary methods:
- * <ul>
- *   <li>{@code uploadNewPack(source)} - create an upload with byte storage and an empty PackIndex.</li>
- *   <li>{@code commit(...)} - internally publish the completed self-contained pack and its index.</li>
- *   <li>{@code publishedPacks()} - list metadata of published packs.</li>
- * </ul>
- * Pack completion is implemented: it verifies the received file, appends each missing base as a full object,
- * verifies its canonical ObjectId, updates the header, and rehashes the completed file with bounded buffers.
- * Original entry offsets remain unchanged. An unchanged self-contained pack retains its received PackId.
- * Success forces bytes and finalizes the index; failure closes both handles, leaving permanent staging
- * cleanup to the upload owner. No partially completed attempt may be resumed or published.
- * Base restoration uses ResolvedGitObjectRead and inherits its current REF_DELTA-only resolution and
- * in-memory base-size limits. Publishing, repository lookup, and upload lifecycle wiring remain pending.
+ * <p>Completion verifies retained bytes, appends each missing base as a full object, checks its ObjectId,
+ * and updates the count and checksum with bounded buffers. Original offsets remain unchanged.
+ * Base restoration inherits ResolvedGitObjectRead's current REF_DELTA-only and in-memory base limits.
+ * Indexes are opened one at a time under the pack lock, avoiding overlapping MVStore file locks.
+ * All index and directory handles close before invoking a reader, allowing nested and concurrent reads.
+ * There is no repository-wide object index or retained index cache.
+ * The repository directory must already exist; this backend creates its packs and incoming children.
+ * A failed publication may already be visible if its final directory sync failed; rollback preserves it.
+ * A later identical upload checks and syncs that pair before reporting success.
  */
 final class GitPackStorage {
+    private final Path packs;
+    private final Path incoming;
+    private final GitLock lock;
+
+    GitPackStorage(Path repository) throws IOException {
+        Path root = repository.toRealPath();
+        packs = root.resolve("packs");
+        incoming = root.resolve("incoming");
+        Files.createDirectories(packs);
+        Files.createDirectories(incoming);
+        forceDirectory(root);
+        lock = new GitLock(root);
+    }
+
+    PackUpload upload(GitStorageApi storage, BufferedByteInput source) throws IOException {
+        Objects.requireNonNull(source, "source");
+        Path directory = Files.createTempDirectory(incoming, "pack-");
+        FilePackByteStore bytes = null;
+        FilePackIndex index = null;
+        try {
+            bytes = new FilePackByteStore(directory.resolve("data.pack"));
+            index = FilePackIndex.create(directory.resolve("data.mv"), directory.resolve("data.tmv"));
+            return new PackUpload(storage, source, new Attempt(storage, directory, bytes, index));
+        } catch (IOException | RuntimeException | Error failure) {
+            if (index != null) {
+                closeFailed(index, failure);
+            }
+            if (bytes != null) {
+                closeFailed(bytes, failure);
+            }
+            closeFailed(() -> discard(directory), failure);
+            throw failure;
+        }
+    }
+
+    <R> Optional<R> read(ObjectId id, GitObjectRead<R> reader) throws IOException {
+        Optional<Location> found = scan((packId, indexPath) -> {
+            try (var lease = lockPack(packId); var index = StoredPackIndex.open(indexPath)) {
+                return index.find(id).map(entry -> new Location(packId, entry));
+            }
+        });
+        if (found.isEmpty()) {
+            return Optional.empty();
+        }
+        Location location = found.orElseThrow();
+        R value = null;
+        try (var bytes = FilePackByteStore.open(packPath(location.packId()))) {
+            value = PackObjectParser.readStored(location.entry(), bytes, bytes.size() - 20, reader);
+        } catch (IOException | RuntimeException | Error failure) {
+            if (value instanceof AutoCloseable resource) {
+                closeFailed(resource, failure);
+            }
+            throw failure;
+        }
+        return Optional.of(value);
+    }
+
+    Map<ObjectId, List<PackId>> find(Collection<ObjectId> ids) throws IOException {
+        var result = new LinkedHashMap<ObjectId, List<PackId>>();
+        for (ObjectId id : ids) {
+            Objects.requireNonNull(id, "objectId");
+        }
+        scan((packId, path) -> {
+            try (var lease = lockPack(packId); var index = StoredPackIndex.open(path)) {
+                for (ObjectId id : ids) {
+                    if (index.find(id).isPresent()) {
+                        var locations = result.computeIfAbsent(id, ignored -> new ArrayList<>());
+                        if (!locations.contains(packId)) {
+                            locations.add(packId);
+                        }
+                    }
+                }
+            }
+            return Optional.empty();
+        });
+        return result;
+    }
+
+    private <R> Optional<R> scan(PublishedIndexRead<R> reader) throws IOException {
+        try (var shards = Files.newDirectoryStream(packs, "[0-9a-f][0-9a-f]")) {
+            for (Path shard : shards) {
+                try (var indexes = Files.newDirectoryStream(shard, "*.mv")) {
+                    for (Path index : indexes) {
+                        String name = index.getFileName().toString();
+                        if (!name.matches("[0-9a-f]{38}\\.mv")) {
+                            throw new IOException("Invalid published pack index name: " + index);
+                        }
+                        var id = new PackId(shard.getFileName() + name.substring(0, 38));
+                        if (!Files.isRegularFile(packPath(id))) {
+                            throw new IOException("Published pack is missing: " + id);
+                        }
+                        Optional<R> result = reader.read(id, index);
+                        if (result.isPresent()) {
+                            return result;
+                        }
+                    }
+                }
+            }
+            return Optional.empty();
+        } catch (DirectoryIteratorException failure) {
+            throw failure.getCause();
+        }
+    }
+
+    private Path packPath(PackId id) {
+        String hex = id.toHex();
+        return packs.resolve(hex.substring(0, 2)).resolve(hex.substring(2) + ".pack");
+    }
+
+    private void publish(Path directory, PackId id) throws IOException {
+        try (var lease = lockPack(id)) {
+            Path target = packPath(id);
+            Path shard = target.getParent();
+            Path index = shard.resolve(id.toHex().substring(2) + ".mv");
+            Files.createDirectories(shard);
+            forceDirectory(packs);
+            if (Files.exists(index)) {
+                try (var existing = StoredPackIndex.open(index);
+                     var bytes = FilePackByteStore.open(target)) {
+                    long size = bytes.size();
+                    if (size < 32 || !MessageDigest.isEqual(digest(bytes, size - 20), id.toBytes())
+                            || !MessageDigest.isEqual(readExactly(bytes, size - 20, 20), id.toBytes())) {
+                        throw new IOException("Published pack checksum mismatch: " + id);
+                    }
+                }
+                forceDirectory(shard);
+                return;
+            }
+            Files.move(directory.resolve("data.pack"), target, StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            forceDirectory(shard);
+            Files.move(directory.resolve("data.mv"), index, StandardCopyOption.ATOMIC_MOVE);
+            forceDirectory(shard);
+        }
+    }
+
+    private GitLock.Lease lockPack(PackId id) throws IOException {
+        try {
+            return lock.lockPack(id);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while acquiring pack ownership", interrupted);
+        }
+    }
+
+    private record Location(PackId packId, PackObjectParser.Entry entry) { }
+
+    private static void forceDirectory(Path directory) throws IOException {
+        try (var channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+            channel.force(true);
+        }
+    }
+
+    private static void discard(Path directory) throws IOException {
+        Files.deleteIfExists(directory.resolve("data.tmv"));
+        Files.deleteIfExists(directory.resolve("data.mv"));
+        Files.deleteIfExists(directory.resolve("data.pack"));
+        Files.deleteIfExists(directory);
+    }
+
+    private interface PublishedIndexRead<R> {
+        Optional<R> read(PackId id, Path index) throws IOException;
+    }
+
+    private final class Attempt implements PackUpload.Backend {
+        private final GitStorageApi storage;
+        private final Path directory;
+        private final FilePackByteStore bytes;
+        private final FilePackIndex index;
+
+        private Attempt(GitStorageApi storage, Path directory, FilePackByteStore bytes, FilePackIndex index) {
+            this.storage = storage;
+            this.directory = directory;
+            this.bytes = bytes;
+            this.index = index;
+        }
+
+        @Override
+        public FilePackByteStore bytes() {
+            return bytes;
+        }
+
+        @Override
+        public FilePackIndex index() {
+            return index;
+        }
+
+        @Override
+        public PackId commit(PackId receivedId) throws IOException {
+            PackId id = complete(bytes, index, storage, receivedId);
+            try (bytes; index) {
+                // Close the finalized writers before moving either file.
+            }
+            publish(directory, id);
+            discard(directory);
+            return id;
+        }
+
+        @Override
+        public void rollback() throws IOException {
+            try (bytes; index) {
+                // Release both handles even if closing either one fails.
+            } catch (IOException | RuntimeException | Error failure) {
+                closeFailed(() -> discard(directory), failure);
+                throw failure;
+            }
+            discard(directory);
+        }
+    }
+
     static PackId complete(FilePackByteStore bytes, FilePackIndex index,
                            GitStorageApi storage, PackId receivedId) throws IOException {
         Objects.requireNonNull(bytes, "bytes");

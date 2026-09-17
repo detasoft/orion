@@ -25,6 +25,14 @@ final class FilePackByteStore implements PackByteStore {
                 StandardOpenOption.READ, StandardOpenOption.WRITE);
     }
 
+    static FilePackByteStore open(Path path) throws IOException {
+        return new FilePackByteStore(FileChannel.open(path, StandardOpenOption.READ));
+    }
+
+    private FilePackByteStore(FileChannel channel) {
+        this.channel = channel;
+    }
+
     @Override
     public int write(ByteBuffer source) throws IOException {
         Objects.requireNonNull(source, "source");

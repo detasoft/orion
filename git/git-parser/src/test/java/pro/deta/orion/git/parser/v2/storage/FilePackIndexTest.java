@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.PackObjectParser;
 import pro.deta.orion.git.parser.v2.pack.PackUpload;
+import pro.deta.orion.git.parser.v2.pack.TestPackBackend;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
@@ -291,7 +292,7 @@ class FilePackIndexTest {
         try (var source = new InputStreamBufferedByteInput(new ByteArrayInputStream(pack));
              var bytes = new FilePackByteStore(packPath);
              var index = create(indexPath)) {
-            var upload = new PackUpload(new GitStorageApi(), source, bytes, index);
+            var upload = new PackUpload(new GitStorageApi(), source, new TestPackBackend(bytes, index));
             var result = upload.next();
             objectId = result.value().orElseThrow();
             assertThat(index.find(objectId)).contains(result.entry());

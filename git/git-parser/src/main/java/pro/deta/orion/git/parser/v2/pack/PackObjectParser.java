@@ -34,7 +34,8 @@ import java.util.OptionalLong;
  * bytes remain available for resolver reads. The index retains metadata, never processors or live read handles.
  * Other callers can select their own result and own any resources it contains. Pack header, count, checksum,
  * and index state belong to the caller. ZlibBoundaryInputStream owns compressed stream validation and
- * boundary detection; the parser buffers retained writes separately.
+ * boundary detection; the parser buffers retained writes separately. readStored applies the same bounded
+ * payload validation to indexed bytes without changing their borrowed store or reading transport input.
  */
 public final class PackObjectParser {
     private PackObjectParser() {
@@ -114,6 +115,68 @@ public final class PackObjectParser {
                 }
             }
             throw failure;
+        }
+    }
+
+    public static <R> R readStored(Entry entry, PackByteStore byteStore, long end,
+                                   GitObjectRead<R> reader) throws IOException {
+        Objects.requireNonNull(reader, "reader");
+        R value = null;
+        try (var zlib = new ZlibBoundaryInputStream(new StoredInput(byteStore, entry.dataOffset(), end),
+                entry.inflatedSize())) {
+            value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
+                    new InputStreamBufferedByteInput(zlib)), "reader result");
+            byte[] discard = new byte[8192];
+            while (zlib.read(discard) != -1) {
+                // Validate unread payload before returning the result.
+            }
+            return value;
+        } catch (IOException | RuntimeException | Error failure) {
+            if (value instanceof AutoCloseable resource) {
+                try {
+                    resource.close();
+                } catch (Throwable cleanup) {
+                    if (cleanup != failure) {
+                        failure.addSuppressed(cleanup);
+                    }
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private static final class StoredInput extends InputStream {
+        private final ByteBuffer buffer = ByteBuffer.allocate(8192);
+        private final PackByteStore byteStore;
+        private final long end;
+        private long position;
+
+        private StoredInput(PackByteStore byteStore, long position, long end) {
+            this.byteStore = byteStore;
+            this.position = position;
+            this.end = end;
+            buffer.limit(0);
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (!buffer.hasRemaining()) {
+                if (position >= end) {
+                    return -1;
+                }
+                buffer.clear();
+                buffer.limit((int) Math.min(buffer.capacity(), end - position));
+                int count = byteStore.read(position, buffer);
+                if (count == -1) {
+                    return -1;
+                }
+                if (count == 0) {
+                    throw new IOException("Pack byte store made no read progress");
+                }
+                position += count;
+                buffer.flip();
+            }
+            return buffer.get() & 255;
         }
     }
 

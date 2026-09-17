@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackUpload;
+import pro.deta.orion.git.parser.v2.pack.TestPackBackend;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
@@ -252,7 +253,7 @@ class PackCompletionTest {
             source = new InputStreamBufferedByteInput(new ByteArrayInputStream(pack));
             bytes = new FilePackByteStore(packPath);
             index = FilePackIndex.create(indexPath, temporaryPath);
-            upload = new PackUpload(storage.api, source, bytes, index);
+            upload = new PackUpload(storage.api, source, new TestPackBackend(bytes, index));
         }
 
         @Override
