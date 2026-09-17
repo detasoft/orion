@@ -129,6 +129,24 @@ final class FilePackIndex implements PackIndex, AutoCloseable {
         }
     }
 
+    long entryCount() throws IOException {
+        data.requireOpen();
+        try {
+            return data.entryCount();
+        } catch (MVStoreException error) {
+            throw storageFailure(error);
+        }
+    }
+
+    long objectCount() throws IOException {
+        data.requireOpen();
+        try {
+            return data.objectCount();
+        } catch (MVStoreException error) {
+            throw storageFailure(error);
+        }
+    }
+
     @Override
     public void addEntry(PackObjectParser.Entry entry) throws IOException {
         requireMutable();

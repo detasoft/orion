@@ -13,6 +13,8 @@ import java.util.Objects;
 
 /**
  * Stores one upload's original pack bytes in a private file, with append writes and positional reads.
+ * Storage-only completion may remove the received trailer and rewrite the object count before appending
+ * a new checksum. These operations are not exposed through the parser's append-only PackByteStore contract.
  * Closing releases the channel; the upload's storage owner handles publication and staging-file deletion.
  */
 final class FilePackByteStore implements PackByteStore {
@@ -60,6 +62,31 @@ final class FilePackByteStore implements PackByteStore {
     @Override
     public void force() throws IOException {
         channel.force(true);
+    }
+
+    long size() throws IOException {
+        return channel.size();
+    }
+
+    void truncate(long size) throws IOException {
+        if (size < 0 || size > channel.size()) {
+            throw new IllegalArgumentException("Invalid retained pack size");
+        }
+        channel.truncate(size);
+        channel.position(size);
+    }
+
+    void rewrite(long offset, ByteBuffer source) throws IOException {
+        if (offset < 0 || offset > channel.size() - source.remaining()) {
+            throw new IllegalArgumentException("Rewrite must stay within retained pack bytes");
+        }
+        while (source.hasRemaining()) {
+            int count = channel.write(source, offset);
+            if (count == 0) {
+                throw new IOException("Pack file made no rewrite progress");
+            }
+            offset += count;
+        }
     }
 
     @Override

@@ -194,6 +194,14 @@ final class StoredPackIndex implements AutoCloseable {
         return entries.keyIterator(null);
     }
 
+    long entryCount() {
+        return entries.sizeAsLong();
+    }
+
+    long objectCount() {
+        return objects.sizeAsLong();
+    }
+
     Long objectOffset(ObjectId id) {
         return objects.get(id);
     }
