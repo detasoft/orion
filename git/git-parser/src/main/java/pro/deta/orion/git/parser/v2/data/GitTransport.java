@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2;
+package pro.deta.orion.git.parser.v2.data;
 
 /**
  * Transport carrying a Git exchange, independent of wire protocol version v0/v1/v2.
