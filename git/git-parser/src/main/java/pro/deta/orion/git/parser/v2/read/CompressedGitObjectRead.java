@@ -1,7 +1,8 @@
 package pro.deta.orion.git.parser.v2.read;
 
-import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.util.ZlibInflatedInputStream;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
@@ -9,23 +10,10 @@ import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Shared streaming decompression processor, separate from RawGitObjectRead's direct byte processing.
- * read owns a per-invocation inflater, exposes its bounded inflated source to readDecompressed, drains and
- * validates the remaining zlib stream and declared length, and then returns the result. It releases only
- * inflater resources, never the provider's raw source. No whole-object buffer or cross-entry cache is required.
- * On failure after a resource-bearing result was produced, the implementation must release that unreturned
- * result's owned resources as well. Processing state belongs to the invocation, not to this reusable handler.
- *
- * <p>For OFS_DELTA and REF_DELTA, readDecompressed receives delta instructions and the optional base ID.
- * Subclasses choose whether to resolve them. HashedGitObjectRead hashes full content;
- * ContentGitObjectRead delegates inflated content to a consumer. ZlibInflatedInputStream owns zlib decoding
- * and boundary validation.
- */
 public abstract sealed class CompressedGitObjectRead<R> implements GitObjectRead<R>
         permits HashedGitObjectRead, ContentGitObjectRead, ResolvedGitObjectRead {
     @Override
-    public final R read(ObjectType type, long inflatedSize, Optional<ObjectId> baseId,
+    public final R read(GitObjectType type, long inflatedSize, Optional<ObjectId> baseId,
             BufferedByteInput rawSource) throws IOException {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(baseId, "baseId");
@@ -56,7 +44,7 @@ public abstract sealed class CompressedGitObjectRead<R> implements GitObjectRead
         }
     }
 
-    protected abstract R readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+    protected abstract R readDecompressed(GitObjectType type, long size, Optional<ObjectId> baseId,
             BufferedByteInput content)
             throws IOException;
 }

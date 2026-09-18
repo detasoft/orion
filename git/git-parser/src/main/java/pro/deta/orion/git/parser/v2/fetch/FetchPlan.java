@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.data;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.util.Map;
 import java.util.Collections;
@@ -14,15 +14,6 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
-/**
- * Inputs for pack preparation after negotiation permits transmission.
- * Contains wanted objects and named ref targets, explicitly confirmed common objects, client shallow
- * boundaries, history/filter constraints, and negotiated pack options. Common objects are seeds for later
- * exclusion traversal, not an expanded set of ancestors; shallow boundaries still apply to that traversal.
- * This value owns snapshots and retains no mutable request, context, storage, streams, or producer resources.
- * A plan permits subsequent preparation but does not claim that a pack has been generated or delivered.
- * Wire framing and acknowledgment state remain with the command and negotiator.
- */
 public record FetchPlan(
         Set<ObjectId> wantedObjects,
         Map<RefId, ObjectId> wantedRefs,

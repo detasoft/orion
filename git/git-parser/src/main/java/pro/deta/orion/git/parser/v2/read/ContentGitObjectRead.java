@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.read;
 
-import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.net.io.BufferedByteInput;
 
@@ -26,7 +26,7 @@ public final class ContentGitObjectRead<R> extends CompressedGitObjectRead<R> {
     }
 
     @Override
-    protected R readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+    protected R readDecompressed(GitObjectType type, long size, Optional<ObjectId> baseId,
             BufferedByteInput content) throws IOException {
         return Objects.requireNonNull(consumer.read(type, size, baseId, content), "reader result");
     }

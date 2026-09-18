@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.read;
 
-import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInput;
@@ -14,19 +14,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * Delivers restored type, size, and content through the existing storage read callback.
- * Full objects stream directly after decompression. REF_DELTA bases are read by ObjectId through the
- * same storage facade and recursively restored; OFS_DELTA resolution is not yet supported.
- * Published packs must be self-contained: every referenced base must be available to storage reads.
- * The consumer receives inflated full content and an empty baseId, never delta instructions.
- *
- * <p>Delta output streams to the consumer, but each base currently needs a temporary byte array for
- * random-access copy instructions and must fit in a Java array. Restored bytes are not persisted or cached.
- * A later request for the same base reads and restores it again; a bounded cache can be added later.
- * A resolution path detects cyclic base references. Readers have no shared mutable per-call state.
- * Sources remain borrowed; result ownership and validation follow CompressedGitObjectRead.
- */
 public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
     private final GitStorageApi storage;
     private final GitObjectRead<R> consumer;
@@ -43,12 +30,12 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
     }
 
     @Override
-    protected R readDecompressed(ObjectType type, long size, Optional<ObjectId> baseId,
+    protected R readDecompressed(GitObjectType type, long size, Optional<ObjectId> baseId,
                                  BufferedByteInput content) throws IOException {
-        if (type == ObjectType.OFS_DELTA) {
+        if (type == GitObjectType.OFS_DELTA) {
             throw new IllegalStateException("not yet supported");
         }
-        if (type != ObjectType.REF_DELTA) {
+        if (type != GitObjectType.REF_DELTA) {
             return consumer.read(type, size, Optional.empty(), content);
         }
         ObjectId id = baseId.orElseThrow(() -> new IOException("REF_DELTA has no base ObjectId"));
@@ -93,7 +80,7 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
         }
     }
 
-    private record Base(ObjectType type, byte[] bytes) {}
+    private record Base(GitObjectType type, byte[] bytes) {}
 
     private static final class DeltaInput extends InputStream {
         private final BufferedByteInput instructions;

@@ -1,74 +1,38 @@
 package pro.deta.orion.git.parser.v2.command;
 
-import pro.deta.orion.git.parser.v2.GitTransport;
-import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
-import pro.deta.orion.git.parser.v2.fetch.FetchNegotiator;
-import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
+import pro.deta.orion.git.parser.v2.fetch.*;
 import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.data.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.SideBand;
+import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * Coordinates fetch negotiation, object-access checks, and preparation of pack-production inputs.
- * FetchNegotiator uses borrowed byte streams. FetchRequest parses version-specific requests;
- * FetchNegotiatorIterator operates on decoded messages and accumulates NegotiationContext.
- * Access checks precede storage reads, negotiation decisions, and pack production.
- * Owns GitStorageApi and lends it to a fresh NegotiationContext for each negotiation.
- * Passes the advertised legacy names or decoded v2 fetch features to that context for request validation.
- * negotiate reads the request, prepares object-based negotiation, then drives the wire loop and returns
- * Optional<FetchPlan>. An empty result means the exchange ended without permitting pack transmission.
- * prepareNegotiation validates capabilities, calls checkFetchAccess, resolves want-ref using one storage snapshot,
- * and checks each distinct wanted object's presence before have/done. Requests without want-ref need no snapshot.
- * checkFetchAccess is a user-policy hook: the default allows fetch; an override can throw IOException to deny it.
- * The application supplies user identity through the command subclass. The hook must not mutate the request.
- * Existing objects need not be ref tips or reachable from advertised refs; no reachability restriction is imposed.
- * Object presence is not authorization or graph readiness. Missing objects and storage failures abort preparation.
- * prepareResponse converts a completed exchange's context into an immutable plan without additional storage reads.
- * DONE permits transmission even without common objects. READY suffices for v2 or negotiated legacy no-done;
- * legacy READY alone still requires DONE. Empty wants do not produce a plan. The context must come from
- * completed negotiation after preparation and validation, with an unchanged request.
- * The plan snapshots requested refs, common objects, shallow/deepen/filter constraints, and negotiated options.
- * Common objects remain explicit seeds for pack selection, not a closure of assumed client-owned ancestors.
- * Pack generation and delivery are subsequent steps; a returned plan neither creates nor owns a producer.
- * Application-specific authorization and storage implementations remain external.
- *
- * <p>Preliminary methods:
- * <ul>
- *   <li>{@code prepareNegotiation(FetchRequest, GitTransport)} - validate capabilities and create the iterator;
- *       check access, resolve requested refs, and verify object availability.</li>
- *   <li>{@code negotiate()} - drive negotiation through response delivery and return an optional pack plan.</li>
- *   <li>{@code prepareResponse(context)} - decide whether the completed exchange permits pack preparation.</li>
- *   <li>{@code writePack(BufferedByteOutput)} - stream the producer into writer-provided output.</li>
- *   <li>{@code close()} - release command-owned production resources.</li>
- * </ul>
- * Method names and signatures are provisional; the producer must not leak into the wire-layer contract.
- */
 public class FetchCommand implements GitCommand {
     private final GitStorageApi storage;
-    private final Set<GitCapability> advertisedCapabilities;
+    private final GitCapabilities advertisedCapabilities;
 
-    public FetchCommand(GitStorageApi storage, Set<GitCapability> advertisedCapabilities) {
+    public FetchCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
         this.storage = Objects.requireNonNull(storage, "storage");
-        this.advertisedCapabilities = Set.copyOf(advertisedCapabilities);
+        this.advertisedCapabilities = Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities");
     }
 
-    public Optional<FetchPlan> negotiate(FetchNegotiator negotiator, GitTransport transport) throws IOException {
+    @Override
+    public void action(GitProtocolContext protocolContext) throws IOException {
+        FetchNegotiator negotiator = new FetchNegotiator(reader, writer, gitProtocolVersion);
         FetchRequest request = negotiator.readRequest();
-        FetchNegotiatorIterator iterator = prepareNegotiation(request, transport);
-        return prepareResponse(negotiator.negotiate(iterator));
-    }
-
-    public FetchNegotiatorIterator prepareNegotiation(FetchRequest request, GitTransport transport)
-            throws IOException {
-        var context = new NegotiationContext(request, storage, advertisedCapabilities);
-        var iterator = new FetchNegotiatorIterator(context, transport);
+        NegotiationContext context = new NegotiationContext(request, storage, advertisedCapabilities);
+        FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, transport);
         checkFetchAccess(request);
         if (!request.wantRefs().isEmpty()) {
             context.resolveWantedRefs(storage.snapshotRefs());
@@ -78,7 +42,7 @@ public class FetchCommand implements GitCommand {
                 throw new IOException("Wanted object does not exist: " + objectId.toHex());
             }
         }
-        return iterator;
+        Optional<FetchPlan> plan = prepareResponse(negotiator.negotiate(iterator));
     }
 
     protected void checkFetchAccess(FetchRequest request) throws IOException {
@@ -88,7 +52,7 @@ public class FetchCommand implements GitCommand {
         Objects.requireNonNull(context, "context");
         FetchRequest request = context.request();
         boolean readyPermitsPack = context.ready() && (request.mode() == FetchRequest.Mode.PROTOCOL_V2
-                || request.capabilities().contains(GitCapability.NO_DONE.entry()));
+                || request.capabilities().contains(GitCapability.NO_DONE.value()));
         if (!context.doneReceived() && !readyPermitsPack) {
             return Optional.empty();
         }
@@ -101,4 +65,54 @@ public class FetchCommand implements GitCommand {
                 request.filter(), request.capabilities(), request.packfileUriProtocols()));
     }
 
+    public NegotiationContext negotiate(FetchNegotiatorIterator iterator) throws IOException {
+        FetchRequest request = iterator.getContext().request();
+        if (version == GitProtocolVersion.V2) {
+            for (NegotiationMessage message : request.initialMessages()) {
+                boolean more = iterator.next(message);
+                writeResponses(iterator.getResponsesToSend(), request);
+                if (!more) {
+                    break;
+                }
+            }
+        } else if (!request.wants().isEmpty()) {
+            boolean more;
+            do {
+                more = iterator.next(readNegotiationMessage(input));
+                writeResponses(iterator.getResponsesToSend(), request);
+            } while (more);
+        }
+        return iterator.getContext();
+    }
+
+    private void writeResponses(List<NegotiationResponse> responsesToSend, FetchRequest request) throws IOException {
+        if (!responsesToSend.isEmpty()) {
+            SideBand sideBand = request.capabilities().contains(GitCapability.SIDEBAND_ALL.value())
+                    ? SideBand.DATA : SideBand.NONE;
+            output.writeNegotiationRound(responsesToSend, sideBand);
+            output.flush();
+        }
+    }
+
+    public static NegotiationMessage readNegotiationMessage(GitProtocolContext.Reader reader) throws IOException {
+        GitPktLine packet = reader.readGitPktLine();
+        return switch (packet) {
+            case GitPktLine.Control.FLUSH -> NegotiationMessage.Control.END_ROUND;
+            case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
+                    throw invalid("Expected a data packet");
+            case GitPktLine.Data data -> {
+                NegotiationCapability argument = NegotiationCapability.parse(data.text());
+                yield switch (argument.cap()) {
+                    case DONE -> NegotiationMessage.Control.DONE;
+                    case HAVE -> new NegotiationMessage.Have(new ObjectId(argument.value()));
+                    default -> throw invalid("Unexpected negotiation message: " + argument.cap().wireName());
+                };
+            }
+        };
+    }
+
+
+    private static IOException invalid(String message) {
+        return new IOException(message);
+    }
 }

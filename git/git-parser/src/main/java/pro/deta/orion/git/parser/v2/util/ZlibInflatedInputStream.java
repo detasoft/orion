@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.read;
+package pro.deta.orion.git.parser.v2.util;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -11,12 +11,7 @@ import java.util.Objects;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-/**
- * Inflates a borrowed source bounded to one zlib stream using fixed-size compressed input storage.
- * Successful exhaustion validates the exact inflated length, zlib completion, and the source boundary.
- * Closing releases the inflater and scratch buffer without closing the borrowed source.
- */
-final class ZlibInflatedInputStream extends InputStream {
+public final class ZlibInflatedInputStream extends InputStream {
     private final BufferedByteInput source;
     private final long expectedSize;
     private final Inflater inflater = new Inflater();
@@ -25,7 +20,7 @@ final class ZlibInflatedInputStream extends InputStream {
     private long inflatedSize;
     private boolean exhausted;
 
-    ZlibInflatedInputStream(BufferedByteInput source, long expectedSize) {
+    public ZlibInflatedInputStream(BufferedByteInput source, long expectedSize) {
         this.source = source;
         this.expectedSize = expectedSize;
     }

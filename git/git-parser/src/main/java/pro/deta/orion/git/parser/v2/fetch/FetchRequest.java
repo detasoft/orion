@@ -1,13 +1,13 @@
 package pro.deta.orion.git.parser.v2.data;
 
-import pro.deta.orion.git.parser.v2.GitReader;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationCapability;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
+import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -19,26 +19,18 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
-/**
- * Mutable fetch request with static wire parsers, without an intermediate builder.
- * Collection accessors expose this request's mutable collections; scalar setters replace optional values.
- * Known capabilities use GitCapability.Entry, retaining values and custom names without string flags.
- * parseLegacy reads the v0/v1 want section through its flush without consuming negotiation haves.
- * parseV2 starts after the command-header delimiter and reads arguments, including have/done, through flush.
- * Both create a fresh request, validate syntax and argument combinations, and leave the borrowed input open.
- * Malformed or truncated requests fail with IOException. Capability advertisement and object access checks
- * belong to command preparation; successful parsing does not imply that a requested feature is supported.
- *
- * <p>Legacy capabilities come from the first want. V2 initialMessages preserve parsed have/done order and
- * the final END_ROUND; legacy leaves this list empty and reads subsequent negotiation messages separately.
- * An empty legacy want section ends the exchange. Pack options and shallow boundaries remain available to
- * FetchCommand. Each parse creates its own request. Finish population before negotiation and do not mutate
- * the request concurrently or while its context is in use. Current object IDs require SHA-1.
- */
 public final class FetchRequest {
+
+    WANT_REF("want-ref"),
+    WANT("want"),
+    HAVE("have"),
+    DONE("done"),
+    DEEPEN("deepen"),
+
     private final Set<ObjectId> wants = new LinkedHashSet<>();
     private final Set<ObjectId> shallowCommits = new LinkedHashSet<>();
-    private final Set<GitCapability.Entry> capabilities = new LinkedHashSet<>();
+
+    private final Set<GitCapabilityValue> capabilities = new LinkedHashSet<>();
     private final List<NegotiationMessage> initialMessages = new ArrayList<>();
     private final Set<String> wantRefs = new LinkedHashSet<>();
     private final Set<String> deepenNot = new LinkedHashSet<>();
@@ -48,7 +40,14 @@ public final class FetchRequest {
     private OptionalLong deepenSince = OptionalLong.empty();
     private Optional<String> filter = Optional.empty();
 
-    public static FetchRequest parseV2(GitReader reader) throws IOException {
+    public FetchRequest parseRequest(GitProtocolContext.Reader reader, GitProtocolVersion gitProtocolVersion) throws IOException {
+        return switch (gitProtocolVersion) {
+            case V0, V1 -> FetchRequest.parseLegacy(reader);
+            case V2 -> FetchRequest.parseV2(reader);
+        };
+    }
+
+    public static FetchRequest parseV2(GitProtocolContext.Reader reader) throws IOException {
         var request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
@@ -93,7 +92,7 @@ public final class FetchRequest {
                             }
                         }
                         case THIN_PACK, OFS_DELTA, INCLUDE_TAG, NO_PROGRESS, WAIT_FOR_DONE,
-                             SIDEBAND_ALL, DEEPEN_RELATIVE -> request.capabilities().add(argument.cap().entry());
+                             SIDEBAND_ALL, DEEPEN_RELATIVE -> request.capabilities().add(argument.cap().value());
                         default -> acceptShared(request, argument);
                     }
                 }
@@ -101,7 +100,7 @@ public final class FetchRequest {
         }
     }
 
-    public static FetchRequest parseLegacy(GitReader reader) throws IOException {
+    public static FetchRequest parseLegacy(GitProtocolContext.Reader reader) throws IOException {
         var request = new FetchRequest();
         boolean receivedLine = false;
         boolean wantsEnded = false;
@@ -112,9 +111,9 @@ public final class FetchRequest {
                     if (receivedLine && request.wants().isEmpty()) {
                         throw invalid("Legacy fetch requires want");
                     }
-                    FetchRequest.Mode mode = request.capabilities().contains(GitCapability.MULTI_ACK_DETAILED.entry())
+                    FetchRequest.Mode mode = request.capabilities().contains(GitCapability.MULTI_ACK_DETAILED.value())
                             ? FetchRequest.Mode.MULTI_ACK_DETAILED
-                            : request.capabilities().contains(GitCapability.MULTI_ACK.entry())
+                            : request.capabilities().contains(GitCapability.MULTI_ACK.value())
                                     ? FetchRequest.Mode.MULTI_ACK : FetchRequest.Mode.SINGLE_ACK;
                     request.setMode(mode);
                     validate(request);
@@ -237,7 +236,7 @@ public final class FetchRequest {
         if (request.depth().isPresent() && (request.deepenSince().isPresent() || !request.deepenNot().isEmpty())) {
             throw invalid("Depth cannot be combined with deepen-since or deepen-not");
         }
-        if (request.capabilities().contains(GitCapability.DEEPEN_RELATIVE.entry()) && request.depth().isEmpty()) {
+        if (request.capabilities().contains(GitCapability.DEEPEN_RELATIVE.value()) && request.depth().isEmpty()) {
             throw invalid("deepen-relative requires depth");
         }
         if (request.mode() != FetchRequest.Mode.PROTOCOL_V2 && request.waitForDone()) {
@@ -305,7 +304,7 @@ public final class FetchRequest {
     }
 
     public boolean waitForDone() {
-        return capabilities.contains(GitCapability.WAIT_FOR_DONE.entry());
+        return capabilities.contains(GitCapability.WAIT_FOR_DONE.value());
     }
 
     /** Negotiated legacy ACK behavior, or the protocol v2 acknowledgment-section rules. */
