@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
@@ -18,9 +17,9 @@ import java.util.OptionalLong;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-public final class PackIngestor implements AutoCloseable {
+public final class PackIngestor<T extends PackTarget> implements AutoCloseable {
     private final BufferedByteInputV2 input;
-    private final PackUpload upload;
+    private final T target;
     private final ByteBuffer retained = ByteBuffer.allocate(8192);
     private final byte[] inflated = new byte[8192];
     private final MessageDigest checksum = sha1();
@@ -28,14 +27,14 @@ public final class PackIngestor implements AutoCloseable {
     private long position;
     private boolean started;
     private boolean trailer;
-    private boolean ownsUpload = true;
+    private boolean ownsTarget = true;
 
-    public PackIngestor(BufferedByteInputV2 input, PackUpload upload) {
+    public PackIngestor(BufferedByteInputV2 input, T target) {
         this.input = Objects.requireNonNull(input, "input");
-        this.upload = Objects.requireNonNull(upload, "upload");
+        this.target = Objects.requireNonNull(target, "target");
     }
 
-    public IndexedPack read() throws IOException {
+    public T ingest() throws IOException {
         if (started) {
             throw new IllegalStateException("Pack ingestion has already started or closed");
         }
@@ -51,22 +50,7 @@ public final class PackIngestor implements AutoCloseable {
         Inflater inflater = new Inflater();
         try {
             for (long entryNumber = 0; entryNumber < count; entryNumber++) {
-                IndexedPack.Entry entry = readHeader();
-                boolean full = entry.type() != GitObjectType.OFS_DELTA
-                        && entry.type() != GitObjectType.REF_DELTA;
-                if (full) {
-                    objectHash.reset();
-                    String header = entry.type().name().toLowerCase(Locale.ROOT)
-                            + " " + entry.inflatedSize() + "\0";
-                    objectHash.update(header.getBytes(StandardCharsets.US_ASCII));
-                }
-                inflater.reset();
-                readContent(inflater, entry.inflatedSize(), full);
-                upload.index().addEntry(entry);
-                if (full) {
-                    upload.index().addObject(entry, new ObjectId(objectHash.digest()),
-                            entry.type(), entry.inflatedSize());
-                }
+                readEntry(inflater);
             }
         } finally {
             inflater.end();
@@ -78,12 +62,11 @@ public final class PackIngestor implements AutoCloseable {
             throw new IOException("Pack checksum mismatch");
         }
         flush();
-        IndexedPack pack = upload.finish(new PackId(received));
-        ownsUpload = false;
-        return pack;
+        ownsTarget = false;
+        return target;
     }
 
-    private IndexedPack.Entry readHeader() throws IOException {
+    private void readEntry(Inflater inflater) throws IOException {
         long offset = position;
         int part = readByte();
         GitObjectType type = GitObjectType.valueOf((part >>> 4) & 7);
@@ -116,7 +99,19 @@ public final class PackIngestor implements AutoCloseable {
         } else if (type == GitObjectType.REF_DELTA) {
             baseId = Optional.of(new ObjectId(readBytes(checksum.getDigestLength())));
         }
-        return new IndexedPack.Entry(offset, position, size, type, baseOffset, baseId);
+        long dataOffset = position;
+        boolean full = type != GitObjectType.OFS_DELTA && type != GitObjectType.REF_DELTA;
+        if (full) {
+            objectHash.reset();
+            String header = type.name().toLowerCase(Locale.ROOT) + " " + size + "\0";
+            objectHash.update(header.getBytes(StandardCharsets.US_ASCII));
+        }
+        inflater.reset();
+        readContent(inflater, size, full);
+        target.addEntry(offset, dataOffset, size, type, baseOffset, baseId);
+        if (full) {
+            target.addObject(offset, new ObjectId(objectHash.digest()), type, size);
+        }
     }
 
     private void readContent(Inflater inflater, long size, boolean full) throws IOException {
@@ -225,7 +220,7 @@ public final class PackIngestor implements AutoCloseable {
     private void flush() throws IOException {
         if (retained.position() != 0) {
             retained.flip();
-            upload.write(retained);
+            target.append(retained);
             retained.clear();
         }
     }
@@ -233,9 +228,9 @@ public final class PackIngestor implements AutoCloseable {
     @Override
     public void close() throws IOException {
         started = true;
-        if (ownsUpload) {
-            upload.discard();
-            ownsUpload = false;
+        if (ownsTarget) {
+            target.discard();
+            ownsTarget = false;
         }
     }
 
