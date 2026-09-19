@@ -24,6 +24,13 @@
   belong in `AGENTS.md`, `docs/definitions.md`, and repository skills.
 - Create a standalone design or plan document only when the user explicitly
   requests that document or the selected task names it as a deliverable.
+- Do not follow a requested approach blindly when it conflicts with minimal
+  implementation or established best practices, introduces avoidable complexity,
+  or contains contradictions or material ambiguity. Before implementing the
+  disputed part, explain the concrete concern, nuances, and tradeoffs, propose
+  a simpler or clearer alternative where possible, and ask the user to confirm
+  the intended approach. Once the user resolves the concern, follow that decision
+  without requesting the same confirmation again.
 
 ## Commits and verification
 
@@ -110,6 +117,7 @@
   separate commit.
 - Prefer ordinary loops and straightforward control flow over Java streams
   unless streams are noticeably clearer.
+- Prefer explicit local variable types over `var` whenever practical.
 - Keep source lines at or below 112 characters; up to 135 is acceptable only
   for a line that barely cannot fit.
 - Mark test-only non-contract methods with
