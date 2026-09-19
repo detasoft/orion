@@ -42,7 +42,7 @@ public final class GitPackObjectResolver {
 
     public PackId complete() throws IOException {
         PackId receivedId = pack.id();
-        try (PackUploadIndex index = PackUploadIndex.create(pack, pack.directory().resolve("data.tmv"))) {
+        try (PackUploadIndex index = PackUploadIndex.create(pack)) {
             return complete(pack, index, storage, receivedId);
         }
     }

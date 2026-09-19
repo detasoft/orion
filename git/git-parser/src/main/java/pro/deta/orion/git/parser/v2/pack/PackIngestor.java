@@ -17,9 +17,9 @@ import java.util.OptionalLong;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-public final class PackIngestor<T extends PackTarget> implements AutoCloseable {
+public final class PackIngestor implements AutoCloseable {
     private final BufferedByteInputV2 input;
-    private final T target;
+    private final IndexedPack target;
     private final ByteBuffer retained = ByteBuffer.allocate(8192);
     private final byte[] inflated = new byte[8192];
     private final MessageDigest checksum = sha1();
@@ -29,12 +29,12 @@ public final class PackIngestor<T extends PackTarget> implements AutoCloseable {
     private boolean trailer;
     private boolean ownsTarget = true;
 
-    public PackIngestor(BufferedByteInputV2 input, T target) {
+    public PackIngestor(BufferedByteInputV2 input, IndexedPack target) {
         this.input = Objects.requireNonNull(input, "input");
         this.target = Objects.requireNonNull(target, "target");
     }
 
-    public T ingest() throws IOException {
+    public IndexedPack ingest() throws IOException {
         if (started) {
             throw new IllegalStateException("Pack ingestion has already started or closed");
         }

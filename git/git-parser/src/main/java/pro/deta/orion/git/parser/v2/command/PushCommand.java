@@ -19,8 +19,8 @@ public final class PushCommand implements GitCommand {
     @Override
     public void action(GitProtocolContext protocolContext) throws IOException {
         BufferedByteInputV2 input = protocolContext.input();
-        try (PackIngestor<IndexedPack> ingestor = new PackIngestor<>(input, storage.newPack());
-                IndexedPack pack = ingestor.ingest()) {
+        try (PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
+            IndexedPack pack = ingestor.ingest();
             storage.persist(pack);
         }
     }

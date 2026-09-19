@@ -30,14 +30,20 @@ public final class PackUploadIndex implements AutoCloseable {
     private boolean finalized;
     private boolean temporaryDeleted;
 
-    public static PackUploadIndex create(IndexedPack data, Path temporaryPath) throws IOException {
+    public static PackUploadIndex create(IndexedPack data) throws IOException {
         Objects.requireNonNull(data, "data").requireOpen();
-        Objects.requireNonNull(temporaryPath, "temporaryPath");
+        Path temporaryPath = data.isInMemory() ? null : data.directory().resolve("data.tmv");
         MVStore temporary = null;
-        Files.createFile(temporaryPath);
+        if (temporaryPath != null) {
+            Files.createFile(temporaryPath);
+        }
         try {
-            temporary = new MVStore.Builder().fileName(temporaryPath.toAbsolutePath().toString())
-                    .cacheSize(4).autoCommitDisabled().autoCommitBufferSize(0).open();
+            MVStore.Builder builder = new MVStore.Builder()
+                    .cacheSize(4).autoCommitDisabled().autoCommitBufferSize(0);
+            if (temporaryPath != null) {
+                builder.fileName(temporaryPath.toAbsolutePath().toString());
+            }
+            temporary = builder.open();
             PackUploadIndex state = new PackUploadIndex(data, temporary, temporaryPath);
             Iterator<Long> offsets = data.offsets();
             while (offsets.hasNext()) {
@@ -61,7 +67,9 @@ public final class PackUploadIndex implements AutoCloseable {
             if (temporary != null) {
                 IndexedPack.closeFailed(temporary, error);
             }
-            deleteFailed(temporaryPath, error);
+            if (temporaryPath != null) {
+                deleteFailed(temporaryPath, error);
+            }
             if (error instanceof MVStoreException) {
                 throw new IOException("Cannot create temporary pack state", error);
             }
@@ -202,7 +210,9 @@ public final class PackUploadIndex implements AutoCloseable {
     private void discardTemporary() throws IOException {
         if (!temporaryDeleted) {
             temporary.closeImmediately();
-            Files.deleteIfExists(temporaryPath);
+            if (temporaryPath != null) {
+                Files.deleteIfExists(temporaryPath);
+            }
             temporaryDeleted = true;
         }
     }

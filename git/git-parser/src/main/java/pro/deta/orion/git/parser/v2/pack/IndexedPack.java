@@ -18,25 +18,45 @@ import java.io.InputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
-import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 
-public final class IndexedPack implements PackTarget, AutoCloseable {
+public final class IndexedPack implements AutoCloseable {
     private static final Set<String> MAP_NAMES = Set.of("entries", "objects");
-    private final FileChannel bytes;
+    private final PackDataStorage bytes;
     private final MVStore store;
     private final MVMap<Long, byte[]> entries;
     private final MVMap<ObjectId, Long> objects;
     private final Path directory;
     private int pendingChanges;
+
+    public static IndexedPack create() throws IOException {
+        PackDataStorage bytes = PackDataStorage.memory();
+        MVStore store = null;
+        try {
+            store = new MVStore.Builder().autoCommitDisabled().open();
+            store.setStoreVersion(2);
+            return new IndexedPack(bytes, store, null);
+        } catch (RuntimeException | Error error) {
+            if (store != null) {
+                closeFailed(store, error);
+            }
+            try {
+                bytes.close();
+            } catch (IOException cleanup) {
+                error.addSuppressed(cleanup);
+            }
+            throw error;
+        }
+    }
 
     public static IndexedPack create(Path directory) throws IOException {
         Files.createDirectory(directory);
@@ -61,9 +81,9 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
     }
 
     private static IndexedPack load(Path packPath, Path indexPath, Path directory) throws IOException {
-        FileChannel bytes = directory == null
-                ? FileChannel.open(packPath, StandardOpenOption.READ)
-                : FileChannel.open(packPath, StandardOpenOption.CREATE_NEW,
+        PackDataStorage bytes = directory == null
+                ? PackDataStorage.open(packPath, StandardOpenOption.READ)
+                : PackDataStorage.open(packPath, StandardOpenOption.CREATE_NEW,
                         StandardOpenOption.READ, StandardOpenOption.WRITE);
         MVStore store = null;
         try {
@@ -98,7 +118,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         }
     }
 
-    private IndexedPack(FileChannel bytes, MVStore store, Path directory) {
+    private IndexedPack(PackDataStorage bytes, MVStore store, Path directory) {
         this.bytes = bytes;
         this.store = store;
         this.directory = directory;
@@ -108,25 +128,24 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
                 .keyType(ObjectIdDataType.INSTANCE).valueType(LongDataType.INSTANCE));
     }
 
-    @Override
     public void append(ByteBuffer source) throws IOException {
         write(size(), source);
     }
 
     public void write(long offset, ByteBuffer source) throws IOException {
         requireMutable();
-        while (source.hasRemaining()) {
-            int count = bytes.write(source, offset);
-            if (count <= 0) {
-                throw new IOException("Pack file write made no progress");
-            }
-            offset += count;
+        if (offset < 0) {
+            throw new IllegalArgumentException("Negative pack offset");
         }
+        if (source.remaining() > Long.MAX_VALUE - offset) {
+            throw new IOException("Pack size overflows a signed long");
+        }
+        bytes.write(offset, source);
     }
 
     public int read(long offset, ByteBuffer target) throws IOException {
         requireOpen();
-        return bytes.read(target, offset);
+        return bytes.read(offset, target);
     }
 
     public long size() throws IOException {
@@ -154,9 +173,51 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         return new PackId(trailer.array());
     }
 
+    public boolean isInMemory() {
+        return store.getFileStore() == null;
+    }
+
+    public IndexedPack copyTo(Path directory) throws IOException {
+        requireOpen();
+        IndexedPack copy = create(directory);
+        try {
+            ByteBuffer buffer = ByteBuffer.allocate(8192);
+            long length = size();
+            long offset = 0;
+            while (offset < length) {
+                buffer.clear().limit((int) Math.min(buffer.capacity(), length - offset));
+                int count = read(offset, buffer);
+                if (count <= 0) {
+                    throw new EOFException("Cannot copy pack bytes");
+                }
+                copy.append(buffer.flip());
+                offset += count;
+            }
+            for (Map.Entry<Long, byte[]> entry : entries.entrySet()) {
+                copy.entries.put(entry.getKey(), entry.getValue());
+                copy.commitBatch();
+            }
+            for (Map.Entry<ObjectId, Long> entry : objects.entrySet()) {
+                copy.objects.put(entry.getKey(), entry.getValue());
+                copy.commitBatch();
+            }
+            copy.flush();
+            return copy;
+        } catch (IOException | RuntimeException | Error error) {
+            try {
+                copy.discard();
+            } catch (Throwable cleanup) {
+                if (cleanup != error) {
+                    error.addSuppressed(cleanup);
+                }
+            }
+            throw error;
+        }
+    }
+
     public Path directory() {
         if (directory == null) {
-            throw new IllegalStateException("Pack is read-only");
+            throw new IllegalStateException("Pack has no staging directory");
         }
         return directory;
     }
@@ -175,7 +236,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
 
     public static <R> R readObject(Path path, EntryMetadata entry, GitObjectRead<R> reader) throws IOException {
         R value = null;
-        try (FileChannel bytes = FileChannel.open(path, StandardOpenOption.READ)) {
+        try (PackDataStorage bytes = PackDataStorage.open(path, StandardOpenOption.READ)) {
             value = readStored(entry, bytes, bytes.size(), reader);
             return value;
         } catch (IOException | RuntimeException | Error error) {
@@ -184,7 +245,6 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         }
     }
 
-    @Override
     public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
                             OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
         requireOpen();
@@ -210,7 +270,6 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         }
     }
 
-    @Override
     public boolean addObject(long offset, ObjectId id, GitObjectType type, long size)
             throws IOException {
         requireOpen();
@@ -286,13 +345,16 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         }
     }
 
-    @Override
     public void discard() throws IOException {
-        Path staging = directory();
+        if (store.isReadOnly()) {
+            throw new IllegalStateException("Pack is read-only");
+        }
         close();
-        Files.deleteIfExists(staging.resolve("data.mv"));
-        Files.deleteIfExists(staging.resolve("data.pack"));
-        Files.deleteIfExists(staging);
+        if (directory != null) {
+            Files.deleteIfExists(directory.resolve("data.mv"));
+            Files.deleteIfExists(directory.resolve("data.pack"));
+            Files.deleteIfExists(directory);
+        }
     }
 
     Iterator<Long> offsets() {
@@ -326,7 +388,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
     public void flush() throws IOException {
         requireMutable();
         try {
-            bytes.force(true);
+            bytes.flush();
             store.commit();
             store.sync();
         } catch (MVStoreException error) {
@@ -346,7 +408,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
 
     private void requireMutable() throws IOException {
         requireOpen();
-        if (directory == null) {
+        if (store.isReadOnly()) {
             throw new IllegalStateException("Pack is read-only");
         }
     }
@@ -376,7 +438,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
         }
     }
 
-    private static <R> R readStored(EntryMetadata entry, FileChannel byteStore, long end,
+    private static <R> R readStored(EntryMetadata entry, PackDataStorage byteStore, long end,
                                    GitObjectRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
         R value = null;
@@ -408,11 +470,11 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
 
     private static final class StoredInput extends InputStream {
         private final ByteBuffer buffer = ByteBuffer.allocate(8192);
-        private final FileChannel byteStore;
+        private final PackDataStorage byteStore;
         private final long end;
         private long position;
 
-        private StoredInput(FileChannel byteStore, long position, long end) {
+        private StoredInput(PackDataStorage byteStore, long position, long end) {
             this.byteStore = byteStore;
             this.position = position;
             this.end = end;
@@ -427,7 +489,7 @@ public final class IndexedPack implements PackTarget, AutoCloseable {
                 }
                 buffer.clear();
                 buffer.limit((int) Math.min(buffer.capacity(), end - position));
-                int count = byteStore.read(buffer, position);
+                int count = byteStore.read(position, buffer);
                 if (count == -1) {
                     return -1;
                 }

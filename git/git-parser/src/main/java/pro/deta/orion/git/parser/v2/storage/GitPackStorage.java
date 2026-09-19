@@ -47,6 +47,17 @@ final class GitPackStorage {
     }
 
     PackId persist(IndexedPack pack) throws IOException {
+        if (pack.isInMemory()) {
+            try {
+                IndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
+                PackId id = persist(staged);
+                pack.close();
+                return id;
+            } catch (IOException | RuntimeException | Error failure) {
+                closeFailed(pack::discard, failure);
+                throw failure;
+            }
+        }
         Path directory = pack.directory();
         try {
             PackId id = pack.id();
@@ -62,7 +73,7 @@ final class GitPackStorage {
             if (!MessageDigest.isEqual(digest(pack, size - 20), id.toBytes())) {
                 throw new IOException("Pack checksum mismatch");
             }
-            try (PackUploadIndex state = PackUploadIndex.create(pack, directory.resolve("data.tmv"))) {
+            try (PackUploadIndex state = PackUploadIndex.create(pack)) {
                 state.finish();
             }
             pack.close();
