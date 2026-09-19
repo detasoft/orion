@@ -10,37 +10,21 @@ import java.io.IOException;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Accumulates one fetch argument block or legacy negotiation round as an ordered GitCapabilities list.
- * parse returns true while more packets are needed, false on FLUSH or legacy DONE. V2 DONE still requires
- * FLUSH. DELIMITER and RESPONSE_END are invalid within this block; the V2 command envelope is read earlier.
- * After completion another packet is rejected; the next block requires a new parser.
- * capabilities exposes the accumulated list for incremental reads; callers must not mutate it during parsing.
- * Checks argument names, protocol version, value presence, and separators without trimming input.
- * The first legacy want adds the object ID and each trailing capability as separate occurrences.
- * Flags have no value. Object IDs, numeric ranges, ref/filter syntax, request ordering,
- * duplicates, and advertised feature checks belong to the request or negotiation consumer.
- * The result represents a space-separated argument; GitCapabilityValue.wireToken uses capability syntax
- * with '=' and must not be used to serialize this result as a fetch argument.
- */
 public final class NegotiationCapabilityParser {
     private final GitProtocolVersion version;
-    private final GitCapabilities capabilities = new GitCapabilities();
+    private boolean receivedArgument;
     private boolean finished;
 
     public NegotiationCapabilityParser(GitProtocolVersion version) {
         this.version = Objects.requireNonNull(version, "version");
     }
 
-    public GitCapabilities capabilities() {
-        return capabilities;
-    }
-
-    public boolean parse(GitPktLine packet) throws IOException {
+    public GitCapabilities parse(GitPktLine packet) throws IOException {
         Objects.requireNonNull(packet, "packet");
         if (finished) {
             throw new IllegalStateException("Negotiation argument block is complete");
         }
+        var parsed = new GitCapabilities();
         switch (packet) {
             case GitPktLine.Control.FLUSH -> finished = true;
             case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
@@ -50,23 +34,22 @@ public final class NegotiationCapabilityParser {
                 if (version != GitProtocolVersion.V2
                         && argument.name().equals(NegotiationCapability.WANT.wireName())) {
                     String[] tokens = argument.value().orElseThrow().split(" ");
-                    if (tokens.length > 1 && !capabilities.isEmpty()) {
+                    if (tokens.length > 1 && receivedArgument) {
                         throw new IOException("Capabilities are only allowed on the first want");
                     }
-                    var parsed = new GitCapabilities();
                     parsed.add(new GitCapabilityValue(argument.name(), Optional.of(tokens[0])));
                     for (int i = 1; i < tokens.length; i++) {
                         parsed.add(GitCapabilityValue.parse(tokens[i]));
                     }
-                    capabilities.addAll(parsed);
                 } else {
-                    capabilities.add(argument);
+                    parsed.add(argument);
                     finished = version != GitProtocolVersion.V2
                             && argument.name().equals(NegotiationCapability.DONE.wireName());
                 }
+                receivedArgument = true;
             }
         }
-        return !finished;
+        return parsed;
     }
 
     private GitCapabilityValue parseLine(String line) throws IOException {

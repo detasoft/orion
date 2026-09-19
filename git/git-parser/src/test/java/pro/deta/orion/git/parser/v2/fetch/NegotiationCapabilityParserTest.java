@@ -8,12 +8,12 @@ import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import java.nio.charset.StandardCharsets;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static pro.deta.orion.git.parser.v2.capability.GitCapability.*;
 import static pro.deta.orion.git.parser.v2.data.GitProtocolVersion.*;
 
@@ -44,8 +44,10 @@ class NegotiationCapabilityParserTest {
             for (var version : new GitProtocolVersion[]{V0, V1}) {
                 var legacy = new NegotiationCapabilityParser(version);
                 assertThrows(IOException.class, () -> read(legacy, flag));
-                assertEquals(Optional.of(ID), read(legacy, "want " + ID + " " + flag).value());
-                assertTrue(legacy.capabilities().has(pro.deta.orion.git.parser.v2.capability.GitCapability
+                var arguments = legacy.parse(packet("want " + ID + " " + flag));
+                assertEquals(Optional.of(ID), arguments.getFirst().value());
+                assertEquals(2, arguments.size());
+                assertTrue(arguments.has(pro.deta.orion.git.parser.v2.capability.GitCapability
                         .findByWireName(flag).orElseThrow()));
             }
         }
@@ -62,10 +64,11 @@ class NegotiationCapabilityParserTest {
         String value = ID + " multi_ack agent=client/1 custom=a=b";
         for (var version : new GitProtocolVersion[]{V0, V1}) {
             var legacy = new NegotiationCapabilityParser(version);
-            assertEquals(Optional.of(ID), read(legacy, "want " + value).value());
-            assertTrue(legacy.capabilities().has(MULTI_ACK));
-            assertEquals(Optional.of("client/1"), legacy.capabilities().value(AGENT));
-            assertEquals(Optional.of("a=b"), legacy.capabilities().getLast().value());
+            var arguments = legacy.parse(packet("want " + value));
+            assertEquals(Optional.of(ID), arguments.getFirst().value());
+            assertTrue(arguments.has(MULTI_ACK));
+            assertEquals(Optional.of("client/1"), arguments.value(AGENT));
+            assertEquals(Optional.of("a=b"), arguments.getLast().value());
         }
         var parser = new NegotiationCapabilityParser(V2);
         assertEquals(Optional.of("refs/heads/ветка"), read(parser, "want-ref refs/heads/ветка").value());
@@ -99,11 +102,12 @@ class NegotiationCapabilityParserTest {
     @Test
     void keepsValuesIndependentAcrossMessages() throws Exception {
         var parser = new NegotiationCapabilityParser(V2);
-        var first = read(parser, "have " + ID);
-        var second = read(parser, "have " + "cd".repeat(20));
-        assertEquals(first.name(), second.name());
-        assertEquals(Optional.of(ID), first.value());
-        assertEquals(Optional.of("cd".repeat(20)), second.value());
+        var first = parser.parse(packet("have " + ID));
+        var second = parser.parse(packet("have " + "cd".repeat(20)));
+        assertEquals(List.of(new GitCapabilityValue("have", Optional.of(ID))), first);
+        assertEquals(List.of(new GitCapabilityValue("have", Optional.of("cd".repeat(20)))), second);
+        first.clear();
+        assertEquals(1, second.size());
     }
 
     @Test
@@ -121,18 +125,20 @@ class NegotiationCapabilityParserTest {
     @Test
     void finishesAtFlushAndWaitsForFlushAfterV2Done() throws Exception {
         var parser = new NegotiationCapabilityParser(V2);
-        assertTrue(parser.parse(packet("want " + ID + "\n")));
-        assertTrue(parser.parse(packet("done\n")));
-        assertFalse(parser.parse(GitPktLine.Control.FLUSH));
-        assertEquals(2, parser.capabilities().size());
+        assertEquals(List.of(new GitCapabilityValue("want", Optional.of(ID))),
+                parser.parse(packet("want " + ID + "\n")));
+        assertEquals(List.of(new GitCapabilityValue("done", Optional.empty())), parser.parse(packet("done\n")));
+        assertTrue(parser.parse(GitPktLine.Control.FLUSH).isEmpty());
         assertThrows(IllegalStateException.class, () -> parser.parse(packet("thin-pack")));
         assertThrows(IllegalStateException.class, () -> parser.parse(GitPktLine.Control.FLUSH));
         for (var version : new GitProtocolVersion[]{V0, V1}) {
             var legacy = new NegotiationCapabilityParser(version);
-            assertTrue(legacy.parse(packet("have " + ID)));
-            assertFalse(legacy.parse(packet("done")));
+            assertEquals(1, legacy.parse(packet("have " + ID)).size());
+            assertEquals(List.of(new GitCapabilityValue("done", Optional.empty())), legacy.parse(packet("done")));
+            assertThrows(IllegalStateException.class, () -> legacy.parse(packet("have " + ID)));
+            assertThrows(IllegalStateException.class, () -> legacy.parse(GitPktLine.Control.FLUSH));
         }
-        assertFalse(new NegotiationCapabilityParser(V0).parse(GitPktLine.Control.FLUSH));
+        assertTrue(new NegotiationCapabilityParser(V0).parse(GitPktLine.Control.FLUSH).isEmpty());
     }
 
     @Test
@@ -142,27 +148,23 @@ class NegotiationCapabilityParserTest {
         assertThrows(IOException.class, () -> parser.parse(GitPktLine.Control.RESPONSE_END));
         assertThrows(IOException.class, () -> parser.parse(new GitPktLine.Data(new byte[]{(byte) 0xff})));
         assertThrows(IOException.class, () -> parser.parse(packet("")));
-        assertTrue(parser.capabilities().isEmpty());
     }
 
     @Test
-    void onlyFirstLegacyWantCanCarryCapabilitiesAndMalformedPacketAddsNothing() throws Exception {
+    void onlyFirstLegacyWantCanCarryCapabilitiesAndMalformedPacketDoesNotAdvanceState() throws Exception {
         var parser = new NegotiationCapabilityParser(V1);
         assertThrows(IOException.class, () -> parser.parse(packet("want " + ID + " thin-pack agent=")));
-        assertTrue(parser.capabilities().isEmpty());
-        assertTrue(parser.parse(packet("want " + ID + " thin-pack agent=a agent=b")));
-        assertEquals(java.util.List.of("a", "b"), parser.capabilities().values(AGENT));
-        int count = parser.capabilities().size();
+        var first = parser.parse(packet("want " + ID + " thin-pack agent=a agent=b"));
+        assertEquals(List.of("a", "b"), first.values(AGENT));
+        first.clear();
         assertThrows(IOException.class, () -> parser.parse(packet("want " + ID + " thin-pack")));
-        assertEquals(count, parser.capabilities().size());
-        assertTrue(parser.parse(packet("want " + ID)));
-        assertFalse(parser.parse(GitPktLine.Control.FLUSH));
+        assertEquals(List.of(new GitCapabilityValue("want", Optional.of(ID))),
+                parser.parse(packet("want " + ID)));
+        assertTrue(parser.parse(GitPktLine.Control.FLUSH).isEmpty());
     }
 
     private static GitCapabilityValue read(NegotiationCapabilityParser parser, String line) throws IOException {
-        int offset = parser.capabilities().size();
-        parser.parse(packet(line));
-        return parser.capabilities().get(offset);
+        return parser.parse(packet(line)).getFirst();
     }
 
     private static GitPktLine.Data packet(String line) {

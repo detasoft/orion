@@ -116,8 +116,7 @@ public class FetchCommand implements GitCommand {
                     throw invalid("Expected a data packet");
             case GitPktLine.Data data -> {
                 var parser = new NegotiationCapabilityParser(GitProtocolVersion.V0);
-                parser.parse(packet);
-                GitCapabilityValue argument = parser.capabilities().getFirst();
+                GitCapabilityValue argument = parser.parse(packet).getFirst();
                 try {
                     yield switch (NegotiationCapability.findByWireName(argument.name()).orElse(null)) {
                         case DONE -> NegotiationMessage.Control.DONE;

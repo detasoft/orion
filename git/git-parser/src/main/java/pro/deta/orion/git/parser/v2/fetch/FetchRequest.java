@@ -48,8 +48,7 @@ public final class FetchRequest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         while (true) {
             GitPktLine packet = reader.readGitPktLine();
-            int firstArgument = parser.capabilities().size();
-            parser.parse(packet);
+            GitCapabilities arguments = parser.parse(packet);
             switch (packet) {
                 case GitPktLine.Control.FLUSH -> {
                     if (request.wants().isEmpty() && request.wantRefs().isEmpty()) {
@@ -62,7 +61,7 @@ public final class FetchRequest {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    GitCapabilityValue argument = parser.capabilities().get(firstArgument);
+                    GitCapabilityValue argument = arguments.getFirst();
                     switch (NegotiationCapability.findByWireName(argument.name()).orElse(null)) {
                         case WANT -> request.wants().add(objectId(argument.value().orElseThrow()));
                         case HAVE -> request.initialMessages().add(
@@ -112,8 +111,7 @@ public final class FetchRequest {
         boolean wantsEnded = false;
         while (true) {
             GitPktLine packet = reader.readGitPktLine();
-            int firstArgument = parser.capabilities().size();
-            parser.parse(packet);
+            GitCapabilities arguments = parser.parse(packet);
             switch (packet) {
                 case GitPktLine.Control.FLUSH -> {
                     if (receivedLine && request.wants().isEmpty()) {
@@ -131,15 +129,14 @@ public final class FetchRequest {
                 case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                         throw invalid("Expected a data packet");
                 case GitPktLine.Data data -> {
-                    GitCapabilityValue argument = parser.capabilities().get(firstArgument);
+                    GitCapabilityValue argument = arguments.getFirst();
                     receivedLine = true;
                     if (argument.name().equals(NegotiationCapability.WANT.wireName())) {
                         if (wantsEnded) {
                             throw invalid("Want after legacy request options");
                         }
                         request.wants().add(objectId(argument.value().orElseThrow()));
-                        request.capabilities().addAll(parser.capabilities().subList(firstArgument + 1,
-                                parser.capabilities().size()));
+                        request.capabilities().addAll(arguments.subList(1, arguments.size()));
                     } else {
                         if (request.wants().isEmpty()) {
                             throw invalid("Legacy request must start with want");
