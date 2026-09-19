@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.storage;
 
 import org.h2.mvstore.WriteBuffer;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import static org.assertj.core.api.Assertions.assertThat;

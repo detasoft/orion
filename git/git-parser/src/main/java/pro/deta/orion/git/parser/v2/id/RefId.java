@@ -2,12 +2,6 @@ package pro.deta.orion.git.parser.v2.id;
 
 import java.util.Objects;
 
-/**
- * Identifies a ref by its exact name within a repository, independently of the object it points to.
- * Preserves case and spelling; rejects blank names, ASCII controls, space, and Git-forbidden characters.
- * This is basic character validation; structural ref syntax and operation-specific checks remain at the boundary.
- * The repository context supplies repository identity, so this value contains only the ref name.
- */
 public record RefId(String value) {
     public RefId {
         Objects.requireNonNull(value, "value");

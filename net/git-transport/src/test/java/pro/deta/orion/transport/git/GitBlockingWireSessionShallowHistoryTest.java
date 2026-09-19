@@ -336,7 +336,7 @@ class GitBlockingWireSessionShallowHistoryTest {
         }
 
         private NativeGitRepository repository(InitialRequestData data) {
-            return provider.find(data.getRepositoryPath())
+            return provider.find(data.repositoryPath())
                     .valueOrFailure("repository");
         }
     }

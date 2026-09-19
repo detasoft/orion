@@ -407,7 +407,7 @@ public class SshCommandFactory implements CommandFactory {
                 repository,
                 packId -> NativePackfileUriBuilder.packUri(
                         baseUri,
-                        data.getRepositoryPath(),
+                        data.repositoryPath(),
                         packId));
     }
 

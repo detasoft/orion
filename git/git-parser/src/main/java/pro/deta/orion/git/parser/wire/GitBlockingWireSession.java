@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
@@ -74,15 +75,15 @@ public final class GitBlockingWireSession {
 
     public void advertise(InitialRequestData data) throws IOException {
         Objects.requireNonNull(data, "data");
-        if (data.getService() == InitialRequestService.UPLOAD_PACK
+        if (data.service() == InitialRequestService.UPLOAD_PACK
                 && data.getProtocolVersion()
                         .orElse(null)
-                == InitialRequestData.ProtocolVersion.V2) {
+                == GitProtocolVersion.V2) {
             wire.sendV2UploadPackAdvertisement(
                     configuration.protocolV2());
             return;
         }
-        if (data.getService() == InitialRequestService.UPLOAD_PACK) {
+        if (data.service() == InitialRequestService.UPLOAD_PACK) {
             sendProtocolV1Marker(data);
             wire.sendAdvertisement(
                     repositoryService.legacyUploadPackAdvertisement(
@@ -113,10 +114,10 @@ public final class GitBlockingWireSession {
             InitialRequestData data,
             boolean stateless) throws IOException {
         Objects.requireNonNull(data, "data");
-        InitialRequestData.ProtocolVersion version =
+        GitProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
-        if (version == InitialRequestData.ProtocolVersion.V2
-                && data.getService() == InitialRequestService.UPLOAD_PACK) {
+        if (version == GitProtocolVersion.V2
+                && data.service() == InitialRequestService.UPLOAD_PACK) {
             if (!configuration.protocolV2().fetch()
                     && !configuration.protocolV2().lsRefs()) {
                 throw new IOException(
@@ -125,7 +126,7 @@ public final class GitBlockingWireSession {
             readV2UploadCommands(data);
             return;
         }
-        if (data.getService() == InitialRequestService.UPLOAD_PACK) {
+        if (data.service() == InitialRequestService.UPLOAD_PACK) {
             serveLegacyUpload(data, stateless);
             return;
         }
@@ -135,7 +136,7 @@ public final class GitBlockingWireSession {
     private void sendProtocolV1Marker(InitialRequestData data)
             throws IOException {
         if (data.getProtocolVersion().orElse(null)
-                == InitialRequestData.ProtocolVersion.V1) {
+                == GitProtocolVersion.V1) {
             wire.writeTextLine("version 1");
         }
     }

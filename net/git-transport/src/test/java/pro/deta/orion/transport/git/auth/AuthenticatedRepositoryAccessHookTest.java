@@ -171,7 +171,7 @@ class AuthenticatedRepositoryAccessHookTest {
         String repositoryName = GitWireBootstrap.sshCommandData(
                         "git-upload-pack '/team%2Frepo.git'",
                         null)
-                .getRepositoryPath();
+                .repositoryPath();
 
         assertThatCode(() -> hook.beforeRead(repositoryName))
                 .doesNotThrowAnyException();

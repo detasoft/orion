@@ -33,6 +33,7 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.transport.git.command.ReadOnlyDomainCommandCatalog;
 import pro.deta.orion.transport.git.command.read.DefaultOperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
@@ -53,7 +54,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -408,12 +408,12 @@ class SshCommandFactoryTest {
                 "git-upload-pack '/team/project.git'",
                 environment(Map.of("GIT_PROTOCOL", "version=2")));
 
-        assertEquals(InitialRequestService.UPLOAD_PACK, data.getService());
-        assertEquals("team/project", data.getRepositoryPath());
-        assertNull(data.getHost());
-        assertEquals(Map.of("version", "2"), data.getParameters());
+        assertEquals(InitialRequestService.UPLOAD_PACK, data.service());
+        assertEquals("team/project", data.repositoryPath());
+        assertNull(data.host());
+        assertEquals(Map.of("version", "2"), data.parameters());
         assertEquals(
-                InitialRequestData.ProtocolVersion.V2,
+                GitProtocolVersion.V2,
                 data.getProtocolVersion().orElseThrow());
     }
 

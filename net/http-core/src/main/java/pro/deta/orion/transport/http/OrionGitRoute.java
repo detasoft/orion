@@ -15,6 +15,7 @@ import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
@@ -132,7 +133,7 @@ public class OrionGitRoute implements OrionHttpRoute {
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
             if (bootstrap.data()
                     .getProtocolVersion()
-                    .filter(InitialRequestData.ProtocolVersion.V2::equals)
+                    .filter(GitProtocolVersion.V2::equals)
                     .isEmpty()) {
                 writeServiceAnnouncement(bootstrap.wire(), request.service());
             }
@@ -201,7 +202,7 @@ public class OrionGitRoute implements OrionHttpRoute {
                 repository,
                 packId -> NativePackfileUriBuilder.packUri(
                         baseUri.get(),
-                        data.getRepositoryPath(),
+                        data.repositoryPath(),
                         packId));
     }
 

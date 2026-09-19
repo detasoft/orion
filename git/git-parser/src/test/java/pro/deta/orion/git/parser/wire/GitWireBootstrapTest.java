@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
@@ -24,9 +25,9 @@ class GitWireBootstrapTest {
                 null);
         GitWireBootstrap daemon = nativeDaemonPayload("git-upload-pack /team/repo.git");
 
-        assertThat(smartHttp.data().getRepositoryPath()).isEqualTo("team/repo");
-        assertThat(ssh.getRepositoryPath()).isEqualTo("team/repo");
-        assertThat(daemon.data().getRepositoryPath()).isEqualTo("team/repo");
+        assertThat(smartHttp.data().repositoryPath()).isEqualTo("team/repo");
+        assertThat(ssh.repositoryPath()).isEqualTo("team/repo");
+        assertThat(daemon.data().repositoryPath()).isEqualTo("team/repo");
     }
 
     @Test
@@ -48,11 +49,11 @@ class GitWireBootstrapTest {
         InitialRequestData data = bootstrap.data();
 
         assertThat(bootstrap.wire()).isNotNull();
-        assertThat(data.getService()).isEqualTo(InitialRequestService.UPLOAD_PACK);
-        assertThat(data.getRepositoryPath()).isEqualTo("repo");
-        assertThat(data.getHost()).isEqualTo("localhost");
+        assertThat(data.service()).isEqualTo(InitialRequestService.UPLOAD_PACK);
+        assertThat(data.repositoryPath()).isEqualTo("repo");
+        assertThat(data.host()).isEqualTo("localhost");
         assertThat(data.getProtocolVersion())
-                .contains(InitialRequestData.ProtocolVersion.V2);
+                .contains(GitProtocolVersion.V2);
     }
 
     @Test
@@ -62,8 +63,8 @@ class GitWireBootstrapTest {
                         + "version=2\0version=9\0version=1\0");
 
         assertThat(bootstrap.data().getProtocolVersion())
-                .contains(InitialRequestData.ProtocolVersion.V2);
-        assertThat(bootstrap.data().getProtocolParameters())
+                .contains(GitProtocolVersion.V2);
+        assertThat(bootstrap.data().protocolParameters())
                 .containsExactly("version=2", "version=9", "version=1");
     }
 
@@ -72,8 +73,8 @@ class GitWireBootstrapTest {
         InitialRequestData data = nativeDaemonPayload(
                 "git-upload-pack /repo.git").data();
 
-        assertThat(data.getHost()).isNull();
-        assertThat(data.getProtocolParameters()).isEmpty();
+        assertThat(data.host()).isNull();
+        assertThat(data.protocolParameters()).isEmpty();
     }
 
     @Test
@@ -81,8 +82,8 @@ class GitWireBootstrapTest {
         InitialRequestData data = nativeDaemonPayload(
                 "git-upload-pack /repo.git\n\0HoSt=Git.Example:9418\0").data();
 
-        assertThat(data.getHost()).isEqualTo("git.example");
-        assertThat(data.getProtocolParameters()).isEmpty();
+        assertThat(data.host()).isEqualTo("git.example");
+        assertThat(data.protocolParameters()).isEmpty();
     }
 
     @Test
@@ -90,7 +91,7 @@ class GitWireBootstrapTest {
         InitialRequestData data = nativeDaemonPayload(
                 "git-upload-pack /repo.git\0host=\0").data();
 
-        assertThat(data.getHost()).isEmpty();
+        assertThat(data.host()).isEmpty();
     }
 
     @Test
@@ -121,11 +122,11 @@ class GitWireBootstrapTest {
                 "version=2:agent=ignored");
 
         assertThat(bootstrap.wire()).isNotNull();
-        assertThat(bootstrap.data().getService())
+        assertThat(bootstrap.data().service())
                 .isEqualTo(InitialRequestService.RECEIVE_PACK);
-        assertThat(bootstrap.data().getRepositoryPath()).isEqualTo("team/project");
-        assertThat(bootstrap.data().getHost()).isEqualTo("localhost");
-        assertThat(bootstrap.data().getParameters()).isEqualTo(Map.of("version", "2"));
+        assertThat(bootstrap.data().repositoryPath()).isEqualTo("team/project");
+        assertThat(bootstrap.data().host()).isEqualTo("localhost");
+        assertThat(bootstrap.data().parameters()).isEqualTo(Map.of("version", "2"));
     }
 
     @Test
@@ -140,7 +141,7 @@ class GitWireBootstrapTest {
                 "version=0:version=9:version=2:version=1");
 
         assertThat(bootstrap.data().getProtocolVersion())
-                .contains(InitialRequestData.ProtocolVersion.V2);
+                .contains(GitProtocolVersion.V2);
     }
 
     @Test
@@ -163,7 +164,7 @@ class GitWireBootstrapTest {
                 "version=9");
 
         assertThat(explicitV0.data().getProtocolVersion())
-                .contains(InitialRequestData.ProtocolVersion.V0);
+                .contains(GitProtocolVersion.V0);
         assertThat(unknownOnly.data().getProtocolVersion()).isEmpty();
     }
 
@@ -173,11 +174,11 @@ class GitWireBootstrapTest {
                 "git-upload-pack '/team/project.git'",
                 "version=2");
 
-        assertThat(data.getService()).isEqualTo(InitialRequestService.UPLOAD_PACK);
-        assertThat(data.getRepositoryPath()).isEqualTo("team/project");
-        assertThat(data.getHost()).isNull();
+        assertThat(data.service()).isEqualTo(InitialRequestService.UPLOAD_PACK);
+        assertThat(data.repositoryPath()).isEqualTo("team/project");
+        assertThat(data.host()).isNull();
         assertThat(data.getProtocolVersion())
-                .contains(InitialRequestData.ProtocolVersion.V2);
+                .contains(GitProtocolVersion.V2);
     }
 
     private static GitWireBootstrap nativeDaemon(String ascii) throws Exception {

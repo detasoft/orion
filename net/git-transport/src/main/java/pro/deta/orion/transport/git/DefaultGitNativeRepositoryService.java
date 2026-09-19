@@ -76,7 +76,7 @@ public final class DefaultGitNativeRepositoryService
             GitWireConfiguration configuration) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(configuration, "configuration");
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         NativeGitRepository repository = findOrFail(
                 repositoryPath,
                 accessHook);
@@ -115,7 +115,7 @@ public final class DefaultGitNativeRepositoryService
             GitWireConfiguration configuration) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(configuration, "configuration");
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath, accessHook));
@@ -200,7 +200,7 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(haves, "haves");
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         NativeGitRepository repository = findOrFail(
                 repositoryPath,
                 accessHook);
@@ -224,7 +224,7 @@ public final class DefaultGitNativeRepositoryService
             InitialRequestData data,
             NativeFetchRequest request,
             GitNativeRepositoryAccessHook accessHook) {
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         NativeGitRepository repository = findOrFail(
                 repositoryPath,
                 accessHook);
@@ -305,7 +305,7 @@ public final class DefaultGitNativeRepositoryService
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(commonHaves, "commonHaves");
         NativeGitRepository repository = findOrFail(
-                data.getRepositoryPath(),
+                data.repositoryPath(),
                 accessHook);
         return repository.legacyUploadReady(wants, commonHaves);
     }
@@ -315,7 +315,7 @@ public final class DefaultGitNativeRepositoryService
             InitialRequestData data,
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         return check(
                 repositoryPath,
                 receiveRepository(repositoryPath, accessHook))
@@ -331,7 +331,7 @@ public final class DefaultGitNativeRepositoryService
                 receivePack.commandSection().commands();
         String repositoryPath = receivePack.commandSection()
                 .initialRequest()
-                .getRepositoryPath();
+                .repositoryPath();
         NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath, accessHook));
@@ -353,7 +353,7 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        String repositoryPath = data.getRepositoryPath();
+        String repositoryPath = data.repositoryPath();
         return lsRefs(findOrFail(repositoryPath, accessHook), request);
     }
 

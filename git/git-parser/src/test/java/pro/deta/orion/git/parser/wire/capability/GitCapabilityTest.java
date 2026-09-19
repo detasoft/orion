@@ -1,6 +1,9 @@
 package pro.deta.orion.git.parser.wire.capability;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 
 import java.io.IOException;
 import java.util.List;
@@ -13,66 +16,69 @@ class GitCapabilityTest {
 
     @Test
     void parsesKnownAndCustomTokensWithoutLosingValues() throws Exception {
-        assertThat(GitCapability.parse("thin-pack", GitObjectFormat.SHA1)).isEqualTo(GitCapability.THIN_PACK.entry());
-        assertThat(GitCapability.parse("agent=client/1", GitObjectFormat.SHA1)).isEqualTo(GitCapability.AGENT.withValue("client/1"));
-        assertThat(GitCapability.parse("vendor-option", GitObjectFormat.SHA1)).isEqualTo(GitCapability.Entry.custom("vendor-option"));
-        assertThat(GitCapability.parse("vendor-option=a=b", GitObjectFormat.SHA1))
-                .isEqualTo(GitCapability.Entry.custom("vendor-option", "a=b"));
-        assertThat(GitCapability.parse("object-format=sha256", GitObjectFormat.SHA256))
-                .isEqualTo(GitCapability.OBJECT_FORMAT.withValue("sha256"));
+        assertThat(GitCapabilityValue.parse("thin-pack", GitHashAlgorithm.SHA1))
+                .isEqualTo(GitCapabilityValue.value(GitCapability.THIN_PACK));
+        assertThat(GitCapabilityValue.parse("agent=client/1", GitHashAlgorithm.SHA1))
+                .isEqualTo(GitCapabilityValue.value(GitCapability.AGENT, "client/1"));
+        assertThat(GitCapabilityValue.parse("vendor-option", GitHashAlgorithm.SHA1))
+                .isEqualTo(GitCapabilityValue.value("vendor-option"));
+        assertThat(GitCapabilityValue.parse("vendor-option=a=b", GitHashAlgorithm.SHA1))
+                .isEqualTo(GitCapabilityValue.value("vendor-option", "a=b"));
+        assertThat(GitCapabilityValue.parse("object-format=sha256", GitHashAlgorithm.SHA256))
+                .isEqualTo(GitCapabilityValue.value(GitCapability.OBJECT_FORMAT, "sha256"));
     }
 
     @Test
     void rejectsMalformedWireTokens() {
         for (String token : new String[]{"", "=value", "agent=", "two words", "agent=two words", "agent=x\n"}) {
-            assertThatThrownBy(() -> GitCapability.parse(token, GitObjectFormat.SHA1))
+            assertThatThrownBy(() -> GitCapabilityValue.parse(token, GitHashAlgorithm.SHA1))
                     .isInstanceOf(IOException.class).hasCauseInstanceOf(IllegalArgumentException.class);
         }
     }
 
     @Test
     void validatesTheExpectedObjectFormat() throws Exception {
-        assertThat(GitCapability.parse("object-format=sha1", GitObjectFormat.SHA1))
-                .isEqualTo(GitCapability.OBJECT_FORMAT.withValue("sha1"));
-        assertThatThrownBy(() -> GitCapability.parse("object-format=sha256", GitObjectFormat.SHA1))
+        assertThat(GitCapabilityValue.parse("object-format=sha1", GitHashAlgorithm.SHA1))
+                .isEqualTo(GitCapabilityValue.value(GitCapability.OBJECT_FORMAT, "sha1"));
+        assertThatThrownBy(() -> GitCapabilityValue.parse("object-format=sha256", GitHashAlgorithm.SHA1))
                 .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
-        assertThatThrownBy(() -> GitCapability.parse("object-format=sha1", GitObjectFormat.SHA256))
+        assertThatThrownBy(() -> GitCapabilityValue.parse("object-format=sha1", GitHashAlgorithm.SHA256))
                 .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha256");
     }
 
     @Test
     void exposesAllStandardProtocolV0V1Capabilities() {
         assertThat(List.of(
-                GitCapability.MULTI_ACK.entry(),
-                GitCapability.MULTI_ACK_DETAILED.entry(),
-                GitCapability.NO_DONE.entry(),
-                GitCapability.THIN_PACK.entry(),
-                GitCapability.NO_THIN.entry(),
-                GitCapability.SIDE_BAND.entry(),
-                GitCapability.SIDE_BAND_64K.entry(),
-                GitCapability.OFS_DELTA.entry(),
-                GitCapability.AGENT.withValue("orion-native"),
-                GitCapability.OBJECT_FORMAT.withValue("sha1"),
-                GitCapability.SYMREF.withValue("HEAD:refs/heads/main"),
-                GitCapability.SHALLOW.entry(),
-                GitCapability.DEEPEN_SINCE.entry(),
-                GitCapability.DEEPEN_NOT.entry(),
-                GitCapability.DEEPEN_RELATIVE.entry(),
-                GitCapability.NO_PROGRESS.entry(),
-                GitCapability.INCLUDE_TAG.entry(),
-                GitCapability.REPORT_STATUS.entry(),
-                GitCapability.REPORT_STATUS_V2.entry(),
-                GitCapability.DELETE_REFS.entry(),
-                GitCapability.QUIET.entry(),
-                GitCapability.ATOMIC.entry(),
-                GitCapability.PUSH_OPTIONS.entry(),
-                GitCapability.ALLOW_TIP_SHA1_IN_WANT.entry(),
-                GitCapability.ALLOW_REACHABLE_SHA1_IN_WANT.entry(),
-                GitCapability.PUSH_CERT.withValue("nonce"),
-                GitCapability.FILTER.entry(),
-                GitCapability.REF_IN_WANT.entry(),
-                GitCapability.SESSION_ID.withValue("session")))
-                .extracting(GitCapability.Entry::wireToken)
+                GitCapabilityValue.value(GitCapability.MULTI_ACK),
+                GitCapabilityValue.value(GitCapability.MULTI_ACK_DETAILED),
+                GitCapabilityValue.value(GitCapability.NO_DONE),
+                GitCapabilityValue.value(GitCapability.THIN_PACK),
+                GitCapabilityValue.value(GitCapability.NO_THIN),
+                GitCapabilityValue.value(GitCapability.SIDE_BAND),
+                GitCapabilityValue.value(GitCapability.SIDE_BAND_64K),
+                GitCapabilityValue.value(GitCapability.OFS_DELTA),
+                GitCapabilityValue.value(GitCapability.AGENT, "orion-native"),
+                GitCapabilityValue.value(GitCapability.OBJECT_FORMAT, "sha1"),
+                GitCapabilityValue.value(GitCapability.SYMREF, "HEAD:refs/heads/main"),
+                GitCapabilityValue.value(GitCapability.SHALLOW),
+                GitCapabilityValue.value(GitCapability.DEEPEN_SINCE),
+                GitCapabilityValue.value(GitCapability.DEEPEN_NOT),
+                GitCapabilityValue.value(GitCapability.DEEPEN_RELATIVE),
+                GitCapabilityValue.value(GitCapability.NO_PROGRESS),
+                GitCapabilityValue.value(GitCapability.INCLUDE_TAG),
+                GitCapabilityValue.value(GitCapability.REPORT_STATUS),
+                GitCapabilityValue.value(GitCapability.REPORT_STATUS_V2),
+                GitCapabilityValue.value(GitCapability.DELETE_REFS),
+                GitCapabilityValue.value(GitCapability.QUIET),
+                GitCapabilityValue.value(GitCapability.ATOMIC),
+                GitCapabilityValue.value(GitCapability.PUSH_OPTIONS),
+                GitCapabilityValue.value(GitCapability.ALLOW_TIP_SHA1_IN_WANT),
+                GitCapabilityValue.value(GitCapability.ALLOW_REACHABLE_SHA1_IN_WANT),
+                GitCapabilityValue.value(GitCapability.PUSH_CERT, "nonce"),
+                GitCapabilityValue.value(GitCapability.FILTER),
+                GitCapabilityValue.value(GitCapability.REF_IN_WANT),
+                GitCapabilityValue.value(GitCapability.SESSION_ID, "session")))
+                .extracting(GitCapabilityValue::wireToken)
                 .containsExactly(
                         "multi_ack",
                         "multi_ack_detailed",
@@ -109,17 +115,17 @@ class GitCapabilityTest {
     void exposesProtocolV2FetchFlagsAsStandardCapabilities() {
         assertThat(GitCapability.WAIT_FOR_DONE.wireName()).isEqualTo("wait-for-done");
         assertThat(GitCapability.SIDEBAND_ALL.wireName()).isEqualTo("sideband-all");
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("wait-for-done"));
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("sideband-all"));
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("packfile-uris"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapabilityValue.value("wait-for-done"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapabilityValue.value("sideband-all"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapabilityValue.value("packfile-uris"));
     }
 
     @Test
     void supportsCustomBareAndValuedCapabilities() {
         assertThat(List.of(
-                GitCapability.Entry.custom("bundle-uri"),
-                GitCapability.Entry.custom("vendor-option", "enabled")))
-                .extracting(GitCapability.Entry::wireToken)
+                GitCapabilityValue.value("bundle-uri"),
+                GitCapabilityValue.value("vendor-option", "enabled")))
+                .extracting(GitCapabilityValue::wireToken)
                 .containsExactly(
                         "bundle-uri",
                         "vendor-option=enabled");
@@ -127,31 +133,33 @@ class GitCapabilityTest {
 
     @Test
     void resolvesWireNamesWithoutUsingEnumIdentifiers() {
-        assertThat(GitCapability.fromWireName("multi_ack")).contains(GitCapability.MULTI_ACK);
-        assertThat(GitCapability.fromWireName("side-band-64k")).contains(GitCapability.SIDE_BAND_64K);
-        assertThat(GitCapability.fromWireName("agent")).contains(GitCapability.AGENT);
-        assertThat(GitCapability.fromWireName("packfile-uris")).contains(GitCapability.PACKFILE_URIS);
-        assertThat(GitCapability.fromWireName("MULTI_ACK")).isEmpty();
-        assertThat(GitCapability.fromWireName("agent=orion")).isEmpty();
-        assertThat(GitCapability.fromWireName("vendor-option")).isEmpty();
+        assertThat(GitCapability.findByWireName("multi_ack")).contains(GitCapability.MULTI_ACK);
+        assertThat(GitCapability.findByWireName("side-band-64k")).contains(GitCapability.SIDE_BAND_64K);
+        assertThat(GitCapability.findByWireName("agent")).contains(GitCapability.AGENT);
+        assertThat(GitCapability.findByWireName("packfile-uris")).contains(GitCapability.PACKFILE_URIS);
+        assertThat(GitCapability.findByWireName("MULTI_ACK")).isEmpty();
+        assertThat(GitCapability.findByWireName("agent=orion")).isEmpty();
+        assertThat(GitCapability.findByWireName("vendor-option")).isEmpty();
     }
 
     @Test
     void valuesRemainIndependentAndCannotInjectWireWhitespace() {
-        GitCapability.Entry first = GitCapability.AGENT.withValue("first");
-        GitCapability.Entry second = GitCapability.AGENT.withValue("second");
+        GitCapabilityValue first = GitCapabilityValue.value(GitCapability.AGENT, "first");
+        GitCapabilityValue second = GitCapabilityValue.value(GitCapability.AGENT, "second");
         assertThat(first.wireToken()).isEqualTo("agent=first");
         assertThat(second.wireToken()).isEqualTo("agent=second");
         assertThat(GitCapability.AGENT.wireName()).isEqualTo("agent");
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.AGENT.withValue("two words"));
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.SESSION_ID.withValue(""));
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("vendor option"));
-        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.Entry.custom("agent", "value"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> GitCapabilityValue.value(GitCapability.AGENT, "two words"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> GitCapabilityValue.value(GitCapability.SESSION_ID, ""));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapabilityValue.value("vendor option"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapabilityValue.value("agent", "value"));
     }
 
     @Test
     void standardCapabilityCannotBeCreatedAsCustom() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> GitCapability.Entry.custom("multi_ack"));
+                .isThrownBy(() -> GitCapabilityValue.value("multi_ack"));
     }
 }
