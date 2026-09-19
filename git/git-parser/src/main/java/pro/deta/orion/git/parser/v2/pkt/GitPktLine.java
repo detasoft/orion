@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.pkt;
 
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -19,7 +19,7 @@ import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.*;
 
 /**
  * One completely read pkt-line: Data owns its payload, while Control has no payload.
- * readNextFrom validates the header and reads exactly the declared payload through BufferedByteInput.readBytes.
+ * readNextFrom validates the header and reads exactly the declared payload through BufferedByteInputV2.readBytes.
  * DATA stays binary until text() is explicitly requested; arbitrary pack bytes need not be valid UTF-8.
  * Lengths are derived from the variant, never independently mutable header state.
  * No stream or reference-counted buffer is retained. EOF during the header or payload is an IOException.
@@ -124,7 +124,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
         }
     }
 
-    static Optional<GitPktLine> readNextFrom(BufferedByteInput input) throws IOException {
+    static Optional<GitPktLine> readNextFrom(BufferedByteInputV2 input) throws IOException {
         int first;
         try {
             first = input.readUnsignedByte();
@@ -147,7 +147,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
         return Optional.of(valueOf(length, input));
     }
 
-    private static GitPktLine valueOf(int length, BufferedByteInput input) throws IOException {
+    private static GitPktLine valueOf(int length, BufferedByteInputV2 input) throws IOException {
         if (length > MAX_PKT_LINE_LENGTH) {
             throw malformed(new GitGeneralException(LENGTH_EXCEEDS_LIMIT));
         }

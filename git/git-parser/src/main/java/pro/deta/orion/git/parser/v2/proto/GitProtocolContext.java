@@ -5,7 +5,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.EOFException;
@@ -15,12 +15,12 @@ import java.util.List;
 import java.util.Objects;
 
 public class GitProtocolContext {
-    private final BufferedByteInput input;
+    private final BufferedByteInputV2 input;
     private final BufferedByteOutput output;
     private final GitProtocolVersion version;
     private final GitTransport transport;
 
-    public GitProtocolContext(BufferedByteInput input, BufferedByteOutput output,
+    public GitProtocolContext(BufferedByteInputV2 input, BufferedByteOutput output,
                               GitProtocolVersion version, GitTransport transport) {
         this.input = Objects.requireNonNull(input, "input");
         this.output = Objects.requireNonNull(output, "output");
@@ -34,6 +34,10 @@ public class GitProtocolContext {
 
     public GitTransport transport() {
         return transport;
+    }
+
+    public BufferedByteInputV2 input() {
+        return input;
     }
 
     public Reader reader() {

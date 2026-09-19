@@ -87,7 +87,7 @@ import java.util.Optional;
  * After commit, packId returns the final checksum, which may differ when thin-pack bases were appended.
  * Parsing and content access end at commit; rollback remains safe and never removes published data.
  */
-public final class PackUpload {
+public final class PackUpload implements AutoCloseable {
     private final GitStorageApi storage;
     private final BufferedByteInput source;
     private final PackByteStore byteStore;
@@ -230,7 +230,11 @@ public final class PackUpload {
         }
     }
 
-    public void rollback() throws IOException {
+    @Override
+    public void close() throws IOException {
+        if (committedPackId != null) {
+            return;
+        }
         backend.rollback();
     }
 
