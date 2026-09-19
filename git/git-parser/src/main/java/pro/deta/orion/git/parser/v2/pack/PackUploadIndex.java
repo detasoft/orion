@@ -6,7 +6,7 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.WriteBuffer;
 import org.h2.mvstore.type.BasicDataType;
 import org.h2.mvstore.type.LongDataType;
-import pro.deta.orion.git.parser.v2.data.ObjectIdDataType;
+import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 

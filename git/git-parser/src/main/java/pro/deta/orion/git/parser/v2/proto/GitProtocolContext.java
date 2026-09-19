@@ -1,9 +1,14 @@
 package pro.deta.orion.git.parser.v2.proto;
 
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLineOutput;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
@@ -12,6 +17,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class GitProtocolContext {
@@ -59,8 +65,40 @@ public class GitProtocolContext {
     public final class Writer {
         private Writer() {}
 
+        public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs)
+                throws IOException {
+            if (version == GitProtocolVersion.V2) {
+                SideBand sideBand = capabilities.has(GitCapability.SIDEBAND_ALL) ? SideBand.DATA : SideBand.NONE;
+                if (!wantedRefs.isEmpty()) {
+                    writeText("wanted-refs\n", sideBand);
+                    for (Map.Entry<RefId, ObjectId> ref : wantedRefs.entrySet()) {
+                        writeText(ref.getValue().toHex() + " " + ref.getKey().value() + "\n", sideBand);
+                    }
+                    GitPktLine.Control.DELIMITER.writeTo(output);
+                }
+                writeText("packfile\n", sideBand);
+            }
+            if (!usesSideBand(capabilities)) {
+                return output;
+            }
+            int limit = version == GitProtocolVersion.V2 || capabilities.has(GitCapability.SIDE_BAND_64K)
+                    ? GitPktLine.MAX_PKT_LINE_LENGTH : 1000;
+            return new GitPktLineOutput(output, SideBand.DATA, limit);
+        }
+
+        public void endPack(GitCapabilities capabilities) throws IOException {
+            if (usesSideBand(capabilities)) {
+                GitPktLine.Control.FLUSH.writeTo(output);
+            }
+        }
+
+        private boolean usesSideBand(GitCapabilities capabilities) {
+            return version == GitProtocolVersion.V2 || capabilities.has(GitCapability.SIDE_BAND)
+                    || capabilities.has(GitCapability.SIDE_BAND_64K);
+        }
+
         private void writeText(String text, SideBand sideBand) throws IOException {
-            new GitPktLine.Data(text.getBytes(StandardCharsets.US_ASCII)).writeTo(output, sideBand);
+            new GitPktLine.Data(text.getBytes(StandardCharsets.UTF_8)).writeTo(output, sideBand);
         }
 
         public void flush() throws IOException {

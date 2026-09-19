@@ -4,15 +4,14 @@ import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -223,7 +222,9 @@ public class NegotiationContext {
         if (wants.isEmpty() || commonObjects.isEmpty()) {
             return false;
         }
-        var reader = new ResolvedGitObjectRead<>(storage, NegotiationContext::readGraphLinks);
+        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage,
+                (type, size, base, input) -> type == GitObjectType.TREE || type == GitObjectType.BLOB
+                        ? new GitObjectLinks(type, List.of()) : GitObjectLinks.read(type, size, base, input));
         for (ObjectId want : wants) {
             if (!reachesCommon(want, reader)) {
                 return false;
@@ -232,9 +233,9 @@ public class NegotiationContext {
         return true;
     }
 
-    private boolean reachesCommon(ObjectId want, ResolvedGitObjectRead<GraphLinks> reader) throws IOException {
-        var pending = new ArrayDeque<GraphVisit>();
-        var visited = new HashSet<ObjectId>();
+    private boolean reachesCommon(ObjectId want, ResolvedGitObjectRead<GitObjectLinks> reader) throws IOException {
+        ArrayDeque<GraphVisit> pending = new ArrayDeque<>();
+        Set<ObjectId> visited = new HashSet<>();
         pending.add(new GraphVisit(want, false));
         while (!pending.isEmpty()) {
             GraphVisit visit = pending.removeFirst();
@@ -245,7 +246,7 @@ public class NegotiationContext {
             if (!visited.add(id)) {
                 continue;
             }
-            GraphLinks links = storage.readObject(id, reader)
+            GitObjectLinks links = storage.readObject(id, reader)
                     .orElseThrow(() -> new IOException("Missing fetch history object: " + id.toHex()));
             if (visit.commitOnly() && links.type() != GitObjectType.COMMIT) {
                 throw new IOException("Commit parent is not a commit: " + id.toHex());
@@ -256,8 +257,8 @@ public class NegotiationContext {
                 }
                 case COMMIT -> {
                     if (!request.shallowCommits().contains(id)) {
-                        for (ObjectId parent : links.targets()) {
-                            pending.addLast(new GraphVisit(parent, true));
+                        for (int i = 1; i < links.targets().size(); i++) {
+                            pending.addLast(new GraphVisit(links.targets().get(i), true));
                         }
                     }
                 }
@@ -268,64 +269,7 @@ public class NegotiationContext {
         return false;
     }
 
-    private static GraphLinks readGraphLinks(GitObjectType type, long size, Optional<ObjectId> baseId,
-                                             BufferedByteInput input) throws IOException {
-        if (type == GitObjectType.BLOB || type == GitObjectType.TREE) {
-            return new GraphLinks(type, List.of());
-        }
-        if (type != GitObjectType.COMMIT && type != GitObjectType.TAG) {
-            throw new IOException("Fetch history object was not resolved");
-        }
-        var targets = new ArrayList<ObjectId>();
-        var prefix = new StringBuilder(47);
-        long lineLength = 0;
-        boolean firstLine = true;
-        for (long remaining = size; remaining > 0; remaining--) {
-            int next = input.readUnsignedByte();
-            if (next != '\n') {
-                if (prefix.length() < 47) {
-                    prefix.append((char) next);
-                }
-                lineLength++;
-                continue;
-            }
-            if (lineLength == 0) {
-                if (firstLine) {
-                    throw new IOException("Missing Git object header");
-                }
-                return new GraphLinks(type, targets);
-            }
-            String line = prefix.toString();
-            if (firstLine) {
-                String field = type == GitObjectType.COMMIT ? "tree " : "object ";
-                ObjectId target = graphHeaderId(line, lineLength, field);
-                if (type == GitObjectType.TAG) {
-                    targets.add(target);
-                }
-                firstLine = false;
-            } else if (type == GitObjectType.COMMIT && line.startsWith("parent ")) {
-                targets.add(graphHeaderId(line, lineLength, "parent "));
-            }
-            prefix.setLength(0);
-            lineLength = 0;
-        }
-        throw new IOException("Missing Git object header terminator");
-    }
-
-    private static ObjectId graphHeaderId(String line, long length, String field) throws IOException {
-        if (!line.startsWith(field) || length != field.length() + 40) {
-            throw new IOException("Invalid Git object " + field.strip() + " header");
-        }
-        try {
-            return new ObjectId(line.substring(field.length()));
-        } catch (IllegalArgumentException error) {
-            throw new IOException("Invalid Git object " + field.strip() + " ID", error);
-        }
-    }
-
     private record GraphVisit(ObjectId id, boolean commitOnly) {}
-
-    private record GraphLinks(GitObjectType type, List<ObjectId> targets) {}
 
     public FetchRequest request() {
         return request;

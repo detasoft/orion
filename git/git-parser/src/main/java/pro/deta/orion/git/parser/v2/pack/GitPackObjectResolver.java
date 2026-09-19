@@ -17,7 +17,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -122,7 +121,7 @@ public final class GitPackObjectResolver {
             throw new IOException("Negative base object size");
         }
         long offset = bytes.size();
-        bytes.append(ByteBuffer.wrap(objectHeader(type, size)));
+        bytes.append(ByteBuffer.wrap(PackWriter.objectHeader(type, size)));
         long dataOffset = bytes.size();
         MessageDigest hash = sha1();
         hash.update((name + " " + size + "\0").getBytes(StandardCharsets.US_ASCII));
@@ -159,20 +158,6 @@ public final class GitPackObjectResolver {
             buffer.release();
         }
         return new IndexedPack.EntryMetadata(offset, dataOffset, size, type, OptionalLong.empty(), Optional.empty());
-    }
-
-    private static byte[] objectHeader(GitObjectType type, long size) {
-        byte[] header = new byte[10];
-        int count = 0;
-        int part = type.code() << 4 | (int) (size & 15);
-        size >>>= 4;
-        while (size != 0) {
-            header[count++] = (byte) (part | 128);
-            part = (int) (size & 127);
-            size >>>= 7;
-        }
-        header[count++] = (byte) part;
-        return Arrays.copyOf(header, count);
     }
 
     private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {

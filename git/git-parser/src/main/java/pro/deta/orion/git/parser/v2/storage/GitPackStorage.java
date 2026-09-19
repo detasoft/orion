@@ -89,14 +89,21 @@ final class GitPackStorage {
     <R> Optional<R> read(ObjectId id, GitObjectRead<R> reader) throws IOException {
         Optional<Location> found = scan((packId, indexPath) -> {
             try (GitLock.Lease lease = lockPack(packId); IndexedPack index = IndexedPack.open(packPath(packId), indexPath)) {
-                return index.find(id).map(entry -> new Location(packId, entry));
+                Optional<IndexedPack.EntryMetadata> foundEntry = index.find(id);
+                if (foundEntry.isEmpty()) {
+                    return Optional.empty();
+                }
+                IndexedPack.EntryMetadata entry = foundEntry.orElseThrow();
+                return Optional.of(new Location(packId, entry, index.dataEnd(entry.offset()),
+                        index.baseId(entry.offset())));
             }
         });
         if (found.isEmpty()) {
             return Optional.empty();
         }
         Location location = found.orElseThrow();
-        return Optional.of(IndexedPack.readObject(packPath(location.packId()), location.entry(), reader));
+        return Optional.of(IndexedPack.readObject(packPath(location.packId()), location.entry(),
+                location.end(), location.baseId(), reader));
     }
 
     Map<ObjectId, List<PackId>> find(Collection<ObjectId> ids) throws IOException {
@@ -186,7 +193,7 @@ final class GitPackStorage {
         }
     }
 
-    private record Location(PackId packId, IndexedPack.EntryMetadata entry) { }
+    private record Location(PackId packId, IndexedPack.EntryMetadata entry, long end, Optional<ObjectId> baseId) { }
 
     private static void forceDirectory(Path directory) throws IOException {
         try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {

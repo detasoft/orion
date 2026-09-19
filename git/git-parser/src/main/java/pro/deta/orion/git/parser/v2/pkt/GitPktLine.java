@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.pkt;
 
+import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -51,10 +52,24 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
             case Data data -> data.length() + (sideBand == SideBand.NONE ? 0 : 1);
             case Control control -> control.wireValue();
         };
-        if (wireLength > MAX_PKT_LINE_LENGTH) {
+        writeHeader(output, wireLength, this instanceof Data ? sideBand : SideBand.NONE);
+        if (this instanceof Data data) {
+            output.write(data.content());
+        }
+    }
+
+    static void writeDataTo(BufferedByteOutput output, ByteBuf content, SideBand sideBand) throws IOException {
+        int length = PKT_LINE_HEADER_SIZE + content.readableBytes() + (sideBand == SideBand.NONE ? 0 : 1);
+        writeHeader(output, length, sideBand);
+        output.write(content);
+    }
+
+    private static void writeHeader(BufferedByteOutput output, int wireLength, SideBand sideBand)
+            throws IOException {
+        if (wireLength < 0 || wireLength > MAX_PKT_LINE_LENGTH) {
             throw new IllegalArgumentException("Pkt-line payload exceeds Git pkt-line limit");
         }
-        boolean hasChannel = this instanceof Data && sideBand != SideBand.NONE;
+        boolean hasChannel = sideBand != SideBand.NONE;
         byte[] header = new byte[PKT_LINE_HEADER_SIZE + (hasChannel ? 1 : 0)];
         for (int index = 0; index < PKT_LINE_HEADER_SIZE; index++) {
             int shift = (PKT_LINE_HEADER_SIZE - 1 - index) * 4;
@@ -64,9 +79,6 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
             header[PKT_LINE_HEADER_SIZE] = sideBand.wireValue();
         }
         output.write(header);
-        if (this instanceof Data data) {
-            output.write(data.content());
-        }
     }
 
 

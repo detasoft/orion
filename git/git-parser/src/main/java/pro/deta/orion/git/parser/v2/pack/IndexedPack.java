@@ -6,7 +6,7 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.type.ByteArrayDataType;
 import org.h2.mvstore.type.LongDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.data.ObjectIdDataType;
+import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -234,10 +234,43 @@ public final class IndexedPack implements AutoCloseable {
                 : Optional.of(readObject(entry.orElseThrow().offset(), reader));
     }
 
-    public static <R> R readObject(Path path, EntryMetadata entry, GitObjectRead<R> reader) throws IOException {
+    public long dataEnd(long offset) throws IOException {
+        requireOpen();
+        Long next = entries.higherKey(offset);
+        return next == null ? size() - 20 : next;
+    }
+
+    public Optional<ObjectId> baseId(long offset) throws IOException {
+        requireOpen();
+        Record record = record(offset);
+        if (record == null) {
+            throw new IOException("Unknown pack entry offset: " + offset);
+        }
+        EntryMetadata entry = record.entry();
+        if (entry.type() != GitObjectType.OFS_DELTA) {
+            return entry.baseId();
+        }
+        Record base = record(entry.baseOffset().orElseThrow());
+        if (base == null || base.objectId() == null) {
+            throw new IOException("Offset delta base has no ObjectId");
+        }
+        return Optional.of(base.objectId());
+    }
+
+    public static <R> R readObject(Path path, EntryMetadata entry, long end, Optional<ObjectId> baseId,
+                                   GitObjectRead<R> reader) throws IOException {
         R value = null;
         try (PackDataStorage bytes = PackDataStorage.open(path, StandardOpenOption.READ)) {
-            value = readStored(entry, bytes, bytes.size(), reader);
+            if (end <= entry.dataOffset() || end > bytes.size() - 20) {
+                throw new EOFException("Invalid stored object boundary");
+            }
+            GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
+                    ? GitObjectType.REF_DELTA : entry.type();
+            try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+                    new StoredInput(bytes, entry.dataOffset(), end))) {
+                value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
+                        "reader result");
+            }
             return value;
         } catch (IOException | RuntimeException | Error error) {
             closeUnreturned(value, error);
@@ -491,7 +524,7 @@ public final class IndexedPack implements AutoCloseable {
                 buffer.limit((int) Math.min(buffer.capacity(), end - position));
                 int count = byteStore.read(position, buffer);
                 if (count == -1) {
-                    return -1;
+                    throw new EOFException("Truncated stored object");
                 }
                 if (count == 0) {
                     throw new IOException("Pack byte store made no read progress");
@@ -500,6 +533,27 @@ public final class IndexedPack implements AutoCloseable {
                 buffer.flip();
             }
             return buffer.get() & 255;
+        }
+
+        @Override
+        public int read(byte[] target, int offset, int length) throws IOException {
+            Objects.checkFromIndexSize(offset, length, target.length);
+            if (length == 0) {
+                return 0;
+            }
+            if (!buffer.hasRemaining()) {
+                int first = read();
+                if (first < 0) {
+                    return -1;
+                }
+                target[offset] = (byte) first;
+                int count = Math.min(length - 1, buffer.remaining());
+                buffer.get(target, offset + 1, count);
+                return count + 1;
+            }
+            int count = Math.min(length, buffer.remaining());
+            buffer.get(target, offset, count);
+            return count;
         }
     }
 

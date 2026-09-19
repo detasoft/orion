@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
+import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationCapability;
@@ -14,10 +15,12 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
 import java.util.List;
@@ -36,9 +39,29 @@ public class FetchCommand implements GitCommand {
 
     @Override
     public void action(GitProtocolContext protocolContext) throws IOException {
-        FetchRequest request = FetchRequest.parseRequest(protocolContext.reader(), protocolContext.version());
-        var iterator = prepareNegotiation(request, protocolContext.transport());
-        negotiate(iterator, protocolContext.reader(), protocolContext.writer());
+        GitProtocolContext.Reader reader = protocolContext.reader();
+        GitProtocolContext.Writer writer = protocolContext.writer();
+        FetchRequest request = FetchRequest.parseRequest(reader, protocolContext.version());
+        if (request.mode() != FetchRequest.Mode.PROTOCOL_V2
+                && (request.depth().isPresent() || request.deepenSince().isPresent()
+                || !request.deepenNot().isEmpty())) {
+            throw new IOException("Legacy shallow updates are not implemented");
+        }
+        FetchNegotiatorIterator iterator = prepareNegotiation(request, protocolContext.transport());
+        NegotiationContext context = negotiate(iterator, reader, writer);
+        Optional<FetchPlan> response = prepareResponse(context);
+        if (response.isEmpty()) {
+            return;
+        }
+        FetchPlan plan = response.orElseThrow();
+        FetchPack pack = FetchPack.prepare(storage, plan);
+        BufferedByteOutput output = writer.beginPack(plan.capabilities(), plan.wantedRefs());
+        try (PackWriter packWriter = new PackWriter(output, pack.objectCount())) {
+            pack.writeTo(packWriter);
+            packWriter.finish();
+        }
+        writer.endPack(plan.capabilities());
+        writer.flush();
     }
 
     public FetchNegotiatorIterator prepareNegotiation(FetchRequest request, GitTransport transport)
@@ -64,7 +87,7 @@ public class FetchCommand implements GitCommand {
         Objects.requireNonNull(context, "context");
         FetchRequest request = context.request();
         boolean readyPermitsPack = context.ready() && (request.mode() == FetchRequest.Mode.PROTOCOL_V2
-                || request.capabilities().contains(GitCapabilityValue.value(GitCapability.NO_DONE)));
+                || request.capabilities().has(GitCapability.NO_DONE));
         if (!context.doneReceived() && !readyPermitsPack) {
             return Optional.empty();
         }
@@ -101,7 +124,7 @@ public class FetchCommand implements GitCommand {
     private void writeResponses(GitProtocolContext.Writer writer, List<NegotiationResponse> responsesToSend,
                                 FetchRequest request) throws IOException {
         if (!responsesToSend.isEmpty()) {
-            SideBand sideBand = request.capabilities().contains(GitCapabilityValue.value(GitCapability.SIDEBAND_ALL))
+            SideBand sideBand = request.capabilities().has(GitCapability.SIDEBAND_ALL)
                     ? SideBand.DATA : SideBand.NONE;
             writer.writeNegotiationRound(responsesToSend, sideBand);
             writer.flush();
@@ -115,7 +138,7 @@ public class FetchCommand implements GitCommand {
             case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
                     throw invalid("Expected a data packet");
             case GitPktLine.Data data -> {
-                var parser = new NegotiationCapabilityParser(GitProtocolVersion.V0);
+                NegotiationCapabilityParser parser = new NegotiationCapabilityParser(GitProtocolVersion.V0);
                 GitCapabilityValue argument = parser.parse(packet).getFirst();
                 try {
                     yield switch (NegotiationCapability.findByWireName(argument.name()).orElse(null)) {
