@@ -1,14 +1,17 @@
-package pro.deta.orion.git.parser.v2;
+package pro.deta.orion.git.parser.v2.proto;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
-import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -21,7 +24,7 @@ import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Status.COMM
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Status.CONTINUE;
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Status.PLAIN;
 
-class GitWriterTest {
+class GitProtocolWriterTest {
     private static final ObjectId ID = new ObjectId("ab".repeat(20));
     private static final ObjectId OTHER = new ObjectId("cd".repeat(20));
 
@@ -29,12 +32,12 @@ class GitWriterTest {
     void legacyWritesOrderedAckSuffixesWithoutAddingRoundMarkers() throws Exception {
         for (GitProtocolVersion version : new GitProtocolVersion[]{
                 GitProtocolVersion.V0, GitProtocolVersion.V1}) {
-            var bytes = new ByteArrayOutputStream();
-            var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            GitProtocolContext.Writer writer = writer(bytes, version);
             writer.writeNegotiationRound(List.of(new NegotiationResponse.Ack(ID, CONTINUE),
                     new NegotiationResponse.Ack(ID, COMMON), new NegotiationResponse.Ack(ID, PLAIN),
                     new NegotiationResponse.Ack(ID, NegotiationResponse.Status.READY), NAK),
-                    version, SideBand.NONE);
+                    SideBand.NONE);
             assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
                     "003aACK " + ID + " continue\n0038ACK " + ID + " common\n0031ACK " + ID
                             + "\n0037ACK " + ID + " ready\n0008NAK\n");
@@ -43,18 +46,18 @@ class GitWriterTest {
 
     @Test
     void v2NakSectionEndsWithFlushPacket() throws Exception {
-        var bytes = new ByteArrayOutputStream();
-        var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
-        writer.writeNegotiationRound(List.of(NAK), GitProtocolVersion.V2, SideBand.NONE);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        GitProtocolContext.Writer writer = writer(bytes, GitProtocolVersion.V2);
+        writer.writeNegotiationRound(List.of(NAK), SideBand.NONE);
         assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo("0014acknowledgments\n0008NAK\n0000");
     }
 
     @Test
     void v2AcknowledgmentsPreserveOrderAndEndWithFlushWithoutReady() throws Exception {
-        var bytes = new ByteArrayOutputStream();
-        var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        GitProtocolContext.Writer writer = writer(bytes, GitProtocolVersion.V2);
         writer.writeNegotiationRound(List.of(new NegotiationResponse.Ack(ID, PLAIN),
-                new NegotiationResponse.Ack(OTHER, PLAIN)), GitProtocolVersion.V2, SideBand.NONE);
+                new NegotiationResponse.Ack(OTHER, PLAIN)), SideBand.NONE);
         assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
                 "0014acknowledgments\n0031ACK " + ID + "\n0031ACK " + OTHER + "\n0000");
     }
@@ -62,10 +65,10 @@ class GitWriterTest {
     @Test
     void v2ReadyDelimitsTheFollowingSectionWithOptionalSideband() throws Exception {
         for (SideBand channel : new SideBand[]{SideBand.NONE, SideBand.DATA}) {
-            var bytes = new ByteArrayOutputStream();
-            var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            GitProtocolContext.Writer writer = writer(bytes, GitProtocolVersion.V2);
             writer.writeNegotiationRound(List.of(new NegotiationResponse.Ack(ID, PLAIN), READY),
-                    GitProtocolVersion.V2, channel);
+                    channel);
             String expected = channel == SideBand.NONE
                     ? "0014acknowledgments\n0031ACK " + ID + "\n000aready\n0001"
                     : "0015\u0001acknowledgments\n0032\u0001ACK " + ID + "\n000b\u0001ready\n0001";
@@ -75,10 +78,9 @@ class GitWriterTest {
 
     @Test
     void emptyRepliesWriteNothingInAnyVersion() throws Exception {
-        var bytes = new ByteArrayOutputStream();
-        var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         for (GitProtocolVersion version : GitProtocolVersion.values()) {
-            writer.writeNegotiationRound(List.of(), version, SideBand.NONE);
+            writer(bytes, version).writeNegotiationRound(List.of(), SideBand.NONE);
         }
         assertThat(bytes.size()).isZero();
     }
@@ -98,8 +100,8 @@ class GitWriterTest {
                 throw new AssertionError("Writer borrows output");
             }
         };
-        var writer = new GitWriter(new OutputStreamBufferedByteOutput(bytes));
-        writer.writeNegotiationRound(List.of(NAK), GitProtocolVersion.V2, SideBand.DATA);
+        GitProtocolContext.Writer writer = writer(bytes, GitProtocolVersion.V2);
+        writer.writeNegotiationRound(List.of(NAK), SideBand.DATA);
         assertThat(bytes.flushes).isZero();
         writer.flush();
         assertThat(bytes.flushes).isEqualTo(1);
@@ -109,8 +111,8 @@ class GitWriterTest {
 
     @Test
     void propagatesWriteAndFlushFailures() {
-        var failure = new IOException("Transport failed");
-        var writer = new GitWriter(new OutputStreamBufferedByteOutput(new OutputStream() {
+        IOException failure = new IOException("Transport failed");
+        GitProtocolContext.Writer writer = writer(new OutputStream() {
             @Override
             public void write(int value) throws IOException {
                 throw failure;
@@ -120,9 +122,14 @@ class GitWriterTest {
             public void flush() throws IOException {
                 throw failure;
             }
-        }));
-        assertThatThrownBy(() -> writer.writeNegotiationRound(List.of(NAK), GitProtocolVersion.V0, SideBand.NONE))
+        }, GitProtocolVersion.V0);
+        assertThatThrownBy(() -> writer.writeNegotiationRound(List.of(NAK), SideBand.NONE))
                 .isSameAs(failure);
         assertThatThrownBy(writer::flush).isSameAs(failure);
     }
+    private static GitProtocolContext.Writer writer(OutputStream output, GitProtocolVersion version) {
+        return new GitProtocolContext(new BufferedByteInputV2(InputStream.nullInputStream()),
+                new OutputStreamBufferedByteOutput(output), version, GitTransport.SSH).writer();
+    }
+
 }

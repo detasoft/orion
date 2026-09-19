@@ -2,308 +2,226 @@ package pro.deta.orion.git.parser.v2.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.data.ObjectType;
-import pro.deta.orion.git.parser.v2.pack.PackUpload;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executors;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.DeflaterOutputStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class PackPublicationTest {
     @TempDir
     Path directory;
 
     @Test
-    void publishesOnlyAtCommitSurvivesReopenAndRollbackKeepsPublishedData() throws Exception {
-        var storage = new GitStorageApi(directory);
-        byte[] pack = pack(new byte[]{1, 2, 3});
-        try (var source = source(join(pack, new byte[]{42}))) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                ObjectId object = upload.next().value().orElseThrow();
-                assertThat(upload.hasNext()).isFalse();
-                assertThat(storage.exists(object)).isFalse();
-                assertThat(storage.findPacksByObjectIds(List.of(object))).isEmpty();
-                PackId id = upload.packId();
-                upload.commit(id);
-                assertThat(Files.readAllBytes(path(id, ".pack"))).containsExactly(pack);
-                assertThat(Files.isRegularFile(path(id, ".mv"))).isTrue();
-                upload.rollback();
-                upload.rollback();
-                assertThat(source.readBytes(1)).containsExactly((byte) 42);
-                var reopened = new GitStorageApi(directory);
-                assertThat(reopened.readObject(object, new HashedGitObjectRead())).contains(object);
-                assertThat(reopened.findPacksByObjectIds(List.of(object))).containsEntry(object, List.of(id));
-                assertThatThrownBy(upload::next).isInstanceOf(ClosedChannelException.class);
-            } finally {
-                upload.rollback();
-            }
+    void publishesOnlyAtPersistAndSurvivesReopen() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        byte[] wire = pack(blob(new byte[]{1, 2, 3}));
+        ObjectId object = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
+        try (BufferedByteInputV2 source = source(join(wire, new byte[]{42}));
+             IndexedPack target = storage.newPack();
+             PackIngestor ingestor = new PackIngestor(source, target)) {
+            ingestor.ingest();
+            assertThat(storage.exists(object)).isFalse();
+            assertThat(storage.findPacksByObjectIds(List.of(object))).isEmpty();
+            PackId id = target.id();
+            assertThat(storage.persist(target)).isEqualTo(id);
+            assertThat(Files.readAllBytes(path(id, ".pack"))).containsExactly(wire);
+            assertThat(path(id, ".mv")).isRegularFile();
+            assertThat(source.readUnsignedByte()).isEqualTo(42);
+            GitStorageApi reopened = new GitStorageApi(directory);
+            assertThat(reopened.readObject(object, new HashedGitObjectRead())).contains(object);
+            assertThat(reopened.findPacksByObjectIds(List.of(object))).containsEntry(object, List.of(id));
+            assertThatThrownBy(target::size).isInstanceOf(ClosedChannelException.class);
         }
         assertStagingEmpty();
     }
 
     @Test
-    void rollbackDiscardsOnlyItsAttemptAndLeavesInputOpen() throws Exception {
-        var storage = new GitStorageApi(directory);
-        try (var firstSource = source(pack(new byte[]{1})); var secondSource = source(pack(new byte[]{2}))) {
-            var first = storage.uploadNewPack(firstSource);
-            var second = storage.uploadNewPack(secondSource);
-            try {
-                first.next();
-                first.rollback();
-                first.rollback();
-                assertThat(firstSource.readBytes(1)).hasSize(1);
-                ObjectId object = second.next().value().orElseThrow();
-                assertThat(second.hasNext()).isFalse();
-                second.commit(second.packId());
-                assertThat(storage.exists(object)).isTrue();
-            } finally {
-                first.rollback();
-                second.rollback();
-            }
+    void discardingOneAttemptDoesNotRemoveAnother() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        try (IndexedPack first = ingest(pack(blob(new byte[]{1})), storage.newPack());
+             IndexedPack second = ingest(pack(blob(new byte[]{2})), storage.newPack())) {
+            first.discard();
+            first.discard();
+            storage.persist(second);
+            assertThat(storage.exists(blobId((byte) 2))).isTrue();
         }
         assertStagingEmpty();
     }
 
     @Test
     void concurrentIdenticalPublicationsReuseOnePairAcrossStorageInstances() throws Exception {
-        byte[] pack = pack(new byte[]{5});
-        try (var sourceA = source(pack); var sourceB = source(pack);
-             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var first = new GitStorageApi(directory).uploadNewPack(sourceA);
-            var second = new GitStorageApi(directory).uploadNewPack(sourceB);
-            try {
-                ObjectId object = first.next().value().orElseThrow();
-                second.next();
-                assertThat(first.hasNext()).isFalse();
-                assertThat(second.hasNext()).isFalse();
-                var a = executor.submit(() -> { first.commit(first.packId()); return null; });
-                var b = executor.submit(() -> { second.commit(second.packId()); return null; });
-                a.get(10, TimeUnit.SECONDS);
-                b.get(10, TimeUnit.SECONDS);
-                assertThat(new GitStorageApi(directory).findPacksByObjectIds(List.of(object)))
-                        .containsEntry(object, List.of(first.packId()));
-            } finally {
-                first.rollback();
-                second.rollback();
-            }
+        byte[] wire = pack(blob(new byte[]{5}));
+        GitStorageApi firstStorage = new GitStorageApi(directory);
+        GitStorageApi secondStorage = new GitStorageApi(directory);
+        try (IndexedPack first = ingest(wire, firstStorage.newPack());
+             IndexedPack second = ingest(wire, secondStorage.newPack());
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            PackId expected = first.id();
+            CyclicBarrier start = new CyclicBarrier(2);
+            Future<PackId> a = executor.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return firstStorage.persist(first);
+            });
+            Future<PackId> b = executor.submit(() -> {
+                start.await(5, TimeUnit.SECONDS);
+                return secondStorage.persist(second);
+            });
+            assertThat(a.get(10, TimeUnit.SECONDS)).isEqualTo(expected);
+            assertThat(b.get(10, TimeUnit.SECONDS)).isEqualTo(expected);
+            ObjectId object = blobId((byte) 5);
+            assertThat(firstStorage.findPacksByObjectIds(List.of(object)))
+                    .containsEntry(object, List.of(expected));
         }
         assertStagingEmpty();
     }
 
     @Test
-    void incompletePublicationIsInvisibleAndCanBeReplacedByVerifiedUpload() throws Exception {
-        byte[] pack = pack(new byte[]{7});
-        var storage = new GitStorageApi(directory);
-        try (var source = source(pack)) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                ObjectId object = upload.next().value().orElseThrow();
-                assertThat(upload.hasNext()).isFalse();
-                PackId id = upload.packId();
-                Files.createDirectories(path(id, ".pack").getParent());
-                Files.write(path(id, ".pack"), new byte[]{0});
-                assertThat(storage.exists(object)).isFalse();
-                upload.commit(id);
-                assertThat(storage.readObject(object, new HashedGitObjectRead())).contains(object);
-            } finally {
-                upload.rollback();
-            }
+    void incompletePublicationIsInvisibleAndCanBeReplacedByVerifiedPack() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        try (IndexedPack target = ingest(pack(blob(new byte[]{7})), storage.newPack())) {
+            PackId id = target.id();
+            Files.createDirectories(path(id, ".pack").getParent());
+            Files.write(path(id, ".pack"), new byte[]{0});
+            assertThat(storage.exists(blobId((byte) 7))).isFalse();
+            storage.persist(target);
+            assertThat(storage.readObject(blobId((byte) 7), new HashedGitObjectRead())).contains(blobId((byte) 7));
         }
+        assertStagingEmpty();
     }
 
     @Test
-    void failedParsingCannotPublishAndRollbackRemovesItsFiles() throws Exception {
-        byte[] pack = pack(new byte[]{8});
-        pack[pack.length - 1] ^= 1;
-        var storage = new GitStorageApi(directory);
-        try (var source = source(pack)) {
-            PackUpload upload = storage.uploadNewPack(source);
-            try {
-                ObjectId object = upload.next().value().orElseThrow();
-                assertThatThrownBy(upload::hasNext).isInstanceOf(IOException.class);
-                assertThatThrownBy(() -> upload.commit(new PackId(new byte[20])))
-                        .isInstanceOf(IOException.class);
-                assertThat(storage.exists(object)).isFalse();
-            } finally {
-                upload.rollback();
-            }
-        }
+    void failedParsingLeavesNoPublishedOrTemporaryFiles() throws Exception {
+        byte[] wire = pack(blob(new byte[]{8}));
+        wire[wire.length - 1] ^= 1;
+        GitStorageApi storage = new GitStorageApi(directory);
+        assertThatThrownBy(() -> ingest(wire, storage.newPack())).isInstanceOf(IOException.class);
+        assertThat(storage.exists(blobId((byte) 8))).isFalse();
         assertStagingEmpty();
     }
 
     @Test
     void completesThinPackFromTwoPublishedBasesAndIndexesTheFinalPackId() throws Exception {
-        var storage = new GitStorageApi(directory);
+        GitStorageApi storage = new GitStorageApi(directory);
         for (byte value : new byte[]{1, 2}) {
-            try (var source = source(pack(new byte[]{value}))) {
-                var upload = storage.uploadNewPack(source);
-                try {
-                    upload.next();
-                    assertThat(upload.hasNext()).isFalse();
-                    upload.commit(upload.packId());
-                } finally {
-                    upload.rollback();
-                }
-            }
+            storage.persist(ingest(pack(blob(new byte[]{value})), storage.newPack()));
         }
         ObjectId firstBase = blobId((byte) 1);
         ObjectId secondBase = blobId((byte) 2);
-        byte[] thin = entries(delta(firstBase, (byte) 3), delta(secondBase, (byte) 4));
-        try (var source = source(thin)) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                for (byte value : new byte[]{3, 4}) {
-                    var entry = upload.next().entry();
-                    upload.index().addObject(entry, blobId(value), ObjectType.BLOB, 1);
-                }
-                assertThat(upload.hasNext()).isFalse();
-                PackId received = upload.packId();
-                upload.commit(received);
-                PackId completed = upload.packId();
-                assertThat(completed).isNotEqualTo(received);
-                assertThat(Files.exists(path(received, ".mv"))).isFalse();
-                byte[] bytes = Files.readAllBytes(path(completed, ".pack"));
-                assertThat(ByteBuffer.wrap(bytes).getInt(8)).isEqualTo(4);
-                assertThat(storage.findPacksByObjectIds(List.of(firstBase, secondBase)))
-                        .allSatisfy((id, packs) -> assertThat(packs).hasSize(2).contains(completed));
-                var reopened = new GitStorageApi(directory);
-                assertThat(reopened.readObject(blobId((byte) 4), new ResolvedGitObjectRead<>(reopened,
-                        (type, size, base, content) -> content.readBytes((int) size))))
-                        .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 4));
-            } finally {
-                upload.rollback();
-            }
+        byte[] firstDelta = delta(firstBase, new byte[]{1, 1, 1, 3});
+        byte[] thin = pack(firstDelta, delta(secondBase, new byte[]{1, 1, 1, 4}));
+        try (IndexedPack target = ingest(thin, storage.newPack())) {
+            target.addObject(12, blobId((byte) 3), GitObjectType.BLOB, 1);
+            target.addObject(12 + firstDelta.length, blobId((byte) 4), GitObjectType.BLOB, 1);
+            PackId received = target.id();
+            PackId completed = new GitPackObjectResolver(target, storage).complete();
+            assertThat(storage.persist(target)).isEqualTo(completed);
+            assertThat(completed).isNotEqualTo(received);
+            assertThat(path(received, ".mv")).doesNotExist();
+            assertThat(ByteBuffer.wrap(Files.readAllBytes(path(completed, ".pack"))).getInt(8)).isEqualTo(4);
+            assertThat(storage.findPacksByObjectIds(List.of(firstBase, secondBase)))
+                    .allSatisfy((id, packs) -> assertThat(packs).hasSize(2).contains(completed));
+            GitStorageApi reopened = new GitStorageApi(directory);
+            assertThat(reopened.readObject(blobId((byte) 4), new ResolvedGitObjectRead<>(reopened,
+                    (type, size, base, content) -> content.readBytes((int) size))))
+                    .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 4));
         }
         assertStagingEmpty();
     }
 
     @Test
     void publishedIndexCorruptionIsAnErrorRatherThanAnAbsentObject() throws Exception {
-        var storage = new GitStorageApi(directory);
-        try (var source = source(pack(new byte[]{9}))) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                ObjectId object = upload.next().value().orElseThrow();
-                assertThat(upload.hasNext()).isFalse();
-                upload.commit(upload.packId());
-                Files.write(path(upload.packId(), ".mv"), new byte[]{0});
-                assertThatThrownBy(() -> storage.exists(object)).isInstanceOf(IOException.class);
-                assertThatThrownBy(() -> storage.findPacksByObjectIds(List.of(object)))
-                        .isInstanceOf(IOException.class);
-            } finally {
-                upload.rollback();
-            }
-        }
+        GitStorageApi storage = new GitStorageApi(directory);
+        PackId id = storage.persist(ingest(pack(blob(new byte[]{9})), storage.newPack()));
+        Files.write(path(id, ".mv"), new byte[]{0});
+        assertThatThrownBy(() -> storage.exists(blobId((byte) 9))).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> storage.findPacksByObjectIds(List.of(blobId((byte) 9))))
+                .isInstanceOf(IOException.class);
     }
 
     @Test
-    void publicationFailureRemainsRollbackSafeAndDoesNotDeleteExistingPaths() throws Exception {
-        var storage = new GitStorageApi(directory);
-        try (var source = source(pack(new byte[]{10}))) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                upload.next();
-                assertThat(upload.hasNext()).isFalse();
-                PackId id = upload.packId();
-                Path obstacle = path(id, ".mv");
-                Files.createDirectories(obstacle);
-                Files.write(obstacle.resolve("keep"), new byte[]{42});
-                assertThatThrownBy(() -> upload.commit(id)).isInstanceOf(IOException.class);
-                upload.rollback();
-                assertThat(Files.readAllBytes(obstacle.resolve("keep"))).containsExactly((byte) 42);
-            } finally {
-                upload.rollback();
-            }
+    void publicationFailureCleansStagingWithoutDeletingExistingPaths() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        try (IndexedPack target = ingest(pack(blob(new byte[]{10})), storage.newPack())) {
+            Path obstacle = path(target.id(), ".mv");
+            Files.createDirectories(obstacle);
+            Files.write(obstacle.resolve("keep"), new byte[]{42});
+            assertThatThrownBy(() -> storage.persist(target)).isInstanceOf(IOException.class);
+            assertThat(Files.readAllBytes(obstacle.resolve("keep"))).containsExactly((byte) 42);
         }
         assertStagingEmpty();
     }
 
-    private static ObjectId blobId(byte value) throws Exception {
-        return new ObjectId(MessageDigest.getInstance("SHA-1").digest(
-                new byte[]{'b', 'l', 'o', 'b', ' ', '1', 0, value}));
-    }
-
     @Test
     void resolvesAReferenceToAnotherObjectInTheSamePublishedPack() throws Exception {
-        var storage = new GitStorageApi(directory);
-        byte[] full = join(new byte[]{0x31}, compressed(new byte[]{1}));
-        try (var source = source(entries(full, delta(blobId((byte) 1), (byte) 2)))) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                upload.next();
-                var entry = upload.next().entry();
-                upload.index().addObject(entry, blobId((byte) 2), ObjectType.BLOB, 1);
-                assertThat(upload.hasNext()).isFalse();
-                upload.commit(upload.packId());
-                assertThat(storage.readObject(blobId((byte) 2), new ResolvedGitObjectRead<>(storage,
-                        (type, size, base, content) -> content.readBytes((int) size))))
-                        .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
-            } finally {
-                upload.rollback();
-            }
+        GitStorageApi storage = new GitStorageApi(directory);
+        byte[] full = blob(new byte[]{1});
+        try (IndexedPack target = ingest(pack(full, delta(blobId((byte) 1), new byte[]{1, 1, 1, 2})),
+                storage.newPack())) {
+            target.addObject(12 + full.length, blobId((byte) 2), GitObjectType.BLOB, 1);
+            storage.persist(target);
+            assertThat(storage.readObject(blobId((byte) 2), new ResolvedGitObjectRead<>(storage,
+                    (type, size, base, content) -> content.readBytes((int) size))))
+                    .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
         }
     }
 
     @Test
     void concurrentReadersDoNotRetainTheIndexLockAcrossCallbacks() throws Exception {
-        var storage = new GitStorageApi(directory);
-        try (var source = source(pack(new byte[]{1}));
-             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var upload = storage.uploadNewPack(source);
-            try {
-                ObjectId object = upload.next().value().orElseThrow();
-                assertThat(upload.hasNext()).isFalse();
-                upload.commit(upload.packId());
-                var barrier = new CyclicBarrier(2);
-                var other = new GitStorageApi(directory);
-                var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
-                for (var api : List.of(storage, other)) {
-                    futures.add(executor.submit(() -> {
-                        for (int i = 0; i < 20; i++) {
-                            assertThat(api.readObject(object, (type, size, base, content) -> {
-                                try {
-                                    barrier.await(5, TimeUnit.SECONDS);
-                                } catch (Exception error) {
-                                    throw new IOException(error);
-                                }
-                                return true;
-                            })).contains(true);
-                            assertThat(api.findPacksByObjectIds(List.of(object)))
-                                    .containsEntry(object, List.of(upload.packId()));
-                        }
-                        return null;
-                    }));
-                }
-                for (var future : futures) {
-                    future.get(10, TimeUnit.SECONDS);
-                }
-            } finally {
-                upload.rollback();
+        GitStorageApi storage = new GitStorageApi(directory);
+        PackId id = storage.persist(ingest(pack(blob(new byte[]{1})), storage.newPack()));
+        ObjectId object = blobId((byte) 1);
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            CyclicBarrier barrier = new CyclicBarrier(2);
+            List<Future<?>> futures = new ArrayList<>();
+            for (GitStorageApi api : List.of(storage, new GitStorageApi(directory))) {
+                futures.add(executor.submit(() -> {
+                    for (int i = 0; i < 20; i++) {
+                        assertThat(api.readObject(object, (type, size, base, content) -> {
+                            try {
+                                barrier.await(5, TimeUnit.SECONDS);
+                            } catch (Exception error) {
+                                throw new IOException(error);
+                            }
+                            return true;
+                        })).contains(true);
+                        assertThat(api.findPacksByObjectIds(List.of(object)))
+                                .containsEntry(object, List.of(id));
+                    }
+                    return null;
+                }));
+            }
+            for (Future<?> future : futures) {
+                future.get(10, TimeUnit.SECONDS);
             }
         }
     }
 
-    private static byte[] delta(ObjectId base, byte value) throws Exception {
-        return join(new byte[]{0x74}, base.toBytes(), compressed(new byte[]{1, 1, 1, value}));
+    private static ObjectId blobId(byte value) {
+        return objectId(GitObjectType.BLOB, new byte[]{value});
     }
 
     private Path path(PackId id, String extension) {
@@ -312,38 +230,12 @@ class PackPublicationTest {
     }
 
     private void assertStagingEmpty() throws IOException {
-        try (var files = Files.list(directory.resolve("incoming"))) {
+        try (Stream<Path> files = Files.list(directory.resolve("incoming"))) {
             assertThat(files.toList()).isEmpty();
         }
     }
 
-    private static InputStreamBufferedByteInput source(byte[] bytes) {
-        return new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes));
-    }
-
-    private static byte[] pack(byte[] content) throws Exception {
-        return entries(join(new byte[]{(byte) (0x30 | content.length)}, compressed(content)));
-    }
-
-    private static byte[] compressed(byte[] content) throws IOException {
-        var compressed = new ByteArrayOutputStream();
-        try (var zlib = new DeflaterOutputStream(compressed)) {
-            zlib.write(content);
-        }
-        return compressed.toByteArray();
-    }
-
-    private static byte[] entries(byte[]... entries) throws Exception {
-        byte[] body = join(ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(entries.length).array(),
-                join(entries));
-        return join(body, MessageDigest.getInstance("SHA-1").digest(body));
-    }
-
-    private static byte[] join(byte[]... parts) {
-        var output = new ByteArrayOutputStream();
-        for (byte[] part : parts) {
-            output.writeBytes(part);
-        }
-        return output.toByteArray();
+    private static BufferedByteInputV2 source(byte[] bytes) {
+        return new BufferedByteInputV2(new ByteArrayInputStream(bytes));
     }
 }

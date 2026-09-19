@@ -7,10 +7,12 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
-import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandDispatcher;
@@ -21,12 +23,10 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.render.RenderedCommand;
-import pro.deta.orion.auth.check.OrionSecurityException;
-import pro.deta.orion.auth.check.rule.SubjectAccessRules;
-import pro.deta.orion.schema.config.GitPackfileUriConfig;
-import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
@@ -34,14 +34,14 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.config.GitPackfileUriConfig;
+import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
-import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
+import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.util.stream.*;
 
 import java.io.*;
@@ -273,8 +273,8 @@ public class SshCommandFactory implements CommandFactory {
                     inputStream,
                     outputStream,
                     errorStream)) {
-                try (InputStreamBufferedByteInput input =
-                        new InputStreamBufferedByteInput(
+                try (BufferedByteInputV2 input =
+                        new BufferedByteInputV2(
                                 streams.getInputStream())) {
                     OutputStreamBufferedByteOutput output =
                             new OutputStreamBufferedByteOutput(

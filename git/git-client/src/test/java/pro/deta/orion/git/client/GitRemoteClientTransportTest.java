@@ -1,6 +1,7 @@
 package pro.deta.orion.git.client;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -58,7 +59,7 @@ class GitRemoteClientTransportTest {
 
     private static final class EmptySession implements GitClientTransportSession {
         @Override
-        public pro.deta.orion.net.io.BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             throw new UnsupportedOperationException();
         }
 

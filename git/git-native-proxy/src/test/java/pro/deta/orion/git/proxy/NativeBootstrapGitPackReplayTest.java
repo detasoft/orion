@@ -22,7 +22,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
@@ -135,7 +135,7 @@ class NativeBootstrapGitPackReplayTest {
             GitClientTransportSession delegate = new GitFileClientTransport().open(service, uri, options);
             return new GitClientTransportSession() {
                 @Override
-                public BufferedByteInput input() {
+                public BufferedByteInputV2 input() {
                     return delegate.input();
                 }
 

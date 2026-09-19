@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
@@ -113,7 +113,7 @@ class GitWireBootstrapTest {
     @Test
     void createsSmartHttpBootstrap() {
         GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
-                new InputStreamBufferedByteInput(
+                new BufferedByteInputV2(
                         new ByteArrayInputStream(new byte[0])),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
                 InitialRequestService.RECEIVE_PACK,
@@ -132,7 +132,7 @@ class GitWireBootstrapTest {
     @Test
     void smartHttpSelectsHighestRecognizedProtocolVersion() {
         GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
-                new InputStreamBufferedByteInput(
+                new BufferedByteInputV2(
                         new ByteArrayInputStream(new byte[0])),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
                 InitialRequestService.UPLOAD_PACK,
@@ -147,7 +147,7 @@ class GitWireBootstrapTest {
     @Test
     void smartHttpAcceptsExplicitProtocolV0AndIgnoresUnknownOffers() {
         GitWireBootstrap explicitV0 = GitWireBootstrap.smartHttp(
-                new InputStreamBufferedByteInput(
+                new BufferedByteInputV2(
                         new ByteArrayInputStream(new byte[0])),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
                 InitialRequestService.UPLOAD_PACK,
@@ -155,7 +155,7 @@ class GitWireBootstrapTest {
                 "localhost",
                 "version=9:version=0");
         GitWireBootstrap unknownOnly = GitWireBootstrap.smartHttp(
-                new InputStreamBufferedByteInput(
+                new BufferedByteInputV2(
                         new ByteArrayInputStream(new byte[0])),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
                 InitialRequestService.UPLOAD_PACK,
@@ -183,7 +183,7 @@ class GitWireBootstrapTest {
 
     private static GitWireBootstrap nativeDaemon(String ascii) throws Exception {
         return GitWireBootstrap.nativeDaemon(
-                new InputStreamBufferedByteInput(
+                new BufferedByteInputV2(
                         new ByteArrayInputStream(
                                 ascii.getBytes(StandardCharsets.US_ASCII))),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()));
@@ -191,7 +191,7 @@ class GitWireBootstrapTest {
 
     private static GitWireBootstrap smartHttp(String repositoryPath) {
         return GitWireBootstrap.smartHttp(
-                new InputStreamBufferedByteInput(new ByteArrayInputStream(new byte[0])),
+                new BufferedByteInputV2(new ByteArrayInputStream(new byte[0])),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
                 InitialRequestService.UPLOAD_PACK,
                 repositoryPath,

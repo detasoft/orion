@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.wire;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.schema.orion.RepositoryName;
 
@@ -27,12 +27,17 @@ public final class GitWireBootstrap {
         this.data = Objects.requireNonNull(data, "data");
     }
 
-    public static GitWireBootstrap smartHttp(BufferedByteInput input, BufferedByteOutput output, InitialRequestService service, String repositoryPath, String host, String gitProtocol) {
-        return new GitWireBootstrap(new GitBlockingWireTransport(input, output), transportRequest(service, repositoryPath, host, gitProtocol));
+    public static GitWireBootstrap smartHttp(BufferedByteInputV2 input, BufferedByteOutput output,
+                                            InitialRequestService service, String repositoryPath,
+                                            String host, String gitProtocol) {
+        return new GitWireBootstrap(new GitBlockingWireTransport(input, output),
+                transportRequest(service, repositoryPath, host, gitProtocol));
     }
 
-    public static GitWireBootstrap sshCommand(BufferedByteInput input, BufferedByteOutput output, String commandLine, String gitProtocol) {
-        return new GitWireBootstrap(new GitBlockingWireTransport(input, output), sshCommandData(commandLine, gitProtocol));
+    public static GitWireBootstrap sshCommand(BufferedByteInputV2 input, BufferedByteOutput output,
+                                             String commandLine, String gitProtocol) {
+        return new GitWireBootstrap(new GitBlockingWireTransport(input, output),
+                sshCommandData(commandLine, gitProtocol));
     }
 
     public static InitialRequestData sshCommandData(String commandLine, String gitProtocol) {
@@ -40,7 +45,7 @@ public final class GitWireBootstrap {
         return transportRequest(request.service(), request.repositoryPath(), null, gitProtocol);
     }
 
-    public static GitWireBootstrap nativeDaemon(BufferedByteInput input, BufferedByteOutput output) throws IOException {
+    public static GitWireBootstrap nativeDaemon(BufferedByteInputV2 input, BufferedByteOutput output) throws IOException {
         GitBlockingWireTransport wire = new GitBlockingWireTransport(input, output);
         GitPktLine packet = wire.readPacket();
         if (!(packet instanceof GitPktLine.Data data)) {

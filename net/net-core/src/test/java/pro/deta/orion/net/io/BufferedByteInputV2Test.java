@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -30,6 +31,58 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BufferedByteInputV2Test {
+    @Test
+    void streamSourceReusesItsBufferAndClosesItsInputOnce() throws Exception {
+        byte[] data = new byte[20000];
+        new Random(91).nextBytes(data);
+        int[] closes = {0};
+        ByteArrayInputStream stream = new ByteArrayInputStream(data) {
+            @Override
+            public void close() {
+                closes[0]++;
+            }
+        };
+        BufferedByteInputV2 input = new BufferedByteInputV2(stream);
+        try (input) {
+            ByteBuffer first = input.buffer();
+            int count = first.remaining();
+            assertThat(input.readBytes(count)).containsExactly(java.util.Arrays.copyOf(data, count));
+            assertThat(input.buffer()).isSameAs(first);
+            assertThat(input.newInputStream().readAllBytes())
+                    .containsExactly(java.util.Arrays.copyOfRange(data, count, data.length));
+            assertThat(input.buffer()).isNull();
+        }
+        input.close();
+        assertThat(closes[0]).isEqualTo(1);
+    }
+
+    @Test
+    void streamSourceHandlesFragmentedReadsOnVirtualThreadsAndPropagatesFailures() throws Exception {
+        onVirtualThread(() -> {
+            byte[] bytes = {1, 2, 3, 4, 42};
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes) {
+                @Override
+                public synchronized int read(byte[] target, int offset, int length) {
+                    return super.read(target, offset, Math.min(length, 2));
+                }
+            })) {
+                assertThat(input.readInt()).isEqualTo(0x01020304);
+                assertThat(input.newInputStream().read()).isEqualTo(42);
+                assertThat(input.newInputStream().read()).isEqualTo(-1);
+            }
+            IOException failure = new IOException("transport failed");
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(new InputStream() {
+                @Override
+                public int read() throws IOException {
+                    throw failure;
+                }
+            })) {
+                assertThatThrownBy(input::buffer).isSameAs(failure);
+            }
+            return null;
+        });
+    }
+
     @Test
     void exactReadsWorkOnVirtualThreads() throws Exception {
         onVirtualThread(() -> {

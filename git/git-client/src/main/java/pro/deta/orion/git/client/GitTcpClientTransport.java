@@ -1,8 +1,7 @@
 package pro.deta.orion.git.client;
 
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.IOException;
@@ -121,17 +120,17 @@ public final class GitTcpClientTransport implements GitClientTransport {
 
     private static final class SocketSession implements GitClientTransportSession {
         private final Socket socket;
-        private final InputStreamBufferedByteInput input;
+        private final BufferedByteInputV2 input;
         private final OutputStreamBufferedByteOutput output;
 
         private SocketSession(Socket socket) throws IOException {
             this.socket = socket;
-            input = new InputStreamBufferedByteInput(socket.getInputStream());
+            input = new BufferedByteInputV2(socket.getInputStream());
             output = new OutputStreamBufferedByteOutput(socket.getOutputStream());
         }
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             return input;
         }
 

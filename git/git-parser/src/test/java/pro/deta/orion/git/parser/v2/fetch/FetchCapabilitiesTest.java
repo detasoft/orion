@@ -1,30 +1,33 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.data.GitTransport;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
-
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
 
-import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
-import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
-import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
-import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.capability.GitCapability.*;
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 
 class FetchCapabilitiesTest {
+    @TempDir
+    static Path directory;
     private static final ObjectId ID = new ObjectId("1".repeat(40));
 
     @Test
@@ -191,11 +194,11 @@ class FetchCapabilitiesTest {
         var advertised = capabilities(FILTER);
         var request = request(true);
         request.setFilter(Optional.of("blob:none"));
-        var context = new NegotiationContext(request, new GitStorageApi(), advertised);
+        var context = new NegotiationContext(request, FetchTestSupport.storage(directory), advertised);
         advertised.clear();
         new FetchNegotiatorIterator(context, HTTP);
 
-        var denied = new NegotiationContext(request, new GitStorageApi(), advertised) {
+        var denied = new NegotiationContext(request, FetchTestSupport.storage(directory), advertised) {
             @Override
             public boolean objectExists(ObjectId id) {
                 throw new AssertionError("Unsupported request must not query storage");
@@ -218,6 +221,6 @@ class FetchCapabilitiesTest {
 
     private static void validate(FetchRequest request, GitCapabilities advertised, GitTransport transport)
             throws IOException {
-        new FetchNegotiatorIterator(new NegotiationContext(request, new GitStorageApi(), advertised), transport);
+        new FetchNegotiatorIterator(new NegotiationContext(request, FetchTestSupport.storage(directory), advertised), transport);
     }
 }

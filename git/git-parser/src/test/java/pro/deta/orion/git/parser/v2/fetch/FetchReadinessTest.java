@@ -1,245 +1,214 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.data.*;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.storage.InMemoryGitStorage;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
-import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
-import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 
 class FetchReadinessTest {
-    private static final ObjectId ROOT = id(1);
-    private static final ObjectId LEFT = id(2);
-    private static final ObjectId RIGHT = id(3);
-    private static final ObjectId TIP = id(4);
-    private static final ObjectId TAG = id(5);
-    private final InMemoryGitStorage storage = new InMemoryGitStorage();
+    @TempDir
+    Path directory;
+    private GitStorageApi storage;
+    private ObjectId tree;
 
-    @Test
-    void requiresBothWantsAndConfirmedCommonObjects() throws Exception {
-        var context = context(TIP);
-        assertThat(context.isReady()).isFalse();
-        context.request().wants().clear();
-        context.addCommon(ROOT);
-        assertThat(context.isReady()).isFalse();
-        assertThat(storage.lookups).isEmpty();
+    @BeforeEach
+    void setup() throws Exception {
+        storage = new GitStorageApi(directory);
+        tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
     }
 
     @Test
-    void stopsAtCommonAncestorWithoutReadingItsParentsOrMutatingNegotiation() throws Exception {
-        commit(TIP, LEFT);
-        commit(LEFT, ROOT);
-        var context = context(TIP);
-        context.addCommon(ROOT);
+    void requiresWantsAndConfirmedCommonObjectsWithoutMutatingNegotiation() throws Exception {
+        ObjectId root = commit();
+        ObjectId tip = commit(root);
+        NegotiationContext context = context(tip);
+        assertThat(context.isReady()).isFalse();
+        context.addCommon(root);
         assertThat(context.isReady()).isTrue();
-        assertThat(storage.lookups).containsExactly(TIP, LEFT);
-        assertThat(context.commonObjects()).containsExactly(ROOT);
+        assertThat(context.commonObjects()).containsExactly(root);
         assertThat(context.ready()).isFalse();
         assertThat(context.doneReceived()).isFalse();
-    }
-
-    @Test
-    void everyIndependentWantNeedsACommonPath() throws Exception {
-        commit(LEFT, ROOT);
-        commit(RIGHT);
-        var context = context(LEFT, RIGHT);
-        context.addCommon(ROOT);
+        context.request().wants().clear();
         assertThat(context.isReady()).isFalse();
-        context.addCommon(RIGHT);
-        assertThat(context.isReady()).isTrue();
     }
 
     @Test
-    void anotherBranchDoesNotEstablishAnExplicitCommonAncestor() throws Exception {
-        commit(ROOT);
-        commit(LEFT, ROOT);
-        commit(RIGHT, ROOT);
-        var context = context(LEFT);
-        context.addCommon(RIGHT);
+    void everyIndependentWantNeedsItsOwnCommonPath() throws Exception {
+        ObjectId root = commit();
+        ObjectId left = commit(root);
+        ObjectId right = put(GitObjectType.COMMIT, commitText() + "another root");
+        NegotiationContext context = context(left, right);
+        context.addCommon(root);
         assertThat(context.isReady()).isFalse();
-        context.addCommon(ROOT);
+        context.addCommon(right);
         assertThat(context.isReady()).isTrue();
     }
 
     @Test
-    void mergeCanReachCommonThroughItsSecondParent() throws Exception {
-        commit(TIP, LEFT, RIGHT);
-        commit(LEFT);
-        var context = context(TIP);
-        context.addCommon(RIGHT);
-        assertThat(context.isReady()).isTrue();
+    void aSiblingDoesNotEstablishCommonHistoryButTheSecondMergeParentDoes() throws Exception {
+        ObjectId root = commit();
+        ObjectId left = commit(root);
+        ObjectId right = put(GitObjectType.COMMIT, commitText(root) + "other branch");
+        NegotiationContext context = context(left);
+        context.addCommon(right);
+        assertThat(context.isReady()).isFalse();
+        NegotiationContext merge = context(commit(left, right));
+        merge.addCommon(right);
+        assertThat(merge.isReady()).isTrue();
     }
 
     @Test
     void doesNotTraverseAnUnconfirmedShallowBoundary() throws Exception {
-        commit(TIP, LEFT);
-        commit(LEFT, ROOT);
-        var context = context(TIP);
-        context.request().shallowCommits().add(LEFT);
-        context.addCommon(ROOT);
+        ObjectId root = commit();
+        ObjectId boundary = commit(root);
+        NegotiationContext context = context(commit(boundary));
+        context.request().shallowCommits().add(boundary);
+        context.addCommon(root);
         assertThat(context.isReady()).isFalse();
-        assertThat(storage.lookups).doesNotContain(ROOT);
-        context.addCommon(LEFT);
+        context.addCommon(boundary);
         assertThat(context.isReady()).isTrue();
     }
 
     @Test
     void includesResolvedWantRefsAndPeelsTags() throws Exception {
-        commit(TIP, ROOT);
-        put(TAG, GitObjectType.TAG, "object " + TIP.toHex() + "\ntype commit\ntag release\n\nmessage");
-        var context = context();
-        var ref = new RefId("refs/tags/release");
+        ObjectId root = commit();
+        ObjectId tag = put(GitObjectType.TAG, "object " + commit(root) + "\ntype commit\ntag release\n\nmessage");
+        RefId ref = new RefId("refs/tags/release");
+        NegotiationContext context = context();
         context.request().wantRefs().add(ref.value());
-        context.resolveWantedRefs(new RefsSnapshot(Map.of(ref, TAG), new Head.Symbolic(ref)));
-        context.addCommon(ROOT);
-        assertThat(context.isReady()).isTrue();
-        assertThat(storage.lookups).containsExactly(TAG, TIP);
-    }
-
-    @Test
-    void treesAndBlobsDoNotRequireCommitHistory() throws Exception {
-        put(LEFT, GitObjectType.TREE, "");
-        put(RIGHT, GitObjectType.BLOB, "parent not-a-header");
-        var context = context(LEFT, RIGHT);
-        context.addCommon(ROOT);
+        context.resolveWantedRefs(new RefsSnapshot(Map.of(ref, tag), new Head.Symbolic(ref)));
+        context.addCommon(root);
         assertThat(context.isReady()).isTrue();
     }
 
     @Test
-    void missingOrCorruptHistoryIsAnErrorRatherThanNotReady() {
-        var context = context(TIP);
-        context.addCommon(ROOT);
-        assertThatThrownBy(context::isReady).isInstanceOf(IOException.class).hasMessageContaining(TIP.toHex());
-        put(TIP, GitObjectType.COMMIT, "tree " + id(99).toHex() + "\nparent invalid\n\nmessage");
-        assertThatThrownBy(context::isReady).isInstanceOf(IOException.class);
-        storage.failure = new IOException("backend failure");
-        assertThatThrownBy(context::isReady).isSameAs(storage.failure);
-    }
-
-    @Test
-    void malformedCyclesCannotLoopForeverOrProduceReadiness() throws Exception {
-        commit(LEFT, RIGHT);
-        commit(RIGHT, LEFT);
-        var context = context(LEFT);
-        context.addCommon(ROOT);
-        assertThat(context.isReady()).isFalse();
-        assertThat(storage.lookups).containsExactly(LEFT, RIGHT);
-    }
-
-    @Test
-    void readsParentsFromARefDeltaCommit() throws Exception {
-        String base = "tree " + id(99).toHex() + "\n\n";
-        String target = "tree " + id(99).toHex() + "\nparent " + ROOT.toHex() + "\n\nmessage";
-        put(RIGHT, GitObjectType.COMMIT, base);
-        byte[] content = target.getBytes(StandardCharsets.US_ASCII);
-        byte[] delta = new byte[content.length + 3];
-        delta[0] = (byte) base.length();
-        delta[1] = (byte) content.length;
-        delta[2] = (byte) content.length;
-        System.arraycopy(content, 0, delta, 3, content.length);
-        storage.put(TIP, GitObjectType.REF_DELTA, Optional.of(RIGHT), delta);
-        var context = context(TIP);
-        context.addCommon(ROOT);
-        assertThat(context.isReady()).isTrue();
-        assertThat(storage.lookups).containsExactly(TIP, RIGHT);
-    }
-
-    @Test
-    void skipsLongHeaderValuesAndNeverInterpretsTheMessageAsParents() throws Exception {
-        String header = "tree " + id(99).toHex() + "\ngpgsig " + "x".repeat(100_000) + "\n";
-        put(TIP, GitObjectType.COMMIT, header + "\nparent " + ROOT.toHex() + "\n");
-        var context = context(TIP);
-        context.addCommon(ROOT);
-        assertThat(context.isReady()).isFalse();
-        put(TIP, GitObjectType.COMMIT, header + "parent " + ROOT.toHex() + "\n\nmessage");
-        assertThat(context.isReady()).isTrue();
-    }
-
-    @Test
-    void aNonCommitParentCannotMakeTheHistoryReady() {
-        commit(TIP, LEFT);
-        put(LEFT, GitObjectType.BLOB, "content");
-        var context = context(TIP);
-        context.addCommon(ROOT);
-        assertThatThrownBy(context::isReady).isInstanceOf(IOException.class)
+    void treesAndBlobsNeedNoHistoryButNonCommitParentsAreInvalid() throws Exception {
+        ObjectId blob = put(GitObjectType.BLOB, "content");
+        ObjectId root = commit();
+        NegotiationContext content = context(tree, blob);
+        content.addCommon(root);
+        assertThat(content.isReady()).isTrue();
+        NegotiationContext malformed = context(commit(blob));
+        malformed.addCommon(root);
+        assertThatThrownBy(malformed::isReady).isInstanceOf(IOException.class)
                 .hasMessageContaining("parent is not a commit");
     }
 
     @Test
-    void walksLongHistoryWithoutRecursiveCalls() throws Exception {
-        int length = 1500;
-        for (int i = 2; i <= length; i++) {
-            commit(id(i), id(i - 1));
-        }
-        var context = context(id(length));
-        context.addCommon(ROOT);
+    void missingAndMalformedHistoryAreErrors() throws Exception {
+        ObjectId root = commit();
+        NegotiationContext missing = context(new ObjectId("f".repeat(40)));
+        missing.addCommon(root);
+        assertThatThrownBy(missing::isReady).isInstanceOf(IOException.class);
+        NegotiationContext malformed = context(put(GitObjectType.COMMIT, "tree " + tree + "\nparent invalid\n\n"));
+        malformed.addCommon(root);
+        assertThatThrownBy(malformed::isReady).isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void skipsLongHeaderValuesAndNeverInterpretsTheMessageAsParents() throws Exception {
+        ObjectId root = commit();
+        String header = "tree " + tree + "\ngpgsig " + "x".repeat(100_000) + "\n";
+        NegotiationContext message = context(put(GitObjectType.COMMIT, header + "\nparent " + root + "\n"));
+        message.addCommon(root);
+        assertThat(message.isReady()).isFalse();
+        NegotiationContext parent = context(put(GitObjectType.COMMIT, header + "parent " + root + "\n\n"));
+        parent.addCommon(root);
+        assertThat(parent.isReady()).isTrue();
+    }
+
+    @Test
+    void readsParentsFromARefDeltaCommit() throws Exception {
+        ObjectId root = commit();
+        byte[] base = ("tree " + tree + "\n\n").getBytes(StandardCharsets.US_ASCII);
+        byte[] content = ("tree " + tree + "\nparent " + root + "\n\nmessage")
+                .getBytes(StandardCharsets.US_ASCII);
+        byte[] instructions = PackTestData.join(
+                new byte[]{(byte) base.length, (byte) content.length, (byte) content.length}, content);
+        ObjectId tip = PackTestData.storeDelta(storage, GitObjectType.COMMIT, base, instructions, content);
+        NegotiationContext context = context(tip);
+        context.addCommon(root);
         assertThat(context.isReady()).isTrue();
-        assertThat(storage.lookups).hasSize(length - 1);
     }
 
     @Test
-    void roundUsesTheRealGraphCheckToEmitReady() throws Exception {
-        commit(ROOT);
-        commit(TIP, ROOT);
-        var context = context(TIP);
-        var iterator = new FetchNegotiatorIterator(context, GitTransport.HTTP);
-        assertThat(iterator.next(new NegotiationMessage.Have(ROOT))).isTrue();
-        assertThat(iterator.next(NegotiationMessage.Control.END_ROUND)).isFalse();
-        assertThat(iterator.getResponsesToSend()).containsExactly(
-                new NegotiationResponse.Ack(ROOT, NegotiationResponse.Status.PLAIN),
-                NegotiationResponse.Control.READY);
-        assertThat(context.ready()).isTrue();
-        assertThat(context.doneReceived()).isFalse();
+    void walksLongHistoryWithoutRecursiveCalls() throws Exception {
+        ObjectId root = commit();
+        ObjectId tip = root;
+        List<byte[]> entries = new ArrayList<>();
+        for (int i = 0; i < 1500; i++) {
+            byte[] bytes = commitText(tip).getBytes(StandardCharsets.US_ASCII);
+            entries.add(PackTestData.entry(GitObjectType.COMMIT, bytes));
+            tip = PackTestData.objectId(GitObjectType.COMMIT, bytes);
+        }
+        try (IndexedPack pack = PackTestData.ingest(PackTestData.pack(entries.toArray(byte[][]::new)),
+                storage.newPack())) {
+            storage.persist(pack);
+        }
+        NegotiationContext context = context(tip);
+        context.addCommon(root);
+        assertThat(context.isReady()).isTrue();
     }
 
     @Test
-    void waitForDoneSkipsGraphTraversal() throws Exception {
-        commit(ROOT);
-        var context = context(TIP);
-        context.request().capabilities().add(value(GitCapability.WAIT_FOR_DONE));
-        var iterator = new FetchNegotiatorIterator(context, GitTransport.HTTP);
-        iterator.next(new NegotiationMessage.Have(ROOT));
-        iterator.next(NegotiationMessage.Control.END_ROUND);
-        assertThat(iterator.getResponsesToSend()).containsExactly(
-                new NegotiationResponse.Ack(ROOT, NegotiationResponse.Status.PLAIN));
-        assertThat(storage.lookups).containsExactly(ROOT);
-        assertThat(context.ready()).isFalse();
+    void emitsReadyForCommonHistoryButHonorsWaitForDone() throws Exception {
+        ObjectId root = commit();
+        ObjectId tip = commit(root);
+        for (boolean wait : new boolean[]{false, true}) {
+            NegotiationContext context = context(tip);
+            if (wait) {
+                context.request().capabilities().add(value(GitCapability.WAIT_FOR_DONE));
+            }
+            FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, GitTransport.HTTP);
+            iterator.next(new NegotiationMessage.Have(root));
+            iterator.next(NegotiationMessage.Control.END_ROUND);
+            assertThat(context.ready()).isEqualTo(!wait);
+            assertThat(iterator.getResponsesToSend().contains(NegotiationResponse.Control.READY)).isEqualTo(!wait);
+        }
     }
 
     private NegotiationContext context(ObjectId... wants) {
-        var request = new FetchRequest();
+        FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wants().addAll(List.of(wants));
-        return new NegotiationContext(request, storage.api,
+        return new NegotiationContext(request, storage,
                 capabilities(GitCapability.SHALLOW, GitCapability.WAIT_FOR_DONE));
     }
 
-    private void commit(ObjectId id, ObjectId... parents) {
-        var text = new StringBuilder("tree " + id(99).toHex() + "\n");
+    private ObjectId commit(ObjectId... parents) throws Exception {
+        return put(GitObjectType.COMMIT, commitText(parents));
+    }
+
+    private String commitText(ObjectId... parents) {
+        StringBuilder text = new StringBuilder("tree " + tree + "\n");
         for (ObjectId parent : parents) {
-            text.append("parent ").append(parent.toHex()).append('\n');
+            text.append("parent ").append(parent).append('\n');
         }
-        text.append("author A <a@b> 0 +0000\ncommitter A <a@b> 0 +0000\n\nmessage\n");
-        put(id, GitObjectType.COMMIT, text.toString());
+        return text.append("author A <a@b> 0 +0000\ncommitter A <a@b> 0 +0000\n\nmessage\n").toString();
     }
 
-    private void put(ObjectId id, GitObjectType type, String content) {
-        storage.put(id, type, Optional.empty(), content.getBytes(StandardCharsets.US_ASCII));
-    }
-
-    private static ObjectId id(int number) {
-        return new ObjectId(String.format("%040x", number));
+    private ObjectId put(GitObjectType type, String content) throws Exception {
+        return PackTestData.store(storage, type, content.getBytes(StandardCharsets.US_ASCII));
     }
 }

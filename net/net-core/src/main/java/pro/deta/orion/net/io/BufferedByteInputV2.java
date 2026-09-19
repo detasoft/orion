@@ -20,6 +20,10 @@ public final class BufferedByteInputV2 implements Closeable {
     private boolean eof;
     private boolean closed;
 
+    public BufferedByteInputV2(InputStream input) {
+        this(new InputStreamByteSource(input));
+    }
+
     public BufferedByteInputV2(Source source) {
         this.source = Objects.requireNonNull(source, "source");
     }

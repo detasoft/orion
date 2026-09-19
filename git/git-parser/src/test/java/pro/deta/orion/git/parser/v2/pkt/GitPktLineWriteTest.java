@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.pkt;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -27,7 +27,7 @@ class GitPktLineWriteTest {
             var packet = new GitPktLine.Data(payload);
             packet.writeTo(output, sideBand);
             boolean hasChannel = sideBand != SideBand.NONE;
-            try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(output.bytes()))) {
+            try (var input = new BufferedByteInputV2(new ByteArrayInputStream(output.bytes()))) {
                 var read = (GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow();
                 byte[] expected = switch (sideBand) {
                     case NONE -> payload;

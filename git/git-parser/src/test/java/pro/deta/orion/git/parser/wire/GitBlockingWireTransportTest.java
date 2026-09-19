@@ -6,19 +6,19 @@ import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
-import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
-import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
-import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +47,25 @@ class GitBlockingWireTransportTest {
                 .filteredOn(field -> !Modifier.isStatic(field.getModifiers()))
                 .filteredOn(field -> ByteBuf.class.equals(field.getType()))
                 .isEmpty();
+    }
+
+    @Test
+    void switchesBetweenPacketsAndRawBytesWithinTheSameTransportBuffer() throws Exception {
+        GitBlockingWireTransport wire = input("0008wantPACK00000008done");
+        assertThat(((GitPktLine.Data) wire.readPacket()).text()).isEqualTo("want");
+        ByteBuf target = Unpooled.buffer(4, 4);
+        try {
+            assertThat(wire.readRawInto(target, 2)).isEqualTo(2);
+            assertThat(wire.readRawInto(target, 8)).isEqualTo(2);
+            assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("PACK");
+            assertThat(wire.readPacket()).isSameAs(GitPktLine.Control.FLUSH);
+            assertThat(((GitPktLine.Data) wire.readPacket()).text()).isEqualTo("done");
+            assertThat(wire.readNextPacket()).isEmpty();
+            target.clear();
+            assertThat(wire.readRawInto(target, 4)).isZero();
+        } finally {
+            target.release();
+        }
     }
 
     @Test
@@ -369,7 +388,7 @@ class GitBlockingWireTransportTest {
 
     private static GitBlockingWireTransport input(String ascii) {
         return new GitBlockingWireTransport(
-                new ArrayInput(ascii.getBytes(StandardCharsets.US_ASCII)),
+                new BufferedByteInputV2(new ByteArrayInputStream(ascii.getBytes(StandardCharsets.US_ASCII))),
                 new RecordingBufferedByteOutput());
     }
 
@@ -381,55 +400,6 @@ class GitBlockingWireTransportTest {
         byte[] bytes = new byte[length];
         Arrays.fill(bytes, value);
         return bytes;
-    }
-
-    private static final class ArrayInput implements BufferedByteInput {
-        private final byte[] bytes;
-        private int offset;
-
-        private ArrayInput(byte[] bytes) {
-            this.bytes = bytes;
-        }
-
-        @Override
-        public int available() {
-            return bytes.length - offset;
-        }
-
-        @Override
-        public int readUnsignedByte() throws IOException {
-            if (offset == bytes.length) {
-                throw new EOFException("test input exhausted");
-            }
-            return bytes[offset++] & 0xff;
-        }
-
-        @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
-            if (length < 0) {
-                throw new IllegalArgumentException(
-                        "length must be non-negative");
-            }
-            if (available() < length) {
-                throw new EOFException("test input exhausted");
-            }
-            ByteBuf copy = Unpooled.buffer(length, length);
-            copy.writeBytes(bytes, offset, length);
-            offset += length;
-            return copy;
-        }
-
-        @Override
-        public int readInto(
-                ByteBuf target,
-                int maxLength) throws IOException {
-            int copied = Math.min(
-                    Math.min(maxLength, target.writableBytes()),
-                    available());
-            target.writeBytes(bytes, offset, copied);
-            offset += copied;
-            return copied;
-        }
     }
 
     private static final class ByteArrayRecordingOutput

@@ -1,6 +1,6 @@
 package pro.deta.orion.git.client;
 
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -11,7 +11,7 @@ import java.io.IOException;
  * must unblock an active input or output operation.
  */
 public interface GitClientTransportSession extends AutoCloseable {
-    BufferedByteInput input();
+    BufferedByteInputV2 input();
 
     BufferedByteOutput output();
 

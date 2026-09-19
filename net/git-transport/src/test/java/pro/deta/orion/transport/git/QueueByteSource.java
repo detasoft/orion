@@ -1,24 +1,23 @@
 package pro.deta.orion.transport.git;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-final class QueueBufferedByteInput implements BufferedByteInput, AutoCloseable {
+final class QueueByteSource implements BufferedByteInputV2.Source {
     private final Object lock = new Object();
     private final ArrayDeque<Byte> queue = new ArrayDeque<>();
     private final Duration timeout;
     private boolean closed;
 
-    QueueBufferedByteInput(
+    QueueByteSource(
             Duration timeout) {
         this.timeout = Objects.requireNonNull(timeout, "timeout");
         if (timeout.isNegative() || timeout.isZero()) {
@@ -27,53 +26,23 @@ final class QueueBufferedByteInput implements BufferedByteInput, AutoCloseable {
     }
 
     @Override
-    public int available() {
-        synchronized (lock) {
-            return queue.size();
-        }
-    }
-
-    @Override
-    public int readUnsignedByte() throws IOException {
-        return awaitByte() & 0xff;
-    }
-
-    @Override
-    public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
-        requireNonNegativeLength(length);
-        Objects.requireNonNull(allocator, "allocator");
-        ByteBuf copy = allocator.buffer(length, length);
+    public ByteBuffer read() throws IOException {
+        ByteBuffer bytes = ByteBuffer.allocate(8192);
         try {
-            while (copy.writableBytes() > 0) {
-                copy.writeByte(awaitByte());
-            }
-            return copy;
-        } catch (Throwable error) {
-            copy.release();
-            throw error;
+            bytes.put(awaitByte());
+        } catch (EOFException end) {
+            return null;
         }
+        synchronized (lock) {
+            while (bytes.hasRemaining() && !queue.isEmpty()) {
+                bytes.put(queue.removeFirst());
+            }
+        }
+        return bytes.flip();
     }
 
     @Override
-    public int readInto(
-            ByteBuf target,
-            int maxLength) throws IOException {
-        Objects.requireNonNull(target, "target");
-        requireNonNegativeLength(maxLength);
-        if (maxLength == 0 || !target.isWritable()) {
-            return 0;
-        }
-        target.writeByte(awaitByte());
-        int copied = 1;
-        synchronized (lock) {
-            int limit = Math.min(maxLength, target.writableBytes());
-            while (copied < limit && !queue.isEmpty()) {
-                target.writeByte(queue.removeFirst());
-                copied++;
-            }
-        }
-        return copied;
-    }
+    public void release() {}
 
     void feed(String ascii) {
         feed(ascii.getBytes(StandardCharsets.US_ASCII));
@@ -128,9 +97,4 @@ final class QueueBufferedByteInput implements BufferedByteInput, AutoCloseable {
         }
     }
 
-    private static void requireNonNegativeLength(int length) {
-        if (length < 0) {
-            throw new IllegalArgumentException("length must be non-negative");
-        }
-    }
 }

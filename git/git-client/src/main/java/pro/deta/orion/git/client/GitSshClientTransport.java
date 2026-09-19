@@ -8,15 +8,14 @@ import org.apache.sshd.client.keyverifier.DefaultKnownHostsServerKeyVerifier;
 import org.apache.sshd.client.keyverifier.RejectAllServerKeyVerifier;
 import org.apache.sshd.client.keyverifier.ServerKeyVerifier;
 import org.apache.sshd.client.session.ClientSession;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.URI;
 import java.net.SocketAddress;
+import java.net.URI;
 import java.nio.file.Path;
 import java.security.PublicKey;
 import java.time.Duration;
@@ -290,7 +289,7 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
         private final ClientSession session;
         private final ClientChannel channel;
         private final SshClient ownedClient;
-        private final InputStreamBufferedByteInput input;
+        private final BufferedByteInputV2 input;
         private final OutputStreamBufferedByteOutput output;
 
         private SshSession(
@@ -300,12 +299,12 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
             this.session = session;
             this.channel = channel;
             this.ownedClient = ownedClient;
-            input = new InputStreamBufferedByteInput(channel.getInvertedOut());
+            input = new BufferedByteInputV2(channel.getInvertedOut());
             output = new OutputStreamBufferedByteOutput(channel.getInvertedIn());
         }
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             return input;
         }
 

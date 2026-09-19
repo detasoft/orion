@@ -3,13 +3,14 @@ package pro.deta.orion.transport.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.GitTransportConfig;
 
@@ -23,7 +24,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 
 @Slf4j
 @Singleton
@@ -247,8 +247,8 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     }
 
     private void serveConnection(Socket socket) throws IOException {
-        InputStreamBufferedByteInput input =
-                new InputStreamBufferedByteInput(socket.getInputStream());
+        BufferedByteInputV2 input =
+                new BufferedByteInputV2(socket.getInputStream());
         OutputStreamBufferedByteOutput output =
                 new OutputStreamBufferedByteOutput(socket.getOutputStream());
         GitWireBootstrap bootstrap = GitWireBootstrap.nativeDaemon(input, output);

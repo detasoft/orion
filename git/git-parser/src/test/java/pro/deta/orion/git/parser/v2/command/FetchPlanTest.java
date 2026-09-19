@@ -1,35 +1,45 @@
 package pro.deta.orion.git.parser.v2.command;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.storage.InMemoryGitStorage;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
-import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 
 class FetchPlanTest {
-    private static final ObjectId WANT = new ObjectId("1".repeat(40));
+    @TempDir
+    Path directory;
+    private static final ObjectId WANT = PackTestData.objectId(GitObjectType.BLOB, new byte[]{42});
     private static final ObjectId UNKNOWN = new ObjectId("2".repeat(40));
     private static final RefId MAIN = new RefId("refs/heads/main");
-    private final InMemoryGitStorage storage = new InMemoryGitStorage();
-    private final FetchCommand command = new FetchCommand(storage.api, capabilities(
-            GitCapability.MULTI_ACK, GitCapability.MULTI_ACK_DETAILED,
-            GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE,
-            GitCapability.SHALLOW, GitCapability.FILTER, GitCapability.REF_IN_WANT,
-            GitCapability.PACKFILE_URIS, GitCapability.SIDEBAND_ALL));
+    private GitStorageApi storage;
+    private FetchCommand command;
+
+    @BeforeEach
+    void setup() throws Exception {
+        storage = new GitStorageApi(directory);
+        PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
+        command = new FetchCommand(storage, capabilities(GitCapability.values()));
+    }
 
     @Test
     void unfinishedRoundProducesNoPlan() throws Exception {
@@ -47,11 +57,9 @@ class FetchPlanTest {
             if (mode == FetchRequest.Mode.PROTOCOL_V2) {
                 iterator.next(NegotiationMessage.Control.END_ROUND);
             }
-            int reads = storage.lookups.size();
             var plan = command.prepareResponse(iterator.getContext()).orElseThrow();
             assertThat(plan.wantedObjects()).containsExactly(WANT);
             assertThat(plan.commonObjects()).isEmpty();
-            assertThat(storage.lookups).hasSize(reads);
         }
     }
 
@@ -107,7 +115,7 @@ class FetchPlanTest {
                 value(GitCapability.INCLUDE_TAG), value(GitCapability.NO_PROGRESS),
                 value(GitCapability.DEEPEN_RELATIVE), value(GitCapability.SIDEBAND_ALL)));
         request.packfileUriProtocols().add("https");
-        storage.refs = new RefsSnapshot(Map.of(MAIN, WANT), new Head.Symbolic(MAIN));
+        storage.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
         var iterator = command.prepareNegotiation(request, GitTransport.HTTP);
         iterator.next(new NegotiationMessage.Have(WANT));
         iterator.next(NegotiationMessage.Control.DONE);
@@ -156,7 +164,6 @@ class FetchPlanTest {
     }
 
     private FetchRequest request(FetchRequest.Mode mode) {
-        storage.put(WANT, GitObjectType.BLOB, Optional.empty(), new byte[]{42});
         var request = new FetchRequest();
         request.setMode(mode);
         request.wants().add(WANT);

@@ -2,14 +2,14 @@ package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
-import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
-import java.io.ByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -408,13 +408,13 @@ final class GitBlockingClientWire {
     private static List<String> parsePacketLines(byte[] bytes)
             throws GitClientProtocolException {
         List<String> lines = new ArrayList<>();
-        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes))) {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             while (true) {
                 GitPktLine packet = GitPktLine.readNextFrom(input)
                         .orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
                 switch (packet) {
                     case GitPktLine.Control.FLUSH -> {
-                        if (input.available() != 0) {
+                        if (input.buffer() != null) {
                             throw malformedStatus();
                         }
                         return List.copyOf(lines);

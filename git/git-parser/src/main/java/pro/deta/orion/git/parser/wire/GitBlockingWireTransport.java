@@ -5,24 +5,25 @@ import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
-import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
-import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
-import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
+import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
+import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.serialization.AsciiPacketSequenceSerialization;
 import pro.deta.orion.git.parser.wire.serialization.OutputSerialization;
 import pro.deta.orion.git.parser.wire.serialization.PacketListSerialization;
 import pro.deta.orion.git.parser.wire.serialization.PktLineSerialization;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.EOFException;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,14 +41,14 @@ import static pro.deta.orion.git.parser.wire.serialization.AsciiPacketUtils.*;
 public final class GitBlockingWireTransport {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
-    private final BufferedByteInput input;
+    private final BufferedByteInputV2 input;
     private final BufferedByteOutput outputSink;
 
     public GitBlockingWireTransport(BufferedByteOutput outputSink) {
         this(null, outputSink);
     }
 
-    public GitBlockingWireTransport(BufferedByteInput input, BufferedByteOutput outputSink) {
+    public GitBlockingWireTransport(BufferedByteInputV2 input, BufferedByteOutput outputSink) {
         this.input = input;
         this.outputSink = Objects.requireNonNull(outputSink, "outputSink");
     }
@@ -66,7 +67,21 @@ public final class GitBlockingWireTransport {
     }
 
     public int readRawInto(ByteBuf target, int maxLength) throws IOException {
-        return requireInput().readInto(target, maxLength);
+        Objects.requireNonNull(target, "target");
+        if (maxLength < 0) {
+            throw new IllegalArgumentException("maxLength must be non-negative");
+        }
+        if (maxLength == 0 || !target.isWritable()) {
+            return 0;
+        }
+        ByteBuffer bytes = requireInput().buffer();
+        if (bytes == null) {
+            return 0;
+        }
+        int count = Math.min(Math.min(maxLength, target.writableBytes()), bytes.remaining());
+        target.writeBytes(bytes.slice(bytes.position(), count));
+        bytes.position(bytes.position() + count);
+        return count;
     }
 
     public void writeData(ByteBuf payload) throws IOException {
@@ -473,7 +488,7 @@ public final class GitBlockingWireTransport {
         operation.writeTo(this);
     }
 
-    private BufferedByteInput requireInput() {
+    private BufferedByteInputV2 requireInput() {
         if (input == null) {
             throw new IllegalStateException("input is not configured");
         }

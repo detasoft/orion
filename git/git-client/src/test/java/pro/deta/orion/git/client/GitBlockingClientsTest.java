@@ -1,10 +1,8 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -413,27 +411,13 @@ class GitBlockingClientsTest {
         IOException readFailure = new IOException("read failed");
         IOException closeFailure = new IOException("close failed");
         ClosingFailureTransport transport = new ClosingFailureTransport(
-                new BufferedByteInput() {
-                    @Override
-                    public int available() {
-                        return 0;
-                    }
+                new BufferedByteInputV2(new java.io.InputStream() {
 
                     @Override
-                    public int readUnsignedByte() throws IOException {
+                    public int read() throws IOException {
                         throw readFailure;
                     }
-
-                    @Override
-                    public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
-                        throw new AssertionError("not reached");
-                    }
-
-                    @Override
-                    public int readInto(ByteBuf target, int maxLength) {
-                        return 0;
-                    }
-                },
+                }),
                 closeFailure);
 
         GitClientResult<GitRemoteAdvertisement> result =
@@ -595,7 +579,7 @@ class GitBlockingClientsTest {
         private boolean openedOnVirtualThread;
 
         private RecordingTransport(byte[] input) {
-            session = new RecordingSession(new FragmentedInput(input));
+            session = new RecordingSession(fragmentedInput(input));
         }
 
         @Override
@@ -652,27 +636,13 @@ class GitBlockingClientsTest {
 
     private static final class FailingReadTransport implements GitClientTransport {
         private final RecordingSession session = new RecordingSession(
-                new BufferedByteInput() {
-                    @Override
-                    public int available() {
-                        return 0;
-                    }
+                new BufferedByteInputV2(new java.io.InputStream() {
 
                     @Override
-                    public int readUnsignedByte() throws IOException {
+                    public int read() throws IOException {
                         throw new IOException("connection reset");
                     }
-
-                    @Override
-                    public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
-                        throw new AssertionError("not reached");
-                    }
-
-                    @Override
-                    public int readInto(ByteBuf target, int maxLength) {
-                        return 0;
-                    }
-                });
+                }));
 
         @Override
         public GitClientTransportSession open(
@@ -689,11 +659,11 @@ class GitBlockingClientsTest {
         private ClosingFailureTransport(
                 byte[] input,
                 IOException closeFailure) {
-            this(new FragmentedInput(input), closeFailure);
+            this(fragmentedInput(input), closeFailure);
         }
 
         private ClosingFailureTransport(
-                BufferedByteInput input,
+                BufferedByteInputV2 input,
                 IOException closeFailure) {
             session = new ClosingFailureSession(input, closeFailure);
         }
@@ -708,18 +678,18 @@ class GitBlockingClientsTest {
     }
 
     private static final class ClosingFailureSession implements GitClientTransportSession {
-        private final BufferedByteInput input;
+        private final BufferedByteInputV2 input;
         private final IOException closeFailure;
 
         private ClosingFailureSession(
-                BufferedByteInput input,
+                BufferedByteInputV2 input,
                 IOException closeFailure) {
             this.input = input;
             this.closeFailure = closeFailure;
         }
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             return input;
         }
 
@@ -736,16 +706,16 @@ class GitBlockingClientsTest {
 
     private static final class RecordingSession
             implements GitClientTransportSession {
-        private final BufferedByteInput input;
+        private final BufferedByteInputV2 input;
         private final RecordingOutput output = new RecordingOutput();
         private volatile boolean closed;
 
-        private RecordingSession(BufferedByteInput input) {
+        private RecordingSession(BufferedByteInputV2 input) {
             this.input = input;
         }
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             return input;
         }
 
@@ -766,15 +736,11 @@ class GitBlockingClientsTest {
         private volatile boolean closed;
 
         @Override
-        public BufferedByteInput input() {
-            return new BufferedByteInput() {
-                @Override
-                public int available() {
-                    return 0;
-                }
+        public BufferedByteInputV2 input() {
+            return new BufferedByteInputV2(new java.io.InputStream() {
 
                 @Override
-                public int readUnsignedByte() throws IOException {
+                public int read() throws IOException {
                     try {
                         close.await();
                     } catch (InterruptedException error) {
@@ -783,19 +749,7 @@ class GitBlockingClientsTest {
                     }
                     throw new EOFException();
                 }
-
-                @Override
-                public ByteBuf readCopy(
-                        int length,
-                        ByteBufAllocator allocator) throws EOFException {
-                    throw new EOFException();
-                }
-
-                @Override
-                public int readInto(ByteBuf target, int maxLength) {
-                    return 0;
-                }
-            };
+            });
         }
 
         @Override
@@ -816,7 +770,7 @@ class GitBlockingClientsTest {
         private volatile boolean usedByProtocol;
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             usedByProtocol = true;
             throw new AssertionError("session must close before use");
         }
@@ -833,47 +787,13 @@ class GitBlockingClientsTest {
         }
     }
 
-    private static final class FragmentedInput implements BufferedByteInput {
-        private final byte[] bytes;
-        private int offset;
-
-        private FragmentedInput(byte[] bytes) {
-            this.bytes = bytes.clone();
-        }
-
-        @Override
-        public int available() {
-            return bytes.length - offset;
-        }
-
-        @Override
-        public int readUnsignedByte() throws EOFException {
-            if (offset == bytes.length) {
-                throw new EOFException();
+    private static BufferedByteInputV2 fragmentedInput(byte[] bytes) {
+        return new BufferedByteInputV2(new java.io.ByteArrayInputStream(bytes) {
+            @Override
+            public synchronized int read(byte[] target, int offset, int length) {
+                return super.read(target, offset, Math.min(3, length));
             }
-            return bytes[offset++] & 0xff;
-        }
-
-        @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator)
-                throws EOFException {
-            if (length > available()) {
-                throw new EOFException();
-            }
-            ByteBuf result = allocator.buffer(length, length);
-            for (int index = 0; index < length; index++) {
-                result.writeByte(readUnsignedByte());
-            }
-            return result;
-        }
-
-        @Override
-        public int readInto(ByteBuf target, int maxLength) {
-            int length = Math.min(Math.min(3, maxLength), available());
-            target.writeBytes(bytes, offset, length);
-            offset += length;
-            return length;
-        }
+        });
     }
 
     private static final class RecordingOutput implements BufferedByteOutput {

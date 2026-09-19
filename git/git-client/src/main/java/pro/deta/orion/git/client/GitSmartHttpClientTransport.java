@@ -1,14 +1,11 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
@@ -477,7 +474,7 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         private final Supplier<CompletableFuture<HttpResponse<InputStream>>> responseSupplier;
         private final GitClientService service;
         private final Duration readTimeout;
-        private final SwitchingInput input;
+        private final BufferedByteInputV2 input;
         private final FinishingOutput output;
         private InputStream responseBody;
         private CompletableFuture<HttpResponse<InputStream>> response;
@@ -495,13 +492,13 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
             this.responseSupplier = responseSupplier;
             this.service = service;
             this.readTimeout = readTimeout;
-            input = new SwitchingInput(
-                    new ByteArrayInputStream(advertisement), this::postResponse);
+            input = new BufferedByteInputV2(new SwitchingInput(
+                    new ByteArrayInputStream(advertisement), this::postResponse));
             output = new FinishingOutput(requestOutput, this::startPost);
         }
 
         @Override
-        public BufferedByteInput input() {
+        public BufferedByteInputV2 input() {
             return input;
         }
 
@@ -611,56 +608,40 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         InputStream get() throws IOException;
     }
 
-    private static final class SwitchingInput implements BufferedByteInput {
-        private InputStreamBufferedByteInput delegate;
+    private static final class SwitchingInput extends InputStream {
+        private InputStream delegate;
         private InputSupplier next;
 
         private SwitchingInput(InputStream initial, InputSupplier next) {
-            delegate = new InputStreamBufferedByteInput(initial);
+            delegate = initial;
             this.next = next;
         }
 
         @Override
-        public int available() {
-            return delegate.available();
+        public int read() throws IOException {
+            int value = delegate.read();
+            return value < 0 && switchInput() ? delegate.read() : value;
         }
 
         @Override
-        public int readUnsignedByte() throws IOException {
-            try {
-                return delegate.readUnsignedByte();
-            } catch (EOFException error) {
-                switchInput();
-                return delegate.readUnsignedByte();
-            }
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            int count = delegate.read(bytes, offset, length);
+            return count < 0 && switchInput() ? delegate.read(bytes, offset, length) : count;
         }
 
-        @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
-            try {
-                return delegate.readCopy(length, allocator);
-            } catch (EOFException error) {
-                switchInput();
-                return delegate.readCopy(length, allocator);
-            }
-        }
-
-        @Override
-        public int readInto(ByteBuf target, int maxLength) throws IOException {
-            int read = delegate.readInto(target, maxLength);
-            if (read == 0 && next != null) {
-                switchInput();
-                return delegate.readInto(target, maxLength);
-            }
-            return read;
-        }
-
-        private void switchInput() throws IOException {
+        private boolean switchInput() throws IOException {
             if (next == null) {
-                throw new EOFException("Git Smart HTTP response reached end of stream");
+                return false;
             }
-            delegate = new InputStreamBufferedByteInput(next.get());
+            delegate.close();
+            delegate = next.get();
             next = null;
+            return true;
+        }
+
+        @Override
+        public void close() throws IOException {
+            delegate.close();
         }
     }
 

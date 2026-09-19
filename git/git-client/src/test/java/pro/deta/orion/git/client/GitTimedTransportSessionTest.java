@@ -1,9 +1,8 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -70,15 +69,11 @@ class GitTimedTransportSessionTest {
         private final CountDownLatch closed = new CountDownLatch(1);
 
         @Override
-        public BufferedByteInput input() {
-            return new BufferedByteInput() {
-                @Override
-                public int available() {
-                    return 0;
-                }
+        public BufferedByteInputV2 input() {
+            return new BufferedByteInputV2(new java.io.InputStream() {
 
                 @Override
-                public int readUnsignedByte() throws IOException {
+                public int read() throws IOException {
                     try {
                         closed.await();
                     } catch (InterruptedException error) {
@@ -87,17 +82,7 @@ class GitTimedTransportSessionTest {
                     }
                     throw new IOException("closed");
                 }
-
-                @Override
-                public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
-                    throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public int readInto(ByteBuf target, int maxLength) {
-                    throw new UnsupportedOperationException();
-                }
-            };
+            });
         }
 
         @Override
@@ -115,28 +100,14 @@ class GitTimedTransportSessionTest {
         private volatile boolean closed;
 
         @Override
-        public BufferedByteInput input() {
-            return new BufferedByteInput() {
+        public BufferedByteInputV2 input() {
+            return new BufferedByteInputV2(new java.io.InputStream() {
+
                 @Override
-                public int available() {
+                public int read() {
                     return 1;
                 }
-
-                @Override
-                public int readUnsignedByte() {
-                    return 1;
-                }
-
-                @Override
-                public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
-                    throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public int readInto(ByteBuf target, int maxLength) {
-                    throw new UnsupportedOperationException();
-                }
-            };
+            });
         }
 
         @Override
@@ -155,8 +126,8 @@ class GitTimedTransportSessionTest {
         private final CountDownLatch closed = new CountDownLatch(1);
 
         @Override
-        public BufferedByteInput input() {
-            return EmptyInput.INSTANCE;
+        public BufferedByteInputV2 input() {
+            return new BufferedByteInputV2(java.io.InputStream.nullInputStream());
         }
 
         @Override
@@ -194,30 +165,6 @@ class GitTimedTransportSessionTest {
 
         @Override
         public void flush() {
-        }
-    }
-
-    private enum EmptyInput implements BufferedByteInput {
-        INSTANCE;
-
-        @Override
-        public int available() {
-            return 0;
-        }
-
-        @Override
-        public int readUnsignedByte() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public int readInto(ByteBuf target, int maxLength) {
-            throw new UnsupportedOperationException();
         }
     }
 

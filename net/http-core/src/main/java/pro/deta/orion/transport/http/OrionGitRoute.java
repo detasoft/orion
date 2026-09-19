@@ -4,22 +4,21 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.NonNull;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.schema.config.GitPackfileUriConfig;
-import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
-import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
-import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.config.GitPackfileUriConfig;
+import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import java.io.IOException;
@@ -126,7 +125,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         HttpServletRequest req = exchange.request();
         OrionHttpResponse metadata = noCache(
                 OrionHttpResponse.stream(SC_OK, advertisementContentType(request.service())));
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(req.getInputStream())) {
             OutputStreamBufferedByteOutput output =
                     new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata));
             GitWireBootstrap bootstrap = gitWireBootstrap(req, request, input, output);
@@ -152,7 +151,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         }
         OrionHttpResponse metadata = noCache(
                 OrionHttpResponse.stream(SC_OK, resultContentType(request.service())));
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
                 GitHttpRequestBody.decode(
                         req.getInputStream(),
                         req.getHeader("Content-Encoding")))) {
@@ -169,7 +168,7 @@ public class OrionGitRoute implements OrionHttpRoute {
     private static @NonNull GitWireBootstrap gitWireBootstrap(
             HttpServletRequest req,
             NativeHttpRequest request,
-            InputStreamBufferedByteInput input,
+            BufferedByteInputV2 input,
             OutputStreamBufferedByteOutput output) {
         return GitWireBootstrap.smartHttp(
                 input,

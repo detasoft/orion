@@ -14,6 +14,9 @@ class GitCapabilityValueTest {
     void resolvesKnownCapabilitiesAndPreservesOtherNames() throws Exception {
         for (GitCapability capability : GitCapability.values()) {
             assertEquals(Optional.of(capability), GitCapabilityValue.value(capability).capability());
+            assertThrows(IllegalArgumentException.class, () -> GitCapabilityValue.value(capability.wireName()));
+            assertThrows(IllegalArgumentException.class,
+                    () -> GitCapabilityValue.value(capability.wireName(), "value"));
             assertEquals(Optional.of(capability), GitCapabilityValue.parse(capability.wireName()).capability());
             assertEquals(Optional.of(capability),
                     new GitCapabilityValue(capability.wireName(), Optional.of("value")).capability());

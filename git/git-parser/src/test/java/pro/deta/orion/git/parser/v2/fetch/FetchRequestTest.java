@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
@@ -117,7 +117,7 @@ class FetchRequestTest {
     }
 
     private static GitProtocolContext.Reader reader(String wire, GitProtocolVersion version) {
-        var input = new InputStreamBufferedByteInput(
+        var input = new BufferedByteInputV2(
                 new ByteArrayInputStream(wire.getBytes(StandardCharsets.UTF_8)));
         var output = new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream());
         return new GitProtocolContext(input, output, version, GitTransport.SSH).reader();

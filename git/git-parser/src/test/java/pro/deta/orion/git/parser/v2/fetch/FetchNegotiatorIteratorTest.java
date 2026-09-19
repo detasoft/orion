@@ -1,21 +1,23 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.data.GitTransport;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.id.ObjectId;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
-import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
-import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
-import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationMessage.Control.DONE;
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationMessage.Control.END_ROUND;
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Control.NAK;
@@ -23,6 +25,8 @@ import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Control.REA
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Status.*;
 
 class FetchNegotiatorIteratorTest {
+    @TempDir
+    static Path directory;
     private static final ObjectId FIRST = new ObjectId("1".repeat(40));
     private static final ObjectId SECOND = new ObjectId("2".repeat(40));
     private static final ObjectId UNKNOWN = new ObjectId("3".repeat(40));
@@ -294,7 +298,7 @@ class FetchNegotiatorIteratorTest {
         }
 
         private TestContext(FetchRequest request, Set<ObjectId> existing) {
-            super(request, new GitStorageApi(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
+            super(request, FetchTestSupport.storage(directory), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
                     GitCapability.MULTI_ACK_DETAILED, GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE));
             this.existing = existing;
         }

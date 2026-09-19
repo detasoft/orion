@@ -1,12 +1,12 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
 import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -20,7 +20,7 @@ final class GitTimedTransportSession implements GitClientTransportSession {
                     Thread.ofPlatform().daemon(true)
                             .name("orion-git-timeout-", 0).factory());
     private final GitClientTransportSession delegate;
-    private final BufferedByteInput input;
+    private final BufferedByteInputV2 input;
     private final BufferedByteOutput output;
 
     static GitClientTransportSession wrap(
@@ -46,12 +46,12 @@ final class GitTimedTransportSession implements GitClientTransportSession {
             Watchdog watchdog) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         Objects.requireNonNull(options, "options");
-        input = new TimedInput(delegate.input(), options.readTimeout(), watchdog);
+        input = new BufferedByteInputV2(new TimedInput(delegate.input(), options.readTimeout(), watchdog));
         output = new TimedOutput(delegate.output(), options.writeTimeout(), watchdog);
     }
 
     @Override
-    public BufferedByteInput input() {
+    public BufferedByteInputV2 input() {
         return input;
     }
 
@@ -131,13 +131,13 @@ final class GitTimedTransportSession implements GitClientTransportSession {
         void cancel();
     }
 
-    private final class TimedInput implements BufferedByteInput {
-        private final BufferedByteInput delegate;
+    private final class TimedInput implements BufferedByteInputV2.Source {
+        private final BufferedByteInputV2 delegate;
         private final Duration timeout;
         private final Watchdog watchdog;
 
         private TimedInput(
-                BufferedByteInput delegate,
+                BufferedByteInputV2 delegate,
                 Duration timeout,
                 Watchdog watchdog) {
             this.delegate = delegate;
@@ -146,25 +146,15 @@ final class GitTimedTransportSession implements GitClientTransportSession {
         }
 
         @Override
-        public int available() {
-            return delegate.available();
+        public ByteBuffer read() throws IOException {
+            return within(timeout, watchdog, delegate::buffer);
         }
 
         @Override
-        public int readUnsignedByte() throws IOException {
-            return within(timeout, watchdog, delegate::readUnsignedByte);
-        }
+        public void release() {}
 
         @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator)
-                throws IOException {
-            return within(timeout, watchdog, () -> delegate.readCopy(length, allocator));
-        }
-
-        @Override
-        public int readInto(ByteBuf target, int maxLength) throws IOException {
-            return within(timeout, watchdog, () -> delegate.readInto(target, maxLength));
-        }
+        public void close() {}
     }
 
     private final class TimedOutput implements BufferedByteOutput {

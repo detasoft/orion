@@ -1,23 +1,23 @@
 package pro.deta.orion.transport.git;
 
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -68,7 +68,7 @@ class GitBlockingWireSessionTest {
                 return NativeGitRepositoryProvider.super.publish(selected, received, updates, atomic);
             }
         };
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(Duration.ofSeconds(1))) {
+        try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(NULL_ID + " " + prepared.refUpdates().getFirst().newId()
                     + " refs/heads/main\0report-status\n"));
@@ -118,7 +118,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void smartHttpPostReadsLsRefsRequestOneByteAtATime() throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -147,7 +147,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void smartHttpPostFailsWhenLsRefsPayloadTimesOut() throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed("0012command=ls");
@@ -169,7 +169,7 @@ class GitBlockingWireSessionTest {
         GitObjectId have = repository.writeObject(
                 ObjectType.BLOB,
                 "have".getBytes(StandardCharsets.US_ASCII));
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -197,7 +197,7 @@ class GitBlockingWireSessionTest {
         GitObjectId blob = repository.writeObject(
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -227,7 +227,7 @@ class GitBlockingWireSessionTest {
                 "initial",
                 GitCommitAuthor.EMPTY);
         String mainId = repository.refs().get("refs/heads/main");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ByteArrayBuilder request = new ByteArrayBuilder();
@@ -264,7 +264,7 @@ class GitBlockingWireSessionTest {
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef("refs/heads/main", NULL_ID, blob.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -294,7 +294,7 @@ class GitBlockingWireSessionTest {
         GitObjectId blob = repository.writeObject(
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequestWithCapabilities(
@@ -311,7 +311,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void smartHttpPostRejectsDuplicateFetchWantRef() throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -329,7 +329,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostRejectsFetchWithoutWantsOrWantRefs()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest("have " + WANT + "\n", "done\n"));
@@ -343,7 +343,7 @@ class GitBlockingWireSessionTest {
 
     @Test
     void smartHttpPostFailsWhenFetchPayloadTimesOut() throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(command("fetch"));
@@ -368,7 +368,7 @@ class GitBlockingWireSessionTest {
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
                 "refs/heads/main", NULL_ID, blob.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             byte[] request = legacyUploadRequest(
@@ -399,7 +399,7 @@ class GitBlockingWireSessionTest {
                 "base".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
                 "refs/heads/main", NULL_ID, want.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
@@ -435,7 +435,7 @@ class GitBlockingWireSessionTest {
                 "next",
                 GitCommitAuthor.EMPTY);
         String want = repository.refs().get("refs/heads/main");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRound(
@@ -469,7 +469,7 @@ class GitBlockingWireSessionTest {
                 "refs/heads/main", NULL_ID, firstWant.value());
         repository.updateRef(
                 "refs/heads/second", NULL_ID, secondWant.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRound(
@@ -507,7 +507,7 @@ class GitBlockingWireSessionTest {
                 "next",
                 GitCommitAuthor.EMPTY);
         String want = repository.refs().get("refs/heads/main");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRounds(
@@ -541,7 +541,7 @@ class GitBlockingWireSessionTest {
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
                 "refs/heads/main", NULL_ID, want.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
@@ -572,7 +572,7 @@ class GitBlockingWireSessionTest {
                 "base".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
                 "refs/heads/main", NULL_ID, want.value());
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
@@ -593,7 +593,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostRejectsLegacyUploadInvalidObjectId()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest("want invalid\n", "done\n"));
@@ -615,7 +615,7 @@ class GitBlockingWireSessionTest {
         GitObjectId hidden = repository.writeObject(
                 ObjectType.BLOB,
                 "hidden".getBytes(StandardCharsets.US_ASCII));
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
@@ -648,7 +648,7 @@ class GitBlockingWireSessionTest {
                 "tip",
                 GitCommitAuthor.EMPTY);
         String tip = repository.refs().get("refs/heads/main");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRound(
@@ -677,7 +677,7 @@ class GitBlockingWireSessionTest {
                 List.of(
                         "want " + MAIN_ID + " shallow\n",
                         "deepen-relative\n"))) {
-            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+            try (QueueByteSource input = new QueueByteSource(
                     Duration.ofSeconds(1))) {
                 RecordingBufferedByteOutput output =
                         new RecordingBufferedByteOutput();
@@ -699,7 +699,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostWritesLegacyReceivePackStatusForDelete()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -726,7 +726,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostAcceptsReceiveShallowPrefixesBeforeCommands()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -751,7 +751,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostRejectsReceiveShallowPrefixAfterCommand()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -777,7 +777,7 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         provider.find("project").valueOrFailure("repository")
                 .updateRef("refs/heads/feature", NULL_ID, MAIN_ID);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -809,7 +809,7 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         provider.find("project").valueOrFailure("repository")
                 .updateRef("refs/heads/feature", NULL_ID, MAIN_ID);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -840,7 +840,7 @@ class GitBlockingWireSessionTest {
     void smartHttpReceivePackV2OfferFallsBackToLegacyProtocol()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -869,7 +869,7 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         provider.create("project").valueOrFailure("repository");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ByteArrayBuilder request = new ByteArrayBuilder();
@@ -899,7 +899,7 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         provider.create("project").valueOrFailure("repository");
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed("0000");
@@ -916,7 +916,7 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         provider.find("project").valueOrFailure("repository")
                 .updateRef(refName, NULL_ID, MAIN_ID);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -938,7 +938,7 @@ class GitBlockingWireSessionTest {
     void smartHttpPostRejectsLegacyReceiveRefNameWithForbiddenGitCharacters()
             throws Exception {
         for (String character : List.of("~", "^", ":", "?", "*", "[", "\\")) {
-            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+            try (QueueByteSource input = new QueueByteSource(
                         Duration.ofSeconds(1))) {
                 RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
                 input.feed(legacyReceiveRequest(
@@ -960,7 +960,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostRejectsLegacyReceiveInvalidObjectId()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -979,7 +979,7 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostFailsWhenLegacyReceivePackBodyTimesOut()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -996,11 +996,12 @@ class GitBlockingWireSessionTest {
     }
 
     private static GitBlockingWireSession session(
-            QueueBufferedByteInput input,
+            QueueByteSource input,
             RecordingBufferedByteOutput output,
             NativeGitRepositoryProvider provider) {
-        GitBlockingWireTransport wire =
-                new GitBlockingWireTransport(input, output);
+        GitBlockingWireTransport wire = input == null
+                ? new GitBlockingWireTransport(output)
+                : new GitBlockingWireTransport(new BufferedByteInputV2(input), output);
         return new GitBlockingWireSession(
                 new DefaultGitNativeRepositoryService(provider),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,

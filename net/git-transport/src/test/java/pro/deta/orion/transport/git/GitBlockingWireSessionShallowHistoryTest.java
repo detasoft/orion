@@ -7,10 +7,11 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
@@ -21,14 +22,14 @@ import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.HexFormat;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -50,7 +51,7 @@ class GitBlockingWireSessionShallowHistoryTest {
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         String shallow = "3".repeat(40);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ByteArrayBuilder request = new ByteArrayBuilder();
@@ -105,7 +106,7 @@ class GitBlockingWireSessionShallowHistoryTest {
                 rootCommit,
                 "tip",
                 300);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+        try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -141,7 +142,7 @@ class GitBlockingWireSessionShallowHistoryTest {
                         "shallow " + "3".repeat(40) + "\n",
                         "shallow " + "3".repeat(40) + "\n",
                         "done\n"))) {
-            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+            try (QueueByteSource input = new QueueByteSource(
                     Duration.ofSeconds(1))) {
                 RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
                 input.feed(fetchRequest(arguments.toArray(String[]::new)));
@@ -156,11 +157,11 @@ class GitBlockingWireSessionShallowHistoryTest {
     }
 
     private static GitBlockingWireSession session(
-            QueueBufferedByteInput input,
+            QueueByteSource input,
             RecordingBufferedByteOutput output,
             InMemoryNativeGitRepositoryProvider provider) {
         GitBlockingWireTransport wire =
-                new GitBlockingWireTransport(input, output);
+                new GitBlockingWireTransport(new BufferedByteInputV2(input), output);
         return new GitBlockingWireSession(
                 new RecordingGitNativeRepositoryService(provider),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
