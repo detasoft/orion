@@ -2,7 +2,9 @@ package pro.deta.orion.git.parser.wire.exchange;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -17,7 +19,7 @@ public record LegacyUploadRequest(
         boolean deepenRelative,
         long deepenSince,
         Set<String> deepenNotRefs,
-        Set<String> capabilities,
+        GitCapabilities capabilities,
         GitV1Advertisement serverAdvertisement) {
 
     public LegacyUploadRequest {
@@ -32,8 +34,7 @@ public record LegacyUploadRequest(
                 new LinkedHashSet<>(clientShallowCommits));
         deepenNotRefs = Collections.unmodifiableSet(
                 new LinkedHashSet<>(deepenNotRefs));
-        capabilities = Collections.unmodifiableSet(
-                new LinkedHashSet<>(capabilities));
+        capabilities = new GitCapabilities(capabilities);
         if (wants.isEmpty()) {
             throw new IllegalArgumentException(
                     "Legacy upload request must contain a want");
@@ -47,7 +48,7 @@ public record LegacyUploadRequest(
     public LegacyUploadRequest(
             InitialRequestData initialRequest,
             Set<GitObjectId> wants,
-            Set<String> capabilities,
+            GitCapabilities capabilities,
             GitV1Advertisement serverAdvertisement) {
         this(initialRequest, wants, Set.of(), 0, false, -1, Set.of(),
                 capabilities, serverAdvertisement);
@@ -63,14 +64,12 @@ public record LegacyUploadRequest(
 
     public boolean negotiated(GitCapability capability) {
         Objects.requireNonNull(capability, "capability");
-        if (!capabilities.contains(capability.wireName())) {
-            return false;
-        }
-        for (GitCapability.Entry advertised : serverAdvertisement.capabilities()) {
-            if (advertised.name().equals(capability.wireName())) {
-                return true;
-            }
-        }
-        return false;
+        return capabilities.contains(GitCapabilityValue.value(capability))
+                && serverAdvertisement.capabilities().has(capability);
+    }
+
+    @Override
+    public GitCapabilities capabilities() {
+        return new GitCapabilities(capabilities);
     }
 }

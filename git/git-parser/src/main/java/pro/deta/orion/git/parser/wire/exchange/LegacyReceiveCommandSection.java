@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.wire.exchange;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -77,14 +77,6 @@ public record LegacyReceiveCommandSection(
 
     public boolean negotiated(GitCapability capability) {
         Objects.requireNonNull(capability, "capability");
-        if (!capabilities.contains(capability.wireName())) {
-            return false;
-        }
-        for (GitCapability.Entry advertised : serverAdvertisement.capabilities()) {
-            if (advertised.name().equals(capability.wireName())) {
-                return true;
-            }
-        }
-        return false;
+        return capabilities.contains(capability.wireName()) && serverAdvertisement.capabilities().has(capability);
     }
 }

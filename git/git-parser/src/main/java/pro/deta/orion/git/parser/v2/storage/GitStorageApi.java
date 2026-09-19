@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
@@ -11,6 +12,7 @@ import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +27,7 @@ public final class GitStorageApi {
     public GitStorageApi(Path repository) throws IOException {
         packs = new GitPackStorage(Objects.requireNonNull(repository, "repository"));
         objects = new GitObjectStorage(packs);
-        refs = new GitRefsStorage();
+        refs = new GitRefsStorage(repository, objects);
     }
 
     public IndexedPack newPack() throws IOException {
@@ -44,12 +46,26 @@ public final class GitStorageApi {
         return readObject(objectId, new ExistsGitObjectRead()).isPresent();
     }
 
-    public RefsSnapshot snapshotRefs() {
+    public RefsSnapshot snapshotRefs() throws IOException {
         return refs.snapshot();
     }
 
+    public void updateHead(Head head) throws IOException {
+        refs.updateHead(head);
+    }
+
     public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
-        throw new UnsupportedOperationException("Ref updates are not implemented");
+        updates = List.copyOf(updates);
+        try {
+            return refs.updateAll(updates, atomic);
+        } catch (IOException error) {
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (RefUpdate update : updates) {
+                results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
+                        Optional.ofNullable(error.getMessage())));
+            }
+            return List.copyOf(results);
+        }
     }
 
     /**

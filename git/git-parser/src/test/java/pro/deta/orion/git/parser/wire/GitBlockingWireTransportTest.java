@@ -9,7 +9,9 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
@@ -226,7 +228,7 @@ class GitBlockingWireTransportTest {
         RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
         GitBlockingWireTransport output = output(sink);
         GitV1Advertisement advertisement = new GitV1Advertisement(
-                List.of(GitCapability.MULTI_ACK.entry()),
+                new GitCapabilities(List.of(GitCapabilityValue.value(GitCapability.MULTI_ACK))),
                 List.of(
                         new GitAdvertisedRef(
                                 MAIN_ID,

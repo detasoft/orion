@@ -15,7 +15,9 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
@@ -23,7 +25,7 @@ import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.git.parser.wire.exchange.LegacyUploadRequest;
-import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
@@ -438,7 +440,7 @@ public final class GitBlockingWireSession {
 
     private static void acceptLegacyUploadWant(
             Set<GitObjectId> wants,
-            Set<String> capabilities,
+            GitCapabilities capabilities,
             String line) throws IOException {
         if (!line.startsWith("want ")) {
             throw invalidLegacyUploadRequest(
@@ -466,7 +468,7 @@ public final class GitBlockingWireSession {
         wants.add(GitObjectId.of(tokens[0]));
         if (firstWant) {
             for (int index = 1; index < tokens.length; index++) {
-                capabilities.add(tokens[index]);
+                capabilities.add(GitCapabilityValue.parse(tokens[index]));
             }
         }
     }
@@ -950,7 +952,7 @@ public final class GitBlockingWireSession {
         private final Set<GitObjectId> clientShallowCommits =
                 new LinkedHashSet<>();
         private final Set<String> deepenNotRefs = new LinkedHashSet<>();
-        private final Set<String> capabilities = new LinkedHashSet<>();
+        private final GitCapabilities capabilities = new GitCapabilities();
         private boolean wantsFinished;
         private boolean deepenRelative;
         private int depth;

@@ -35,7 +35,7 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;

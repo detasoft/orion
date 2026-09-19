@@ -4,6 +4,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 public enum GitCapability {
+    LS_REFS("ls-refs"),
     MULTI_ACK("multi_ack"),
     MULTI_ACK_DETAILED("multi_ack_detailed"),
     NO_DONE("no-done"),

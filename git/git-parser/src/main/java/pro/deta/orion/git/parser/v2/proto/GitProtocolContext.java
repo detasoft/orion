@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 public class GitProtocolContext {
     private final BufferedByteInputV2 input;
@@ -64,6 +65,26 @@ public class GitProtocolContext {
 
     public final class Writer {
         private Writer() {}
+
+        public void writeRef(RefId name, Optional<ObjectId> id, Optional<RefId> symbolic,
+                             Optional<ObjectId> peeled) throws IOException {
+            if (id.isEmpty() && (symbolic.isEmpty() || peeled.isPresent())) {
+                throw new IllegalArgumentException("Unborn ref requires a symbolic target and cannot be peeled");
+            }
+            StringBuilder line = new StringBuilder(id.map(ObjectId::toHex).orElse("unborn"))
+                    .append(' ').append(name.value());
+            if (symbolic.isPresent()) {
+                line.append(" symref-target:").append(symbolic.get().value());
+            }
+            if (peeled.isPresent()) {
+                line.append(" peeled:").append(peeled.get().toHex());
+            }
+            writeText(line.append('\n').toString(), SideBand.NONE);
+        }
+
+        public void endRefs() throws IOException {
+            GitPktLine.Control.FLUSH.writeTo(output);
+        }
 
         public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs)
                 throws IOException {

@@ -11,7 +11,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 
 import java.util.List;
 

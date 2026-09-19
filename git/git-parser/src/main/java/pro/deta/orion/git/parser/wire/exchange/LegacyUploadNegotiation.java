@@ -4,7 +4,7 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;

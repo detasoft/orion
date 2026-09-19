@@ -1,11 +1,18 @@
 package pro.deta.orion.git.parser.v2.capability;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 public final class GitCapabilities extends ArrayList<GitCapabilityValue> {
+    public GitCapabilities() {}
+
+    public GitCapabilities(Collection<? extends GitCapabilityValue> values) {
+        super(List.copyOf(values));
+    }
+
     public boolean has(GitCapability capability) {
         Objects.requireNonNull(capability, "capability");
         for (GitCapabilityValue entry : this) {

@@ -8,7 +8,8 @@ import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.serialization.AsciiPacketSequenceSerialization;
@@ -611,7 +612,7 @@ public final class GitBlockingWireTransport {
         List<GitAdvertisedRef> refs = advertisement.refs();
         GitAdvertisedRef first = refs.getFirst();
         List<String> capabilityTokens = new ArrayList<>();
-        for (GitCapability.Entry capability : advertisement.capabilities()) {
+        for (GitCapabilityValue capability : advertisement.capabilities()) {
             capabilityTokens.add(capability.wireToken());
         }
         lines.add(encodeLine(first.objectId() + " " + first.name() + "\0" + String.join(" ", capabilityTokens)));
