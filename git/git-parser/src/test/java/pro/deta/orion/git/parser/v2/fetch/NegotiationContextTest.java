@@ -2,12 +2,12 @@ package pro.deta.orion.git.parser.v2.fetch;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.util.List;
 import java.util.Set;
 
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -19,7 +19,7 @@ class NegotiationContextTest {
     void clientClaimsDoNotBecomeCommonWithoutConfirmation() {
         FetchRequest request = request(List.of(new NegotiationMessage.Have(FIRST),
                 NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND));
-        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), Set.of());
+        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), capabilities());
         assertThat(context.commonObjects()).isEmpty();
         assertThat(context.lastCommon()).isEmpty();
         assertThat(context.doneReceived()).isFalse();
@@ -33,7 +33,7 @@ class NegotiationContextTest {
     @Test
     void accumulatesConfirmedObjectsAcrossRoundsWithoutLeakingMutableState() {
         FetchRequest request = request(List.of());
-        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), Set.of());
+        NegotiationContext context = new NegotiationContext(request, new GitStorageApi(), capabilities());
         context.addCommon(FIRST);
         Set<ObjectId> firstRound = context.commonObjects();
         context.addCommon(SECOND);
@@ -45,7 +45,7 @@ class NegotiationContextTest {
         assertThatThrownBy(() -> firstRound.add(SECOND)).isInstanceOf(UnsupportedOperationException.class);
         assertThat(context.ready()).isTrue();
         assertThat(context.doneReceived()).isFalse();
-        assertThat(new NegotiationContext(request, new GitStorageApi(), Set.of()).commonObjects()).isEmpty();
+        assertThat(new NegotiationContext(request, new GitStorageApi(), capabilities()).commonObjects()).isEmpty();
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {

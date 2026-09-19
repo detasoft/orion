@@ -1,15 +1,11 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.GitTransport;
-import pro.deta.orion.git.parser.v2.data.FetchRequest;
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.ObjectType;
-import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.InMemoryGitStorage;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +14,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -100,7 +98,7 @@ class FetchReadinessTest {
     @Test
     void includesResolvedWantRefsAndPeelsTags() throws Exception {
         commit(TIP, ROOT);
-        put(TAG, ObjectType.TAG, "object " + TIP.toHex() + "\ntype commit\ntag release\n\nmessage");
+        put(TAG, GitObjectType.TAG, "object " + TIP.toHex() + "\ntype commit\ntag release\n\nmessage");
         var context = context();
         var ref = new RefId("refs/tags/release");
         context.request().wantRefs().add(ref.value());
@@ -112,8 +110,8 @@ class FetchReadinessTest {
 
     @Test
     void treesAndBlobsDoNotRequireCommitHistory() throws Exception {
-        put(LEFT, ObjectType.TREE, "");
-        put(RIGHT, ObjectType.BLOB, "parent not-a-header");
+        put(LEFT, GitObjectType.TREE, "");
+        put(RIGHT, GitObjectType.BLOB, "parent not-a-header");
         var context = context(LEFT, RIGHT);
         context.addCommon(ROOT);
         assertThat(context.isReady()).isTrue();
@@ -124,7 +122,7 @@ class FetchReadinessTest {
         var context = context(TIP);
         context.addCommon(ROOT);
         assertThatThrownBy(context::isReady).isInstanceOf(IOException.class).hasMessageContaining(TIP.toHex());
-        put(TIP, ObjectType.COMMIT, "tree " + id(99).toHex() + "\nparent invalid\n\nmessage");
+        put(TIP, GitObjectType.COMMIT, "tree " + id(99).toHex() + "\nparent invalid\n\nmessage");
         assertThatThrownBy(context::isReady).isInstanceOf(IOException.class);
         storage.failure = new IOException("backend failure");
         assertThatThrownBy(context::isReady).isSameAs(storage.failure);
@@ -144,14 +142,14 @@ class FetchReadinessTest {
     void readsParentsFromARefDeltaCommit() throws Exception {
         String base = "tree " + id(99).toHex() + "\n\n";
         String target = "tree " + id(99).toHex() + "\nparent " + ROOT.toHex() + "\n\nmessage";
-        put(RIGHT, ObjectType.COMMIT, base);
+        put(RIGHT, GitObjectType.COMMIT, base);
         byte[] content = target.getBytes(StandardCharsets.US_ASCII);
         byte[] delta = new byte[content.length + 3];
         delta[0] = (byte) base.length();
         delta[1] = (byte) content.length;
         delta[2] = (byte) content.length;
         System.arraycopy(content, 0, delta, 3, content.length);
-        storage.put(TIP, ObjectType.REF_DELTA, Optional.of(RIGHT), delta);
+        storage.put(TIP, GitObjectType.REF_DELTA, Optional.of(RIGHT), delta);
         var context = context(TIP);
         context.addCommon(ROOT);
         assertThat(context.isReady()).isTrue();
@@ -161,18 +159,18 @@ class FetchReadinessTest {
     @Test
     void skipsLongHeaderValuesAndNeverInterpretsTheMessageAsParents() throws Exception {
         String header = "tree " + id(99).toHex() + "\ngpgsig " + "x".repeat(100_000) + "\n";
-        put(TIP, ObjectType.COMMIT, header + "\nparent " + ROOT.toHex() + "\n");
+        put(TIP, GitObjectType.COMMIT, header + "\nparent " + ROOT.toHex() + "\n");
         var context = context(TIP);
         context.addCommon(ROOT);
         assertThat(context.isReady()).isFalse();
-        put(TIP, ObjectType.COMMIT, header + "parent " + ROOT.toHex() + "\n\nmessage");
+        put(TIP, GitObjectType.COMMIT, header + "parent " + ROOT.toHex() + "\n\nmessage");
         assertThat(context.isReady()).isTrue();
     }
 
     @Test
     void aNonCommitParentCannotMakeTheHistoryReady() {
         commit(TIP, LEFT);
-        put(LEFT, ObjectType.BLOB, "content");
+        put(LEFT, GitObjectType.BLOB, "content");
         var context = context(TIP);
         context.addCommon(ROOT);
         assertThatThrownBy(context::isReady).isInstanceOf(IOException.class)
@@ -210,7 +208,7 @@ class FetchReadinessTest {
     void waitForDoneSkipsGraphTraversal() throws Exception {
         commit(ROOT);
         var context = context(TIP);
-        context.request().capabilities().add(GitCapability.WAIT_FOR_DONE.entry());
+        context.request().capabilities().add(value(GitCapability.WAIT_FOR_DONE));
         var iterator = new FetchNegotiatorIterator(context, GitTransport.HTTP);
         iterator.next(new NegotiationMessage.Have(ROOT));
         iterator.next(NegotiationMessage.Control.END_ROUND);
@@ -225,7 +223,7 @@ class FetchReadinessTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wants().addAll(List.of(wants));
         return new NegotiationContext(request, storage.api,
-                Set.of(GitCapability.SHALLOW, GitCapability.WAIT_FOR_DONE));
+                capabilities(GitCapability.SHALLOW, GitCapability.WAIT_FOR_DONE));
     }
 
     private void commit(ObjectId id, ObjectId... parents) {
@@ -234,10 +232,10 @@ class FetchReadinessTest {
             text.append("parent ").append(parent.toHex()).append('\n');
         }
         text.append("author A <a@b> 0 +0000\ncommitter A <a@b> 0 +0000\n\nmessage\n");
-        put(id, ObjectType.COMMIT, text.toString());
+        put(id, GitObjectType.COMMIT, text.toString());
     }
 
-    private void put(ObjectId id, ObjectType type, String content) {
+    private void put(ObjectId id, GitObjectType type, String content) {
         storage.put(id, type, Optional.empty(), content.getBytes(StandardCharsets.US_ASCII));
     }
 

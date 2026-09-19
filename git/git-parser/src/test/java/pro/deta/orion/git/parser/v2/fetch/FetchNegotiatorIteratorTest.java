@@ -1,18 +1,19 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.GitTransport;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.data.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.v2.GitTransport.HTTP;
-import static pro.deta.orion.git.parser.v2.GitTransport.SSH;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
+import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
+import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
+import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationMessage.Control.DONE;
@@ -166,7 +167,7 @@ class FetchNegotiatorIteratorTest {
             var checks = new TestContext(request, Set.of(FIRST));
             checks.ready = true;
             if (wait) {
-                request.capabilities().add(GitCapability.WAIT_FOR_DONE.entry());
+                request.capabilities().add(value(GitCapability.WAIT_FOR_DONE));
             }
             var iterator = new FetchNegotiatorIterator(checks, HTTP);
             iterator.next(have(FIRST));
@@ -263,7 +264,7 @@ class FetchNegotiatorIteratorTest {
         request.wants().add(WANT);
         request.shallowCommits().add(FIRST);
         for (GitCapability capability : capabilities) {
-            request.capabilities().add(capability.entry());
+            request.capabilities().add(value(capability));
         }
         return request;
     }
@@ -293,7 +294,7 @@ class FetchNegotiatorIteratorTest {
         }
 
         private TestContext(FetchRequest request, Set<ObjectId> existing) {
-            super(request, new GitStorageApi(), Set.of(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
+            super(request, new GitStorageApi(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
                     GitCapability.MULTI_ACK_DETAILED, GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE));
             this.existing = existing;
         }

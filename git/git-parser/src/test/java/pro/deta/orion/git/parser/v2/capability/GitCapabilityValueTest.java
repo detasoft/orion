@@ -11,6 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GitCapabilityValueTest {
     @Test
+    void resolvesKnownCapabilitiesAndPreservesOtherNames() throws Exception {
+        for (GitCapability capability : GitCapability.values()) {
+            assertEquals(Optional.of(capability), GitCapabilityValue.value(capability).capability());
+            assertEquals(Optional.of(capability), GitCapabilityValue.parse(capability.wireName()).capability());
+            assertEquals(Optional.of(capability),
+                    new GitCapabilityValue(capability.wireName(), Optional.of("value")).capability());
+        }
+        for (String name : new String[]{"custom-feature", "want", "have", "THIN-PACK"}) {
+            var value = new GitCapabilityValue(name, Optional.empty());
+            assertEquals(Optional.empty(), value.capability());
+            assertEquals(name, value.name());
+        }
+    }
+
+    @Test
     void initializesBothComponentsAndRoundTripsCapabilityTokens() throws Exception {
         for (String token : new String[]{"thin-pack", "agent=client/1", "custom=a=b"}) {
             var value = GitCapabilityValue.parse(token);

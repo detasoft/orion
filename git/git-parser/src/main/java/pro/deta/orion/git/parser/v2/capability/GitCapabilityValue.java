@@ -19,6 +19,10 @@ public record GitCapabilityValue(String name, Optional<String> value) {
         Objects.requireNonNull(value, "value");
     }
 
+    public Optional<GitCapability> capability() {
+        return GitCapability.findByWireName(name);
+    }
+
     public String wireToken() {
         value.ifPresent(GitCapabilityValue::validateWireValue);
         return value.map(item -> name + "=" + item).orElse(name);

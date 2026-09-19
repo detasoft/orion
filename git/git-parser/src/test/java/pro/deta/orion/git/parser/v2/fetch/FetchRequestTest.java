@@ -120,7 +120,7 @@ class FetchRequestTest {
         var input = new InputStreamBufferedByteInput(
                 new ByteArrayInputStream(wire.getBytes(StandardCharsets.UTF_8)));
         var output = new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream());
-        return new GitProtocolContext(input, output, version, GitTransport.SSH).new Reader();
+        return new GitProtocolContext(input, output, version, GitTransport.SSH).reader();
     }
 
     private static String packet(String text) {

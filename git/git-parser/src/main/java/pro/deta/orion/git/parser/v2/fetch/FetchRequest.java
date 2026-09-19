@@ -80,7 +80,7 @@ public final class FetchRequest {
                         }
                         case DEEPEN -> acceptShared(request, argument);
                         case null -> {
-                            GitCapability capability = GitCapability.findByWireName(argument.name())
+                            GitCapability capability = argument.capability()
                                     .orElseThrow(() -> invalid("Unsupported fetch argument: " + argument.name()));
                             switch (capability) {
                                 case PACKFILE_URIS -> {
@@ -218,7 +218,7 @@ public final class FetchRequest {
             request.setDepth(OptionalInt.of(depth));
             return;
         }
-        GitCapability capability = GitCapability.findByWireName(argument.name())
+        GitCapability capability = argument.capability()
                 .orElseThrow(() -> invalid("Unsupported fetch argument: " + argument.name()));
         switch (capability) {
             case SHALLOW -> request.shallowCommits().add(objectId(value));

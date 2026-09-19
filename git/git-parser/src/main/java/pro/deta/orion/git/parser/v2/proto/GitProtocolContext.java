@@ -1,6 +1,5 @@
 package pro.deta.orion.git.parser.v2.proto;
 
-import pro.deta.orion.git.parser.v2.GitWriter;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
@@ -21,20 +20,41 @@ public class GitProtocolContext {
     private final GitProtocolVersion version;
     private final GitTransport transport;
 
-    public GitProtocolContext(BufferedByteInput input, BufferedByteOutput output, GitProtocolVersion version, GitTransport transport) {
+    public GitProtocolContext(BufferedByteInput input, BufferedByteOutput output,
+                              GitProtocolVersion version, GitTransport transport) {
         this.input = Objects.requireNonNull(input, "input");
         this.output = Objects.requireNonNull(output, "output");
         this.version = Objects.requireNonNull(version, "version");
         this.transport = Objects.requireNonNull(transport, "transport");
     }
 
-    public class Reader {
+    public GitProtocolVersion version() {
+        return version;
+    }
+
+    public GitTransport transport() {
+        return transport;
+    }
+
+    public Reader reader() {
+        return new Reader();
+    }
+
+    public Writer writer() {
+        return new Writer();
+    }
+
+    public final class Reader {
+        private Reader() {}
+
         public GitPktLine readGitPktLine() throws IOException {
             return GitPktLine.readNextFrom(input).orElseThrow(() -> new EOFException("Expected a Git pkt-line"));
         }
     }
 
-    class Writer {
+    public final class Writer {
+        private Writer() {}
+
         private void writeText(String text, SideBand sideBand) throws IOException {
             new GitPktLine.Data(text.getBytes(StandardCharsets.US_ASCII)).writeTo(output, sideBand);
         }

@@ -1,8 +1,8 @@
-package pro.deta.orion.git.parser.v2.data;
+package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 
 import java.util.Map;
 import java.util.Collections;
@@ -23,7 +23,7 @@ public record FetchPlan(
         OptionalLong deepenSince,
         Set<String> deepenNot,
         Optional<String> filter,
-        Set<GitCapability.Entry> capabilities,
+        GitCapabilities capabilities,
         Set<String> packfileUriProtocols) {
     public FetchPlan {
         wantedObjects = snapshot(wantedObjects);
@@ -34,8 +34,13 @@ public record FetchPlan(
         Objects.requireNonNull(deepenSince, "deepenSince");
         deepenNot = snapshot(deepenNot);
         Objects.requireNonNull(filter, "filter");
-        capabilities = snapshot(capabilities);
+        capabilities = (GitCapabilities) capabilities.clone();
         packfileUriProtocols = snapshot(packfileUriProtocols);
+    }
+
+    @Override
+    public GitCapabilities capabilities() {
+        return (GitCapabilities) capabilities.clone();
     }
 
     private static <T> Set<T> snapshot(Set<T> values) {

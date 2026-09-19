@@ -1,17 +1,14 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.GitTransport;
-import pro.deta.orion.git.parser.v2.data.FetchRequest;
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.ObjectType;
-import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.capability.GitObjectFormat;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -61,17 +58,17 @@ import java.util.Set;
 public class NegotiationContext {
     private final FetchRequest request;
     private final GitStorageApi storage;
-    private final Set<GitCapability> advertisedCapabilities;
+    private final GitCapabilities advertisedCapabilities = new GitCapabilities();
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
     private Map<RefId, ObjectId> wantedRefs = Map.of();
     private ObjectId lastCommon;
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request, GitStorageApi storage, Set<GitCapability> advertisedCapabilities) {
+    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitCapabilities advertisedCapabilities) {
         this.request = Objects.requireNonNull(request, "request");
         this.storage = Objects.requireNonNull(storage, "storage");
-        this.advertisedCapabilities = Set.copyOf(advertisedCapabilities);
+        this.advertisedCapabilities.addAll(Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities"));
     }
 
     void validateCapabilities(GitTransport transport) throws IOException {
@@ -86,8 +83,8 @@ public class NegotiationContext {
     }
 
     private void validateRequestedCapabilities(boolean v2) throws IOException {
-        for (GitCapability.Entry entry : request.capabilities()) {
-            GitCapability capability = GitCapability.fromWireName(entry.name())
+        for (GitCapabilityValue entry : request.capabilities()) {
+            GitCapability capability = entry.capability()
                     .orElseThrow(() -> new IOException("Unsupported fetch capability: " + entry.name()));
             validateCapabilityValue(capability, entry);
             if (v2) {
@@ -98,7 +95,7 @@ public class NegotiationContext {
         }
     }
 
-    private void validateCapabilityValue(GitCapability capability, GitCapability.Entry entry) throws IOException {
+    private void validateCapabilityValue(GitCapability capability, GitCapabilityValue entry) throws IOException {
         boolean valued = switch (capability) {
             case AGENT, SESSION_ID, OBJECT_FORMAT -> true;
             default -> false;
@@ -107,7 +104,7 @@ public class NegotiationContext {
             throw new IOException("Invalid fetch capability value: " + entry.wireToken());
         }
         if (capability == GitCapability.OBJECT_FORMAT) {
-            GitCapability.parse(entry.wireToken(), GitObjectFormat.SHA1);
+            GitCapabilityValue.parse(entry.wireToken(), GitHashAlgorithm.SHA1);
         }
     }
 
@@ -175,7 +172,7 @@ public class NegotiationContext {
     }
 
     private void requireAdvertised(GitCapability capability) throws IOException {
-        if (!advertisedCapabilities.contains(capability)) {
+        if (!advertisedCapabilities.has(capability)) {
             throw new IOException("Fetch capability was not advertised: " + capability.wireName());
         }
     }
@@ -250,7 +247,7 @@ public class NegotiationContext {
             }
             GraphLinks links = storage.readObject(id, reader)
                     .orElseThrow(() -> new IOException("Missing fetch history object: " + id.toHex()));
-            if (visit.commitOnly() && links.type() != ObjectType.COMMIT) {
+            if (visit.commitOnly() && links.type() != GitObjectType.COMMIT) {
                 throw new IOException("Commit parent is not a commit: " + id.toHex());
             }
             switch (links.type()) {
@@ -271,12 +268,12 @@ public class NegotiationContext {
         return false;
     }
 
-    private static GraphLinks readGraphLinks(ObjectType type, long size, Optional<ObjectId> baseId,
+    private static GraphLinks readGraphLinks(GitObjectType type, long size, Optional<ObjectId> baseId,
                                              BufferedByteInput input) throws IOException {
-        if (type == ObjectType.BLOB || type == ObjectType.TREE) {
+        if (type == GitObjectType.BLOB || type == GitObjectType.TREE) {
             return new GraphLinks(type, List.of());
         }
-        if (type != ObjectType.COMMIT && type != ObjectType.TAG) {
+        if (type != GitObjectType.COMMIT && type != GitObjectType.TAG) {
             throw new IOException("Fetch history object was not resolved");
         }
         var targets = new ArrayList<ObjectId>();
@@ -300,13 +297,13 @@ public class NegotiationContext {
             }
             String line = prefix.toString();
             if (firstLine) {
-                String field = type == ObjectType.COMMIT ? "tree " : "object ";
+                String field = type == GitObjectType.COMMIT ? "tree " : "object ";
                 ObjectId target = graphHeaderId(line, lineLength, field);
-                if (type == ObjectType.TAG) {
+                if (type == GitObjectType.TAG) {
                     targets.add(target);
                 }
                 firstLine = false;
-            } else if (type == ObjectType.COMMIT && line.startsWith("parent ")) {
+            } else if (type == GitObjectType.COMMIT && line.startsWith("parent ")) {
                 targets.add(graphHeaderId(line, lineLength, "parent "));
             }
             prefix.setLength(0);
@@ -328,7 +325,7 @@ public class NegotiationContext {
 
     private record GraphVisit(ObjectId id, boolean commitOnly) {}
 
-    private record GraphLinks(ObjectType type, List<ObjectId> targets) {}
+    private record GraphLinks(GitObjectType type, List<ObjectId> targets) {}
 
     public FetchRequest request() {
         return request;
@@ -360,7 +357,7 @@ public class NegotiationContext {
     }
 
     boolean hasRequest(GitCapability capability) {
-        return request().capabilities().contains(capability.entry());
+        return request().capabilities().contains(GitCapabilityValue.value(capability));
     }
 
     void markReady() {
