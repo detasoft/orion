@@ -1,35 +1,14 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
-import pro.deta.orion.git.parser.v2.GitTransport;
-import pro.deta.orion.git.parser.v2.data.FetchRequest;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Processes decoded negotiation messages without owning storage or byte streams. NegotiationContext supplies
- * object-presence and graph-readiness checks using its borrowed storage. Each next(message) replaces the reply
- * batch; true asks for another message, false ends this exchange. The terminal batch must still be sent. Reply snapshots are
- * immutable and non-draining. Calls after completion or a failed check throw IllegalStateException.
- *
- * <p>Legacy SINGLE_ACK acknowledges only the first common object; multi-ACK modes acknowledge individual
- * haves and finish rounds with NAK. Readiness replies for unknown haves never make those IDs common.
- * Detailed readiness does not replace DONE unless HTTP negotiated no-done. Legacy HTTP ends
- * at END_ROUND even when no pack can yet be sent; legacy SSH retains common objects across rounds.
- * GitTransport identifies the transport exchange, not storage access or pack readiness. In legacy HTTP the
- * next round arrives in a new request; the client carries negotiation state between requests.
- * finished stops reading this exchange only: next returns false even if ready and doneReceived are false.
- * In v2 END_ROUND always finishes the command request, on both HTTP and SSH.
- *
- * <p>V2 buffers acknowledgments until END_ROUND, then ends the request. DONE suppresses that entire section
- * but does not skip the request's remaining messages. wait-for-done suppresses early readiness checks and
- * READY. Context ready and doneReceived remain separate facts, not proof of successful pack production.
- * A context can be returned with both false. Parsed request population must finish before iteration starts.
- */
 public final class FetchNegotiatorIterator {
     private final NegotiationContext context;
     private final GitTransport transport;

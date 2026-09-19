@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.data.ObjectType;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 
@@ -25,10 +25,10 @@ class GitStorageApiTest {
     @Test
     void readsRealContentThroughTheSameFacadeUsedForPresenceChecks() throws Exception {
         var storage = new InMemoryGitStorage();
-        storage.put(ID, ObjectType.COMMIT, Optional.empty(), new byte[]{10, 20, 30});
+        storage.put(ID, GitObjectType.COMMIT, Optional.empty(), new byte[]{10, 20, 30});
         assertThat(storage.api.exists(ID)).isTrue();
         var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
-            assertThat(type).isEqualTo(ObjectType.COMMIT);
+            assertThat(type).isEqualTo(GitObjectType.COMMIT);
             assertThat(size).isEqualTo(3);
             assertThat(baseId).isEmpty();
             return input.readBytes((int) size);

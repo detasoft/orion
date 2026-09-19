@@ -1,13 +1,13 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackUpload;
-import pro.deta.orion.git.parser.v2.read.PresenceGitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.IOException;
@@ -98,7 +98,7 @@ public final class GitStorageApi {
     }
 
     public boolean exists(ObjectId objectId) throws IOException {
-        return readObject(objectId, new PresenceGitObjectRead()).isPresent();
+        return readObject(objectId, new ExistsGitObjectRead()).isPresent();
     }
 
     public RefsSnapshot snapshotRefs() {

@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.ObjectType;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -61,9 +61,9 @@ public final class InMemoryGitStorage {
         }
     });
 
-    public void put(ObjectId id, ObjectType type, Optional<ObjectId> baseId, byte[] payload) {
+    public void put(ObjectId id, GitObjectType type, Optional<ObjectId> baseId, byte[] payload) {
         objects.put(id, new Stored(type, baseId, payload.clone()));
     }
 
-    private record Stored(ObjectType type, Optional<ObjectId> baseId, byte[] payload) {}
+    private record Stored(GitObjectType type, Optional<ObjectId> baseId, byte[] payload) {}
 }

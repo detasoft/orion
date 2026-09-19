@@ -38,7 +38,6 @@ public record FetchPlan(
         packfileUriProtocols = snapshot(packfileUriProtocols);
     }
 
-    @Override
     public GitCapabilities capabilities() {
         return (GitCapabilities) capabilities.clone();
     }
