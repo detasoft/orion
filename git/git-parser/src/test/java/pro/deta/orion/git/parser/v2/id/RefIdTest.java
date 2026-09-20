@@ -47,6 +47,17 @@ class RefIdTest {
     void preservesAllowedPunctuationAndUnicode() {
         String value = "refs/heads/Ветка-1_+@draft{test}].v2";
         assertEquals(value, new RefId(value).value());
+        assertDoesNotThrow(() -> new RefId(value).requireFullName());
+    }
+
+    @Test
+    void requiresAFullRefWithoutInvalidPathComponents() {
+        for (String value : new String[]{"HEAD", "main", "refs/", "refs//main", "refs/heads/.hidden",
+                "refs/heads/main.lock", "refs/heads/a..b", "refs/heads/a@{b", "refs/heads/main.",
+                "refs/heads/main/", "refs/heads/hidden.lock/main"}) {
+            assertThrows(IllegalArgumentException.class, () -> new RefId(value).requireFullName(), value);
+        }
+        assertDoesNotThrow(() -> new RefId("refs/heads/main").requireFullName());
     }
 
     private void assertForbidden(char character) {

@@ -20,4 +20,16 @@ public record RefId(String value) {
     public String toString() {
         return value;
     }
+
+    public void requireFullName() {
+        if (!value.startsWith("refs/") || value.contains("//") || value.contains("..")
+                || value.contains("@{") || value.endsWith("/") || value.endsWith(".")) {
+            throw new IllegalArgumentException("Expected a full ref name: " + value);
+        }
+        for (String component : value.split("/")) {
+            if (component.startsWith(".") || component.endsWith(".lock")) {
+                throw new IllegalArgumentException("Invalid ref component: " + component);
+            }
+        }
+    }
 }

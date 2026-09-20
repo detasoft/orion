@@ -166,21 +166,12 @@ public final class FetchRequest {
 
     private static void validateWantedRef(String value) throws IOException {
         try {
-            new RefId(value);
+            RefId ref = new RefId(value);
+            if (!value.equals("HEAD")) {
+                ref.requireFullName();
+            }
         } catch (IllegalArgumentException error) {
             throw new IOException("Invalid wanted ref", error);
-        }
-        if (value.equals("HEAD")) {
-            return;
-        }
-        if (!value.startsWith("refs/") || value.contains("//") || value.contains("..")
-                || value.contains("@{") || value.endsWith("/") || value.endsWith(".")) {
-            throw invalid("Expected a full wanted ref name");
-        }
-        for (String component : value.split("/")) {
-            if (component.startsWith(".") || component.endsWith(".lock")) {
-                throw invalid("Invalid wanted ref component");
-            }
         }
     }
 

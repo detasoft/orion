@@ -76,7 +76,7 @@ final class GitRefsStorage {
                 for (Map.Entry<String, String> entry : values.entrySet()) {
                     if (!entry.getKey().equals(HEAD.value())) {
                         RefId ref = new RefId(entry.getKey());
-                        requireRef(ref);
+                        ref.requireFullName();
                         refs.put(ref, new ObjectId(entry.getValue()));
                     }
                 }
@@ -93,7 +93,7 @@ final class GitRefsStorage {
         Objects.requireNonNull(head, "head");
         String value = switch (head) {
             case Head.Symbolic symbolic -> {
-                requireRef(symbolic.target());
+                symbolic.target().requireFullName();
                 yield SYMBOLIC + symbolic.target().value();
             }
             case Head.Detached detached -> detached.target().toHex();
@@ -125,7 +125,7 @@ final class GitRefsStorage {
         }
         Set<RefId> names = new HashSet<>();
         for (RefUpdate update : updates) {
-            requireRef(update.ref());
+            update.ref().requireFullName();
             if (!names.add(update.ref())) {
                 throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
             }
@@ -214,18 +214,12 @@ final class GitRefsStorage {
         try {
             if (value.startsWith(SYMBOLIC)) {
                 RefId target = new RefId(value.substring(SYMBOLIC.length()));
-                requireRef(target);
+                target.requireFullName();
                 return new Head.Symbolic(target);
             }
             return new Head.Detached(new CommitId(value));
         } catch (IllegalArgumentException error) {
             throw new IOException("Invalid HEAD in refs storage", error);
-        }
-    }
-
-    private static void requireRef(RefId ref) {
-        if (!ref.value().startsWith("refs/") || ref.value().length() == "refs/".length()) {
-            throw new IllegalArgumentException("Expected a full ref name: " + ref);
         }
     }
 

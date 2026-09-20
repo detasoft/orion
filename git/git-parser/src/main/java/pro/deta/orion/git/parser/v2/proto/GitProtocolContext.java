@@ -4,6 +4,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -84,6 +85,34 @@ public class GitProtocolContext {
 
         public void endRefs() throws IOException {
             GitPktLine.Control.FLUSH.writeTo(output);
+        }
+
+        public void writePushStatus(GitCapabilities capabilities, boolean unpacked,
+                                    List<RefUpdateResult> results) throws IOException {
+            boolean sideBand = capabilities.has(GitCapability.SIDE_BAND_64K);
+            if (capabilities.has(GitCapability.REPORT_STATUS) || capabilities.has(GitCapability.REPORT_STATUS_V2)) {
+                BufferedByteOutput status = sideBand
+                        ? new GitPktLineOutput(output, SideBand.DATA, GitPktLine.MAX_PKT_LINE_LENGTH) : output;
+                new GitPktLine.Data(("unpack " + (unpacked ? "ok" : "unpacker error") + "\n")
+                        .getBytes(StandardCharsets.UTF_8)).writeTo(status);
+                for (RefUpdateResult result : results) {
+                    String error = !unpacked ? "unpacker error" : switch (result.status()) {
+                        case APPLIED -> null;
+                        case EXPECTED_OLD_MISMATCH -> "stale info";
+                        case OBJECT_NOT_FOUND -> "missing necessary objects";
+                        case STORAGE_ERROR -> "failed to update ref";
+                        case ATOMIC_ABORTED -> "atomic push failure";
+                    };
+                    String line = error == null ? "ok " + result.update().ref() + "\n"
+                            : "ng " + result.update().ref() + " " + error + "\n";
+                    new GitPktLine.Data(line.getBytes(StandardCharsets.UTF_8)).writeTo(status);
+                }
+                GitPktLine.Control.FLUSH.writeTo(status);
+            }
+            if (sideBand) {
+                GitPktLine.Control.FLUSH.writeTo(output);
+            }
+            output.flush();
         }
 
         public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs)

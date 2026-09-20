@@ -10,6 +10,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+/**
+ * @deprecated Remove when wire receive-pack uses PushCommand and GitStorageApi; PushRequest owns this section.
+ */
+@Deprecated(forRemoval = true)
 public record LegacyReceiveCommandSection(
         InitialRequestData initialRequest,
         List<LegacyReceiveCommand> commands,

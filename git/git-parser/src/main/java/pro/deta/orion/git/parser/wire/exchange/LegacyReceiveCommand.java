@@ -4,6 +4,10 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 
 import java.util.Objects;
 
+/**
+ * @deprecated Remove with the native receive-pack path; PushRequest parses commands directly into RefUpdate.
+ */
+@Deprecated(forRemoval = true)
 public record LegacyReceiveCommand(
         GitObjectId oldObjectId,
         GitObjectId newObjectId,
