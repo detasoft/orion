@@ -13,7 +13,6 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.zip.Deflater;
@@ -69,33 +68,12 @@ public final class PackWriter implements AutoCloseable {
         Objects.requireNonNull(content, "content");
         long offset = position;
         try {
-            writeHeader(type, size, Optional.empty());
             if (deflater == null) {
                 deflater = new Deflater();
                 compressed = new byte[8192];
-            } else {
-                deflater.reset();
             }
-            long remaining = size;
-            ByteBuffer buffer;
-            while ((buffer = content.buffer()) != null) {
-                int count = buffer.remaining();
-                if (count > remaining) {
-                    throw new IOException("Object content exceeds its declared size");
-                }
-                deflater.setInput(buffer);
-                while (!deflater.needsInput()) {
-                    deflate();
-                }
-                remaining -= count;
-            }
-            if (remaining != 0) {
-                throw new EOFException("Truncated object content");
-            }
-            deflater.finish();
-            while (!deflater.finished()) {
-                deflate();
-            }
+            PackEntryWriter entry = this::write;
+            entry.writeObject(type, size, content, deflater, compressed, ignored -> {});
             writtenObjects++;
             return offset;
         } catch (IOException | RuntimeException | Error error) {
@@ -139,34 +117,11 @@ public final class PackWriter implements AutoCloseable {
                 || (type == GitObjectType.REF_DELTA) != baseId.isPresent()) {
             throw new IllegalArgumentException("Invalid outgoing pack entry");
         }
-        byte[] header = objectHeader(type, size);
+        byte[] header = PackEntryWriter.objectHeader(type, size);
         write(header, 0, header.length);
         if (baseId.isPresent()) {
             byte[] id = baseId.orElseThrow().toBytes();
             write(id, 0, id.length);
-        }
-    }
-
-    static byte[] objectHeader(GitObjectType type, long size) {
-        byte[] header = new byte[10];
-        int count = 0;
-        int part = type.code() << 4 | (int) (size & 15);
-        size >>>= 4;
-        while (size != 0) {
-            header[count++] = (byte) (part | 128);
-            part = (int) (size & 127);
-            size >>>= 7;
-        }
-        header[count++] = (byte) part;
-        return Arrays.copyOf(header, count);
-    }
-
-    private void deflate() throws IOException {
-        int count = deflater.deflate(compressed);
-        if (count > 0) {
-            write(compressed, 0, count);
-        } else if (!deflater.needsInput() && !deflater.finished()) {
-            throw new IOException("Deflater made no progress");
         }
     }
 

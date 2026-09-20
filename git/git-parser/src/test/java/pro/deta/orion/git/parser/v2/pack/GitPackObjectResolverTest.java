@@ -32,7 +32,7 @@ class GitPackObjectResolverTest {
         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
         ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
         byte[] forward = delta(second, new byte[]{1, 1, 1, 3});
-        byte[] offset = join(PackWriter.objectHeader(GitObjectType.OFS_DELTA, 4),
+        byte[] offset = join(PackEntryWriter.objectHeader(GitObjectType.OFS_DELTA, 4),
                 new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
         byte[] source = pack(forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));

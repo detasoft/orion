@@ -27,7 +27,7 @@ public final class PackTestData {
     }
 
     public static byte[] entry(GitObjectType type, byte[] content) throws IOException {
-        return join(PackWriter.objectHeader(type, content.length), compressed(content));
+        return join(PackEntryWriter.objectHeader(type, content.length), compressed(content));
     }
 
     public static byte[] blob(byte[] content) throws IOException {
@@ -35,7 +35,7 @@ public final class PackTestData {
     }
 
     public static byte[] delta(ObjectId base, byte[] instructions) throws IOException {
-        return join(PackWriter.objectHeader(GitObjectType.REF_DELTA, instructions.length), base.toBytes(),
+        return join(PackEntryWriter.objectHeader(GitObjectType.REF_DELTA, instructions.length), base.toBytes(),
                 compressed(instructions));
     }
 

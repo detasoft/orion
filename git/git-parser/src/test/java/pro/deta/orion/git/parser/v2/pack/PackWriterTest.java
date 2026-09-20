@@ -70,12 +70,14 @@ class PackWriterTest implements BufferedByteOutput {
         assertThat(flushed).isFalse();
     }
 
-    @Test
-    void failedEntryCannotBeFollowedByASuccessTrailer() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 3})
+    void failedEntryCannotBeFollowedByASuccessTrailer(int declaredSize) throws Exception {
         try (PackWriter writer = new PackWriter(this, 1);
              BufferedByteInputV2 content = input(new byte[]{1, 2})) {
-            assertThatThrownBy(() -> writer.writeObject(GitObjectType.BLOB, 3, content))
-                    .isInstanceOf(IOException.class).hasMessageContaining("Truncated");
+            assertThatThrownBy(() -> writer.writeObject(GitObjectType.BLOB, declaredSize, content))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(declaredSize == 3 ? "Truncated" : "exceeds");
             int written = output.size();
             assertThatThrownBy(writer::finish).isInstanceOf(IOException.class).hasMessageContaining("failed");
             assertThat(output.size()).isEqualTo(written);

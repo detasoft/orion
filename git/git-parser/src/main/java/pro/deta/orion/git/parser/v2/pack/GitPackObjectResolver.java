@@ -229,50 +229,21 @@ public final class GitPackObjectResolver {
             throw new IOException("Negative base object size");
         }
         long offset = bytes.size();
-        bytes.append(ByteBuffer.wrap(PackWriter.objectHeader(type, size)));
-        long dataOffset = bytes.size();
+        long dataOffset;
         MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
         hash.update((name + " " + size + "\0").getBytes(StandardCharsets.US_ASCII));
         byte[] compressed = new byte[8192];
         Deflater deflater = new Deflater();
         try {
-            long remaining = size;
-            ByteBuffer buffer;
-            while ((buffer = content.buffer()) != null) {
-                int count = buffer.remaining();
-                if (count > remaining) {
-                    throw new IOException("Base content exceeds its declared size");
-                }
-                hash.update(buffer.duplicate());
-                deflater.setInput(buffer);
-                while (!deflater.needsInput()) {
-                    appendDeflated(bytes, deflater, compressed);
-                }
-                remaining -= count;
-            }
-            if (remaining != 0) {
-                throw new EOFException("Truncated base content");
-            }
+            PackEntryWriter entry = (buffer, start, length) -> bytes.append(ByteBuffer.wrap(buffer, start, length));
+            dataOffset = offset + entry.writeObject(type, size, content, deflater, compressed, hash::update);
             if (!MessageDigest.isEqual(hash.digest(), expected.toBytes())) {
                 throw new IOException("External base ObjectId does not match its content");
-            }
-            deflater.finish();
-            while (!deflater.finished()) {
-                appendDeflated(bytes, deflater, compressed);
             }
         } finally {
             deflater.end();
         }
         return new IndexedPack.EntryMetadata(offset, dataOffset, size, type, OptionalLong.empty(), Optional.empty());
-    }
-
-    private static void appendDeflated(IndexedPack bytes, Deflater deflater, byte[] buffer) throws IOException {
-        int count = deflater.deflate(buffer);
-        if (count != 0) {
-            bytes.append(ByteBuffer.wrap(buffer, 0, count));
-        } else if (!deflater.needsInput() && !deflater.finished()) {
-            throw new IOException("Deflater made no progress");
-        }
     }
 
     private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {
