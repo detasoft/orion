@@ -104,6 +104,7 @@ function closeSettings() {
 }
 
 function clearConnectedState(nextState = 'disconnected') {
+  submitting.value = false
   serverSnapshot.value = { lifecycle: '', routes: [], transports: {} }
   repositories.value = []
   connectedActivity.value = []
@@ -111,6 +112,9 @@ function clearConnectedState(nextState = 'disconnected') {
 }
 
 function clearExpiredCredentials() {
+  connectionAttempt += 1
+  draftConnectionAttempt += 1
+  draftConnectionState.value = 'disconnected'
   settings.value = { ...settings.value, token: '' }
   saveConnectionSettings(settings.value)
   api = createOrionClient()
@@ -202,8 +206,10 @@ async function createRepository() {
   }
 
   submitting.value = true
+  const attempt = connectionAttempt
   try {
     const response = await api.createRepository(name)
+    if (attempt !== connectionAttempt) return
     if (response.created === false) {
       createOpen.value = false
       showToast('Repository already exists')
@@ -229,6 +235,7 @@ async function createRepository() {
     newRepository.value = { name: '' }
     showToast('Repository created')
   } catch (error) {
+    if (attempt !== connectionAttempt) return
     if (isAuthorizationError(error)) {
       clearExpiredCredentials()
       showToast('Your Admin token is no longer valid. Connect again.', 'error')
@@ -236,7 +243,7 @@ async function createRepository() {
     }
     showToast(error.message, 'error')
   } finally {
-    submitting.value = false
+    if (attempt === connectionAttempt) submitting.value = false
   }
 }
 

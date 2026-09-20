@@ -1,37 +1,5 @@
 # Module Review: net/frontend/ui
 
-## 1. Pending repository creation can overwrite replacement authentication state
-
-**Problem.** Start creation, close its enabled dialog, then replace or remove the saved token before the POST
-finishes. Old success adds repository/activity data to the replacement connection; old 401/403 clears its
-new credentials. Clearing credentials also leaves connectionAttempt unchanged, so pending verification can
-subsequently mark the UI connected without a token.
-
-**Sources.** [Creation completion](src/App.vue#L193), [credential clearing](src/App.vue#L113),
-[settings replacement](src/App.vue#L266), [dialog cancellation](src/App.vue#L576),
-[existing mutation ownership guard](src/components/RemoteAliases.vue#L75),
-and [credential state tests](src/App.test.js#L151). Current creation tests do not overlap replacement settings
-with delayed success or authorization failure.
-
-**Documented behavior.** [README](README.md) describes authenticated, session-scoped UI state. No explicit race
-contract was found; existing connection-attempt and RemoteAliases guards establish the ownership convention.
-
-**Contract.** An earlier connection's response must not change the current connection's credentials or data.
-The already submitted server mutation may finish; ignoring its stale UI completion does not cancel it.
-
-**Minimal repair.** Reuse the existing connection generation/client identity to guard creation success, failure
-and cleanup. Invalidate pending verification when clearing credentials. Add deferred-response component cases
-for old success and old 401/403 after token replacement/removal.
-
-**Alternatives and consequences.** Disabling settings until creation finishes adds a user restriction.
-Aborting fetch alone cannot establish server cancellation or eliminate completion races. No new state owner,
-service, wire format or persistent state is needed.
-
-**Confidence.** High from the unguarded asynchronous paths; no browser reproduction was run.
-
-**Priority signals.** Importance: medium, because a slow request can erase valid replacement credentials or
-mix connection data. Repair ease: high, using the existing ownership mechanism locally.
-
 ## 2. Terminal command authorization failures bypass credential cleanup
 
 **Problem.** After opening a terminal, let its token expire or be revoked. A command POST or command-status

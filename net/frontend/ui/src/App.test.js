@@ -31,10 +31,32 @@ async function connect(wrapper) {
   await flushPromises()
 }
 
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+async function startRepository(wrapper, name) {
+  await wrapper.get('.primary-button.compact').trigger('click')
+  await wrapper.get('input[placeholder="team/project"]').setValue(name)
+  await wrapper.get('form.modal').trigger('submit')
+}
+
+async function replaceToken(wrapper, token) {
+  await wrapper.get('.close-button').trigger('click')
+  await wrapper.get('.server-card').trigger('click')
+  await wrapper.get('input[placeholder="Bearer token"]').setValue(token)
+  await wrapper.get('form.modal').trigger('submit')
+  await flushPromises()
+}
+
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
   vi.clearAllMocks()
+  for (const method of Object.values(client)) method.mockReset()
   client.routes.mockResolvedValue({
     routes: [{ urlPattern: '/api/admin/routes', methods: ['GET'], authorization: 'admin' }],
   })
@@ -161,6 +183,80 @@ describe('Orion connection', () => {
     expect(wrapper.text()).toContain('Not connected')
     expect(wrapper.text()).toContain('Connect to an Orion server')
     expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+  })
+
+  it.each([
+    ['replacement', 'success'], ['replacement', 401], ['replacement', 403],
+    ['', 'success'], ['', 401], ['', 403],
+  ])('ignores old creation %s/%s after replacing credentials', async (token, outcome) => {
+    const pending = deferred()
+    client.createRepository.mockReturnValueOnce(pending.promise)
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await startRepository(wrapper, 'old/project')
+    await replaceToken(wrapper, token)
+    const currentToast = wrapper.get('.toast').text()
+
+    if (outcome === 'success') pending.resolve({ created: true })
+    else pending.reject(Object.assign(new Error('Old credentials rejected'), { status: outcome }))
+    await flushPromises()
+
+    expect(sessionStorage.getItem('orion.ui.token')).toBe(token || null)
+    expect(wrapper.get('.toast').text()).toBe(currentToast)
+    expect(wrapper.text()).not.toContain('old/project')
+    expect(wrapper.get('.server-card').text()).toContain(token ? 'Connected' : 'Not connected')
+    await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
+    expect(wrapper.findAll('.repository-row')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('keeps a new creation pending when the old creation finishes', async () => {
+    const oldRequest = deferred()
+    const newRequest = deferred()
+    client.createRepository.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise)
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await startRepository(wrapper, 'old/project')
+    await replaceToken(wrapper, 'replacement')
+    await wrapper.get('.primary-button.compact').trigger('click')
+    expect(wrapper.get('form.modal .primary-button').element.disabled).toBe(false)
+    await wrapper.get('input[placeholder="team/project"]').setValue('new/project')
+    await wrapper.get('form.modal').trigger('submit')
+
+    oldRequest.resolve({ created: false })
+    await flushPromises()
+    expect(wrapper.get('form.modal .primary-button').element.disabled).toBe(true)
+    expect(wrapper.get('input[placeholder="team/project"]').element.value).toBe('new/project')
+    newRequest.resolve({ created: true })
+    await flushPromises()
+    await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
+    expect(wrapper.text()).toContain('new/project')
+    expect(wrapper.text()).not.toContain('old/project')
+    wrapper.unmount()
+  })
+
+  it('invalidates pending draft verification when credentials are rejected', async () => {
+    const creation = deferred()
+    const verification = deferred()
+    client.createRepository.mockReturnValueOnce(creation.promise)
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await startRepository(wrapper, 'old/project')
+    await wrapper.get('.close-button').trigger('click')
+    await wrapper.get('.server-card').trigger('click')
+    client.routes.mockReturnValueOnce(verification.promise)
+    await wrapper.get('button.secondary-button').trigger('click')
+
+    creation.reject(Object.assign(new Error('Expired'), { status: 403 }))
+    await flushPromises()
+    verification.resolve({ routes: [] })
+    await flushPromises()
+
+    expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+    expect(wrapper.text()).not.toContain('Connection verified')
+    expect(wrapper.text()).not.toContain('Checking')
+    expect(wrapper.get('.toast').text()).toContain('no longer valid')
+    wrapper.unmount()
   })
 
   it('does not duplicate a repository the server reports as already existing', async () => {
