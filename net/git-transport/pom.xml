@@ -14,6 +14,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.git</groupId>
+            <artifactId>git-native-storage</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion</groupId>
             <artifactId>agent-session-server</artifactId>
         </dependency>

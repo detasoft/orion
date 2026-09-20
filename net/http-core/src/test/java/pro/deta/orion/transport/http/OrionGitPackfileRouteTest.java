@@ -1,33 +1,28 @@
 package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.nativestorage.pack.PublishedPack;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -43,8 +38,6 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitPackfileRouteTest {
-    private static final PackIngestionLimits LIMITS =
-            new PackIngestionLimits(1024 * 1024, 100, 1024 * 1024);
 
     @TempDir
     private Path tempDir;
@@ -59,7 +52,7 @@ class OrionGitPackfileRouteTest {
         ResponseRecorder response = new ResponseRecorder();
 
         service(new OrionGitPackfileRoute(provider), request("GET",
-                "/r/team/project.git/objects/pack/" + pack.publishedPack().packId() + ".pack",
+                "/r/team/project.git/objects/pack/" + pack.packId().toHex() + ".pack",
                 repositorySecurityContext("team/project")), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
@@ -82,7 +75,7 @@ class OrionGitPackfileRouteTest {
                 request(
                         "GET",
                         "/r/team%2Fproject.git/objects/pack/"
-                                + pack.publishedPack().packId()
+                                + pack.packId().toHex()
                                 + ".pack",
                         repositorySecurityContext("team/project")),
                 response.proxy());
@@ -148,7 +141,7 @@ class OrionGitPackfileRouteTest {
                 request(
                         "GET",
                         "/r/team/project.git/objects/pack/"
-                                + pack.publishedPack().packId()
+                                + pack.packId().toHex()
                                 + ".pack",
                         authenticatedContext()),
                 response.proxy());
@@ -184,29 +177,22 @@ class OrionGitPackfileRouteTest {
     }
 
     private static PublishedPackFixture publishPack(
-            NativeGitRepository repository) {
-        LooseObjectStore sourceObjects = new LooseObjectStore();
-        GitObjectId objectId = sourceObjects.write(
-                ObjectType.BLOB,
-                "published".getBytes(StandardCharsets.UTF_8));
-        byte[] packBytes = produce(new NoDeltaPackBuilder().producer(
-                sourceObjects,
-                List.of(objectId)));
-        ByteBuf input = Unpooled.wrappedBuffer(packBytes);
-        try {
-            PackIngestionSession session =
-                    repository.beginPackIngestion(LIMITS);
-            PackIngestionResult result = session.accept(input);
-            if (result instanceof PackIngestionResult.NeedInput) {
-                result = session.endOfInput();
+            NativeGitRepository repository) throws IOException {
+        byte[] data = "published".getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(data))) {
+            writer.writeObject(GitObjectType.BLOB, data.length, input);
+            writer.finish();
+        }
+        byte[] packBytes = bytes.toByteArray();
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
+            IndexedPack pack = repository.ingest(input);
+            try {
+                return new PublishedPackFixture(repository.storage().persist(pack), packBytes);
+            } finally {
+                pack.discard();
             }
-            PackIngestionResult.Complete complete =
-                    (PackIngestionResult.Complete) result;
-            return new PublishedPackFixture(
-                    complete.publishedPack().orElseThrow(),
-                    packBytes);
-        } finally {
-            input.release();
         }
     }
 
@@ -218,18 +204,6 @@ class OrionGitPackfileRouteTest {
                 new OrionHttpRouteRegistry(Set.of(route)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
         servlet.service(request, response);
-    }
-
-    private static byte[] produce(NativePackProducer producer) {
-        ByteBuf output = Unpooled.buffer(128, 1024 * 1024);
-        try {
-            while (producer.produce(output) == NativePackProducer.Result.MORE) {
-            }
-            return ByteBufUtil.getBytes(output);
-        } finally {
-            producer.close();
-            output.release();
-        }
     }
 
     private static HttpServletRequest request(
@@ -283,7 +257,7 @@ class OrionGitPackfileRouteTest {
     }
 
     private record PublishedPackFixture(
-            PublishedPack publishedPack,
+            PackId packId,
             byte[] packBytes) {
         private PublishedPackFixture {
             packBytes = packBytes.clone();

@@ -1,7 +1,8 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -23,23 +24,23 @@ final class NativeRepositoryFileLoader {
     GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths)
             throws GitOperationException {
         Objects.requireNonNull(paths, "paths");
-        GitObjectId commitId = resolveBranch(branch);
+        ObjectId commitId = resolveBranch(branch);
         LooseObject commit = readObject(commitId);
-        if (commit.type() != ObjectType.COMMIT) {
+        if (commit.type() != GitObjectType.COMMIT) {
             throw new GitOperationException("Branch target is not a commit: " + branch);
         }
 
-        GitObjectId rootTreeId = rootTreeId(commitId, commit.data());
+        ObjectId rootTreeId = rootTreeId(commitId, commit.data());
         Map<String, byte[]> files = new LinkedHashMap<>();
         for (String path : paths) {
             String gitPath = gitPath(path);
-            GitObjectId objectId = resolvePath(rootTreeId, gitPath);
+            ObjectId objectId = resolvePath(rootTreeId, gitPath);
             files.put(gitPath, readObject(objectId).data());
         }
-        return new GitRepositoryFileSnapshot(files, Optional.of(commitId.value()));
+        return new GitRepositoryFileSnapshot(files, Optional.of(commitId.toHex()));
     }
 
-    private GitObjectId resolveBranch(String branch)
+    private ObjectId resolveBranch(String branch)
             throws GitRepositoryFileNotFoundException {
         Map<String, String> refs = repository.refs();
         String refName = branchRefName(branch);
@@ -50,14 +51,14 @@ final class NativeRepositoryFileLoader {
         if (objectId == null) {
             throw new GitRepositoryFileNotFoundException("Branch not found: " + branch);
         }
-        return GitObjectId.of(objectId);
+        return new ObjectId(objectId);
     }
 
-    private GitObjectId resolvePath(GitObjectId rootTreeId, String path)
+    private ObjectId resolvePath(ObjectId rootTreeId, String path)
             throws GitRepositoryFileNotFoundException, GitOperationException {
         String[] segments = path.split("/");
-        GitObjectId treeId = rootTreeId;
-        GitObjectId objectId = null;
+        ObjectId treeId = rootTreeId;
+        ObjectId objectId = null;
         for (int index = 0; index < segments.length; index++) {
             TreeEntry entry = treeEntry(treeId, segments[index]);
             objectId = entry.objectId();
@@ -71,10 +72,10 @@ final class NativeRepositoryFileLoader {
         return objectId;
     }
 
-    private TreeEntry treeEntry(GitObjectId treeId, String name)
+    private TreeEntry treeEntry(ObjectId treeId, String name)
             throws GitRepositoryFileNotFoundException, GitOperationException {
         LooseObject tree = readObject(treeId);
-        if (tree.type() != ObjectType.TREE) {
+        if (tree.type() != GitObjectType.TREE) {
             throw new GitOperationException("Path segment target is not a tree: " + treeId);
         }
         byte[] data = tree.data();
@@ -89,12 +90,12 @@ final class NativeRepositoryFileLoader {
         throw new GitRepositoryFileNotFoundException("File not found: " + name);
     }
 
-    private LooseObject readObject(GitObjectId objectId) throws GitOperationException {
+    private LooseObject readObject(ObjectId objectId) throws GitOperationException {
         return repository.readObject(objectId)
                 .orElseThrow(() -> new GitOperationException("Object not found: " + objectId));
     }
 
-    private static GitObjectId rootTreeId(GitObjectId commitId, byte[] data)
+    private static ObjectId rootTreeId(ObjectId commitId, byte[] data)
             throws GitOperationException {
         int offset = 0;
         while (offset < data.length) {
@@ -108,7 +109,7 @@ final class NativeRepositoryFileLoader {
                     lineEnd - offset,
                     StandardCharsets.US_ASCII);
             if (line.startsWith("tree ")) {
-                return GitObjectId.of(line.substring("tree ".length()));
+                return new ObjectId(line.substring("tree ".length()));
             }
             offset = lineEnd + 1;
         }
@@ -116,7 +117,7 @@ final class NativeRepositoryFileLoader {
     }
 
     private static ParsedTreeEntry parseTreeEntry(
-            GitObjectId treeId,
+            ObjectId treeId,
             byte[] data,
             int offset) throws GitOperationException {
         int modeStart = offset;
@@ -143,7 +144,7 @@ final class NativeRepositoryFileLoader {
         }
         byte[] rawObjectId = new byte[20];
         System.arraycopy(data, offset, rawObjectId, 0, rawObjectId.length);
-        GitObjectId objectId = GitObjectId.of(HexFormat.of().formatHex(rawObjectId));
+        ObjectId objectId = new ObjectId(HexFormat.of().formatHex(rawObjectId));
         return new ParsedTreeEntry(new TreeEntry(name, objectId), offset + 20);
     }
 
@@ -183,7 +184,7 @@ final class NativeRepositoryFileLoader {
 
     private record TreeEntry(
             String name,
-            GitObjectId objectId) {
+            ObjectId objectId) {
 
         private TreeEntry {
             Objects.requireNonNull(name, "name");

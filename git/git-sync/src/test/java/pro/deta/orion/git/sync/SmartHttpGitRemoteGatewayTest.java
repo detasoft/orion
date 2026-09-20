@@ -12,9 +12,8 @@ import pro.deta.orion.git.client.GitTcpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
@@ -68,8 +67,8 @@ class SmartHttpGitRemoteGatewayTest {
                         "refs/remotes/upstream/release",
                         seed.release());
 
-                assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()))
-                        .isEqualTo(RefUpdateResult.CREATED);
+                assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
+                        .isEqualTo(RefUpdateResult.Status.APPLIED);
                 local.saveFiles(
                         "main",
                         Map.of("orion.txt", "outbound\n".getBytes()),
@@ -122,12 +121,10 @@ class SmartHttpGitRemoteGatewayTest {
 
     private static NativeGitRepository nativeRepository(Path directory) throws Exception {
         Path gitDirectory = directory.resolve(".git");
-        Files.createDirectories(gitDirectory.resolve("objects"));
-        Files.createDirectories(gitDirectory.resolve("refs"));
+        Files.createDirectories(gitDirectory);
         return new NativeGitRepository(
                 "project",
-                new LooseRefStore(gitDirectory),
-                new LooseObjectStore(gitDirectory.resolve("objects")),
+                new GitStorageApi(gitDirectory),
                 "refs/heads/main");
     }
 

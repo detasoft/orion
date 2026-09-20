@@ -2,10 +2,11 @@ package pro.deta.orion.git.sync;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore.Update;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,12 +18,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GitAttachmentTest {
     private static final String NULL_ID = "0".repeat(40);
-    private static final String A = "1".repeat(40);
-    private static final String B = "2".repeat(40);
-    private static final String C = "3".repeat(40);
-    private static final String D = "4".repeat(40);
-    private static final String E = "5".repeat(40);
-    private static final String F = "6".repeat(40);
+    private static final String A = objectId("A");
+    private static final String B = objectId("B");
+    private static final String C = objectId("C");
+    private static final String D = objectId("D");
+    private static final String E = objectId("E");
+    private static final String F = objectId("F");
 
     @Test
     void importsEveryUpstreamBranchIntoAnEmptyRepository() throws Exception {
@@ -115,6 +116,7 @@ class GitAttachmentTest {
         FakeRelationships relationships = new FakeRelationships();
         relationships.ancestor(A, B);
         relationships.ancestor(C, D);
+        repository.racePending = true;
 
         GitAttachmentResult result = attachment(repository, gateway, relationships).attach();
 
@@ -140,6 +142,7 @@ class GitAttachmentTest {
                 head("release"), C));
         FakeRelationships relationships = new FakeRelationships();
         relationships.ancestor(A, B);
+        repository.racePending = true;
 
         GitAttachmentResult result = attachment(repository, gateway, relationships).attach();
 
@@ -164,11 +167,20 @@ class GitAttachmentTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository(
-                "project",
-                new LooseRefStore(),
-                new LooseObjectStore(),
-                head("main"));
+        NativeGitRepository repository = new NativeGitRepository("project", new GitStorageApi(), head("main"));
+        populate(repository);
+        return repository;
+    }
+
+    private static String objectId(String value) {
+        byte[] object = ("blob 1\0" + value).getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        return java.util.HexFormat.of().formatHex(GitHashAlgorithm.SHA1.newDigest().digest(object));
+    }
+
+    private static void populate(NativeGitRepository repository) {
+        for (String value : List.of("A", "B", "C", "D", "E", "F")) {
+            repository.writeObject(GitObjectType.BLOB, value.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        }
     }
 
     private static String head(String branch) {
@@ -269,7 +281,7 @@ class GitAttachmentTest {
         private final String racedRef;
         private final String expectedOldId;
         private final String concurrentId;
-        private boolean racePending = true;
+        private boolean racePending;
         private int livePublicationAttempts;
 
         private RacingRepository(
@@ -278,24 +290,22 @@ class GitAttachmentTest {
                 String concurrentId) {
             super(
                     "project",
-                    new LooseRefStore(),
-                    new LooseObjectStore(),
+                    new GitStorageApi(),
                     head("main"));
+            populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;
             this.concurrentId = concurrentId;
         }
 
         @Override
-        public List<RefUpdateResult> publishObjectsAndRefs(
-                LooseObjectStore quarantinedObjects,
-                List<Update> updates) {
-            livePublicationAttempts++;
+        public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
             if (racePending) {
+                livePublicationAttempts++;
                 racePending = false;
                 updateRef(racedRef, expectedOldId, concurrentId);
             }
-            return super.publishObjectsAndRefs(quarantinedObjects, updates);
+            return super.publishRefs(updates, atomic);
         }
     }
 

@@ -5,16 +5,15 @@ import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore.Update;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.fetch.FetchPack;
+import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -23,6 +22,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -30,12 +31,6 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
     private static final String NULL_ID = "0".repeat(40);
     private static final String HEAD_PREFIX = "refs/heads/";
     private static final String TRACKING_PREFIX = "refs/remotes/upstream/";
-    private static final PackIngestionLimits PACK_LIMITS =
-            new PackIngestionLimits(
-                    4L * 1024 * 1024 * 1024,
-                    1_000_000,
-                    64 * 1024 * 1024);
-
     private final GitRemoteConnection connection;
 
     public SmartHttpGitRemoteGateway(GitRemoteConnection connection) {
@@ -55,7 +50,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         Set<String> wants = new LinkedHashSet<>(heads.values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try (PackIngestionOutput target = new PackIngestionOutput(
-                checked.beginPackIngestion(PACK_LIMITS))) {
+                checked.storage())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.copyOf(wants),
                     List.copyOf(haves),
@@ -67,8 +62,8 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                             connection.options(),
                             request),
                     "fetch");
-            LooseObjectStore quarantine = target.complete().quarantine();
-            publishTrackingRefs(checked, heads, quarantine);
+            checked.storage().persist(target.complete());
+            publishTrackingRefs(checked, heads);
             return new GitFetchedHeads(heads);
         } catch (IOException | RuntimeException error) {
             throw GitRemoteException.local("fetch publication", true, error);
@@ -146,7 +141,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                 trackingRef,
                 expected,
                 desiredId);
-        if (result == RefUpdateResult.STALE) {
+        if (result.status() != RefUpdateResult.Status.APPLIED) {
             throw GitRemoteException.local("tracking ref publication", true, null);
         }
     }
@@ -156,15 +151,11 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
             String refName,
             String observed,
             String desiredId) {
-        Set<GitObjectId> haves = observed == null
-                ? Set.of()
-                : Set.of(GitObjectId.of(observed));
-        NativeFetchRequest packRequest = new NativeFetchRequest(
-                Set.of(GitObjectId.of(desiredId)),
-                haves,
-                true,
-                Set.of(),
-                NativeFetchOptions.DEFAULT);
+        Set<ObjectId> haves = observed == null ? Set.of() : Set.of(new ObjectId(observed));
+        FetchPlan plan = new FetchPlan(
+                Set.of(new ObjectId(desiredId)), Map.of(), haves, Set.of(),
+                OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
+                new GitCapabilities(), Set.of());
         GitReceivePackRequest.Command command = new GitReceivePackRequest.Command(
                 observed == null ? NULL_ID : observed,
                 desiredId,
@@ -172,31 +163,32 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         return new GitReceivePackRequest(
                 List.of(command),
                 output -> {
-                    try (NativePackProducer producer = repository.fetch(packRequest)) {
-                        producer.writeTo(output);
+                    FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+                    try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                        pack.writeTo(writer);
+                        writer.finish();
                     }
                 });
     }
 
     private static void publishTrackingRefs(
             NativeGitRepository repository,
-            Map<String, String> heads,
-            LooseObjectStore quarantine) throws GitRemoteException {
+            Map<String, String> heads) throws GitRemoteException {
         Map<String, String> existing = repository.refs();
-        List<Update> updates = new ArrayList<>();
+        List<RefUpdate> updates = new ArrayList<>();
         for (Map.Entry<String, String> entry : heads.entrySet()) {
             String trackingRef = TRACKING_PREFIX
                     + entry.getKey().substring(HEAD_PREFIX.length());
-            updates.add(new Update(
+            updates.add(RefUpdate.fromWire(
                     trackingRef,
                     existing.getOrDefault(trackingRef, NULL_ID),
                     entry.getValue()));
         }
-        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
-                quarantine,
-                updates);
-        if (results.contains(RefUpdateResult.STALE)) {
-            throw GitRemoteException.local("tracking ref publication", true, null);
+        List<RefUpdateResult> results = repository.publishRefs(updates, true);
+        for (RefUpdateResult result : results) {
+            if (result.status() != RefUpdateResult.Status.APPLIED) {
+                throw GitRemoteException.local("tracking ref publication", true, null);
+            }
         }
     }
 

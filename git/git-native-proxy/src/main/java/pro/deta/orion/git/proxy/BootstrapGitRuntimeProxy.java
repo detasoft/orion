@@ -1,11 +1,9 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus;
 
@@ -13,9 +11,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 final class BootstrapGitRuntimeProxy {
-    private static final String NULL_ID = "0".repeat(40);
 
     private final BootstrapGitLocation location;
     private final NativeGitRepository repository;
@@ -66,12 +64,12 @@ final class BootstrapGitRuntimeProxy {
     }
 
     public synchronized List<RefUpdateResult> publish(
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             boolean atomic) {
         try {
             List<RefUpdateResult> results = publishUpdates(received, updates, atomic);
-            observed(results.contains(RefUpdateResult.STALE) ? SyncStatus.CONFLICT : SyncStatus.SUCCESS);
+            observed(hasConflict(results) ? SyncStatus.CONFLICT : SyncStatus.SUCCESS);
             return results;
         } catch (BootstrapGitProxyException error) {
             observed(error.status());
@@ -83,22 +81,21 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private List<RefUpdateResult> publishUpdates(
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             boolean atomic) {
         Objects.requireNonNull(received, "received");
-        LooseObjectStore objects = received.quarantine();
         Objects.requireNonNull(updates, "updates");
         refresh();
         List<RefUpdateResult> preview = repository.previewRefUpdates(updates, atomic);
-        if (atomic && preview.contains(RefUpdateResult.STALE)) {
+        if (atomic && hasConflict(preview)) {
             return preview;
         }
-        List<LooseRefStore.Update> candidates = new ArrayList<>();
+        List<RefUpdate> candidates = new ArrayList<>();
         List<Integer> candidateIndexes = new ArrayList<>();
         for (int index = 0; index < updates.size(); index++) {
-            if (preview.get(index) != RefUpdateResult.STALE) {
-                validateClosure(objects, updates.get(index));
+            if (preview.get(index).status() == RefUpdateResult.Status.APPLIED) {
+                validateClosure(updates.get(index));
                 candidates.add(updates.get(index));
                 candidateIndexes.add(index);
             }
@@ -106,15 +103,14 @@ final class BootstrapGitRuntimeProxy {
         if (candidates.isEmpty()) {
             return preview;
         }
-        repository.publishObjects(objects);
         List<Boolean> accepted = push(received, candidates, atomic);
         if (accepted.size() != candidates.size()) {
             throw new BootstrapGitProxyException("upstream ref publication");
         }
         if (atomic && accepted.contains(false)) {
-            return stale(updates.size());
+            return stale(updates);
         }
-        List<LooseRefStore.Update> localUpdates = new ArrayList<>();
+        List<RefUpdate> localUpdates = new ArrayList<>();
         List<Integer> localIndexes = new ArrayList<>();
         List<RefUpdateResult> results = new ArrayList<>(preview);
         for (int index = 0; index < candidates.size(); index++) {
@@ -123,11 +119,11 @@ final class BootstrapGitRuntimeProxy {
                 localUpdates.add(candidates.get(index));
                 localIndexes.add(originalIndex);
             } else {
-                results.set(originalIndex, RefUpdateResult.STALE);
+                results.set(originalIndex, new RefUpdateResult(updates.get(originalIndex),
+                        RefUpdateResult.Status.EXPECTED_OLD_MISMATCH, Optional.empty()));
             }
         }
-        List<RefUpdateResult> localResults = repository.publishObjectsAndRefs(
-                new LooseObjectStore(),
+        List<RefUpdateResult> localResults = repository.publishRefs(
                 localUpdates,
                 atomic);
         for (int index = 0; index < localResults.size(); index++) {
@@ -137,8 +133,8 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private List<Boolean> push(
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             boolean atomic) {
         try {
             return transportFactory.withTransport(
@@ -152,13 +148,12 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private void validateClosure(
-            LooseObjectStore objects,
-            LooseRefStore.Update update) {
-        if (NULL_ID.equals(update.newId())) {
+            RefUpdate update) {
+        if (update.newId().isEmpty()) {
             return;
         }
         try {
-            if (!repository.hasCompleteObjectClosure(GitObjectId.of(update.newId()), objects)) {
+            if (!repository.hasCompleteObjectClosure(update.newId().orElseThrow())) {
                 throw new BootstrapGitProxyException("complete object validation");
             }
         } catch (BootstrapGitProxyException error) {
@@ -168,11 +163,20 @@ final class BootstrapGitRuntimeProxy {
         }
     }
 
-    private static List<RefUpdateResult> stale(int size) {
-        List<RefUpdateResult> results = new ArrayList<>(size);
-        for (int index = 0; index < size; index++) {
-            results.add(RefUpdateResult.STALE);
+    private static List<RefUpdateResult> stale(List<RefUpdate> updates) {
+        List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        for (RefUpdate update : updates) {
+            results.add(new RefUpdateResult(update, RefUpdateResult.Status.EXPECTED_OLD_MISMATCH, Optional.empty()));
         }
         return List.copyOf(results);
     }
+    private static boolean hasConflict(List<RefUpdateResult> results) {
+        for (RefUpdateResult result : results) {
+            if (result.status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }

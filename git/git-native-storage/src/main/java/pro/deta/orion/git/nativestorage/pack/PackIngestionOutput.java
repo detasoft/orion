@@ -1,67 +1,96 @@
 package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Objects;
 
-/**
- * Adapts native pack ingestion to buffered transport output while retaining explicit completion state.
- */
 public final class PackIngestionOutput implements BufferedByteOutput, AutoCloseable {
-    private final PackIngestionSession session;
-    private PackIngestionResult result = new PackIngestionResult.NeedInput();
+    private final GitStorageApi storage;
+    private final Path temporary;
+    private final OutputStream output;
+    private boolean finished;
 
-    public PackIngestionOutput(PackIngestionSession session) {
-        this.session = Objects.requireNonNull(session, "session");
-    }
-
-    @Override
-    public void write(ByteBuf buffer) throws IOException {
-        Objects.requireNonNull(buffer, "buffer");
-        if (!(result instanceof PackIngestionResult.NeedInput)) {
-            throw new IOException("Native pack ingestion received bytes after completion");
-        }
-        result = session.accept(buffer);
-        requireSuccess();
-    }
-
-    @Override
-    public void flush() {
-    }
-
-    public boolean completed() {
-        return result instanceof PackIngestionResult.Complete;
-    }
-
-    public PackIngestionResult.Complete complete() throws IOException {
-        if (result instanceof PackIngestionResult.NeedInput) {
-            result = session.endOfInput();
-        }
-        requireSuccess();
-        if (result instanceof PackIngestionResult.Complete complete) {
-            return complete;
-        }
-        throw new IncompleteException("Native pack ingestion is incomplete");
-    }
-
-    private void requireSuccess() throws IOException {
-        if (result instanceof PackIngestionResult.Failed failed) {
-            throw new IOException(
-                    "Native pack ingestion failed: " + failed.failure().getMessage(),
-                    failed.failure());
+    public PackIngestionOutput(GitStorageApi storage) throws IOException {
+        this.storage = Objects.requireNonNull(storage, "storage");
+        temporary = Files.createTempFile("orion-fetch-", ".pack");
+        try {
+            output = Files.newOutputStream(temporary);
+        } catch (IOException failure) {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
         }
     }
 
     @Override
-    public void close() {
-        session.close();
+    public void write(byte[] bytes, int offset, int length) throws IOException {
+        requireWritable();
+        output.write(bytes, offset, length);
     }
 
-    public static final class IncompleteException extends IOException {
-        private IncompleteException(String message) {
-            super(message);
+    @Override
+    public void write(ByteBuf bytes) throws IOException {
+        requireWritable();
+        bytes.getBytes(bytes.readerIndex(), output, bytes.readableBytes());
+    }
+
+    @Override
+    public void flush() throws IOException {
+        requireWritable();
+        output.flush();
+    }
+
+    public IndexedPack complete() throws IOException {
+        requireWritable();
+        finished = true;
+        output.close();
+        IndexedPack pack = null;
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(Files.newInputStream(temporary));
+             PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
+            pack = ingestor.ingest();
+            if (input.buffer() != null) {
+                throw new IOException("Unexpected bytes after pack trailer");
+            }
+            new GitPackObjectResolver(pack, storage).complete();
+        } catch (IOException | RuntimeException | Error failure) {
+            if (pack != null) {
+                try {
+                    pack.discard();
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
+        return pack;
+    }
+
+    @Override
+    public void close() throws IOException {
+        finished = true;
+        try {
+            output.close();
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private void requireWritable() throws IOException {
+        if (finished) {
+            throw new IOException("Pack output is closed or completed");
         }
     }
 }

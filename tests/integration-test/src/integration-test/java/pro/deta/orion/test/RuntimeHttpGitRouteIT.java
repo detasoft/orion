@@ -11,14 +11,13 @@ import org.eclipse.jgit.transport.TransportHttp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.crypto.OrionPasswordHashingService;
 
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
@@ -417,7 +416,7 @@ class RuntimeHttpGitRouteIT {
         NativeGitRepository repository = nativeRepository(repositoryRoot, repositoryName);
         assertThat(repository.refs())
                 .containsEntry("refs/heads/" + BRANCH, commitId.name());
-        assertThat(repository.readObject(GitObjectId.of(commitId.name())))
+        assertThat(repository.readObject(new pro.deta.orion.git.parser.v2.id.ObjectId(commitId.name())))
                 .isPresent();
         var snapshot = repository.loadFiles(BRANCH, List.of(fileName));
         assertThat(snapshot.version()).contains(commitId.name());

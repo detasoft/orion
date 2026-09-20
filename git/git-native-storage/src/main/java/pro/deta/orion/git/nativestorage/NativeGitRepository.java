@@ -2,12 +2,8 @@ package pro.deta.orion.git.nativestorage;
 
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
-import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -19,6 +15,7 @@ import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -37,7 +34,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -160,8 +156,8 @@ public class NativeGitRepository implements AutoCloseable {
         return () -> refUpdateListeners.remove(registered);
     }
 
-    public GitObjectId writeObject(ObjectType type, byte[] data) {
-        GitObjectType objectType = GitObjectType.valueOf(type.name());
+    public ObjectId writeObject(GitObjectType type, byte[] data) {
+        GitObjectType objectType = type;
         MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
         hash.update((objectType.name().toLowerCase(Locale.ROOT) + " " + data.length + "\0")
                 .getBytes(StandardCharsets.US_ASCII));
@@ -174,30 +170,17 @@ public class NativeGitRepository implements AutoCloseable {
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
                 storage().persist(ingest(input));
             }
-            return GitObjectId.of(id.toHex());
+            return id;
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
     }
 
-    public Optional<LooseObject> readObject(GitObjectId id) {
+    public Optional<LooseObject> readObject(ObjectId id) {
         try {
-            return storage().readObject(new ObjectId(id.value()), new ResolvedGitObjectRead<>(storage(),
-                    (type, size, base, input) -> new LooseObject(id, ObjectType.valueOf(type.name()),
+            return storage().readObject(id, new ResolvedGitObjectRead<>(storage(),
+                    (type, size, base, input) -> new LooseObject(id, type,
                             input.readBytes(Math.toIntExact(size)))));
-        } catch (IOException failure) {
-            throw new UncheckedIOException(failure);
-        }
-    }
-
-    public Optional<LooseObjectPrefix> readObjectPrefix(GitObjectId id, int maxDataBytes) {
-        if (maxDataBytes < 0) {
-            throw new IllegalArgumentException("Negative object prefix size");
-        }
-        try {
-            return storage().readObject(new ObjectId(id.value()), new ResolvedGitObjectRead<>(storage(),
-                    (type, size, base, input) -> new LooseObjectPrefix(id, ObjectType.valueOf(type.name()), size,
-                            input.readBytes((int) Math.min(size, maxDataBytes)))));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
@@ -277,15 +260,11 @@ public class NativeGitRepository implements AutoCloseable {
         return List.copyOf(results);
     }
 
-    public boolean hasCompleteObjectClosure(GitObjectId root) {
+    public boolean hasCompleteObjectClosure(ObjectId root) {
         try {
-            new NativeObjectClosure(this::readObject).objectIdsFor(Set.of(root), Set.of());
-            return true;
-        } catch (GitUploadPackException failure) {
-            if (failure.kind() == GitUploadPackException.Kind.MISSING_OBJECT) {
-                return false;
-            }
-            throw failure;
+            return new GitObjectGraph(storage()).hasCompleteClosure(root);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 

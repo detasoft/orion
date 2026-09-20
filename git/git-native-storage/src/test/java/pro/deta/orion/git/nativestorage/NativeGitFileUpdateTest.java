@@ -1,13 +1,18 @@
 package pro.deta.orion.git.nativestorage;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -15,8 +20,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,10 +35,11 @@ class NativeGitFileUpdateTest {
 
         repository.saveFiles("main", files("first"), "first", GitCommitAuthor.EMPTY);
 
-        assertThat(repository.publishedPacks()).hasSize(1);
-        var manifest = repository.publishedPacks().getFirst();
-        try (var pack = repository.openPublishedPack(manifest.packId()).orElseThrow()) {
-            assertThat(pack.input().readNBytes(4)).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
+        assertThat(repository.storage().packIds()).hasSize(1);
+        PackId packId = repository.storage().packIds().iterator().next();
+        try (IndexedPack pack = repository.storage().openPack(packId).orElseThrow();
+             BufferedByteInputV2 input = pack.input()) {
+            assertThat(input.readBytes(4)).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
         }
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
@@ -59,7 +63,7 @@ class NativeGitFileUpdateTest {
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
         assertThat(repository.loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
-        assertThat(repository.publishedPacks()).hasSize(3);
+        assertThat(repository.storage().packIds()).hasSize(3);
     }
 
     @Test
@@ -68,12 +72,12 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository");
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main", files("prepared"), "prepared", GitCommitAuthor.EMPTY);
-        String commitId = update.refUpdates().getFirst().newId();
+        String commitId = update.refUpdates().getFirst().newId().orElseThrow().toHex();
         byte[] firstRead = update.pack();
         firstRead[0] = 0;
 
         assertThat(repository.refs()).isEmpty();
-        assertThat(repository.readObject(GitObjectId.of(commitId))).isEmpty();
+        assertThat(repository.readObject(new pro.deta.orion.git.parser.v2.id.ObjectId(commitId))).isEmpty();
         try (var target = new InMemoryRepository(new DfsRepositoryDescription("pack consumer"));
              var inserter = target.newObjectInserter()) {
             inserter.newPackParser(new ByteArrayInputStream(update.pack())).parse(NullProgressMonitor.INSTANCE);
@@ -92,7 +96,7 @@ class NativeGitFileUpdateTest {
                 .create("another").valueOrFailure("repository");
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
-                    .containsExactly(new ReceivePackStatus("refs/heads/main", true, ""));
+                    .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
             assertThat(target.loadFiles("main", List.of("config.txt")).files())
                     .containsAllEntriesOf(files("prepared"));
         }
@@ -113,7 +117,7 @@ class NativeGitFileUpdateTest {
                     rejected, update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .isInstanceOf(GitOperationException.class);
             assertThat(repository.refs()).isEmpty();
-            assertThat(repository.publishedPacks()).isEmpty();
+            assertThat(repository.storage().packIds()).isEmpty();
         }
     }
 

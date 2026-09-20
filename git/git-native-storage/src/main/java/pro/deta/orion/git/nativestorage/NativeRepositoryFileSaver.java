@@ -1,27 +1,27 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+
 import java.io.ByteArrayInputStream;
-import java.security.MessageDigest;
-import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -92,59 +92,59 @@ final class NativeRepositoryFileSaver {
             String message,
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
-        Optional<GitObjectId> parent = Optional.ofNullable(expectedRefRevision).map(GitObjectId::of);
+        Optional<ObjectId> parent = Optional.ofNullable(expectedRefRevision).map(ObjectId::new);
         return prepareFiles(branch, parent, files, message, author, initializeDefaultHead);
     }
 
     private NativeGitFileUpdate prepareFiles(
             String branch,
-            Optional<GitObjectId> parent,
+            Optional<ObjectId> parent,
             Map<String, byte[]> files,
             String message,
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
         Objects.requireNonNull(files, "files");
-        Map<GitObjectId, LooseObject> preparedObjects = new LinkedHashMap<>();
+        Map<ObjectId, LooseObject> preparedObjects = new LinkedHashMap<>();
         String branchRefName = branchRefName(branch);
-        TreeMap<String, GitObjectId> treeEntries = new TreeMap<>();
+        TreeMap<String, ObjectId> treeEntries = new TreeMap<>();
         if (parent.isPresent()) {
             readTreeEntries(rootTreeId(parent.get()), "", treeEntries);
         }
 
         for (Map.Entry<String, byte[]> entry : files.entrySet()) {
             String path = gitPath(entry.getKey());
-            GitObjectId blobId = writeObject(preparedObjects, ObjectType.BLOB, entry.getValue());
+            ObjectId blobId = writeObject(preparedObjects, GitObjectType.BLOB, entry.getValue());
             treeEntries.put(path, blobId);
         }
 
-        GitObjectId treeId = writeTree("", treeEntries, preparedObjects);
-        GitObjectId commitId = writeCommit(
+        ObjectId treeId = writeTree("", treeEntries, preparedObjects);
+        ObjectId commitId = writeCommit(
                 treeId,
                 parent.orElse(null),
                 message,
                 author,
                 preparedObjects);
-        String expectedOldId = parent.map(GitObjectId::value).orElse(NULL_ID);
+        String expectedOldId = parent.map(ObjectId::toHex).orElse(NULL_ID);
         List<RefUpdate> updates = new java.util.ArrayList<>();
-        updates.add(RefUpdate.fromWire(branchRefName, expectedOldId, commitId.value()));
+        updates.add(RefUpdate.fromWire(branchRefName, expectedOldId, commitId.toHex()));
         if (initializeDefaultHead
                 && !repository.refs().containsKey(repository.defaultHead())
                 && !repository.defaultHead().equals(branchRefName)) {
             updates.add(RefUpdate.fromWire(
                     repository.defaultHead(),
                     NULL_ID,
-                    commitId.value()));
+                    commitId.toHex()));
         }
         return new NativeGitFileUpdate(buildPack(preparedObjects), updates);
     }
 
-    private static byte[] buildPack(Map<GitObjectId, LooseObject> objects) throws GitOperationException {
+    private static byte[] buildPack(Map<ObjectId, LooseObject> objects) throws GitOperationException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), objects.size())) {
             for (LooseObject object : objects.values()) {
                 byte[] data = object.data();
                 try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(data))) {
-                    writer.writeObject(GitObjectType.valueOf(object.type().name()), data.length, input);
+                    writer.writeObject(object.type(), data.length, input);
                 }
             }
             writer.finish();
@@ -154,29 +154,29 @@ final class NativeRepositoryFileSaver {
         }
     }
 
-    private static GitObjectId writeObject(Map<GitObjectId, LooseObject> objects, ObjectType type, byte[] content) {
+    private static ObjectId writeObject(Map<ObjectId, LooseObject> objects, GitObjectType type, byte[] content) {
         MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
         hash.update((type.name().toLowerCase(Locale.ROOT) + " " + content.length + "\0")
                 .getBytes(StandardCharsets.US_ASCII));
-        GitObjectId id = GitObjectId.of(HexFormat.of().formatHex(hash.digest(content)));
+        ObjectId id = new ObjectId(HexFormat.of().formatHex(hash.digest(content)));
         objects.put(id, new LooseObject(id, type, content));
         return id;
     }
 
-    private Optional<GitObjectId> resolveBranch(String branch) {
+    private Optional<ObjectId> resolveBranch(String branch) {
         Map<String, String> refs = repository.refs();
         String refName = branchRefName(branch);
         String objectId = refs.get(refName);
         if (objectId == null && !branch.startsWith("refs/")) {
             objectId = refs.get(branch);
         }
-        return Optional.ofNullable(objectId).map(GitObjectId::of);
+        return Optional.ofNullable(objectId).map(ObjectId::new);
     }
 
-    private GitObjectId rootTreeId(GitObjectId commitId)
+    private ObjectId rootTreeId(ObjectId commitId)
             throws GitOperationException {
         LooseObject commit = readObject(commitId);
-        if (commit.type() != ObjectType.COMMIT) {
+        if (commit.type() != GitObjectType.COMMIT) {
             throw new GitOperationException("Branch target is not a commit: " + commitId);
         }
         int offset = 0;
@@ -188,7 +188,7 @@ final class NativeRepositoryFileSaver {
             }
             String line = new String(data, offset, lineEnd - offset, StandardCharsets.US_ASCII);
             if (line.startsWith("tree ")) {
-                return GitObjectId.of(line.substring("tree ".length()));
+                return new ObjectId(line.substring("tree ".length()));
             }
             offset = lineEnd + 1;
         }
@@ -196,11 +196,11 @@ final class NativeRepositoryFileSaver {
     }
 
     private void readTreeEntries(
-            GitObjectId treeId,
+            ObjectId treeId,
             String prefix,
-            TreeMap<String, GitObjectId> entries) throws GitOperationException {
+            TreeMap<String, ObjectId> entries) throws GitOperationException {
         LooseObject tree = readObject(treeId);
-        if (tree.type() != ObjectType.TREE) {
+        if (tree.type() != GitObjectType.TREE) {
             throw new GitOperationException("Tree target is not a tree: " + treeId);
         }
         byte[] data = tree.data();
@@ -217,13 +217,13 @@ final class NativeRepositoryFileSaver {
         }
     }
 
-    private GitObjectId writeTree(
+    private ObjectId writeTree(
             String prefix,
-            TreeMap<String, GitObjectId> entries,
-            Map<GitObjectId, LooseObject> preparedObjects) {
+            TreeMap<String, ObjectId> entries,
+            Map<ObjectId, LooseObject> preparedObjects) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         String previousDirectory = null;
-        for (Map.Entry<String, GitObjectId> entry : entries.tailMap(prefix).entrySet()) {
+        for (Map.Entry<String, ObjectId> entry : entries.tailMap(prefix).entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 break;
             }
@@ -236,7 +236,7 @@ final class NativeRepositoryFileSaver {
                 String directory = relative.substring(0, slash);
                 if (!directory.equals(previousDirectory)) {
                     previousDirectory = directory;
-                    GitObjectId treeId = writeTree(
+                    ObjectId treeId = writeTree(
                             prefix + directory + "/",
                             entries,
                             preparedObjects);
@@ -246,16 +246,16 @@ final class NativeRepositoryFileSaver {
             }
             writeTreeEntry(output, "100644", relative, entry.getValue());
         }
-        GitObjectId treeId = writeObject(preparedObjects, ObjectType.TREE, output.toByteArray());
+        ObjectId treeId = writeObject(preparedObjects, GitObjectType.TREE, output.toByteArray());
         return treeId;
     }
 
-    private GitObjectId writeCommit(
-            GitObjectId treeId,
-            GitObjectId parent,
+    private ObjectId writeCommit(
+            ObjectId treeId,
+            ObjectId parent,
             String message,
             GitCommitAuthor author,
-            Map<GitObjectId, LooseObject> preparedObjects) {
+            Map<ObjectId, LooseObject> preparedObjects) {
         GitCommitAuthor commitAuthor = Objects.requireNonNullElse(author, GitCommitAuthor.EMPTY);
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
         StringBuilder data = new StringBuilder()
@@ -271,17 +271,17 @@ final class NativeRepositoryFileSaver {
                 .append(commitMessage(message))
                 .append('\n');
         return writeObject(preparedObjects,
-                ObjectType.COMMIT,
+                GitObjectType.COMMIT,
                 data.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private LooseObject readObject(GitObjectId objectId) throws GitOperationException {
+    private LooseObject readObject(ObjectId objectId) throws GitOperationException {
         return repository.readObject(objectId)
                 .orElseThrow(() -> new GitOperationException("Object not found: " + objectId));
     }
 
     private static ParsedTreeEntry parseTreeEntry(
-            GitObjectId treeId,
+            ObjectId treeId,
             byte[] data,
             int offset) throws GitOperationException {
         int modeStart = offset;
@@ -309,7 +309,7 @@ final class NativeRepositoryFileSaver {
         }
         byte[] rawObjectId = new byte[20];
         System.arraycopy(data, offset, rawObjectId, 0, rawObjectId.length);
-        GitObjectId objectId = GitObjectId.of(HexFormat.of().formatHex(rawObjectId));
+        ObjectId objectId = new ObjectId(HexFormat.of().formatHex(rawObjectId));
         return new ParsedTreeEntry(new TreeEntry(mode, name, objectId), offset + 20);
     }
 
@@ -317,9 +317,9 @@ final class NativeRepositoryFileSaver {
             ByteArrayOutputStream output,
             String mode,
             String name,
-            GitObjectId objectId) {
+            ObjectId objectId) {
         output.writeBytes((mode + " " + name + "\0").getBytes(StandardCharsets.UTF_8));
-        output.writeBytes(HexFormat.of().parseHex(objectId.value()));
+        output.writeBytes(HexFormat.of().parseHex(objectId.toHex()));
     }
 
     private static int lineEnd(byte[] data, int offset) {
@@ -366,7 +366,7 @@ final class NativeRepositoryFileSaver {
     private record TreeEntry(
             String mode,
             String name,
-            GitObjectId objectId) {
+            ObjectId objectId) {
     }
 
     private record ParsedTreeEntry(

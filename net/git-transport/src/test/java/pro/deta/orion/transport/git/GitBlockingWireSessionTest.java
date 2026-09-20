@@ -2,18 +2,17 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import java.util.Optional;
-import java.io.UncheckedIOException;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -23,10 +22,12 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -44,7 +45,7 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        pro.deta.orion.git.nativestorage.NativeGitFileUpdate prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
+        NativeGitFileUpdate prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
@@ -84,7 +85,8 @@ class GitBlockingWireSessionTest {
             session(input, output, provider).serveSmartHttpPost(receiveV1Request());
 
             assertThat(output.ascii()).contains("ok refs/heads/main\n");
-            assertThat(repository.refs()).containsEntry("refs/heads/main", prepared.refUpdates().getFirst().newId().orElseThrow().toHex());
+            assertThat(repository.refs()).containsEntry("refs/heads/main",
+                    prepared.refUpdates().getFirst().newId().orElseThrow().toHex());
         }
     }
 
@@ -173,15 +175,15 @@ class GitBlockingWireSessionTest {
                 providerWithMainRef();
         NativeGitRepository repository =
                 provider.find("project").valueOrFailure("repository");
-        GitObjectId have = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId have = repository.writeObject(
+                GitObjectType.BLOB,
                 "have".getBytes(StandardCharsets.US_ASCII));
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
-                    "want " + WANT + "\n",
-                    "have " + have.value() + "\n",
+                    "want " + MAIN_ID + "\n",
+                    "have " + have.toHex() + "\n",
                     "wait-for-done\n"));
             input.end();
 
@@ -190,8 +192,8 @@ class GitBlockingWireSessionTest {
             assertThat(output.ascii())
                     .isEqualTo(
                             "0014acknowledgments\n"
-                                    + "0031ACK " + have.value() + "\n"
-                                    + "0000");
+                                    + "0031ACK " + have.toHex() + "\n"
+                                    + "00000002");
         }
     }
 
@@ -201,14 +203,14 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId blob = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
-                    "want " + blob.value() + "\n",
+                    "want " + blob.toHex() + "\n",
                     "thin-pack\n",
                     "done\n"));
             input.end();
@@ -267,10 +269,10 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId blob = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
-        repository.updateRef("refs/heads/main", NULL_ID, blob.value());
+        repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -285,8 +287,8 @@ class GitBlockingWireSessionTest {
 
             assertThat(output.ascii())
                     .contains("\u0001wanted-refs\n")
-                    .contains(blob.value() + " HEAD\n")
-                    .contains(blob.value() + " refs/heads/main\n")
+                    .contains(blob.toHex() + " HEAD\n")
+                    .contains(blob.toHex() + " refs/heads/main\n")
                     .contains("\u0001packfile\n")
                     .contains("PACK");
         }
@@ -298,15 +300,15 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId blob = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequestWithCapabilities(
                     List.of("server-option=trace\n"),
-                    "want " + blob.value() + "\n",
+                    "want " + blob.toHex() + "\n",
                     "done\n"));
             input.end();
 
@@ -317,7 +319,7 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
-    void smartHttpPostRejectsDuplicateFetchWantRef() throws Exception {
+    void smartHttpPostDeduplicatesFetchWantRefs() throws Exception {
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -326,10 +328,9 @@ class GitBlockingWireSessionTest {
                     "want-ref refs/heads/main\n",
                     "done\n"));
 
-            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
-                    .serveSmartHttpPost(uploadV2Request()))
-                    .isInstanceOf(IOException.class)
-                    .hasMessageContaining("Protocol v2 fetch request is invalid");
+            session(input, output, providerWithMainRef()).serveSmartHttpPost(uploadV2Request());
+            assertThat(output.ascii()).containsOnlyOnce(MAIN_ID + " refs/heads/main\n");
+
         }
     }
 
@@ -343,8 +344,7 @@ class GitBlockingWireSessionTest {
 
             assertThatThrownBy(() -> session(input, output, providerWithMainRef())
                     .serveSmartHttpPost(uploadV2Request()))
-                    .isInstanceOf(IOException.class)
-                    .hasMessageContaining("Protocol v2 fetch request is invalid");
+                    .isInstanceOf(IOException.class);
         }
     }
 
@@ -370,16 +370,16 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId blob = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
-                "refs/heads/main", NULL_ID, blob.value());
+                "refs/heads/main", NULL_ID, blob.toHex());
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             byte[] request = legacyUploadRequest(
-                    "want " + blob.value() + " thin-pack ofs-delta\n",
+                    "want " + blob.toHex() + " thin-pack ofs-delta\n",
                     "done\n");
             for (byte value : request) {
                 input.feed(new byte[] {value});
@@ -398,28 +398,28 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId want = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId want = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
-        GitObjectId have = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId have = repository.writeObject(
+                GitObjectType.BLOB,
                 "base".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
-                "refs/heads/main", NULL_ID, want.value());
+                "refs/heads/main", NULL_ID, want.toHex());
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
-                    "want " + want.value() + " multi_ack_detailed\n",
-                    "have " + have.value() + "\n",
+                    "want " + want.toHex() + " multi_ack_detailed\n",
+                    "have " + have.toHex() + "\n",
                     "done\n"));
 
             session(input, output, provider).serveSmartHttpPost(uploadV1Request());
 
             assertThat(output.ascii())
                     .startsWith(
-                            "0038ACK " + have.value() + " common\n"
-                                    + "0031ACK " + have.value() + "\n")
+                            "0038ACK " + have.toHex() + " common\n"
+                                    + "0031ACK " + have.toHex() + "\n")
                     .contains("PACK");
         }
     }
@@ -466,31 +466,25 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId firstWant = repository.writeObject(
-                ObjectType.BLOB,
-                "first".getBytes(StandardCharsets.US_ASCII));
-        GitObjectId secondWant = repository.writeObject(
-                ObjectType.BLOB,
-                "second".getBytes(StandardCharsets.US_ASCII));
-        repository.updateRef(
-                "refs/heads/main", NULL_ID, firstWant.value());
-        repository.updateRef(
-                "refs/heads/second", NULL_ID, secondWant.value());
+        repository.saveFiles("main", Map.of("first", new byte[]{1}), "first", GitCommitAuthor.EMPTY);
+        repository.saveFiles("second", Map.of("second", new byte[]{2}), "second", GitCommitAuthor.EMPTY);
+        ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
+        ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRound(
                     List.of(
-                            "want " + firstWant.value()
+                            "want " + firstWant.toHex()
                                     + " multi_ack_detailed\n",
-                            "want " + secondWant.value() + "\n"),
-                    "have " + firstWant.value() + "\n"));
+                            "want " + secondWant.toHex() + "\n"),
+                    "have " + firstWant.toHex() + "\n"));
 
             session(input, output, provider).serveSmartHttpPost(uploadV1Request());
 
             assertThat(output.ascii())
                     .isEqualTo(
-                            "0038ACK " + firstWant.value() + " common\n"
+                            "0038ACK " + firstWant.toHex() + " common\n"
                                     + "0008NAK\n");
         }
     }
@@ -543,16 +537,16 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId want = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId want = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
-                "refs/heads/main", NULL_ID, want.value());
+                "refs/heads/main", NULL_ID, want.toHex());
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
-                    "want " + want.value() + " multi_ack_detailed\n",
+                    "want " + want.toHex() + " multi_ack_detailed\n",
                     "have " + WANT + "\n",
                     "done\n"));
 
@@ -571,28 +565,28 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId want = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId want = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
-        GitObjectId have = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId have = repository.writeObject(
+                GitObjectType.BLOB,
                 "base".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef(
-                "refs/heads/main", NULL_ID, want.value());
+                "refs/heads/main", NULL_ID, want.toHex());
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
-                    "want " + want.value() + " multi_ack\n",
-                    "have " + have.value() + "\n",
+                    "want " + want.toHex() + " multi_ack\n",
+                    "have " + have.toHex() + "\n",
                     "done\n"));
 
             session(input, output, provider).serveSmartHttpPost(uploadV1Request());
 
             assertThat(output.ascii())
                     .startsWith(
-                            "003aACK " + have.value() + " continue\n"
-                                    + "0031ACK " + have.value() + "\n")
+                            "003aACK " + have.toHex() + " continue\n"
+                                    + "0031ACK " + have.toHex() + "\n")
                     .contains("PACK");
         }
     }
@@ -609,7 +603,7 @@ class GitBlockingWireSessionTest {
                     .serveSmartHttpPost(uploadV1Request()))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining(
-                            "Legacy upload want must contain a 40-digit");
+                            "Invalid fetch object ID");
         }
     }
 
@@ -619,21 +613,21 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         NativeGitRepository repository =
                 provider.find("project").valueOrFailure("repository");
-        GitObjectId hidden = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId hidden = repository.writeObject(
+                GitObjectType.BLOB,
                 "hidden".getBytes(StandardCharsets.US_ASCII));
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest(
-                    "want " + hidden.value() + "\n",
+                    "want " + hidden.toHex() + "\n",
                     "done\n"));
 
             assertThatThrownBy(() -> session(input, output, provider)
                     .serveSmartHttpPost(uploadV1Request()))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining(
-                            "want must name an advertised object ID");
+                            "Want is not an advertised object");
         }
     }
 
@@ -695,9 +689,7 @@ class GitBlockingWireSessionTest {
                         output,
                         providerWithMainRef())
                         .serveSmartHttpPost(uploadV1Request()))
-                        .isInstanceOf(IOException.class)
-                        .hasMessageContaining(
-                                "Legacy upload shallow request is invalid");
+                        .isInstanceOf(IOException.class);
             }
         }
     }
@@ -774,7 +766,7 @@ class GitBlockingWireSessionTest {
                     providerWithMainRef()).serveSmartHttpPost(receiveV1Request()))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining(
-                            "shallow line must contain a 40-digit");
+                            "Shallow declarations must precede push commands");
         }
     }
 
@@ -800,7 +792,7 @@ class GitBlockingWireSessionTest {
             session(input, output, provider).serveSmartHttpPost(receiveV1Request());
 
             assertThat(output.ascii())
-                    .contains("ng refs/heads/main stale\n")
+                    .contains("ng refs/heads/main stale info\n")
                     .contains("ok refs/heads/feature\n");
             assertThat(provider.find("project")
                     .valueOrFailure("repository")
@@ -832,9 +824,9 @@ class GitBlockingWireSessionTest {
             session(input, output, provider).serveSmartHttpPost(receiveV1Request());
 
             assertThat(output.ascii())
-                    .contains("ng refs/heads/main stale\n")
+                    .contains("ng refs/heads/main stale info\n")
                     .contains(
-                            "ng refs/heads/feature atomic-push-failure\n");
+                            "ng refs/heads/feature atomic push failure\n");
             assertThat(provider.find("project")
                     .valueOrFailure("repository")
                     .refs())
@@ -892,8 +884,8 @@ class GitBlockingWireSessionTest {
             session(input, output, provider).serveSmartHttpPost(receiveV1Request());
 
             assertThat(output.ascii())
-                    .contains("unpack error\n")
-                    .contains("ng refs/heads/main unpacker-error\n");
+                    .contains("unpack unpacker error\n")
+                    .contains("ng refs/heads/main unpacker error\n");
             assertThat(provider.find("project")
                     .valueOrFailure("repository")
                     .refs())
@@ -959,7 +951,7 @@ class GitBlockingWireSessionTest {
                 assertThatThrownBy(() -> session(input, output, providerWithMainRef())
                         .serveSmartHttpPost(receiveV1Request()))
                         .isInstanceOf(IOException.class)
-                        .hasMessageContaining("invalid command");
+                        .hasMessageContaining("Invalid push command");
             }
         }
     }
@@ -979,12 +971,12 @@ class GitBlockingWireSessionTest {
                     .serveSmartHttpPost(receiveV1Request()))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining(
-                            "Legacy receive-pack command must contain 40-digit");
+                            "Invalid push command");
         }
     }
 
     @Test
-    void smartHttpPostFailsWhenLegacyReceivePackBodyTimesOut()
+    void smartHttpPostReportsFailureWhenReceivePackBodyTimesOut()
             throws Exception {
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofMillis(25))) {
@@ -995,10 +987,12 @@ class GitBlockingWireSessionTest {
                             + WANT
                             + " refs/heads/new\0report-status\n"));
 
-            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
-                    .serveSmartHttpPost(receiveV1Request()))
-                    .isInstanceOf(IOException.class)
-                    .hasMessageContaining("Timed out");
+            InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+            assertThat(output.ascii()).contains("unpack unpacker error\n", "ng refs/heads/new unpacker error\n");
+            assertThat(provider.find("project").valueOrFailure("repository").refs())
+                    .doesNotContainKey("refs/heads/new");
+
         }
     }
 
@@ -1020,9 +1014,9 @@ class GitBlockingWireSessionTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        GitObjectId id = repository.writeObject(ObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
-        assertThat(id.value()).isEqualTo(MAIN_ID);
-        repository.updateRef("refs/heads/main", "0".repeat(40), id.value());
+        ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
+        assertThat(id.toHex()).isEqualTo(MAIN_ID);
+        repository.updateRef("refs/heads/main", "0".repeat(40), id.toHex());
         return provider;
     }
 

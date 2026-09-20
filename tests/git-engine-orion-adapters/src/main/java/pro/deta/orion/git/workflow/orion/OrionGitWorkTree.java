@@ -1,29 +1,37 @@
 package pro.deta.orion.git.workflow.orion;
 
+import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
+import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
+import org.eclipse.jgit.lib.NullProgressMonitor;
+import org.eclipse.jgit.lib.ObjectInserter;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore.Update;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.fetch.FetchPack;
+import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.workflow.GitClient;
 import pro.deta.orion.git.workflow.GitOperationResult;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitScenarioContext;
 import pro.deta.orion.git.workflow.GitWorkTree;
+import pro.deta.orion.git.workflow.RepositorySnapshot;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,15 +40,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 
 final class OrionGitWorkTree implements GitWorkTree {
     private static final String NULL_ID = "0".repeat(40);
     private static final String MAIN_REF = "refs/heads/" + GitScenarioContext.DEFAULT_BRANCH;
-    private static final PackIngestionLimits PACK_LIMITS = new PackIngestionLimits(
-            100L * 1024 * 1024,
-            1_000_000,
-            64 * 1024 * 1024);
     private static final GitCommitAuthor PARITY_AUTHOR = new GitCommitAuthor(
             GitScenarioContext.IDENTITY_NAME,
             GitScenarioContext.IDENTITY_EMAIL);
@@ -64,17 +71,11 @@ final class OrionGitWorkTree implements GitWorkTree {
     static OrionGitWorkTree create(OrionGitClient client, Path directory) throws IOException {
         Path workTree = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
         Path gitDirectory = workTree.resolve(".git");
-        Files.createDirectories(gitDirectory.resolve("objects"));
-        Files.createDirectories(gitDirectory.resolve("refs"));
-        Files.writeString(
-                gitDirectory.resolve("HEAD"),
-                "ref: " + MAIN_REF + "\n",
-                StandardCharsets.US_ASCII);
+        Files.createDirectories(gitDirectory);
+        GitStorageApi storage = new GitStorageApi(gitDirectory);
+        storage.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
         NativeGitRepository repository = new NativeGitRepository(
-                workTree.getFileName().toString(),
-                new LooseRefStore(gitDirectory),
-                new LooseObjectStore(gitDirectory.resolve("objects")),
-                MAIN_REF);
+                workTree.getFileName().toString(), storage, MAIN_REF);
         return new OrionGitWorkTree(client, workTree, repository);
     }
 
@@ -86,6 +87,37 @@ final class OrionGitWorkTree implements GitWorkTree {
     @Override
     public Path directory() {
         return directory;
+    }
+
+    @Override
+    public RepositorySnapshot snapshot() throws Exception {
+        Map<String, String> refs = repository.refs();
+        Set<ObjectId> roots = new LinkedHashSet<>();
+        for (Map.Entry<String, String> ref : refs.entrySet()) {
+            if (ref.getKey().startsWith("refs/heads/") || ref.getKey().startsWith("refs/tags/")) {
+                roots.add(new ObjectId(ref.getValue()));
+            }
+        }
+        FetchPlan plan = new FetchPlan(roots, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
+                OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
+        FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), pack.objectCount())) {
+            pack.writeTo(writer);
+            writer.finish();
+        }
+        try (InMemoryRepository observer = new InMemoryRepository(new DfsRepositoryDescription());
+             ObjectInserter inserter = observer.newObjectInserter()) {
+            inserter.newPackParser(new ByteArrayInputStream(bytes.toByteArray())).parse(NullProgressMonitor.INSTANCE);
+            inserter.flush();
+            for (Map.Entry<String, String> ref : refs.entrySet()) {
+                org.eclipse.jgit.lib.RefUpdate update = observer.updateRef(ref.getKey());
+                update.setNewObjectId(org.eclipse.jgit.lib.ObjectId.fromString(ref.getValue()));
+                update.forceUpdate();
+            }
+            observer.updateRef("HEAD").link("refs/heads/" + currentBranch);
+            return RepositorySnapshot.capture(observer);
+        }
     }
 
     @Override
@@ -148,7 +180,7 @@ final class OrionGitWorkTree implements GitWorkTree {
                 client.receivePack().discover(client.uri(remote), client.options()),
                 "receive-pack discovery");
         List<GitReceivePackRequest.Command> commands = new ArrayList<>();
-        Set<GitObjectId> wants = new LinkedHashSet<>();
+        Set<ObjectId> wants = new LinkedHashSet<>();
         for (String refSpec : refSpecs) {
             RefSpec parsed = RefSpec.parse(refSpec);
             String newId = resolve(parsed.source());
@@ -163,19 +195,17 @@ final class OrionGitWorkTree implements GitWorkTree {
                     oldId == null ? NULL_ID : oldId,
                     newId,
                     parsed.destination()));
-            wants.add(GitObjectId.of(newId));
+            wants.add(new ObjectId(newId));
         }
-        NativeFetchRequest packRequest = new NativeFetchRequest(
-                wants,
-                Set.of(),
-                true,
-                Set.of(),
-                NativeFetchOptions.DEFAULT);
+        FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
+                OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
         GitReceivePackRequest request = new GitReceivePackRequest(
                 commands,
                 output -> {
-                    try (NativePackProducer producer = repository.fetch(packRequest)) {
-                        producer.writeTo(output);
+                    FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+                    try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                        pack.writeTo(writer);
+                        writer.finish();
                     }
                 });
         OrionGitClient.requireAccepted(OrionGitClient.requireSuccess(
@@ -189,7 +219,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         String objectId = resolve(target);
         String oldId = repository.refs().getOrDefault(refName, NULL_ID);
         RefUpdateResult result = repository.updateRef(refName, oldId, objectId);
-        if (result == RefUpdateResult.STALE) {
+        if (result.status() != RefUpdateResult.Status.APPLIED) {
             throw new IllegalStateException("Orion local ref update was stale: " + refName);
         }
     }
@@ -211,9 +241,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         String trackingRef = trackingRef(remote, branch);
         String remoteId = requireRef(trackingRef);
         String localId = repository.refs().get(localRef);
-        if (localId != null && !new NativeObjectClosure(repository::readObject).allRootsReachAny(
-                List.of(GitObjectId.of(remoteId)),
-                List.of(GitObjectId.of(localId)))) {
+        if (localId != null && !new GitObjectGraph(repository.storage()).isAncestor(new ObjectId(localId), new ObjectId(remoteId))) {
             throw new IllegalStateException("Orion pull is not a fast-forward for " + localRef);
         }
         updateRef(localRef, trackingRef);
@@ -235,10 +263,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             updateRef(refName, startPoint);
         }
         currentBranch = branch;
-        Files.writeString(
-                directory.resolve(".git/HEAD"),
-                "ref: " + refName + "\n",
-                StandardCharsets.US_ASCII);
+        repository.storage().updateHead(new Head.Symbolic(new RefId(refName)));
     }
 
     @Override
@@ -264,27 +289,26 @@ final class OrionGitWorkTree implements GitWorkTree {
                 .map(GitRemoteAdvertisement.Ref::objectId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Remote Git ref is missing: " + remoteRef));
-        Set<GitObjectId> haves = new LinkedHashSet<>();
+        Set<ObjectId> haves = new LinkedHashSet<>();
         for (String objectId : repository.refs().values()) {
-            haves.add(GitObjectId.of(objectId));
+            haves.add(new ObjectId(objectId));
         }
         try (PackIngestionOutput target = new PackIngestionOutput(
-                repository.beginPackIngestion(PACK_LIMITS))) {
+                repository.storage())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.of(wantedId),
-                    haves.stream().map(GitObjectId::value).toList(),
+                    haves.stream().map(ObjectId::toHex).toList(),
                     target,
                     ignored -> { });
             OrionGitClient.requireSuccess(
                     client.uploadPack().fetch(client.uri(remote), client.options(), request),
                     "upload-pack");
-            LooseObjectStore quarantine = target.complete().quarantine();
+            repository.storage().persist(target.complete());
             String localTrackingRef = trackingRef(remoteName, branch);
             String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
-            List<RefUpdateResult> results = repository.publishObjectsAndRefs(
-                    quarantine,
-                    List.of(new Update(localTrackingRef, oldId, wantedId)));
-            if (results.contains(RefUpdateResult.STALE)) {
+            List<RefUpdateResult> results = repository.publishRefs(
+                    List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
+            if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
                 throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
             }
         }
@@ -308,7 +332,7 @@ final class OrionGitWorkTree implements GitWorkTree {
                 ? repository.refs().get("refs/heads/" + currentBranch)
                 : repository.refs().get(target);
         if (objectId == null && target.length() == 40) {
-            GitObjectId candidate = GitObjectId.of(target);
+            ObjectId candidate = new ObjectId(target);
             if (repository.readObject(candidate).isPresent()) {
                 objectId = target;
             }
@@ -319,13 +343,11 @@ final class OrionGitWorkTree implements GitWorkTree {
         return objectId;
     }
 
-    private boolean isFastForward(String refName, String oldId, String newId) {
+    private boolean isFastForward(String refName, String oldId, String newId) throws IOException {
         if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
             return true;
         }
-        return new NativeObjectClosure(repository::readObject).allRootsReachAny(
-                List.of(GitObjectId.of(newId)),
-                List.of(GitObjectId.of(oldId)));
+        return new GitObjectGraph(repository.storage()).isAncestor(new ObjectId(oldId), new ObjectId(newId));
     }
 
     private static String requireFilePath(String pathspec) {

@@ -1,39 +1,41 @@
 package pro.deta.orion.git.proxy;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.internal.storage.pack.DeltaEncoder;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.pack.DeltaPackBuilder;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.PackIngestor;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
+import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,29 +46,46 @@ class NativeBootstrapGitPackReplayTest {
     @TempDir
     private Path directory;
 
-    @Test
-    void replaysThinPackOnlyWhenItsExternalBaseIsKnownUpstream() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void replaysCompletedPackWithItsBaseRegardlessOfUpstreamHistory(boolean disk) throws Exception {
         for (boolean upstreamHasBase : List.of(true, false)) {
             Path bare = directory.resolve("upstream-" + upstreamHasBase + ".git");
-            CountingRepository repository = new CountingRepository();
+            NativeGitRepository repository = disk
+                    ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
+                            .create("proxy").valueOrFailure("repository")
+                    : new NativeGitRepository("proxy", new GitStorageApi(), "refs/heads/main");
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
             target[4096] ^= 1;
-            GitObjectId baseId = repository.writeObject(ObjectType.BLOB, base);
-            GitObjectId targetId = repository.writeObject(ObjectType.BLOB, target);
-            byte[] original;
-            try (NativePackProducer producer = new DeltaPackBuilder()
-                    .producer(repository::readObject, List.of(targetId), List.of(baseId))) {
-                ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                producer.writeTo(new OutputStreamBufferedByteOutput(bytes));
-                original = bytes.toByteArray();
+            pro.deta.orion.git.parser.v2.id.ObjectId baseId = repository.writeObject(GitObjectType.BLOB, base);
+            pro.deta.orion.git.parser.v2.id.ObjectId targetId = repository.writeObject(GitObjectType.BLOB, target);
+            ByteArrayOutputStream delta = new ByteArrayOutputStream();
+            DeltaEncoder encoder = new DeltaEncoder(delta, base.length, target.length);
+            encoder.copy(0, 4096);
+            encoder.insert(new byte[]{target[4096]});
+            encoder.copy(4097, target.length - 4097);
+            ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+            try (DeflaterOutputStream deflater = new DeflaterOutputStream(compressed)) {
+                deflater.write(delta.toByteArray());
             }
-            PackIngestionResult.Complete received = ingest(repository, original);
-            assertThat(received.externalBaseIds()).containsExactly(baseId);
-            byte[] alteredRead = received.packBytes();
-            alteredRead[0] = 0;
-            assertThat(received.packBytes()).isEqualTo(original);
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
+                 BufferedByteInputV2 input = new BufferedByteInputV2(
+                         new ByteArrayInputStream(compressed.toByteArray()))) {
+                writer.writeCompressed(GitObjectType.REF_DELTA, delta.size(),
+                        Optional.of(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex())), input);
+                writer.finish();
+            }
+            byte[] original = bytes.toByteArray();
+            Optional<PackId> received = ingest(repository, original);
+            byte[] completed;
+            try (IndexedPack pack = repository.storage().openPack(received.orElseThrow()).orElseThrow();
+                 BufferedByteInputV2 input = pack.input()) {
+                completed = input.newInputStream().readAllBytes();
+                assertThat(pack.find(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()))).isPresent();
+            }
 
             try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
                 if (upstreamHasBase) {
@@ -79,22 +98,16 @@ class NativeBootstrapGitPackReplayTest {
                     }
                 }
                 ByteArrayOutputStream sent = new ByteArrayOutputStream();
-                List<LooseRefStore.Update> updates = List.of(new LooseRefStore.Update(
-                        REF, upstreamHasBase ? baseId.value() : ZERO, targetId.value()));
+                List<RefUpdate> updates = List.of(RefUpdate.fromWire(
+                        REF, upstreamHasBase ? baseId.toHex() : ZERO, targetId.toHex()));
 
                 assertThat(new NativeBootstrapGitPusher().push(location(bare), recordingTransport(sent),
                         repository, received, updates, true)).containsExactly(true);
 
                 byte[] forwarded = packFrom(sent.toByteArray());
-                if (upstreamHasBase) {
-                    assertThat(forwarded).isEqualTo(original);
-                    assertThat(repository.rebuiltPacks).isZero();
-                } else {
-                    assertThat(forwarded).isNotEqualTo(original);
-                    assertThat(repository.rebuiltPacks).isEqualTo(1);
-                }
-                assertThat(upstream.getRepository().resolve(REF).name()).isEqualTo(targetId.value());
-                assertThat(upstream.getRepository().open(ObjectId.fromString(targetId.value())).getBytes())
+                assertThat(forwarded).isEqualTo(completed);
+                assertThat(upstream.getRepository().resolve(REF).name()).isEqualTo(targetId.toHex());
+                assertThat(upstream.getRepository().open(ObjectId.fromString(targetId.toHex())).getBytes())
                         .isEqualTo(target);
             }
         }
@@ -102,31 +115,32 @@ class NativeBootstrapGitPackReplayTest {
 
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
-        CountingRepository repository = new CountingRepository();
+        NativeGitRepository repository = new NativeGitRepository(
+                    "proxy", new GitStorageApi(), "refs/heads/main");
         repository.saveFiles("main", Map.of("config.txt", new byte[]{1}), "local", GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");
         var unrelated = repository.prepareFileUpdate("other", Map.of("other.txt", new byte[]{2}),
                 "unrelated", GitCommitAuthor.EMPTY);
-        PackIngestionResult.Complete received = ingest(repository, unrelated.pack());
+        Optional<PackId> received = ingest(repository, unrelated.pack());
         Path bare = directory.resolve("missing-objects.git");
 
         try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
             assertThat(new NativeBootstrapGitPusher().push(location(bare), new GitFileClientTransport(),
                     repository, received,
-                    List.of(new LooseRefStore.Update("refs/heads/main", ZERO, commit)), true))
+                    List.of(RefUpdate.fromWire("refs/heads/main", ZERO, commit)), true))
                     .containsExactly(true);
-            assertThat(repository.rebuiltPacks).isEqualTo(1);
             assertThat(upstream.getRepository().resolve("refs/heads/main").name()).isEqualTo(commit);
         }
     }
 
-    private static PackIngestionResult.Complete ingest(NativeGitRepository repository, byte[] bytes) {
-        ByteBuf input = Unpooled.wrappedBuffer(bytes);
-        try (PackIngestor ingestor = new PackIngestor(
-                new PackIngestionLimits(bytes.length, 100, 1024 * 1024), repository::readObject)) {
-            return (PackIngestionResult.Complete) ingestor.accept(input);
-        } finally {
-            input.release();
+    private static Optional<PackId> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+            IndexedPack pack = repository.ingest(input);
+            try {
+                return Optional.of(repository.storage().persist(pack));
+            } finally {
+                pack.discard();
+            }
         }
     }
 
@@ -183,17 +197,4 @@ class NativeBootstrapGitPackReplayTest {
         return BootstrapGitLocation.parse(source);
     }
 
-    private static final class CountingRepository extends NativeGitRepository {
-        private int rebuiltPacks;
-
-        private CountingRepository() {
-            super("proxy", new LooseRefStore(), new LooseObjectStore(), "refs/heads/main");
-        }
-
-        @Override
-        public NativePackProducer fetch(NativeFetchRequest request) {
-            rebuiltPacks++;
-            return super.fetch(request);
-        }
-    }
 }

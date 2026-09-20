@@ -1,12 +1,13 @@
 package pro.deta.orion.git.nativestorage.object;
 
-import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.util.Objects;
 
 public record LooseObject(
-        GitObjectId id,
-        ObjectType type,
+        ObjectId id,
+        GitObjectType type,
         byte[] data) {
 
     public LooseObject {

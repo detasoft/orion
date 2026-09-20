@@ -4,16 +4,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
@@ -218,9 +217,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitRepository repository = createRepository(backend, "demo");
         String content = "tree " + "f".repeat(40) + "\nauthor A <a@test> 0 +0000\n"
                 + "committer A <a@test> 0 +0000\n\nmissing tree\n";
-        GitObjectId commit = repository.writeObject(ObjectType.COMMIT, content.getBytes(StandardCharsets.US_ASCII));
+        ObjectId commit = repository.writeObject(GitObjectType.COMMIT, content.getBytes(StandardCharsets.US_ASCII));
         List<RefUpdateResult> results = service.open(receiveRequest("demo"), this).publish(Optional.empty(),
-                List.of(RefUpdate.fromWire("refs/heads/main", NULL_ID, commit.value())), true);
+                List.of(RefUpdate.fromWire("refs/heads/main", NULL_ID, commit.toHex())), true);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(OBJECT_NOT_FOUND);
         assertThat(repository.refs()).isEmpty();
     }

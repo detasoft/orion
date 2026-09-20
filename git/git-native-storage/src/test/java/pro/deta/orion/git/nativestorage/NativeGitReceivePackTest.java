@@ -1,10 +1,11 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +24,7 @@ class NativeGitReceivePackTest {
         for (boolean atomic : List.of(true, false)) {
             NativeGitRepository repository = repository();
             NativeGitFileUpdate prepared = prepare(repository, "initial");
-            String newId = prepared.refUpdates().getFirst().newId();
+            String newId = prepared.refUpdates().getFirst().newId().orElseThrow().toHex();
             List<String> calls = new ArrayList<>();
             GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
                 @Override
@@ -45,13 +46,13 @@ class NativeGitReceivePackTest {
                 }
             };
 
-            List<ReceivePackStatus> statuses = repository.publishPack(prepared.pack(), List.of(
-                    new LooseRefStore.Update(MAIN, ZERO, newId),
-                    new LooseRefStore.Update(PROTECTED, ZERO, newId)), atomic, hook);
+            List<RefUpdateResult> statuses = repository.publishPack(prepared.pack(), List.of(
+                    RefUpdate.fromWire(MAIN, ZERO, newId),
+                    RefUpdate.fromWire(PROTECTED, ZERO, newId)), atomic, hook);
 
-            assertThat(statuses).containsExactly(
-                    new ReceivePackStatus(MAIN, !atomic, atomic ? "atomic-push-failure" : ""),
-                    new ReceivePackStatus(PROTECTED, false, "ACCESS_DENIED"));
+            assertThat(statuses).extracting(RefUpdateResult::status).containsExactly(
+                    atomic ? RefUpdateResult.Status.ATOMIC_ABORTED : RefUpdateResult.Status.APPLIED,
+                    RefUpdateResult.Status.REJECTED);
             assertThat(repository.refs()).doesNotContainKey(PROTECTED);
             if (atomic) {
                 assertThat(repository.refs()).isEmpty();
@@ -76,7 +77,7 @@ class NativeGitReceivePackTest {
         assertThatThrownBy(() -> repository.publishPack(
                 prepared.pack(), prepared.refUpdates(), true, denied))
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
-        assertThat(repository.publishedPacks()).isEmpty();
+        assertThat(repository.storage().packIds()).isEmpty();
         assertThat(repository.refs()).isEmpty();
     }
 
@@ -90,7 +91,8 @@ class NativeGitReceivePackTest {
 
         assertThat(repository.publishPack(stale.pack(), stale.refUpdates(), true,
                 GitNativeRepositoryAccessHook.ALLOW_ALL))
-                .containsExactly(new ReceivePackStatus(MAIN, false, "stale"));
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(repository.refs()).containsEntry(MAIN, current);
     }
 
@@ -100,9 +102,10 @@ class NativeGitReceivePackTest {
         NativeGitFileUpdate prepared = prepare(repository, "initial");
 
         assertThat(repository.publishPack(prepared.pack(),
-                List.of(new LooseRefStore.Update(MAIN, ZERO, "1".repeat(40))), true,
+                List.of(RefUpdate.fromWire(MAIN, ZERO, "1".repeat(40))), true,
                 GitNativeRepositoryAccessHook.ALLOW_ALL))
-                .containsExactly(new ReceivePackStatus(MAIN, false, "missing-necessary-objects"));
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.OBJECT_NOT_FOUND);
         assertThat(repository.refs()).isEmpty();
     }
 
@@ -117,12 +120,12 @@ class NativeGitReceivePackTest {
         String descendant = repository.refs().get(MAIN);
         repository.saveFiles("side", files("side"), "side", GitCommitAuthor.EMPTY);
         String side = repository.refs().get("refs/heads/side");
-        String treeLine = new String(repository.readObject(GitObjectId.of(descendant)).orElseThrow().data(),
+        String treeLine = new String(repository.readObject(new ObjectId(descendant)).orElseThrow().data(),
                 java.nio.charset.StandardCharsets.UTF_8).split("\n")[0];
-        String merge = repository.writeObject(ObjectType.COMMIT, (treeLine + "\nparent " + side
+        String merge = repository.writeObject(GitObjectType.COMMIT, (treeLine + "\nparent " + side
                 + "\nparent " + descendant + "\nauthor Test <test@example.invalid> 0 +0000\n"
                 + "committer Test <test@example.invalid> 0 +0000\n\nmerge\n")
-                .getBytes(java.nio.charset.StandardCharsets.UTF_8)).value();
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toHex();
         repository.updateRef(PROTECTED, ZERO, initial);
         List<Boolean> forceChecks = new ArrayList<>();
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -137,14 +140,17 @@ class NativeGitReceivePackTest {
         byte[] pack = prepare(repository, "pack").pack();
 
         assertThat(repository.publishPack(pack,
-                List.of(new LooseRefStore.Update(PROTECTED, initial, descendant)), true, hook))
-                .containsExactly(new ReceivePackStatus(PROTECTED, true, ""));
+                List.of(RefUpdate.fromWire(PROTECTED, initial, descendant)), true, hook))
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.APPLIED);
         assertThat(repository.publishPack(pack,
-                List.of(new LooseRefStore.Update(PROTECTED, descendant, merge)), true, hook))
-                .containsExactly(new ReceivePackStatus(PROTECTED, true, ""));
+                List.of(RefUpdate.fromWire(PROTECTED, descendant, merge)), true, hook))
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.APPLIED);
         assertThat(repository.publishPack(pack,
-                List.of(new LooseRefStore.Update(PROTECTED, merge, side)), true, hook))
-                .containsExactly(new ReceivePackStatus(PROTECTED, false, "ACCESS_DENIED"));
+                List.of(RefUpdate.fromWire(PROTECTED, merge, side)), true, hook))
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.REJECTED);
         assertThat(forceChecks).containsExactly(false, false, true);
         assertThat(repository.refs()).containsEntry(PROTECTED, merge);
     }
@@ -165,7 +171,8 @@ class NativeGitReceivePackTest {
         };
 
         assertThat(repository.publishPack(prepared.pack(), prepared.refUpdates(), true, hook))
-                .containsExactly(new ReceivePackStatus(MAIN, false, "stale"));
+                .extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(repository.refs()).containsEntry(MAIN, concurrent);
     }
 

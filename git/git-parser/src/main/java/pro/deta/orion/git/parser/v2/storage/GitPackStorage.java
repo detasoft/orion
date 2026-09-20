@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
@@ -171,6 +171,9 @@ final class GitPackStorage {
                 Optional<IndexedPack.EntryMetadata> foundEntry = index.find(id);
                 if (foundEntry.isEmpty()) {
                     return Optional.empty();
+                }
+                if (!index.id().equals(packId)) {
+                    throw new IOException("Stored pack checksum does not match its identity");
                 }
                 IndexedPack.EntryMetadata entry = foundEntry.orElseThrow();
                 return Optional.of(new Location(packId, entry, index.dataEnd(entry.offset()),

@@ -9,7 +9,9 @@ import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -72,17 +74,17 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
             exchange.sendError(SC_NOT_FOUND);
             return;
         }
-        Optional<PublishedPackContent> pack =
-                repository.get().openPublishedPack(match.get().packId());
+        Optional<IndexedPack> pack =
+                repository.get().storage().openPack(new PackId(match.get().packId()));
         if (pack.isEmpty()) {
             exchange.sendError(SC_NOT_FOUND);
             return;
         }
-        try (PublishedPackContent content = pack.get()) {
+        try (IndexedPack content = pack.get(); BufferedByteInputV2 input = content.input()) {
             OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, PACK_CONTENT_TYPE)
                     .withHeader("Cache-Control", "no-cache")
-                    .withContentLength(content.manifest().packBytes());
-            content.input().transferTo(exchange.openResponseBody(metadata));
+                    .withContentLength(content.size());
+            input.newInputStream().transferTo(exchange.openResponseBody(metadata));
         }
     }
 

@@ -3,14 +3,13 @@ package pro.deta.orion.git.proxy;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.GitObjectId;
-import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.client.GitFileClientTransport;
+import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
 import java.nio.file.Files;
@@ -101,17 +100,15 @@ class NativeBootstrapGitFetcherTest {
 
     @Test
     void rejectsIncompleteObjectClosureBeforeRefPublication() {
-        LooseObjectStore quarantine = new LooseObjectStore();
-        GitObjectId commit = quarantine.write(
-                ObjectType.COMMIT,
-                ("tree " + "f".repeat(40) + "\n\nmissing tree\n").getBytes());
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
+        ObjectId commit = repository.writeObject(
+                GitObjectType.COMMIT,
+                ("tree " + "f".repeat(40) + "\n\nmissing tree\n").getBytes());
 
         assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(
                 repository,
-                quarantine,
-                new LooseRefStore.Update("refs/heads/main", "0".repeat(40), commit.value())))
+                RefUpdate.fromWire("refs/heads/main", "0".repeat(40), commit.toHex())))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during complete object validation");
         assertThat(repository.refs()).isEmpty();
@@ -125,8 +122,8 @@ class NativeBootstrapGitFetcherTest {
         repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", new byte[]{2}), "remote", GitCommitAuthor.EMPTY);
         Map<String, String> before = repository.refs();
 
-        assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(repository, new LooseObjectStore(),
-                new LooseRefStore.Update("refs/heads/main", "1".repeat(40), before.get("refs/heads/incoming"))))
+        assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(repository,
+                RefUpdate.fromWire("refs/heads/main", "1".repeat(40), before.get("refs/heads/incoming"))))
                 .isInstanceOfSatisfying(BootstrapGitProxyException.class, failure ->
                         assertThat(failure.status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT));
         assertThat(repository.refs()).isEqualTo(before);

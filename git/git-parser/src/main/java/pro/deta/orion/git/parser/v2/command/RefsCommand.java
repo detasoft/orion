@@ -8,14 +8,16 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -87,19 +89,40 @@ public final class RefsCommand implements GitCommand {
         Set<ObjectId> visited = new HashSet<>();
         ObjectId current = id;
         ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage,
-                (type, size, base, input) -> type == GitObjectType.TAG
-                        ? GitObjectLinks.read(type, size, base, input) : new GitObjectLinks(type, List.of()));
-        while (visited.add(current)) {
+                (type, size, base, input) -> tagTarget(type, size, input));
+        while (visited.size() <= 256 && visited.add(current)) {
             ObjectId object = current;
             GitObjectLinks links = storage.readObject(object, (type, size, base, input) -> switch (type) {
                 case TAG, REF_DELTA, OFS_DELTA -> reader.read(type, size, base, input);
                 default -> new GitObjectLinks(type, List.of());
-            }).orElseThrow(() -> new IOException("Missing object while peeling ref: " + object));
+            }).orElse(null);
+            if (links == null) {
+                return Optional.empty();
+            }
             if (links.type() != GitObjectType.TAG) {
                 return current.equals(id) ? Optional.empty() : Optional.of(current);
             }
+            if (links.targets().isEmpty()) {
+                return Optional.empty();
+            }
             current = links.targets().getFirst();
         }
-        throw new IOException("Cyclic tag while peeling ref: " + current);
+        return Optional.empty();
+    }
+
+    private static GitObjectLinks tagTarget(GitObjectType type, long size, BufferedByteInputV2 input)
+            throws IOException {
+        if (type != GitObjectType.TAG || size < 48) {
+            return new GitObjectLinks(type, List.of());
+        }
+        String line = new String(input.readBytes(48), StandardCharsets.US_ASCII);
+        if (!line.startsWith("object ") || line.charAt(47) != '\n') {
+            return new GitObjectLinks(type, List.of());
+        }
+        try {
+            return new GitObjectLinks(type, List.of(new ObjectId(line.substring(7, 47))));
+        } catch (IllegalArgumentException malformed) {
+            return new GitObjectLinks(type, List.of());
+        }
     }
 }

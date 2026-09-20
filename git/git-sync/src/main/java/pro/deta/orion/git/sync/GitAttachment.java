@@ -1,9 +1,8 @@
 package pro.deta.orion.git.sync;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore.Update;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,14 +56,14 @@ public final class GitAttachment {
         return Map.copyOf(heads);
     }
 
-    private boolean publishLocalChanges(GitAttachPlan plan) {
-        List<Update> updates = new ArrayList<>();
+    private boolean publishLocalChanges(GitAttachPlan plan) throws GitRemoteException {
+        List<RefUpdate> updates = new ArrayList<>();
         for (GitBranchPlan branch : plan.branches()) {
             String newObjectId = branch.action() == GitBranchAction.CREATE_LOCAL
                     || branch.action() == GitBranchAction.FAST_FORWARD_LOCAL
                     ? branch.upstreamObjectId().orElseThrow()
                     : branch.localObjectId().orElseThrow();
-            updates.add(new Update(
+            updates.add(RefUpdate.fromWire(
                     branch.refName(),
                     branch.localObjectId().orElse(NULL_ID),
                     newObjectId));
@@ -72,10 +71,17 @@ public final class GitAttachment {
         if (updates.isEmpty()) {
             return true;
         }
-        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
-                new LooseObjectStore(),
-                updates);
-        return !results.contains(RefUpdateResult.STALE);
+        List<RefUpdateResult> results = repository.publishRefs(updates, true);
+        boolean conflict = false;
+        for (RefUpdateResult result : results) {
+            if (result.status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH) {
+                conflict = true;
+            } else if (result.status() != RefUpdateResult.Status.APPLIED
+                    && result.status() != RefUpdateResult.Status.ATOMIC_ABORTED) {
+                throw GitRemoteException.local("local ref publication", false, null);
+            }
+        }
+        return !conflict;
     }
 
     private GitAttachmentResult pushLocalChanges(GitAttachPlan plan)

@@ -1,18 +1,10 @@
 package pro.deta.orion.git.proxy;
 
 import org.eclipse.jgit.api.Git;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitClientFailure;
 import pro.deta.orion.git.client.GitClientTransportException;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
-import org.junit.jupiter.api.Test;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestor;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
@@ -20,20 +12,25 @@ import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
 
 class NativeBootstrapGitPusherTest {
     private static final String NULL_ID = "0".repeat(40);
@@ -45,15 +42,7 @@ class NativeBootstrapGitPusherTest {
     void runtimeProxyPushesNativeCommitToFileUpstream() throws Exception {
         Upstream upstream = upstream("success", "first");
         BootstrapGitLocation location = location(upstream.bare());
-        AtomicInteger rebuiltPacks = new AtomicInteger();
-        NativeGitRepository repository = new NativeGitRepository(
-                location.proxyName(), new LooseRefStore(), new LooseObjectStore(), location.refName()) {
-            @Override
-            public NativePackProducer fetch(NativeFetchRequest request) {
-                rebuiltPacks.incrementAndGet();
-                return super.fetch(request);
-            }
-        };
+        NativeGitRepository repository = repository(location);
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
         NativeGitFileUpdate update = repository.prepareFileUpdate(
@@ -73,10 +62,9 @@ class NativeBootstrapGitPusherTest {
                 update.refUpdates(),
                 true);
 
-        assertThat(results).doesNotContain(RefUpdateResult.STALE);
+        assertThat(results).extracting(RefUpdateResult::status).containsOnly(RefUpdateResult.Status.APPLIED);
         assertThat(proxy.syncObservation().status()).isEqualTo(SUCCESS);
         assertThat(proxy.syncObservation().observedAt()).isNotNull();
-        assertThat(rebuiltPacks).hasValue(0);
         try (Git bareGit = Git.open(upstream.bare().toFile())) {
             assertThat(repository.refs().get(location.refName()))
                     .isEqualTo(bareGit.getRepository().resolve(location.refName()).name());
@@ -97,8 +85,7 @@ class NativeBootstrapGitPusherTest {
                 Map.of("orion.xml", "proxy change".getBytes()),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
-        PackIngestionResult.Complete received = ingest(repository, update);
-        repository.publishObjects(received.quarantine());
+        Optional<PackId> received = ingest(repository, update);
         Files.writeString(upstream.worktree().resolve("orion.xml"), "upstream change");
         upstream.git().add().addFilepattern("orion.xml").call();
         upstream.git().commit().setMessage("upstream update")
@@ -117,7 +104,8 @@ class NativeBootstrapGitPusherTest {
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
                 (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
-        assertThat(proxy.publish(received, update.refUpdates(), true)).containsExactly(RefUpdateResult.STALE);
+        assertThat(proxy.publish(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(proxy.syncObservation().status()).isEqualTo(CONFLICT);
         assertThat(repository.refs()).containsEntry(location.refName(), localOldId);
         assertThat(cloneContent(upstream.bare(), "conflict-checkout")).isEqualTo("upstream change");
@@ -147,9 +135,9 @@ class NativeBootstrapGitPusherTest {
 
     @Test
     void mapsReceiveStatusesToRequestedRefOrder() {
-        List<LooseRefStore.Update> updates = List.of(
-                new LooseRefStore.Update("refs/heads/first", NULL_ID, "1".repeat(40)),
-                new LooseRefStore.Update("refs/heads/second", NULL_ID, "2".repeat(40)));
+        List<RefUpdate> updates = List.of(
+                RefUpdate.fromWire("refs/heads/first", NULL_ID, "1".repeat(40)),
+                RefUpdate.fromWire("refs/heads/second", NULL_ID, "2".repeat(40)));
         GitReceivePackResult result = new GitReceivePackResult(
                 new GitRemoteAdvertisement(Set.of(), List.of()),
                 "ok",
@@ -212,14 +200,14 @@ class NativeBootstrapGitPusherTest {
     private record Upstream(Git git, Path worktree, Path bare) {
     }
 
-    private static PackIngestionResult.Complete ingest(NativeGitRepository repository, NativeGitFileUpdate update) {
-        byte[] pack = update.pack();
-        ByteBuf input = Unpooled.wrappedBuffer(pack);
-        try (PackIngestor ingestor = new PackIngestor(
-                new PackIngestionLimits(pack.length, 100, 1024 * 1024), repository::readObject)) {
-            return (PackIngestionResult.Complete) ingestor.accept(input);
-        } finally {
-            input.release();
+    private static Optional<PackId> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
+            IndexedPack pack = repository.ingest(input);
+            try {
+                return Optional.of(repository.storage().persist(pack));
+            } finally {
+                pack.discard();
+            }
         }
     }
 }

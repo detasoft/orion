@@ -1,12 +1,11 @@
 package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -18,7 +17,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -37,8 +35,8 @@ class GitBlockingWireSessionShallowHistoryTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId blob = repository.writeObject(
+                GitObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         String shallow = "3".repeat(40);
         try (QueueByteSource input = new QueueByteSource(
@@ -46,7 +44,7 @@ class GitBlockingWireSessionShallowHistoryTest {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ByteArrayBuilder request = new ByteArrayBuilder();
             request.write(command("fetch"));
-            request.writePacket("want " + blob.value() + "\n");
+            request.writePacket("want " + blob.toHex() + "\n");
             request.writePacket("shallow " + shallow + "\n");
             request.writePacket("deepen 1\n");
             request.writePacket("deepen-relative\n");
@@ -72,25 +70,25 @@ class GitBlockingWireSessionShallowHistoryTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId rootBlob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId rootBlob = repository.writeObject(
+                GitObjectType.BLOB,
                 "root".getBytes(StandardCharsets.US_ASCII));
-        GitObjectId rootTree = repository.writeObject(
-                ObjectType.TREE,
+        ObjectId rootTree = repository.writeObject(
+                GitObjectType.TREE,
                 treeEntry("100644", "root.txt", rootBlob));
-        GitObjectId rootCommit = writeCommit(
+        ObjectId rootCommit = writeCommit(
                 repository,
                 rootTree,
                 null,
                 "root",
                 100);
-        GitObjectId tipBlob = repository.writeObject(
-                ObjectType.BLOB,
+        ObjectId tipBlob = repository.writeObject(
+                GitObjectType.BLOB,
                 "tip".getBytes(StandardCharsets.US_ASCII));
-        GitObjectId tipTree = repository.writeObject(
-                ObjectType.TREE,
+        ObjectId tipTree = repository.writeObject(
+                GitObjectType.TREE,
                 treeEntry("100644", "tip.txt", tipBlob));
-        GitObjectId tipCommit = writeCommit(
+        ObjectId tipCommit = writeCommit(
                 repository,
                 tipTree,
                 rootCommit,
@@ -100,7 +98,7 @@ class GitBlockingWireSessionShallowHistoryTest {
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
-                    "want " + tipCommit.value() + "\n",
+                    "want " + tipCommit.toHex() + "\n",
                     "deepen-since 200\n",
                     "done\n"));
             input.end();
@@ -109,7 +107,7 @@ class GitBlockingWireSessionShallowHistoryTest {
 
             assertThat(output.ascii())
                     .startsWith("0011shallow-info\n")
-                    .contains("shallow " + tipCommit.value() + "\n")
+                    .contains("shallow " + tipCommit.toHex() + "\n")
                     .contains("packfile\n");
         }
     }
@@ -126,11 +124,6 @@ class GitBlockingWireSessionShallowHistoryTest {
                 List.of(
                         "want " + WANT + "\n",
                         "deepen-relative\n",
-                        "done\n"),
-                List.of(
-                        "want " + WANT + "\n",
-                        "shallow " + "3".repeat(40) + "\n",
-                        "shallow " + "3".repeat(40) + "\n",
                         "done\n"))) {
             try (QueueByteSource input = new QueueByteSource(
                     Duration.ofSeconds(1))) {
@@ -141,8 +134,27 @@ class GitBlockingWireSessionShallowHistoryTest {
                         .serveSmartHttpPost(uploadV2Request()))
                         .isInstanceOf(IOException.class)
                         .hasMessageContaining(
-                                "Protocol v2 fetch request is invalid");
+                                arguments.contains("deepen-relative\n")
+                                        ? "deepen-relative requires depth"
+                                        : "Depth cannot be combined");
             }
+        }
+    }
+
+    @Test
+    void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
+        repository.saveFiles("main", Map.of("file", new byte[]{1}), "initial",
+                pro.deta.orion.git.nativestorage.GitCommitAuthor.EMPTY);
+        String tip = repository.refs().get("refs/heads/main");
+        try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(fetchRequest("want " + tip + "\n", "shallow " + tip + "\n",
+                    "shallow " + tip + "\n", "done\n"));
+            input.end();
+            session(input, output, provider).serveSmartHttpPost(uploadV2Request());
+            assertThat(output.ascii()).containsOnlyOnce("packfile\n").contains("PACK");
         }
     }
 
@@ -163,9 +175,9 @@ class GitBlockingWireSessionShallowHistoryTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        GitObjectId id = repository.writeObject(ObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
-        assertThat(id.value()).isEqualTo(MAIN_ID);
-        repository.updateRef("refs/heads/main", "0".repeat(40), id.value());
+        ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
+        assertThat(id.toHex()).isEqualTo(MAIN_ID);
+        repository.updateRef("refs/heads/main", "0".repeat(40), id.toHex());
         return provider;
     }
 
@@ -195,10 +207,10 @@ class GitBlockingWireSessionShallowHistoryTest {
         return output.bytes();
     }
 
-    private static GitObjectId writeCommit(
+    private static ObjectId writeCommit(
             NativeGitRepository repository,
-            GitObjectId tree,
-            GitObjectId parent,
+            ObjectId tree,
+            ObjectId parent,
             String message,
             long committerTimestamp) {
         StringBuilder data = new StringBuilder("tree ")
@@ -215,18 +227,18 @@ class GitBlockingWireSessionShallowHistoryTest {
                 .append(message)
                 .append('\n');
         return repository.writeObject(
-                ObjectType.COMMIT,
+                GitObjectType.COMMIT,
                 data.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static byte[] treeEntry(
             String mode,
             String name,
-            GitObjectId objectId) {
+            ObjectId objectId) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         output.writeBytes((mode + " " + name + "\0")
                 .getBytes(StandardCharsets.UTF_8));
-        output.writeBytes(HexFormat.of().parseHex(objectId.value()));
+        output.writeBytes(HexFormat.of().parseHex(objectId.toHex()));
         return output.toByteArray();
     }
 

@@ -1,21 +1,15 @@
 package pro.deta.orion.git.proxy;
 
-import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
-import pro.deta.orion.git.client.GitUploadPackResult;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
 import java.util.List;
@@ -24,9 +18,6 @@ import java.util.Objects;
 final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
     private static final String NULL_ID = "0".repeat(40);
     private static final GitClientOptions OPTIONS = GitClientOptions.defaults();
-    private static final PackIngestionLimits PACK_LIMITS = new PackIngestionLimits(
-            OPTIONS.maximumPackBytes(), 1_000_000, 256 * 1024 * 1024);
-
     @Override
     public void fetch(
             BootstrapGitLocation location,
@@ -43,14 +34,11 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
         if (oldId.equals(remoteRef.objectId())) {
             return;
         }
-        LooseObjectStore noObjects = new LooseObjectStore();
         if (repository.hasCompleteObjectClosure(
-                GitObjectId.of(remoteRef.objectId()),
-                noObjects)) {
+                new ObjectId(remoteRef.objectId()))) {
             NativeFetchedRefPublisher.publish(
                     repository,
-                    noObjects,
-                    new LooseRefStore.Update(location.refName(), oldId, remoteRef.objectId()));
+                    RefUpdate.fromWire(location.refName(), oldId, remoteRef.objectId()));
             return;
         }
         fetchPack(client, location, repository, oldId, remoteRef.objectId());
@@ -73,19 +61,19 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             NativeGitRepository repository,
             String oldId,
             String newId) {
-        try (PackIngestionSession session = repository.beginPackIngestion(PACK_LIMITS)) {
-            IngestionOutput output = new IngestionOutput(session);
+        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.of(newId),
                     NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
                     output,
                     ignored -> { });
             success(client.fetch(location.remoteUri(), OPTIONS, request), "pack transfer");
-            LooseObjectStore objects = output.complete();
+            repository.storage().persist(output.complete());
             NativeFetchedRefPublisher.publish(
                     repository,
-                    objects,
-                    new LooseRefStore.Update(location.refName(), oldId, newId));
+                    RefUpdate.fromWire(location.refName(), oldId, newId));
+        } catch (IOException failure) {
+            throw new BootstrapGitProxyException("pack validation");
         }
     }
 
@@ -96,34 +84,4 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
         throw new BootstrapGitProxyException(stage, ((GitClientResult.Failed<T>) result).failure());
     }
 
-    private static final class IngestionOutput implements BufferedByteOutput {
-        private final PackIngestionSession session;
-        private PackIngestionResult result = new PackIngestionResult.NeedInput();
-
-        private IngestionOutput(PackIngestionSession session) {
-            this.session = session;
-        }
-
-        @Override
-        public void write(ByteBuf buffer) throws IOException {
-            result = session.accept(buffer);
-            if (result instanceof PackIngestionResult.Failed) {
-                throw new IOException("Remote Git pack is invalid");
-            }
-        }
-
-        @Override
-        public void flush() {
-        }
-
-        private LooseObjectStore complete() {
-            if (result instanceof PackIngestionResult.NeedInput) {
-                result = session.endOfInput();
-            }
-            if (result instanceof PackIngestionResult.Complete complete) {
-                return complete.quarantine();
-            }
-            throw new BootstrapGitProxyException("pack validation");
-        }
-    }
 }

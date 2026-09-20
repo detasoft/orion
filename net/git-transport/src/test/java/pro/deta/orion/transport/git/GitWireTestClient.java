@@ -1,22 +1,21 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
-import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -41,9 +40,9 @@ final class GitWireTestClient {
 
     static NativeGitRepository createRepository(NativeGitRepositoryProvider provider, String name) {
         NativeGitRepository repository = provider.create(name).valueOrFailure("repository");
-        assertThat(repository.writeObject(ObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII)).value())
+        assertThat(repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII)).toHex())
                 .isEqualTo(MAIN_ID);
-        assertThat(repository.writeObject(ObjectType.BLOB, "tag".getBytes(StandardCharsets.US_ASCII)).value())
+        assertThat(repository.writeObject(GitObjectType.BLOB, "tag".getBytes(StandardCharsets.US_ASCII)).toHex())
                 .isEqualTo(TAG_ID);
         return repository;
     }

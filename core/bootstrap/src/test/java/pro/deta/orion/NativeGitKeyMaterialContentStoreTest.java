@@ -9,9 +9,9 @@ import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
@@ -210,10 +210,10 @@ class NativeGitKeyMaterialContentStoreTest {
         }
 
         @Override
-        public List<ReceivePackStatus> publishPack(
+        public List<RefUpdateResult> publishPack(
                 String repositoryName,
                 byte[] pack,
-                List<LooseRefStore.Update> updates,
+                List<RefUpdate> updates,
                 boolean atomic,
                 GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
             if (!interleaved) {

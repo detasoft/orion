@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage.upload;
 
+import pro.deta.orion.git.parser.v2.id.PackId;
+
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import java.util.Objects;
@@ -88,6 +90,6 @@ public final class NativePackfileUriBuilder {
 
     private static void validatePackId(String packId) {
         Objects.requireNonNull(packId, "packId");
-        new NativePackfileUri(packId, "https://example.test/pack");
+        new PackId(packId);
     }
 }

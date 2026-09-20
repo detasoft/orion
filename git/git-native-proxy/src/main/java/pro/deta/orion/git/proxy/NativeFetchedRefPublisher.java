@@ -1,28 +1,23 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 
 import java.util.List;
 
 final class NativeFetchedRefPublisher {
-    private static final String NULL_ID = "0".repeat(40);
 
     private NativeFetchedRefPublisher() {
     }
 
     static void publish(
             NativeGitRepository repository,
-            LooseObjectStore objects,
-            LooseRefStore.Update update) {
+            RefUpdate update) {
         try {
-            if (!NULL_ID.equals(update.newId())
+            if (update.newId().isPresent()
                     && !repository.hasCompleteObjectClosure(
-                            GitObjectId.of(update.newId()),
-                            objects)) {
+                            update.newId().orElseThrow())) {
                 throw new BootstrapGitProxyException("complete object validation");
             }
         } catch (BootstrapGitProxyException error) {
@@ -30,15 +25,12 @@ final class NativeFetchedRefPublisher {
         } catch (RuntimeException error) {
             throw new BootstrapGitProxyException("complete object validation");
         }
-        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
-                objects,
+        List<RefUpdateResult> results = repository.publishRefs(
                 List.of(update),
                 true);
-        if (!results.equals(List.of(RefUpdateResult.CREATED))
-                && !results.equals(List.of(RefUpdateResult.FAST_FORWARD))
-                && !results.equals(List.of(RefUpdateResult.NO_OP))) {
+        if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
             throw new BootstrapGitProxyException("local ref publication",
-                    results.contains(RefUpdateResult.STALE)
+                    results.getFirst().status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH
                             ? ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT
                             : ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
         }

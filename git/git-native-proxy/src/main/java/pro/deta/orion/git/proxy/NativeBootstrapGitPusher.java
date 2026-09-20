@@ -6,21 +6,28 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitReceivePackResult;
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.fetch.FetchPack;
+import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 
 final class NativeBootstrapGitPusher implements BootstrapGitPusher {
@@ -32,15 +39,15 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             BootstrapGitLocation location,
             GitClientTransport transport,
             NativeGitRepository repository,
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             boolean atomic) {
         List<GitReceivePackRequest.Command> commands = new ArrayList<>(updates.size());
-        for (LooseRefStore.Update update : updates) {
+        for (RefUpdate update : updates) {
             commands.add(new GitReceivePackRequest.Command(
-                    update.expectedOldId(),
-                    update.newId(),
-                    update.refName()));
+                    update.expectedOld().map(ObjectId::toHex).orElse(NULL_ID),
+                    update.newId().map(ObjectId::toHex).orElse(NULL_ID),
+                    update.ref().value()));
         }
         GitReceivePackRequest request = new GitReceivePackRequest(
                 commands,
@@ -62,7 +69,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
     }
 
     static List<Boolean> accepted(
-            List<LooseRefStore.Update> updates,
+            List<RefUpdate> updates,
             GitReceivePackResult result) {
         Map<String, GitReceivePackResult.RefStatus> statuses = new HashMap<>();
         for (GitReceivePackResult.RefStatus status : result.refs()) {
@@ -70,8 +77,8 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
         }
         boolean unpacked = "ok".equals(result.unpackStatus());
         List<Boolean> accepted = new ArrayList<>(updates.size());
-        for (LooseRefStore.Update update : updates) {
-            GitReceivePackResult.RefStatus status = statuses.get(update.refName());
+        for (RefUpdate update : updates) {
+            GitReceivePackResult.RefStatus status = statuses.get(update.ref().value());
             if (status == null) {
                 throw new BootstrapGitProxyException("upstream ref publication");
             }
@@ -82,59 +89,59 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
 
     private static void writePack(
             NativeGitRepository repository,
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             pro.deta.orion.net.io.BufferedByteOutput output) throws IOException {
-        Set<GitObjectId> wants = new LinkedHashSet<>();
-        Set<GitObjectId> haves = new LinkedHashSet<>();
-        for (LooseRefStore.Update update : updates) {
-            if (!NULL_ID.equals(update.newId())) {
-                wants.add(GitObjectId.of(update.newId()));
+        Set<ObjectId> wants = new LinkedHashSet<>();
+        Set<ObjectId> haves = new LinkedHashSet<>();
+        for (RefUpdate update : updates) {
+            if (update.newId().isPresent()) {
+                wants.add(update.newId().orElseThrow());
             }
-            if (!NULL_ID.equals(update.expectedOldId())) {
-                haves.add(GitObjectId.of(update.expectedOldId()));
+            if (update.expectedOld().isPresent()) {
+                haves.add(update.expectedOld().orElseThrow());
             }
         }
         if (wants.isEmpty()) {
             return;
         }
-        byte[] packBytes = received.packBytes();
-        if (packBytes.length > 0 && canReusePack(repository, received, wants, haves)) {
-            output.write(packBytes);
-            output.flush();
-            return;
-        }
-        NativeFetchRequest request = new NativeFetchRequest(
-                wants,
-                haves,
-                true,
-                Set.of(),
-                NativeFetchOptions.initial(false, true, false));
-        try (NativePackProducer producer = repository.fetch(request)) {
-            while (producer.produce(output) == NativePackProducer.Result.MORE) {
-                // Continue until the complete native pack has been written.
+        if (received.isPresent()) {
+            GitObjectGraph graph = new GitObjectGraph(repository.storage());
+            Set<ObjectId> required = graph.reachableObjects(wants, false);
+            required.removeAll(graph.reachableObjects(haves, true));
+            Optional<IndexedPack> stored = repository.storage().openPack(received.orElseThrow());
+            if (stored.isPresent()) {
+                try (IndexedPack pack = stored.orElseThrow()) {
+                    if (canReusePack(pack, required)) {
+                        try (BufferedByteInputV2 input = pack.input()) {
+                            byte[] buffer = new byte[8192];
+                            ByteBuffer source;
+                            while ((source = input.buffer()) != null) {
+                                int count = Math.min(source.remaining(), buffer.length);
+                                source.get(buffer, 0, count);
+                                output.write(buffer, 0, count);
+                            }
+                        }
+                        output.flush();
+                        return;
+                    }
+                }
             }
-            output.flush();
         }
+        FetchPlan plan = new FetchPlan(wants, Map.of(), haves, Set.of(), OptionalInt.empty(),
+                OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
+        FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+        try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+            pack.writeTo(writer);
+            writer.finish();
+        }
+        output.flush();
     }
 
-    private static boolean canReusePack(
-            NativeGitRepository repository,
-            PackIngestionResult.Complete received,
-            Set<GitObjectId> wants,
-            Set<GitObjectId> haves) {
-        NativeObjectClosure closure = new NativeObjectClosure(repository::readObject);
-        for (GitObjectId required : closure.objectIdsFor(wants, haves)) {
-            if (!received.quarantine().contains(required)) {
+    private static boolean canReusePack(IndexedPack pack, Set<ObjectId> required) throws IOException {
+        for (ObjectId id : required) {
+            if (pack.find(id).isEmpty()) {
                 return false;
-            }
-        }
-        if (!received.externalBaseIds().isEmpty()) {
-            Set<GitObjectId> upstreamObjects = closure.existingObjectIdsReachableFrom(haves);
-            for (GitObjectId base : received.externalBaseIds()) {
-                if (!received.quarantine().contains(base) && !upstreamObjects.contains(base)) {
-                    return false;
-                }
             }
         }
         return true;

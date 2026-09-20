@@ -1,21 +1,21 @@
 package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestor;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +52,7 @@ class BootstrapGitRuntimeProxyTest {
                 true);
 
         assertThat(refreshes).hasValue(1);
-        assertThat(results).containsExactly(RefUpdateResult.STALE);
+        assertThat(results).extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(repository.refs()).containsEntry(location.refName(), oldId);
     }
 
@@ -64,14 +64,14 @@ class BootstrapGitRuntimeProxyTest {
         return BootstrapGitLocation.parse(config);
     }
 
-    private static PackIngestionResult.Complete ingest(NativeGitRepository repository, NativeGitFileUpdate update) {
-        byte[] pack = update.pack();
-        ByteBuf input = Unpooled.wrappedBuffer(pack);
-        try (PackIngestor ingestor = new PackIngestor(
-                new PackIngestionLimits(pack.length, 100, 1024 * 1024), repository::readObject)) {
-            return (PackIngestionResult.Complete) ingestor.accept(input);
-        } finally {
-            input.release();
+    private static Optional<PackId> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
+            IndexedPack pack = repository.ingest(input);
+            try {
+                return Optional.of(repository.storage().persist(pack));
+            } finally {
+                pack.discard();
+            }
         }
     }
 }

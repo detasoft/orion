@@ -1,11 +1,9 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.Head;
@@ -17,6 +15,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 
 import java.io.IOException;
 import java.net.URI;
@@ -75,20 +74,20 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
                 }
             }
         }
-        Map<GitObjectId, List<String>> branches = new LinkedHashMap<>();
+        Map<ObjectId, List<String>> branches = new LinkedHashMap<>();
         for (ObjectId want : wants) {
-            branches.put(GitObjectId.of(want.toHex()), new ArrayList<>());
+            branches.put(want, new ArrayList<>());
         }
         List<RefId> refs = new ArrayList<>(snapshot.refs().keySet());
         refs.sort((left, right) -> left.value().compareTo(right.value()));
-        NativeObjectClosure closure = new NativeObjectClosure(repository::readObject);
+        GitObjectGraph graph = new GitObjectGraph(storage());
         for (RefId ref : refs) {
             if (!ref.value().startsWith("refs/heads/")) {
                 continue;
             }
-            Set<GitObjectId> reachable = closure.existingObjectIdsReachableFrom(
-                    Set.of(GitObjectId.of(snapshot.refs().get(ref).toHex())));
-            for (Map.Entry<GitObjectId, List<String>> entry : branches.entrySet()) {
+            Set<ObjectId> reachable = graph.reachableObjects(
+                    Set.of(snapshot.refs().get(ref)), true);
+            for (Map.Entry<ObjectId, List<String>> entry : branches.entrySet()) {
                 if (reachable.contains(entry.getKey())) {
                     entry.getValue().add(ref.value().substring("refs/heads/".length()));
                 }

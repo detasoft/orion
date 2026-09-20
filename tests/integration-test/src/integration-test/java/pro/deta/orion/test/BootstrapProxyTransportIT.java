@@ -1,47 +1,47 @@
 package pro.deta.orion.test;
 
-import java.util.LinkedHashMap;
-import java.net.URI;
-import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
-import pro.deta.orion.util.ConfigurationContext;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
+import pro.deta.orion.acl.storage.AccessControlSaveRequest;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.PASSWORD_ENV;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.configureSources;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.materialBytes;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
-import static org.assertj.core.api.Assertions.assertThat;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapProxyTransportIT {
     private static final String REF = "refs/heads/main";
@@ -167,7 +167,8 @@ class BootstrapProxyTransportIT {
                         String upstreamRevision = repository.refs().get(REF);
                         assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
                                 GitNativeRepositoryAccessHook.ALLOW_ALL))
-                                .extracting(ReceivePackStatus::ok).containsExactly(false);
+                                .extracting(RefUpdateResult::status)
+                                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
                         assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
                         assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
                                 .containsEntry("marker.txt", bytes("concurrent upstream edit"));

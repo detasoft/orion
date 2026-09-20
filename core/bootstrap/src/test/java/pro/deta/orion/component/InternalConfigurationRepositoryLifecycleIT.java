@@ -1,44 +1,43 @@
 package pro.deta.orion.component;
 
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
-import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
-import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
-import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.ConfigurationContext;
+import pro.deta.orion.util.KeyUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -619,7 +618,8 @@ class InternalConfigurationRepositoryLifecycleIT {
                 });
                 start.countDown();
                 assertThat(List.of(alpha.get().getFirst(), beta.get().getFirst()))
-                        .containsExactlyInAnyOrder(RefUpdateResult.FAST_FORWARD, RefUpdateResult.STALE);
+                        .extracting(RefUpdateResult::status)
+                        .containsExactlyInAnyOrder(RefUpdateResult.Status.APPLIED, RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
             }
 
             String activeId = repository.refs().get(CONFIGURATION_REF);
@@ -857,7 +857,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String candidateId = saveCandidate(repository, candidateName, content);
         String expectedOldId = repository.refs().get(CONFIGURATION_REF);
         assertThat(publish(repository, expectedOldId, candidateId))
-                .containsExactly(RefUpdateResult.FAST_FORWARD);
+                .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
     }
 
     private static String saveCandidate(
@@ -877,9 +877,8 @@ class InternalConfigurationRepositoryLifecycleIT {
             NativeGitRepository repository,
             String expectedOldId,
             String candidateId) {
-        return repository.publishObjectsAndRefs(
-                new LooseObjectStore(),
-                List.of(new LooseRefStore.Update(
+        return repository.publishRefs(
+                List.of(RefUpdate.fromWire(
                         CONFIGURATION_REF,
                         expectedOldId,
                         candidateId)),

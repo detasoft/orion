@@ -2,28 +2,15 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.nativestorage.GitObjectId;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
-import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.id.CommitId;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
@@ -76,7 +63,7 @@ class GitWireAdvertisementTest {
     }
 
     @Test
-    void advertisesHeadFromExistingBranchWhenDefaultHeadTargetIsMissing() throws Exception {
+    void keepsUnbornHeadTargetWhenAnotherBranchExists() throws Exception {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
@@ -85,10 +72,9 @@ class GitWireAdvertisementTest {
         GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("demo"));
 
         assertThat(advertisement.refs()).containsExactly(
-                GitAdvertisedRef.direct(MAIN_ID, "HEAD"),
                 GitAdvertisedRef.direct(MAIN_ID, "refs/heads/master"));
         assertThat(capabilityTokens(advertisement))
-                .contains("symref=HEAD:refs/heads/master");
+                .contains("symref=HEAD:refs/heads/main");
     }
 
     @Test

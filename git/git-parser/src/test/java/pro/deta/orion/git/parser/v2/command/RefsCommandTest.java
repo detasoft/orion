@@ -149,14 +149,13 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     }
 
     @Test
-    void rejectsMissingTagTargetWhenPeeling() throws Exception {
+    void omitsPeeledAttributeForMissingTagTarget() throws Exception {
         GitStorageApi storage = new GitStorageApi(repository);
         ObjectId missing = new ObjectId("f".repeat(40));
         ObjectId tag = publish(storage, GitObjectType.TAG, tag(missing, "blob", "broken"));
         addRef(storage, "refs/tags/broken", tag);
         assertThat(execute(storage)).containsExactly(tag + " refs/tags/broken");
-        assertThatThrownBy(() -> execute(storage, "peel")).isInstanceOf(IOException.class)
-                .hasMessageContaining("Missing object");
+        assertThat(execute(storage, "peel")).containsExactly(tag + " refs/tags/broken");
     }
 
     @Test

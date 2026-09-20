@@ -62,7 +62,17 @@ public record PushRequest(List<RefUpdate> updates, GitCapabilities capabilities)
                 command = data.text();
             }
             if (command.startsWith("shallow ")) {
-                throw new IOException("Shallow push is not supported");
+                if (!updates.isEmpty() || separator >= 0) {
+                    throw new IOException("Shallow declarations must precede push commands");
+                }
+                try {
+                    if (parseId(command.substring(8)).isEmpty()) {
+                        throw new IllegalArgumentException("Zero shallow object ID");
+                    }
+                } catch (IllegalArgumentException invalid) {
+                    throw new IOException("Invalid shallow object ID", invalid);
+                }
+                continue;
             }
             RefUpdate update = parseUpdate(command);
             if (!refs.add(update.ref())) {

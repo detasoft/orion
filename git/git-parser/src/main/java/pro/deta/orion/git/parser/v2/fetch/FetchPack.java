@@ -1,30 +1,32 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.Optional;
-import pro.deta.orion.git.parser.v2.GitRepositoryContext;
-import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import java.util.ArrayDeque;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class FetchPack {
@@ -143,11 +145,15 @@ public final class FetchPack {
         if (refs.isEmpty()) {
             return result;
         }
-        Map<RefId, ObjectId> storedRefs = storage.snapshotRefs().refs();
+        RefsSnapshot snapshot = storage.snapshotRefs();
+        Map<RefId, ObjectId> storedRefs = snapshot.refs();
         ArrayDeque<ObjectId> pending = new ArrayDeque<>();
         for (String ref : refs) {
-            ObjectId id = storedRefs.get(new RefId(ref));
-            if (id == null && !ref.startsWith("refs/")) {
+            ObjectId id = "HEAD".equals(ref) ? switch (snapshot.head()) {
+                case Head.Symbolic head -> storedRefs.get(head.target());
+                case Head.Detached head -> new ObjectId(head.target().toBytes());
+            } : storedRefs.get(new RefId(ref));
+            if (id == null && !"HEAD".equals(ref) && !ref.startsWith("refs/")) {
                 id = storedRefs.get(new RefId("refs/heads/" + ref));
             }
             if (id == null) {

@@ -1,11 +1,12 @@
 package pro.deta.orion.git.nativestorage.receive;
 
-import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -27,17 +28,16 @@ public final class NativeGitReceivePack {
         Objects.requireNonNull(publisher, "publisher");
         List<RefUpdateResult> results = new ArrayList<>(updates.size());
         List<RefUpdate> valid = new ArrayList<>();
-        NativeObjectClosure closure = new NativeObjectClosure(repository::readObject);
+        GitObjectGraph graph = new GitObjectGraph(repository.storage());
         for (RefUpdate update : updates) {
             if (update.newId().isPresent() && !repository.hasCompleteObjectClosure(
-                    GitObjectId.of(update.newId().orElseThrow().toHex()))) {
+                    update.newId().orElseThrow())) {
                 results.add(new RefUpdateResult(update, OBJECT_NOT_FOUND, Optional.of("missing necessary objects")));
                 continue;
             }
             boolean force = update.expectedOld().isPresent() && update.newId().isPresent()
                     && !update.expectedOld().equals(update.newId())
-                    && !closure.isAncestor(GitObjectId.of(update.expectedOld().orElseThrow().toHex()),
-                            GitObjectId.of(update.newId().orElseThrow().toHex()));
+                    && !isAncestor(graph, update);
             try {
                 accessHook.beforeUpdate(repositoryName, update.ref().value(), force);
                 valid.add(update);
@@ -66,4 +66,12 @@ public final class NativeGitReceivePack {
         }
         return List.copyOf(results);
     }
+    private static boolean isAncestor(GitObjectGraph graph, RefUpdate update) {
+        try {
+            return graph.isAncestor(update.expectedOld().orElseThrow(), update.newId().orElseThrow());
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
 }

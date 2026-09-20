@@ -1,43 +1,37 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInputV2;
+
+import java.io.ByteArrayInputStream;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryPackIngestionTest {
     @Test
-    void opensIndependentPackIngestionSessions() {
-        NativeGitRepository repository = repository();
-        PackIngestionLimits limits = new PackIngestionLimits(
-                1024,
-                10,
-                512);
-
-        try (PackIngestionSession first =
-                     repository.beginPackIngestion(limits);
-             PackIngestionSession second =
-                     repository.beginPackIngestion(limits)) {
-            assertThat(first).isNotSameAs(second);
+    void independentIngestionsRemainUnpublishedUntilPersisted() throws Exception {
+        try (NativeGitRepository repository = new NativeGitRepository(
+                "project.git", new GitStorageApi(), "refs/heads/main")) {
+            byte[] bytes = repository.prepareFileUpdate("main", Map.of("file", new byte[]{1}),
+                    "initial", GitCommitAuthor.EMPTY).pack();
+            try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
+                 BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+                IndexedPack first = repository.ingest(firstInput);
+                IndexedPack second = repository.ingest(secondInput);
+                try {
+                    assertThat(first).isNotSameAs(second);
+                    assertThat(repository.storage().packIds()).isEmpty();
+                    first.discard();
+                    repository.storage().persist(second);
+                    assertThat(repository.storage().packIds()).hasSize(1);
+                } finally {
+                    first.discard();
+                    second.discard();
+                }
+            }
         }
-    }
-
-    @Test
-    void rejectsMissingPackIngestionLimits() {
-        assertThatThrownBy(() -> repository().beginPackIngestion(null))
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("limits");
-    }
-
-    private static NativeGitRepository repository() {
-        return new NativeGitRepository(
-                "project.git",
-                new LooseRefStore(),
-                new LooseObjectStore(),
-                "refs/heads/main");
     }
 }
