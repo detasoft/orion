@@ -221,7 +221,7 @@ class OrionXmlTest {
                       <grants>
                         <grant id="values">
                           <info>
-                            <expression><key>WRITE</key><value>z</value></expression>
+                            <expression><key>READ_WRITE</key><value>z</value></expression>
                             <expression><key>READ</key><value>a</value></expression>
                           </info>
                         </grant>
@@ -258,7 +258,7 @@ class OrionXmlTest {
                 .containsExactly("a-user", "z-user");
         assertThat(document.system().accessControl().getGrants().getFirst().getInfo())
                 .extracting(expression -> expression.getKey().name())
-                .containsExactly("READ", "WRITE");
+                .containsExactly("READ", "READ_WRITE");
     }
 
     @Test

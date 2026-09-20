@@ -468,7 +468,7 @@
       <xs:enumeration value="BRANCH"/>
       <xs:enumeration value="FORCE"/>
       <xs:enumeration value="READ"/>
-      <xs:enumeration value="WRITE"/>
+      <xs:enumeration value="READ_WRITE"/>
       <xs:enumeration value="CREATE"/>
       <xs:enumeration value="NETWORK_SOURCE"/>
       <xs:enumeration value="NETWORK_PORT"/>

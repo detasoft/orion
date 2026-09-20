@@ -56,12 +56,12 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     public record RepositoryGrantRequest(
             String repository,
             boolean read,
-            boolean write,
+            boolean readWrite,
             boolean create,
             boolean force,
             String branch) {
         private AccessControlRepositoryGrantUpdate toGrantUpdate() {
-            return new AccessControlRepositoryGrantUpdate(repository, read, write, create, force, branch);
+            return new AccessControlRepositoryGrantUpdate(repository, read, readWrite, create, force, branch);
         }
     }
 }

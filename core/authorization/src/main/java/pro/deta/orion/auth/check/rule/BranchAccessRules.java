@@ -39,6 +39,7 @@ public final class BranchAccessRules {
                 securityContext,
                 resource,
                 RepositoryAccessRules.read(),
+                false,
                 "parent repository read denied");
     }
 
@@ -47,6 +48,7 @@ public final class BranchAccessRules {
                 securityContext,
                 resource,
                 RepositoryAccessRules.write(),
+                true,
                 "parent repository write denied");
     }
 
@@ -54,6 +56,7 @@ public final class BranchAccessRules {
             SecurityContext securityContext,
             BranchResource resource,
             AccessRule<RepositoryResource> parentRule,
+            boolean requireReadWrite,
             String parentDeniedReason) {
         RepositoryResource repository = resource.parentResource();
         AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
@@ -64,6 +67,9 @@ public final class BranchAccessRules {
         List<AccessControl.Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(
                 securityContext.getUserIdentity(),
                 repository.repositoryName());
+        if (requireReadWrite) {
+            branchGrants = filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.READ_WRITE));
+        }
         if (branchGrants.isEmpty()) {
             return AccessDecision.allow("parent repository grant has no branch restriction");
         }

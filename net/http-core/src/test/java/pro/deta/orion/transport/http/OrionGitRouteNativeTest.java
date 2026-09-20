@@ -549,7 +549,7 @@ class OrionGitRouteNativeTest {
                 new ArrayList<>())
                 .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
                 .addKey(
-                        AccessControl.GrantKey.WRITE,
+                        AccessControl.GrantKey.READ_WRITE,
                         AccessControl.TRUE_STRING)
                 .toAccessControl();
         return SecurityContext.createContext()

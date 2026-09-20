@@ -1447,8 +1447,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             if (repositoryGrant.read()) {
                 grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
             }
-            if (repositoryGrant.write()) {
-                grant.addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+            if (repositoryGrant.readWrite()) {
+                grant.addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING);
             }
             if (repositoryGrant.create()) {
                 grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);

@@ -524,7 +524,7 @@ class OrionV2MapperTest {
         AccessControl.Grant expressions = new AccessControl.Grant(
                 "expressions",
                 List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.WRITE, "z"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "z"),
                         new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "a")));
         OrionDocument document = document(
                 new AccessControl(List.of(user), List.of(role), List.of(expressions)),
@@ -544,7 +544,7 @@ class OrionV2MapperTest {
                 .containsExactly("a-grant", "z-grant");
         assertThat(mapped.getGrants().getFirst().getInfo())
                 .extracting(expression -> expression.getKey().name())
-                .containsExactly("READ", "WRITE");
+                .containsExactly("READ", "READ_WRITE");
     }
 
     @Test
@@ -599,7 +599,7 @@ class OrionV2MapperTest {
         ScopedRole organizationRole = domainRole(
                 "member", List.of(), List.of("acme/access"));
         ScopedGrant teamGrant = domainGrant(
-                "deploy", ScopedGrant.Effect.DENY, expression(AccessControl.GrantKey.WRITE, "true"));
+                "deploy", ScopedGrant.Effect.DENY, expression(AccessControl.GrantKey.READ_WRITE, "true"));
         ScopedRole teamRole = domainRole(
                 "member", List.of("acme/member"), List.of("acme/access", "acme/platform/deploy"));
         ScopedGrant repositoryGrant = domainGrant(
@@ -736,7 +736,7 @@ class OrionV2MapperTest {
     private static ScopedGrant orderedGrant(String id, boolean reversed) {
         AccessControl.GrantExpression aRead = expression(AccessControl.GrantKey.READ, "a-read");
         AccessControl.GrantExpression zRead = expression(AccessControl.GrantKey.READ, "z-read");
-        AccessControl.GrantExpression write = expression(AccessControl.GrantKey.WRITE, "write");
+        AccessControl.GrantExpression write = expression(AccessControl.GrantKey.READ_WRITE, "write");
         return new ScopedGrant(
                 new GrantId(id),
                 ScopedGrant.Effect.ALLOW,
@@ -756,7 +756,7 @@ class OrionV2MapperTest {
                 .containsExactly(
                         tuple("READ", "a-read"),
                         tuple("READ", "z-read"),
-                        tuple("WRITE", "write"));
+                        tuple("READ_WRITE", "write"));
         assertThat(roles).extracting(OrionV2.ScopedRole::getId)
                 .containsExactly("a-role", "root-role", "z-role");
         assertThat(roles.get(1).getRoleReferences())

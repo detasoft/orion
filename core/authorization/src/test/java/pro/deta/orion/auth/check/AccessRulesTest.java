@@ -146,7 +146,7 @@ public class AccessRulesTest {
 
         AccessControl.Grant writeGrant = grantDraft("write")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
 
@@ -160,7 +160,7 @@ public class AccessRulesTest {
     public void forceAccessRequiresRepositoryForceGrant() {
         AccessControl.Grant writeGrant = grantDraft("write")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
         assertThatThrownBy(() -> requireRepositoryForce(writer, "project"))
@@ -168,7 +168,7 @@ public class AccessRulesTest {
 
         AccessControl.Grant forceGrant = grantDraft("force")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.FORCE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext forceWriter = securityContext(new InternalUserImpl("force-writer", List.of(forceGrant)));
@@ -341,7 +341,7 @@ public class AccessRulesTest {
     @Test
     void branchPushAllowsGrantedBranchAndDeniesOtherBranches() {
         AccessControl.Grant grant = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "master")
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(grant)));
@@ -349,6 +349,64 @@ public class AccessRulesTest {
         assertThatCode(() -> requireBranchPush(writer, "project", "master"))
                 .doesNotThrowAnyException();
         assertThatThrownBy(() -> requireBranchPush(writer, "project", "feature"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    void readOnlyBranchGrantDoesNotExpandPushBranches() {
+        AccessControl.Grant write = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .toAccessControl();
+        SecurityContext user = securityContext(new InternalUserImpl(
+                "developer", List.of(write, repositoryGrant("project", "main"))));
+
+        assertThatCode(() -> requireBranchPush(user, "project", "dev")).doesNotThrowAnyException();
+        assertThatCode(() -> requireBranchFetch(user, "project", "main")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireBranchPush(user, "project", "main"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    void readOnlyWildcardDoesNotExpandPushBranches() {
+        AccessControl.Grant write = repositoryGrantDraft("team/*")
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .toAccessControl();
+        SecurityContext user = securityContext(new InternalUserImpl(
+                "developer", List.of(write, repositoryGrant("team/*", "*"))));
+
+        assertThatCode(() -> requireBranchFetch(user, "team/sub/api", "main")).doesNotThrowAnyException();
+        assertThatCode(() -> requireBranchPush(user, "team/sub/api", "dev")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireBranchPush(user, "team/sub/api", "main"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    void readOnlyBranchRestrictionDoesNotNarrowUnrestrictedWriteGrant() {
+        AccessControl.Grant write = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .toAccessControl();
+        SecurityContext user = securityContext(new InternalUserImpl(
+                "developer", List.of(write, repositoryGrant("project", "main"))));
+
+        assertThatCode(() -> requireBranchPush(user, "project", "dev")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void writeBranchRestrictionsRetainTheirExistingCombinationPolicy() {
+        AccessControl.Grant unrestricted = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .toAccessControl();
+        AccessControl.Grant restricted = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .toAccessControl();
+        SecurityContext user = securityContext(new InternalUserImpl(
+                "developer", List.of(unrestricted, restricted)));
+
+        assertThatCode(() -> requireBranchPush(user, "project", "dev")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireBranchPush(user, "project", "main"))
                 .isInstanceOf(OrionSecurityException.class);
     }
 

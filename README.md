@@ -520,7 +520,7 @@ An active system proxy with alias `configuration` is available at
 `GET /api/admin/proxies` reports the relative HTTP endpoint for each alias.
 
 Grant repository access to `proxy/system/configuration` and the required branches
-using the ordinary Git ACL rules. Push also requires write permission; force
+using the ordinary Git ACL rules. Push also requires `READ_WRITE` permission; force
 updates require force permission. Repository patterns treat every character literally
 except `*`, which matches zero or more characters, including `/`. Thus `team/*` covers `team/api.v1` and
 `team/sub/api`, while `*` grants access to every repository path, including
@@ -532,6 +532,14 @@ reserved for configured proxies: pushing to an unknown alias cannot create a
 local repository, and activation rejects an existing local repository at the
 same name. Private `bootstrap/proxy-*` cache names are never public Git endpoints,
 including for administrators with matching repository grants.
+
+Repository ACL grants use `READ_WRITE` for combined read/write access. The admin user API
+accepts `readWrite: true` in each repository grant. Existing ACL XML must replace the old
+`WRITE` key with `READ_WRITE`, and API clients must replace the `write` field with `readWrite`.
+For push, branch restrictions are taken only from matching `READ_WRITE` grants; read-only
+grants cannot expand or restrict writable branches. Among matching `READ_WRITE` grants,
+the existing combination policy remains: if any specify branches, those branches form
+the allowed set, and a `BRANCH=*` grant permits all branches.
 
 ## Development
 

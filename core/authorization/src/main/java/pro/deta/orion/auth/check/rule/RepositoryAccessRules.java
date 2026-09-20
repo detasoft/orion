@@ -63,7 +63,7 @@ public final class RepositoryAccessRules {
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(AccessControl.GrantKey.WRITE));
+                GrantMatcher.of(AccessControl.GrantKey.READ_WRITE));
         if (allowed) {
             return AccessDecision.allow("repository write grant matched");
         }

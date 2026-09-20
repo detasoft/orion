@@ -17,7 +17,7 @@ public class ACLUtil {
         AccessControlDraft.Grant allRepository = createGrant("ALL_REPOSITORY")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "*")
                 .addKey(AccessControl.GrantKey.READ, "true")
-                .addKey(AccessControl.GrantKey.WRITE, "true")
+                .addKey(AccessControl.GrantKey.READ_WRITE, "true")
                 .addKey(AccessControl.GrantKey.CREATE, "true")
                 .addKey(AccessControl.GrantKey.BRANCH, "*")
                 .addKey(AccessControl.GrantKey.FORCE, "true");

@@ -82,7 +82,7 @@ class OrionAdminProxiesRouteTest {
                 context(new AccessControlDraft.Grant("repository-access", new ArrayList<>())
                         .addKey(AccessControl.GrantKey.REPOSITORY, "team/repository")
                         .addKey(AccessControl.GrantKey.READ, "true")
-                        .addKey(AccessControl.GrantKey.WRITE, "true").toAccessControl()))) {
+                        .addKey(AccessControl.GrantKey.READ_WRITE, "true").toAccessControl()))) {
             var response = get(context);
             assertThat(response.status).isEqualTo(403);
             assertThat(response.body.toString()).isEmpty();

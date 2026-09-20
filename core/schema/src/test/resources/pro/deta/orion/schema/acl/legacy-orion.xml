@@ -13,7 +13,7 @@
                     <value>true</value>
                 </expression>
                 <expression>
-                    <key>WRITE</key>
+                    <key>READ_WRITE</key>
                     <value>true</value>
                 </expression>
                 <expression>

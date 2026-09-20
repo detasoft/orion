@@ -10,6 +10,7 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialListResult;
@@ -591,6 +592,22 @@ class OrionAccessControlServiceImplTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         new XmlService().serialize(ACLUtil.generateDefaultAccessControl("old-password-hash"), output);
         return new AccessControlSnapshot(Map.of(ACL_PATH, output.toByteArray()), Optional.of("initial"));
+    }
+
+    @Test
+    void userUpdatePersistsReadWriteGrantWithoutSeparateReadFlag() {
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            fixture.service.createOrUpdateUser(new AccessControlUserUpdate(
+                    "alice", "alice@example.test", List.of(),
+                    List.of(new AccessControlRepositoryGrantUpdate("project", false, true, false, false, "dev"))));
+
+            AccessControl persisted = parse(fixture.storage.snapshot.files().get(ACL_PATH));
+            AccessControl.User alice = persisted.getUsers().stream()
+                    .filter(user -> user.getId().equals("alice")).findFirst().orElseThrow();
+            assertThat(alice.getGrants().getFirst().getInfo())
+                    .extracting(AccessControl.GrantExpression::getKey)
+                    .contains(AccessControl.GrantKey.READ_WRITE);
+        }
     }
 
     private static ServiceFixture fixture(AccessControlDraft primary, AccessControlDraft secondary) {

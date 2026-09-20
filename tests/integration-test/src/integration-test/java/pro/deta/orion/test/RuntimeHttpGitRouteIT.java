@@ -358,7 +358,7 @@ class RuntimeHttpGitRouteIT {
             grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
         }
         if (write) {
-            grant.addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+            grant.addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING);
         }
         if (create) {
             grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);

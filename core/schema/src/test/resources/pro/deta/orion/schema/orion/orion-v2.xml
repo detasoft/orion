@@ -122,7 +122,7 @@
             <grant id="deploy" effect="ALLOW">
               <expressions>
                 <expression>
-                  <key>WRITE</key>
+                  <key>READ_WRITE</key>
                   <value>true</value>
                 </expression>
               </expressions>

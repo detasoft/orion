@@ -120,7 +120,7 @@ public class AccessControlV1 {
         BRANCH,
         FORCE,
         READ,
-        WRITE,
+        READ_WRITE,
         CREATE,
         NETWORK_SOURCE,
         NETWORK_PORT,

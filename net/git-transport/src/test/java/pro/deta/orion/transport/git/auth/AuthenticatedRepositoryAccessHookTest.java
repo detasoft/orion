@@ -138,6 +138,29 @@ class AuthenticatedRepositoryAccessHookTest {
     }
 
     @Test
+    void updateCannotBorrowBranchFromReadOnlyGrant() {
+        AccessControl.Grant readWrite = new AccessControlDraft.Grant("writer", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .toAccessControl();
+        AccessControl.Grant read = new AccessControlDraft.Grant("reader", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(AccessControl.GrantKey.BRANCH, "main")
+                .toAccessControl();
+        AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
+                SecurityContext.createContext().withUserIdentity(
+                        new InternalUserImpl("developer", List.of(readWrite, read))));
+
+        assertThatCode(() -> hook.beforeUpdate("project", "refs/heads/dev", false))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> hook.beforeFetch("project", List.of("main")))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> hook.beforeUpdate("project", "refs/heads/main", false))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+    }
+
+    @Test
     void createRequiresRepositoryCreateGrant() {
         AuthenticatedRepositoryAccessHook denied =
                 new AuthenticatedRepositoryAccessHook(
@@ -216,7 +239,7 @@ class AuthenticatedRepositoryAccessHookTest {
                                 repositoryName);
         if (write) {
             grant.addKey(
-                    AccessControl.GrantKey.WRITE,
+                    AccessControl.GrantKey.READ_WRITE,
                     AccessControl.TRUE_STRING);
         }
         if (create) {
@@ -245,7 +268,7 @@ class AuthenticatedRepositoryAccessHookTest {
                                 AccessControl.GrantKey.BRANCH,
                                 branchName)
                         .addKey(
-                                AccessControl.GrantKey.WRITE,
+                                AccessControl.GrantKey.READ_WRITE,
                                 AccessControl.TRUE_STRING);
         if (force) {
             grant.addKey(

@@ -1001,7 +1001,7 @@ class GitSshTransportEndToEndIT {
                 "repositories", List.of(Map.of(
                         "repository", repositoryName,
                         "read", true,
-                        "write", true,
+                        "readWrite", true,
                         "create", true,
                         "branch", "*"))));
         postAdmin(orion, rootToken, "/api/admin/users", payload);
@@ -1455,7 +1455,7 @@ class GitSshTransportEndToEndIT {
         user.addGrant("REPOSITORY_" + repositoryName)
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
                 .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "*");
     }
