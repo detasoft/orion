@@ -30,7 +30,9 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
         if (request.context().cancellation().isCancelled()) {
             return failure(CommandFailureCode.CANCELLED, "Command was cancelled");
         }
-        CommandParseResult parseResult = parser.parse(request.commandLine(), request.context().currentPath());
+        CommandParseResult parseResult = parser.parse(
+                request.commandLine(), request.context().currentPath(),
+                (path, action) -> findDefinitionShape(path, action) != null);
         if (parseResult instanceof CommandParseResult.Failure parseFailure) {
             return failure(parseFailure.code(), parseFailure.message());
         }
@@ -45,12 +47,14 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
     @Override
     public CommandAuditDescription describe(CommandRequest request) {
         Objects.requireNonNull(request, "request");
-        CommandParseResult parseResult = parser.parse(request.commandLine(), request.context().currentPath());
+        CommandParseResult parseResult = parser.parse(
+                request.commandLine(), request.context().currentPath(),
+                (path, action) -> findDefinitionShape(path, action) != null);
         if (!(parseResult instanceof CommandParseResult.Success success)) {
             return new CommandAuditDescription(request.context().currentPath().toString(), "", Map.of());
         }
         ParsedCommand command = success.command();
-        CommandDefinition definition = findDefinitionShape(command);
+        CommandDefinition definition = findDefinitionShape(command.path(), command.action());
         Map<String, String> parameters = new LinkedHashMap<>();
         for (int index = 0; index < command.positionalArguments().size(); index++) {
             boolean classified = definition != null && index < definition.maximumPositionalArguments();
@@ -161,9 +165,9 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
                 || definition.query().enabled() && CommandQuery.NAMED_PARAMETERS.contains(name);
     }
 
-    private CommandDefinition findDefinitionShape(ParsedCommand command) {
+    private CommandDefinition findDefinitionShape(CommandPath path, String action) {
         CommandNode node = root;
-        for (String segment : command.path().segments()) {
+        for (String segment : path.segments()) {
             CommandNode child = node.children().get(segment);
             if (child != null) {
                 node = child;
@@ -173,7 +177,7 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
                 return null;
             }
         }
-        return findAction(node, command.action());
+        return findAction(node, action);
     }
 
     private static CommandDefinition findAction(CommandNode node, String action) {

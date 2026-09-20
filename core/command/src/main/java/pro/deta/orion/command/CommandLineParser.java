@@ -5,11 +5,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiPredicate;
 
 public final class CommandLineParser {
-    public CommandParseResult parse(String commandLine, CommandPath currentPath) {
+    public CommandParseResult parse(
+            String commandLine,
+            CommandPath currentPath,
+            BiPredicate<CommandPath, String> registeredAction) {
         Objects.requireNonNull(commandLine, "commandLine");
         Objects.requireNonNull(currentPath, "currentPath");
+        Objects.requireNonNull(registeredAction, "registeredAction");
         Tokenization tokenization = tokenize(commandLine);
         if (tokenization.failure() != null) {
             return tokenization.failure();
@@ -19,7 +24,7 @@ public final class CommandLineParser {
             return failure("Command line is empty", 0);
         }
 
-        int actionIndex = actionIndex(tokens);
+        int actionIndex = actionIndex(tokens, currentPath, registeredAction);
         if (actionIndex > 1) {
             return failure(
                     "Unexpected token before action; only one path token is allowed",
@@ -82,20 +87,26 @@ public final class CommandLineParser {
         return new CommandParseResult.Success(new ParsedCommand(path, action, positional, named, predicates));
     }
 
-    private static int actionIndex(List<Token> tokens) {
+    private static int actionIndex(
+            List<Token> tokens,
+            CommandPath currentPath,
+            BiPredicate<CommandPath, String> registeredAction) {
         Token first = tokens.getFirst();
-        if (CommandAction.fromValue(first.text()).isPresent()) {
+        if (registeredAction.test(currentPath, first.text())) {
             return 0;
         }
-        for (int index = 1; index < tokens.size(); index++) {
-            if (CommandAction.fromValue(tokens.get(index).text()).isPresent()) {
-                return index;
+        CommandParseResult target = parsePath(tokens, 1, currentPath);
+        if (target instanceof CommandParseResult.Success success) {
+            for (int index = 1; index < tokens.size(); index++) {
+                if (registeredAction.test(success.command().path(), tokens.get(index).text())) {
+                    return index;
+                }
             }
         }
-        if (!looksLikePath(first.text())) {
-            return 0;
+        if (looksLikePath(first.text())) {
+            return tokens.size() > 1 ? 1 : -1;
         }
-        return -1;
+        return 0;
     }
 
     private static boolean looksLikePath(String token) {

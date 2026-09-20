@@ -29,7 +29,7 @@ class CommandLineParserTest {
     }
 
     @Test
-    void parsesShortRootCommandsAndEveryReservedAction() {
+    void parsesShortRootCommandsAndRegisteredActions() {
         assertThat(success("whoami", CommandPath.root()).action()).isEqualTo("whoami");
         for (String action : List.of("ls", "show", "add", "rm", "attach", "monitor")) {
             assertThat(success(action, CommandPath.root()).action()).isEqualTo(action);
@@ -105,13 +105,17 @@ class CommandLineParserTest {
     }
 
     private ParsedCommand success(String commandLine, CommandPath currentPath) {
-        CommandParseResult result = parser.parse(commandLine, currentPath);
+        CommandParseResult result = parser.parse(commandLine, currentPath,
+                (path, action) -> List.of("whoami", "ls", "show", "add", "rm", "attach", "monitor")
+                        .contains(action));
         assertThat(result).isInstanceOf(CommandParseResult.Success.class);
         return ((CommandParseResult.Success) result).command();
     }
 
     private void assertFailure(String commandLine, CommandPath currentPath, String messageFragment) {
-        CommandParseResult result = parser.parse(commandLine, currentPath);
+        CommandParseResult result = parser.parse(commandLine, currentPath,
+                (path, action) -> List.of("whoami", "ls", "show", "add", "rm", "attach", "monitor")
+                        .contains(action));
         assertThat(result).isInstanceOf(CommandParseResult.Failure.class);
         CommandParseResult.Failure failure = (CommandParseResult.Failure) result;
         assertThat(failure.message()).containsIgnoringCase(messageFragment);

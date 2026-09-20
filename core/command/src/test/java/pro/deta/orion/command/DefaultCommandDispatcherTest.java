@@ -25,6 +25,26 @@ class DefaultCommandDispatcherTest {
             new CommandRowQuery());
 
     @Test
+    void customActionsKeepActionWordsAsArgumentsInEveryScope() {
+        CommandDefinition custom = definition("custom", 3, 3, Set.of(), invocation ->
+                new CommandResult.Message(String.join(",", invocation.arguments().positional())));
+        CommandNode scope = CommandNode.builder().action(custom).build();
+        DefaultCommandDispatcher customDispatcher = new DefaultCommandDispatcher(
+                new CommandLineParser(), CommandNode.builder().action(custom).child("scope", scope).build(),
+                new CommandRowQuery());
+        for (String line : List.of("custom show ls rm", "scope custom show ls rm", "/scope custom show ls rm")) {
+            CommandRequest request = new CommandRequest(line, context(CommandPath.root()));
+            assertThat(customDispatcher.dispatch(request)).isEqualTo(new CommandResult.Message("show,ls,rm"));
+            assertThat(customDispatcher.describe(request).action()).isEqualTo("custom");
+            assertThat(customDispatcher.describe(request).parameters())
+                    .containsEntry("$0", "show").containsEntry("$1", "ls").containsEntry("$2", "rm");
+        }
+        assertThat(customDispatcher.dispatch(new CommandRequest(
+                "CuStOm 'show' ls rm", context(CommandPath.absolute(List.of("scope"))))))
+                .isEqualTo(new CommandResult.Message("show,ls,rm"));
+    }
+
+    @Test
     void dispatchesStaticDynamicAndRelativeCommandsWithResolvedPayloads() {
         assertThat(dispatch("/repository ls", CommandPath.root()))
                 .isEqualTo(textRows(List.of("name"), List.of(List.of("alpha"))));

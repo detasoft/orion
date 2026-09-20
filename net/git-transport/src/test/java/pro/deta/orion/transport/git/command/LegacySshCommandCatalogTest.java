@@ -137,6 +137,25 @@ class LegacySshCommandCatalogTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"show", "ls", "rm"})
+    void launchPermitAcceptsActionWordsAsAgentLabels(String label) throws Exception {
+        String command = "issue-launch-permit " + label + " https://localhost:8443 /tmp/agent dev";
+        assertFailure(dispatch(command, user(List.of())), CommandFailureCode.ACCESS_DENIED);
+        agentServer = new AgentSessionServer(root);
+        agentServer.onStart();
+        try {
+            CommandResult result = dispatch(command, user(List.of(grant(AccessControl.GrantKey.ADMIN))));
+            assertThat(result).isInstanceOf(CommandResult.Message.class);
+            String[] permit = ((CommandResult.Message) result).value().split("\\n");
+            assertThat(permit).hasSize(3);
+            assertThat(permit[0]).isEqualTo("1");
+            assertThat(java.util.Base64.getUrlDecoder().decode(permit[2])).hasSize(32);
+        } finally {
+            agentServer.onStop();
+        }
+    }
+
     @Test
     void stateAliasesAndRepositoriesPreserveExistingOutput() {
         UserIdentity admin = user(List.of(grant(AccessControl.GrantKey.ADMIN)));

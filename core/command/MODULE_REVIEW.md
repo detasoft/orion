@@ -66,37 +66,3 @@ the viewport behavior requires a decision before repair.
 
 **Priority signals.** Importance: medium, triggered by normal long input. Repair ease: medium because viewport
 policy and Unicode cell handling must be established.
-
-## 4. Fixed action vocabulary consumes valid custom-command arguments
-
-**Problem.** `issue-launch-permit show https://example.test /tmp/agent dev` selects `show` as its action and
-`/issue-launch-permit` as its path, rather than issuing a permit for valid label `show`. A later positional
-value matching an action instead produces "Unexpected token before action". Quotes do not help because
-tokenization removes them before action selection.
-
-**Sources.** [Action search](src/main/java/pro/deta/orion/command/CommandLineParser.java#L85),
-[fixed vocabulary](src/main/java/pro/deta/orion/command/CommandAction.java),
-[real custom command](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalog.java#L118),
-[label consumer](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalog.java#L216),
-[identifier validation](../../agent-protocol/src/main/java/pro/deta/orion/agent/protocol/ProtocolValidation.java#L16),
-[parser tests](src/test/java/pro/deta/orion/command/CommandLineParserTest.java#L32), and
-[catalog tests](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalogTest.java#L99).
-Current tests use noncolliding positional values.
-
-**Documented behavior.** The registered CommandDefinition accepts four positional arguments; AgentLabel accepts
-`show`, `ls` and other action words. No positional-value reservation was found.
-
-**Contract.** Registered custom actions must remain distinct from their valid arguments. Preserve existing
-root-action and relative-path forms, including `repository ls`, and existing authorization checks.
-
-**Minimal repair.** Select the action using existing registered definitions/current scope, then stop searching
-its arguments for another action. Exercise collisions at several argument positions and relative paths.
-
-**Alternatives and consequences.** Adding each custom command to CommandAction retains duplicate declarations.
-A new delimiter changes existing syntax. Reuse command metadata rather than patching forbidden label lists;
-this needs a contained parser/dispatcher integration change, not a new execution framework.
-
-**Confidence.** High in the misparse and valid consumer input; static review only.
-
-**Priority signals.** Importance: medium, because valid launch-permit commands fail depending on their values.
-Repair ease: medium because the parser currently has no registered-action context.
