@@ -15,12 +15,10 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitProxyBinding;
@@ -217,10 +215,8 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> {
-                    try (IndexedPack pack = repository.storage().openPack(received.orElseThrow()).orElseThrow();
-                         BufferedByteInputV2 input = pack.input()) {
-                        forwarded.add(input.newInputStream().readAllBytes());
-                    }
+                    forwarded.add(repository.storage().readPack(received.orElseThrow(),
+                            (size, input) -> input.newInputStream().readAllBytes()).orElseThrow());
                     return java.util.Collections.nCopies(updates.size(), true);
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));

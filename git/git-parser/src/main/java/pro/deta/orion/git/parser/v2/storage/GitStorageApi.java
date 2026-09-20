@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 
 import java.io.IOException;
@@ -143,8 +144,8 @@ public final class GitStorageApi implements AutoCloseable {
         return packs.ids();
     }
 
-    public Optional<IndexedPack> openPack(PackId id) throws IOException {
-        return packs.open(id);
+    public <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
+        return packs.readPack(Objects.requireNonNull(id, "packId"), Objects.requireNonNull(reader, "reader"));
     }
 
     @Override

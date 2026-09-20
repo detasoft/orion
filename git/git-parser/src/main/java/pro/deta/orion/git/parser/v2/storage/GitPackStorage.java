@@ -4,6 +4,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitPackRead;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -73,15 +75,31 @@ final class GitPackStorage {
         return List.copyOf(ids);
     }
 
-    Optional<IndexedPack> open(PackId id) throws IOException {
+    <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
         if (memory != null) {
             IndexedPack pack = memory.get(id);
-            return pack == null ? Optional.empty() : Optional.of(pack.copy());
+            return pack == null ? Optional.empty() : readPack(pack.size(), pack.input(), reader);
         }
-        try (GitLock.Lease lease = lockPack(id)) {
-            Path path = packPath(id);
-            Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
-            return Files.exists(index) ? Optional.of(IndexedPack.open(path, index)) : Optional.empty();
+        Path path = packPath(id);
+        Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
+        if (!Files.exists(index)) {
+            return Optional.empty();
+        }
+        long size = Files.size(path);
+        return readPack(size, new BufferedByteInputV2(Files.newInputStream(path)), reader);
+    }
+
+    private static <R> Optional<R> readPack(long size, BufferedByteInputV2 input, GitPackRead<R> reader)
+            throws IOException {
+        R value = null;
+        try (input) {
+            value = Objects.requireNonNull(reader.read(size, input), "reader result");
+            return Optional.of(value);
+        } catch (IOException | RuntimeException | Error failure) {
+            if (value instanceof AutoCloseable resource) {
+                closeFailed(resource, failure);
+            }
+            throw failure;
         }
     }
 
@@ -206,12 +224,15 @@ final class GitPackStorage {
             IndexedPack pack = memory.get(id);
             return pack == null ? Set.of() : pack.objectIds();
         }
-        Optional<IndexedPack> found = open(id);
-        if (found.isEmpty()) {
-            return Set.of();
-        }
-        try (IndexedPack pack = found.orElseThrow()) {
-            return pack.objectIds();
+        try (GitLock.Lease lease = lockPack(id)) {
+            Path path = packPath(id);
+            Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
+            if (!Files.exists(index)) {
+                return Set.of();
+            }
+            try (IndexedPack pack = IndexedPack.open(path, index)) {
+                return pack.objectIds();
+            }
         }
     }
 

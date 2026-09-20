@@ -166,12 +166,10 @@ class FileNativeGitRepositoryProviderTest {
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
-            try (IndexedPack stored = reopened.storage().openPack(id).orElseThrow();
-                 BufferedByteInputV2 input = stored.input()) {
-                assertThat(input.newInputStream().readAllBytes()).isEqualTo(bytes);
-                assertThat(stored.find(new ObjectId(blobId(first)))).isPresent();
-                assertThat(stored.find(new ObjectId(blobId(second)))).isPresent();
-            }
+            assertThat(reopened.storage().readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
+                    .hasValueSatisfying(content -> assertThat(content).isEqualTo(bytes));
+            assertThat(reopened.storage().packObjectIds(id))
+                    .contains(new ObjectId(blobId(first)), new ObjectId(blobId(second)));
             assertPublishedObject(reopened, blobId(first), first);
             assertPublishedObject(reopened, blobId(second), second);
             assertThat(reopened.readObject(new ObjectId("f".repeat(40)))).isEmpty();
@@ -193,10 +191,8 @@ class FileNativeGitRepositoryProviderTest {
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
-            try (IndexedPack stored = reopened.storage().openPack(id).orElseThrow()) {
-                assertThat(stored.find(new ObjectId(blobId(base)))).isPresent();
-                assertThat(stored.find(new ObjectId(blobId(target)))).isPresent();
-            }
+            assertThat(reopened.storage().packObjectIds(id))
+                    .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
             assertPublishedObject(reopened, blobId(target), target);
             assertThat(reopened.storage().readObject(new ObjectId(blobId(target)),
                     new ResolvedGitObjectRead<>(reopened.storage(), (type, size, baseId, input) -> {

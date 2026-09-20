@@ -12,7 +12,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -67,9 +66,10 @@ class GitBlockingWireSessionTest {
             @Override
             public List<RefUpdateResult> publish(NativeGitRepository selected, Optional<PackId> received,
                     List<RefUpdate> updates, boolean atomic) {
-                try (IndexedPack pack = selected.storage().openPack(received.orElseThrow()).orElseThrow();
-                     BufferedByteInputV2 raw = pack.input()) {
-                    assertThat(raw.newInputStream().readAllBytes()).isEqualTo(original);
+                try {
+                    assertThat(selected.storage().readPack(received.orElseThrow(),
+                            (size, input) -> input.newInputStream().readAllBytes()))
+                            .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(original));
                 } catch (IOException failure) {
                     throw new UncheckedIOException(failure);
                 }

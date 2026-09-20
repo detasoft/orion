@@ -13,10 +13,8 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -109,22 +107,21 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             GitObjectGraph graph = new GitObjectGraph(repository.storage());
             Set<ObjectId> required = graph.reachableObjects(wants, false);
             required.removeAll(graph.reachableObjects(haves, true));
-            Optional<IndexedPack> stored = repository.storage().openPack(received.orElseThrow());
-            if (stored.isPresent()) {
-                try (IndexedPack pack = stored.orElseThrow()) {
-                    if (canReusePack(pack, required)) {
-                        try (BufferedByteInputV2 input = pack.input()) {
-                            byte[] buffer = new byte[8192];
-                            ByteBuffer source;
-                            while ((source = input.buffer()) != null) {
-                                int count = Math.min(source.remaining(), buffer.length);
-                                source.get(buffer, 0, count);
-                                output.write(buffer, 0, count);
-                            }
-                        }
-                        output.flush();
-                        return;
+            PackId id = received.orElseThrow();
+            if (repository.storage().packObjectIds(id).containsAll(required)) {
+                Optional<Boolean> sent = repository.storage().readPack(id, (size, input) -> {
+                    byte[] buffer = new byte[8192];
+                    ByteBuffer source;
+                    while ((source = input.buffer()) != null) {
+                        int count = Math.min(source.remaining(), buffer.length);
+                        source.get(buffer, 0, count);
+                        output.write(buffer, 0, count);
                     }
+                    return true;
+                });
+                if (sent.isPresent()) {
+                    output.flush();
+                    return;
                 }
             }
         }
@@ -136,14 +133,5 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             writer.finish();
         }
         output.flush();
-    }
-
-    private static boolean canReusePack(IndexedPack pack, Set<ObjectId> required) throws IOException {
-        for (ObjectId id : required) {
-            if (pack.find(id).isEmpty()) {
-                return false;
-            }
-        }
-        return true;
     }
 }

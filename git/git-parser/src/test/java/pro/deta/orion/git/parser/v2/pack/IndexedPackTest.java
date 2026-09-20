@@ -167,12 +167,8 @@ class IndexedPackTest {
             PackId id = new GitPackObjectResolver(pack, storage).complete();
             pack.addObject(12, object, GitObjectType.BLOB, 3);
             assertThat(pack.id()).isEqualTo(id);
-            try (IndexedPack copy = pack.copy();
-                 IndexedPack diskCopy = pack.copyTo(directory.resolve("copy"))) {
-                assertThat(copy.id()).isEqualTo(id);
+            try (IndexedPack diskCopy = pack.copyTo(directory.resolve("copy"))) {
                 assertThat(diskCopy.id()).isEqualTo(id);
-                copy.append(ByteBuffer.wrap(new byte[]{1}));
-                assertThatThrownBy(copy::id).isInstanceOf(IOException.class);
                 diskCopy.truncate(12);
                 assertThatThrownBy(diskCopy::id).isInstanceOf(IOException.class);
                 diskCopy.discard();
@@ -181,6 +177,8 @@ class IndexedPackTest {
             assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
             assertThat(new GitPackObjectResolver(pack, storage).complete()).isEqualTo(id);
             assertThat(pack.id()).isEqualTo(id);
+            pack.append(ByteBuffer.wrap(new byte[]{1}));
+            assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
         }
     }
 

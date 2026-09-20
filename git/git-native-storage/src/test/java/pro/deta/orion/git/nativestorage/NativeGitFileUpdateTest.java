@@ -11,8 +11,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -37,10 +35,8 @@ class NativeGitFileUpdateTest {
 
         assertThat(repository.storage().packIds()).hasSize(1);
         PackId packId = repository.storage().packIds().iterator().next();
-        try (IndexedPack pack = repository.storage().openPack(packId).orElseThrow();
-             BufferedByteInputV2 input = pack.input()) {
-            assertThat(input.readBytes(4)).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
-        }
+        assertThat(repository.storage().readPack(packId, (size, input) -> input.readBytes(4)))
+                .hasValueSatisfying(header -> assertThat(header).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII)));
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
         assertThat(reopened.loadFiles("main", List.of("config.txt")).files())

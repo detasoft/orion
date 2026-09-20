@@ -230,11 +230,6 @@ public final class IndexedPack implements AutoCloseable {
         return copyTo(create(directory));
     }
 
-    public IndexedPack copy() throws IOException {
-        requireOpen();
-        return copyTo(create());
-    }
-
     private IndexedPack copyTo(IndexedPack copy) throws IOException {
         try {
             ByteBuffer buffer = ByteBuffer.allocate(8192);

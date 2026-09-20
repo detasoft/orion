@@ -93,9 +93,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
         try (IndexedPack inline = inlinePack(response)) {
             assertThat(inline.objectCount()).isZero();
         }
-        try (IndexedPack published = storage().openPack(packId).orElseThrow()) {
-            assertThat(published.objectIds()).containsExactlyInAnyOrderElementsOf(ids);
-        }
+        assertThat(storage().packObjectIds(packId)).containsExactlyInAnyOrderElementsOf(ids);
     }
 
     @Test

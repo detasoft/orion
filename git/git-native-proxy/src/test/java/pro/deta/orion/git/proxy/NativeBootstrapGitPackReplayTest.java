@@ -80,12 +80,10 @@ class NativeBootstrapGitPackReplayTest {
             }
             byte[] original = bytes.toByteArray();
             Optional<PackId> received = ingest(repository, original);
-            byte[] completed;
-            try (IndexedPack pack = repository.storage().openPack(received.orElseThrow()).orElseThrow();
-                 BufferedByteInputV2 input = pack.input()) {
-                completed = input.newInputStream().readAllBytes();
-                assertThat(pack.find(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()))).isPresent();
-            }
+            byte[] completed = repository.storage().readPack(received.orElseThrow(),
+                    (size, input) -> input.newInputStream().readAllBytes()).orElseThrow();
+            assertThat(repository.storage().packObjectIds(received.orElseThrow()))
+                    .contains(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()));
 
             try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
                 if (upstreamHasBase) {
