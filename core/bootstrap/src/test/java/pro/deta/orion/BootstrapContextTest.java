@@ -279,6 +279,41 @@ class BootstrapContextTest {
     }
 
     @Test
+    void initializesEmptyDiskStorageAndRestartsWithTheSameIdentity() throws Exception {
+        OrionConfiguration configuration = configuration();
+        byte[] payload = bytes("first-start-identity");
+        byte[] signature;
+        String keyId;
+
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT))
+                .isInstanceOf(IllegalStateException.class)
+                .rootCause()
+                .hasMessage("Bootstrap source ref is unavailable: material");
+
+        try (BootstrapContext initialized = BootstrapContext.open(configuration, ENVIRONMENT, true)) {
+            keyId = initialized.serverIdentity().activeKeyId();
+            signature = initialized.serverIdentity().sign(payload);
+            OrionComponent component = runtimeComponent(configuration, initialized);
+            try {
+                assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
+            } finally {
+                component.orionApplicationLifecycle().shutdownApplication();
+            }
+        }
+
+        try (BootstrapContext restarted = BootstrapContext.open(configuration, ENVIRONMENT)) {
+            assertThat(restarted.serverIdentity().activeKeyId()).isEqualTo(keyId);
+            assertThat(restarted.serverIdentity().verify(keyId, payload, signature)).isTrue();
+            OrionComponent component = runtimeComponent(configuration, restarted);
+            try {
+                assertThat(component.orionApplicationLifecycle().runApplication()).isEqualTo(RUNNING);
+            } finally {
+                component.orionApplicationLifecycle().shutdownApplication();
+            }
+        }
+    }
+
+    @Test
     void createsMissingRepositoryMaterialBeforeRuntimeConstruction() throws Exception {
         OrionConfiguration configuration = configuration();
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(

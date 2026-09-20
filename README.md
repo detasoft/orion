@@ -24,19 +24,25 @@ change between revisions.
 
 ## Quick Start
 
-Start Orion with the bundled local development configuration:
+Initialize and start Orion with the bundled local development configuration:
 
 ```sh
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
-make run-server
+make init-server
 ```
 
 The equivalent Maven command is:
 
 ```sh
 export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
-mvn -pl core/bootstrap -am -Prun-server process-classes
+mvn -pl core/bootstrap -am -Prun-server -Dorion.run.arguments="--create-if-missing" process-classes
 ```
+
+For subsequent starts, use `make run-server` with the same material password.
+Both goals accept additional application options through `ORION_ARGS`.
+`init-server` explicitly permits creating missing key material; do not use it
+to recover lost keys from an existing installation. Restore its matching
+[key-material backup](docs/key-material-backup-and-restore.md) instead.
 
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's

@@ -25,7 +25,7 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server run-agent enroll-admin-key require-key-material-password issue-token issue-token-raw
+.PHONY: init-server run-server run-agent enroll-admin-key require-key-material-password issue-token issue-token-raw
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
 .PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
@@ -52,6 +52,9 @@ enroll-admin-key: ## Enroll an admin SSH key
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
+init-server: ## Initialize key material and run the Orion server for the first time
+	$(MAKE) run-server ORION_ARGS="--create-if-missing $(ORION_ARGS)"
+
 run-server: require-key-material-password ## Run the Orion server
 	$(MAVEN) -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
@@ -61,7 +64,8 @@ run-agent: ## Run AgentD on this machine; set AGENT_ARGS for its command-line op
 		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
 
 # Scenario:
-# 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
+# 1. Export ORION_KEY_MATERIAL_PASSWORD, then initialize the server: make init-server
+#    For subsequent starts: make run-server
 #    To recover the root user and password: make run-server ORION_ARGS=--reset-root-pass
 # 2. Enroll a key selected by the SSH client with the generated Orion root password.
 # 3. Issue a temporary admin token and export it into the current shell:
