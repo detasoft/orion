@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLineOutput;
@@ -16,11 +17,13 @@ import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 public class GitProtocolContext {
     private final BufferedByteInputV2 input;
@@ -100,6 +103,7 @@ public class GitProtocolContext {
                         case APPLIED -> null;
                         case EXPECTED_OLD_MISMATCH -> "stale info";
                         case OBJECT_NOT_FOUND -> "missing necessary objects";
+                        case REJECTED -> "permission denied";
                         case STORAGE_ERROR -> "failed to update ref";
                         case ATOMIC_ABORTED -> "atomic push failure";
                     };
@@ -115,7 +119,26 @@ public class GitProtocolContext {
             output.flush();
         }
 
-        public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs)
+        public void writeShallowInfo(Set<ObjectId> shallow, Set<ObjectId> unshallow, SideBand sideBand)
+                throws IOException {
+            if (version == GitProtocolVersion.V2) {
+                if (shallow.isEmpty() && unshallow.isEmpty()) {
+                    return;
+                }
+                writeText("shallow-info\n", sideBand);
+            }
+            for (ObjectId id : shallow) {
+                writeText("shallow " + id.toHex() + "\n", sideBand);
+            }
+            for (ObjectId id : unshallow) {
+                writeText("unshallow " + id.toHex() + "\n", sideBand);
+            }
+            (version == GitProtocolVersion.V2 ? GitPktLine.Control.DELIMITER : GitPktLine.Control.FLUSH)
+                    .writeTo(output);
+        }
+
+        public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs,
+                                             Map<PackId, URI> packfileUris)
                 throws IOException {
             if (version == GitProtocolVersion.V2) {
                 SideBand sideBand = capabilities.has(GitCapability.SIDEBAND_ALL) ? SideBand.DATA : SideBand.NONE;
@@ -123,6 +146,13 @@ public class GitProtocolContext {
                     writeText("wanted-refs\n", sideBand);
                     for (Map.Entry<RefId, ObjectId> ref : wantedRefs.entrySet()) {
                         writeText(ref.getValue().toHex() + " " + ref.getKey().value() + "\n", sideBand);
+                    }
+                    GitPktLine.Control.DELIMITER.writeTo(output);
+                }
+                if (!packfileUris.isEmpty()) {
+                    writeText("packfile-uris\n", sideBand);
+                    for (Map.Entry<PackId, URI> pack : packfileUris.entrySet()) {
+                        writeText(pack.getKey().toHex() + " " + pack.getValue().toASCIIString() + "\n", sideBand);
                     }
                     GitPktLine.Control.DELIMITER.writeTo(output);
                 }

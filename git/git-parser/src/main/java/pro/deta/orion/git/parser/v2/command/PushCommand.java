@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.command;
 
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
@@ -21,10 +22,16 @@ import java.util.Optional;
 
 public final class PushCommand implements GitCommand {
     private final GitStorageApi storage;
+    private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities;
 
     public PushCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
-        this.storage = Objects.requireNonNull(storage, "storage");
+        this(new GitRepositoryContext(storage), advertisedCapabilities);
+    }
+
+    public PushCommand(GitRepositoryContext repository, GitCapabilities advertisedCapabilities) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.storage = repository.storage();
         this.advertisedCapabilities = new GitCapabilities(advertisedCapabilities);
     }
 
@@ -39,9 +46,10 @@ public final class PushCommand implements GitCommand {
         }
         boolean unpacked = true;
         List<RefUpdateResult> results;
+        Optional<IndexedPack> received = Optional.empty();
         try {
             if (request.requiresPack()) {
-                receivePack(protocolContext.input());
+                received = Optional.of(receivePack(protocolContext.input()));
             }
         } catch (IOException failure) {
             if (!request.capabilities().has(GitCapability.REPORT_STATUS)
@@ -56,12 +64,19 @@ public final class PushCommand implements GitCommand {
                 results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR, Optional.empty()));
             }
         } else {
-            results = storage.updateRefs(request.updates(), request.capabilities().has(GitCapability.ATOMIC));
+            try {
+                results = repository.publish(received, request.updates(),
+                        request.capabilities().has(GitCapability.ATOMIC));
+            } finally {
+                if (received.isPresent()) {
+                    received.orElseThrow().discard();
+                }
+            }
         }
         protocolContext.writer().writePushStatus(request.capabilities(), unpacked, results);
     }
 
-    private void receivePack(BufferedByteInputV2 input) throws IOException {
+    private IndexedPack receivePack(BufferedByteInputV2 input) throws IOException {
         try (PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
             IndexedPack pack = ingestor.ingest();
             try {
@@ -76,7 +91,7 @@ public final class PushCommand implements GitCommand {
                 }
                 throw failure;
             }
-            storage.persist(pack);
+            return pack;
         }
     }
 }

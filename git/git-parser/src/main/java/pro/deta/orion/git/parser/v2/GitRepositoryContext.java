@@ -1,20 +1,41 @@
 package pro.deta.orion.git.parser.v2;
 
-/**
- * Binds a server operation to one normalized repository path, resolved repository, and access context.
- * Preserves publication through the policy-aware provider. Separate HTTP discovery and POST requests receive
- * separate contexts; per-want and per-ref authorization remains with the corresponding command.
- *
- * <p>Preliminary methods:
- * <ul>
- *   <li>{@code open(...)} - resolve or create the repository once and check operation-level access.</li>
- *   <li>{@code repositoryPath()} - return the normalized repository path.</li>
- *   <li>{@code repository()} - return the repository bound to this operation.</li>
- *   <li>{@code accessHook()} - provide the bound access policy for command-specific checks.</li>
- *   <li>{@code publish(...)} - publish through the existing provider policy using the bound path.</li>
- * </ul>
- * Method names and signatures are provisional. Resource cleanup is added only for resources the context owns;
- * this context must not become a service containing the implementations of every command.
- */
-public final class GitRepositoryContext {
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+
+import java.io.IOException;
+import java.net.URI;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+
+public class GitRepositoryContext {
+    private final GitStorageApi storage;
+
+    public GitRepositoryContext(GitStorageApi storage) {
+        this.storage = Objects.requireNonNull(storage, "storage");
+    }
+
+    public final GitStorageApi storage() {
+        return storage;
+    }
+
+    public Optional<URI> packUri(PackId id) {
+        return Optional.empty();
+    }
+
+    public void checkFetchAccess(FetchRequest request) throws IOException {
+    }
+
+    public List<RefUpdateResult> publish(Optional<IndexedPack> pack, List<RefUpdate> updates, boolean atomic)
+            throws IOException {
+        if (pack.isPresent()) {
+            storage.persist(pack.orElseThrow());
+        }
+        return storage.updateRefs(updates, atomic);
+    }
 }

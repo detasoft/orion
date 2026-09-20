@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.command;
 
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
@@ -30,10 +31,16 @@ import java.util.Set;
 
 public class FetchCommand implements GitCommand {
     private final GitStorageApi storage;
+    private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
 
     public FetchCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
-        this.storage = Objects.requireNonNull(storage, "storage");
+        this(new GitRepositoryContext(storage), advertisedCapabilities);
+    }
+
+    public FetchCommand(GitRepositoryContext repository, GitCapabilities advertisedCapabilities) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.storage = repository.storage();
         this.advertisedCapabilities.addAll(Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities"));
     }
 
@@ -42,12 +49,14 @@ public class FetchCommand implements GitCommand {
         GitProtocolContext.Reader reader = protocolContext.reader();
         GitProtocolContext.Writer writer = protocolContext.writer();
         FetchRequest request = FetchRequest.parseRequest(reader, protocolContext.version());
+        FetchNegotiatorIterator iterator = prepareNegotiation(request, protocolContext.transport());
         if (request.mode() != FetchRequest.Mode.PROTOCOL_V2
                 && (request.depth().isPresent() || request.deepenSince().isPresent()
                 || !request.deepenNot().isEmpty())) {
-            throw new IOException("Legacy shallow updates are not implemented");
+            FetchPack history = FetchPack.prepare(storage, plan(iterator.getContext()));
+            writer.writeShallowInfo(history.shallowCommits(), history.unshallowCommits(), SideBand.NONE);
+            writer.flush();
         }
-        FetchNegotiatorIterator iterator = prepareNegotiation(request, protocolContext.transport());
         NegotiationContext context = negotiate(iterator, reader, writer);
         Optional<FetchPlan> response = prepareResponse(context);
         if (response.isEmpty()) {
@@ -55,7 +64,13 @@ public class FetchCommand implements GitCommand {
         }
         FetchPlan plan = response.orElseThrow();
         FetchPack pack = FetchPack.prepare(storage, plan);
-        BufferedByteOutput output = writer.beginPack(plan.capabilities(), plan.wantedRefs());
+        if (request.mode() == FetchRequest.Mode.PROTOCOL_V2) {
+            SideBand sideBand = request.capabilities().has(GitCapability.SIDEBAND_ALL)
+                    ? SideBand.DATA : SideBand.NONE;
+            writer.writeShallowInfo(pack.shallowCommits(), pack.unshallowCommits(), sideBand);
+        }
+        BufferedByteOutput output = writer.beginPack(plan.capabilities(), plan.wantedRefs(),
+                pack.selectPackUris(repository, plan.packfileUriProtocols()));
         try (PackWriter packWriter = new PackWriter(output, pack.objectCount())) {
             pack.writeTo(packWriter);
             packWriter.finish();
@@ -81,6 +96,7 @@ public class FetchCommand implements GitCommand {
     }
 
     protected void checkFetchAccess(FetchRequest request) throws IOException {
+        repository.checkFetchAccess(request);
     }
 
     public Optional<FetchPlan> prepareResponse(NegotiationContext context) {
@@ -95,9 +111,14 @@ public class FetchCommand implements GitCommand {
         if (wants.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new FetchPlan(wants, context.wantedRefs(), context.commonObjects(),
+        return Optional.of(plan(context));
+    }
+
+    private static FetchPlan plan(NegotiationContext context) {
+        FetchRequest request = context.request();
+        return new FetchPlan(context.wantedObjects(), context.wantedRefs(), context.commonObjects(),
                 request.shallowCommits(), request.depth(), request.deepenSince(), request.deepenNot(),
-                request.filter(), request.capabilities(), request.packfileUriProtocols()));
+                request.filter(), request.capabilities(), request.packfileUriProtocols());
     }
 
     public NegotiationContext negotiate(FetchNegotiatorIterator iterator, GitProtocolContext.Reader reader,

@@ -5,7 +5,6 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
@@ -296,96 +295,6 @@ class GitBlockingWireTransportTest {
                 .hasMessage("message must not be blank");
     }
 
-    @Test
-    void writesSimpleSerializationToByteArrayOutput() throws Exception {
-        ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
-        GitBlockingWireTransport output = output(sink);
-
-        output.sendNak();
-
-        assertThat(sink.ascii()).isEqualTo("0008NAK\n");
-    }
-
-    @Test
-    void streamsLegacyPackToByteArrayOutput() throws Exception {
-        ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
-        GitBlockingWireTransport output = output(sink);
-        GitBlockingWireTransport.LegacyPackResponse response =
-                output.beginLegacyPack(producer("PACK"), true);
-
-        response.advance();
-
-        assertThat(sink.ascii()).isEqualTo("0008NAK\nPACK");
-    }
-
-    @Test
-    void writesLegacySideBandResponse() throws Exception {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitBlockingWireTransport output = output(
-                new OutputStreamBufferedByteOutput(bytes));
-        GitBlockingWireTransport.LegacySideBandResponse response =
-                output.beginLegacySideBand64k(
-                        producer("PACK-data"),
-                        true);
-
-        try {
-            response.advance();
-
-            assertThat(new String(bytes.toByteArray(), StandardCharsets.US_ASCII))
-                    .isEqualTo(
-                            "0008NAK\n"
-                                    + "000e\u0001PACK-data"
-                                    + "0000");
-        } finally {
-            response.close();
-        }
-    }
-
-    @Test
-    void rejectsProducerThatMakesNoProgress() {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitBlockingWireTransport output = output(
-                new OutputStreamBufferedByteOutput(bytes));
-        GitBlockingWireTransport.LegacyPackResponse response =
-                output.beginLegacyPack(new NativePackProducer() {
-                    @Override
-                    public Result produce(ByteBuf destination) {
-                        return Result.MORE;
-                    }
-
-                    @Override
-                    public void close() {
-                    }
-                }, true);
-
-        try {
-            assertThatThrownBy(response::advance)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("Native pack producer made no progress");
-        } finally {
-            response.close();
-        }
-    }
-
-    @Test
-    void allowsOutputAfterCompletedPackResponse() throws Exception {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitBlockingWireTransport output = output(
-                new OutputStreamBufferedByteOutput(bytes));
-        GitBlockingWireTransport.LegacyPackResponse response =
-                output.beginLegacyPack(producer("PACK"), true);
-
-        response.advance();
-
-        assertThatCode(output::sendNak).doesNotThrowAnyException();
-        assertThat(new String(bytes.toByteArray(), StandardCharsets.US_ASCII))
-                .isEqualTo("0008NAK\nPACK0008NAK\n");
-    }
-
-    private static NativePackProducer producer(String value) {
-        return new TrackingProducer(value);
-    }
-
     private static GitBlockingWireTransport input(String ascii) {
         return new GitBlockingWireTransport(
                 new BufferedByteInputV2(new ByteArrayInputStream(ascii.getBytes(StandardCharsets.US_ASCII))),
@@ -400,65 +309,6 @@ class GitBlockingWireTransportTest {
         byte[] bytes = new byte[length];
         Arrays.fill(bytes, value);
         return bytes;
-    }
-
-    private static final class ByteArrayRecordingOutput
-            implements BufferedByteOutput {
-        private final ByteArrayOutputStream bytes =
-                new ByteArrayOutputStream();
-
-        @Override
-        public void write(byte[] source, int offset, int length) {
-            bytes.write(source, offset, length);
-        }
-
-        @Override
-        public void write(ByteBuf buffer) {
-            throw new AssertionError(
-                    "Simple serialization should use byte-array writes");
-        }
-
-        @Override
-        public void flush() {
-        }
-
-        private String ascii() throws IOException {
-            return bytes.toString(StandardCharsets.US_ASCII);
-        }
-    }
-
-    private static final class TrackingProducer implements NativePackProducer {
-        private final byte[] value;
-        private int offset;
-        private boolean closed;
-
-        private TrackingProducer(String value) {
-            this.value = value.getBytes(StandardCharsets.US_ASCII);
-        }
-
-        @Override
-        public Result produce(ByteBuf destination) {
-            int length = Math.min(
-                    destination.writableBytes(),
-                    value.length - offset);
-            destination.writeBytes(value, offset, length);
-            offset += length;
-            return offset == value.length ? Result.COMPLETED : Result.MORE;
-        }
-
-        @Override
-        public Result produce(BufferedByteOutput destination)
-                throws IOException {
-            int length = Math.min(8 * 1024, value.length - offset);
-            destination.write(value, offset, length);
-            offset += length;
-            return offset == value.length ? Result.COMPLETED : Result.MORE;
-        }
-
-        @Override
-        public void close() {
-            closed = true;
-        }
     }
 
     private static final class RecordingOutput implements BufferedByteOutput {

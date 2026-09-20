@@ -144,7 +144,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         try (BufferedByteInputV2 input = input(new byte[0])) {
             GitProtocolContext.Writer writer = new GitProtocolContext(input,
                     new OutputStreamBufferedByteOutput(bytes), GitProtocolVersion.V2, GitTransport.HTTP).writer();
-            writer.beginPack(capabilities, Map.of(ref, id)).write(new byte[]{42});
+            writer.beginPack(capabilities, Map.of(ref, id), Map.of()).write(new byte[]{42});
             writer.endPack(capabilities);
         }
         try (BufferedByteInputV2 input = input(bytes.toByteArray())) {
@@ -226,12 +226,97 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     }
 
     @Test
-    void rejectsLegacyDeepenBeforeWaitingForHavePackets() throws Exception {
+    void sendsLegacyShallowBoundariesBeforeNegotiationAndPack() throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
-        ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{42});
-        assertThatThrownBy(() -> execute(storage, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
-                "want " + id.toHex() + " shallow", "deepen 1", "FLUSH"))
-                .isInstanceOf(IOException.class).hasMessageContaining("shallow updates");
+        ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
+        ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+        ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+        byte[] response = execute(storage, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
+                "want " + tip.toHex() + " shallow", "deepen 1", "FLUSH", "done");
+        try (BufferedByteInputV2 input = input(response)) {
+            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
+                    .isEqualTo("shallow " + tip.toHex());
+            assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
+            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text()).isEqualTo("NAK");
+            try (IndexedPack pack = ingest(input.newInputStream().readAllBytes())) {
+                assertThat(pack.find(tip)).isPresent();
+                assertThat(pack.find(tree)).isPresent();
+                assertThat(pack.find(root)).isEmpty();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void deepensOneGenerationFromClientBoundary(boolean sidebandAll) throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
+        ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+        ObjectId parent = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+        ObjectId boundary = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
+        ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(boundary)));
+        byte[] response = execute(storage, GitProtocolVersion.V2,
+                capabilities(GitCapability.SHALLOW, GitCapability.SIDEBAND_ALL),
+                sidebandAll ? "sideband-all" : "no-progress", "want " + tip.toHex(),
+                "shallow " + boundary.toHex(), "have " + boundary.toHex(),
+                "deepen 1", "deepen-relative", "done", "FLUSH");
+        assertThat(new String(response, StandardCharsets.ISO_8859_1))
+                .contains("shallow " + parent.toHex() + "\n", "unshallow " + boundary.toHex() + "\n");
+        try (IndexedPack pack = ingest(v2Pack(response, sidebandAll))) {
+            assertThat(pack.find(tip)).isPresent();
+            assertThat(pack.find(parent)).isPresent();
+            assertThat(pack.find(root)).isEmpty();
+            assertThat(pack.find(boundary)).isEmpty();
+        }
+    }
+
+    @Test
+    void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
+        ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+        byte[] parentContent = new String(commit(tree, Optional.of(root)), StandardCharsets.US_ASCII)
+                .replace(" 0 +0000", " 100 +0000").getBytes(StandardCharsets.US_ASCII);
+        ObjectId parent = store(storage, GitObjectType.COMMIT, parentContent);
+        byte[] tipContent = new String(commit(tree, Optional.of(parent)), StandardCharsets.US_ASCII)
+                .replace(" 0 +0000", " 300 +0000").getBytes(StandardCharsets.US_ASCII);
+        ObjectId tip = store(storage, GitObjectType.COMMIT, tipContent);
+        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+                "want " + tip.toHex(), "deepen-since 200", "done", "FLUSH");
+        assertThat(new String(response, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
+        try (IndexedPack pack = ingest(v2Pack(response, false))) {
+            assertThat(pack.find(tip)).isPresent();
+            assertThat(pack.find(parent)).isEmpty();
+        }
+        storage.updateRefs(java.util.List.of(new pro.deta.orion.git.parser.v2.data.RefUpdate(
+                new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
+        byte[] excluded = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+                "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
+        assertThat(new String(excluded, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
+        try (IndexedPack pack = ingest(v2Pack(excluded, false))) {
+            assertThat(pack.find(tip)).isPresent();
+            assertThat(pack.find(parent)).isEmpty();
+        }
+    }
+
+    @Test
+    void blobFilterOmitsTreeBlobsAndRetainsExplicitlyWantedBlob() throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        ObjectId blob = store(storage, GitObjectType.BLOB, new byte[]{1});
+        ObjectId tree = store(storage, GitObjectType.TREE, tree(blob));
+        ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+                "want " + tip.toHex(), "filter blob:none", "done", "FLUSH");
+        try (IndexedPack pack = ingest(v2Pack(response, false))) {
+            assertThat(pack.find(tip)).isPresent();
+            assertThat(pack.find(tree)).isPresent();
+            assertThat(pack.find(blob)).isEmpty();
+        }
+        byte[] explicit = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+                "want " + blob.toHex(), "filter blob:none", "done", "FLUSH");
+        try (IndexedPack pack = ingest(v2Pack(explicit, false))) {
+            assertThat(pack.find(blob)).isPresent();
+        }
     }
 
     private ObjectId store(GitStorageApi storage, GitObjectType type, byte[] content) throws Exception {

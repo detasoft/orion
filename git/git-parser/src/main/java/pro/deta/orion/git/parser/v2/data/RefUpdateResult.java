@@ -27,6 +27,7 @@ public record RefUpdateResult(RefUpdate update, Status status, Optional<String> 
         EXPECTED_OLD_MISMATCH,
         OBJECT_NOT_FOUND,
         STORAGE_ERROR,
+        REJECTED,
         ATOMIC_ABORTED
     }
 }

@@ -5,12 +5,20 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
+import java.net.URI;
+import java.util.Optional;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -23,6 +31,8 @@ public final class FetchPack {
     private final GitStorageApi storage;
     private final Set<ObjectId> objects = new LinkedHashSet<>();
     private final Set<ObjectId> common = new HashSet<>();
+    private final Set<ObjectId> shallow = new LinkedHashSet<>();
+    private final Set<ObjectId> unshallow = new LinkedHashSet<>();
     private final boolean thin;
 
     private FetchPack(GitStorageApi storage, boolean thin) {
@@ -32,12 +42,8 @@ public final class FetchPack {
 
     public static FetchPack prepare(GitStorageApi storage, FetchPlan plan) throws IOException {
         Objects.requireNonNull(plan, "plan");
-        if (plan.depth().isPresent() || plan.deepenSince().isPresent() || !plan.deepenNot().isEmpty()
-                || plan.capabilities().has(GitCapability.DEEPEN_RELATIVE)) {
-            throw new IOException("Deepening fetch history is not implemented");
-        }
-        if (plan.filter().isPresent()) {
-            throw new IOException("Filtered fetch is not implemented");
+        if (plan.filter().isPresent() && !plan.filter().orElseThrow().equals("blob:none")) {
+            throw new IOException("Unsupported object filter: " + plan.filter().orElseThrow());
         }
         FetchPack pack = new FetchPack(storage, plan.capabilities().has(GitCapability.THIN_PACK));
         ArrayDeque<ObjectId> pending = new ArrayDeque<>(plan.commonObjects());
@@ -48,18 +54,196 @@ public final class FetchPack {
                 enqueue(pending, id, links, plan.shallowCommits());
             }
         }
-        pending.addAll(plan.wantedObjects());
-        while (!pending.isEmpty()) {
-            ObjectId id = pending.removeFirst();
-            if (!pack.common.contains(id) && pack.objects.add(id)) {
-                GitObjectLinks links = pack.readLinks(id);
-                enqueue(pending, id, links, plan.shallowCommits());
+        pack.selectWanted(plan);
+        pack.objects.removeAll(pack.common);
+        pack.shallow.retainAll(pack.objects);
+        if (plan.filter().isPresent()) {
+            Iterator<ObjectId> iterator = pack.objects.iterator();
+            while (iterator.hasNext()) {
+                ObjectId id = iterator.next();
+                if (!plan.wantedObjects().contains(id) && pack.readLinks(id).type() == GitObjectType.BLOB) {
+                    iterator.remove();
+                }
             }
         }
         if (plan.capabilities().has(GitCapability.INCLUDE_TAG)) {
             pack.includeTags();
         }
         return pack;
+    }
+
+    public Set<ObjectId> shallowCommits() {
+        return Collections.unmodifiableSet(shallow);
+    }
+
+    public Set<ObjectId> unshallowCommits() {
+        return Collections.unmodifiableSet(unshallow);
+    }
+
+    private void selectWanted(FetchPlan plan) throws IOException {
+        boolean relative = plan.capabilities().has(GitCapability.DEEPEN_RELATIVE);
+        boolean deepening = plan.depth().isPresent() || plan.deepenSince().isPresent()
+                || !plan.deepenNot().isEmpty();
+        Set<ObjectId> excluded = excludedCommits(plan.deepenNot());
+        Map<ObjectId, Integer> visited = new LinkedHashMap<>();
+        Map<ObjectId, GitObjectLinks> commits = new LinkedHashMap<>();
+        ArrayDeque<Map.Entry<ObjectId, Integer>> pending = new ArrayDeque<>();
+        int initialDepth = relative ? Integer.MAX_VALUE : plan.depth().orElse(Integer.MAX_VALUE);
+        for (ObjectId root : plan.wantedObjects()) {
+            pending.addLast(Map.entry(root, initialDepth));
+        }
+        while (!pending.isEmpty()) {
+            Map.Entry<ObjectId, Integer> current = pending.removeFirst();
+            ObjectId id = current.getKey();
+            int remaining = current.getValue();
+            if (relative && remaining == Integer.MAX_VALUE && plan.shallowCommits().contains(id)) {
+                remaining = plan.depth().orElseThrow();
+                if (remaining < Integer.MAX_VALUE) {
+                    remaining++;
+                }
+            }
+            Integer previous = visited.get(id);
+            if (previous != null && previous >= remaining) {
+                continue;
+            }
+            visited.put(id, remaining);
+            objects.add(id);
+            GitObjectLinks links = readLinks(id);
+            if (links.type() != GitObjectType.COMMIT) {
+                for (ObjectId target : links.targets()) {
+                    pending.addLast(Map.entry(target, remaining));
+                }
+                continue;
+            }
+            commits.put(id, links);
+            pending.addLast(Map.entry(links.targets().getFirst(), Integer.MAX_VALUE));
+            if (remaining == 1 || !deepening && plan.shallowCommits().contains(id)) {
+                continue;
+            }
+            int parentDepth = remaining == Integer.MAX_VALUE ? remaining : remaining - 1;
+            for (ObjectId parent : links.targets().subList(1, links.targets().size())) {
+                if (!excluded.contains(parent) && (plan.deepenSince().isEmpty()
+                        || commitTime(parent) > plan.deepenSince().orElseThrow())) {
+                    pending.addLast(Map.entry(parent, parentDepth));
+                }
+            }
+        }
+        for (Map.Entry<ObjectId, GitObjectLinks> commit : commits.entrySet()) {
+            List<ObjectId> targets = commit.getValue().targets();
+            if (!commits.keySet().containsAll(targets.subList(1, targets.size()))) {
+                shallow.add(commit.getKey());
+            } else if (deepening && plan.shallowCommits().contains(commit.getKey())) {
+                unshallow.add(commit.getKey());
+            }
+        }
+    }
+
+    private Set<ObjectId> excludedCommits(Set<String> refs) throws IOException {
+        Set<ObjectId> result = new HashSet<>();
+        if (refs.isEmpty()) {
+            return result;
+        }
+        Map<RefId, ObjectId> storedRefs = storage.snapshotRefs().refs();
+        ArrayDeque<ObjectId> pending = new ArrayDeque<>();
+        for (String ref : refs) {
+            ObjectId id = storedRefs.get(new RefId(ref));
+            if (id == null && !ref.startsWith("refs/")) {
+                id = storedRefs.get(new RefId("refs/heads/" + ref));
+            }
+            if (id == null) {
+                throw new IOException("Unknown deepen-not ref: " + ref);
+            }
+            pending.addLast(id);
+        }
+        while (!pending.isEmpty()) {
+            ObjectId id = pending.removeFirst();
+            if (result.add(id)) {
+                GitObjectLinks links = readLinks(id);
+                if (links.type() == GitObjectType.COMMIT) {
+                    pending.addAll(links.targets().subList(1, links.targets().size()));
+                } else if (links.type() == GitObjectType.TAG) {
+                    pending.addAll(links.targets());
+                }
+            }
+        }
+        return result;
+    }
+
+    private long commitTime(ObjectId id) throws IOException {
+        return storage.readObject(id, new ResolvedGitObjectRead<>(storage,
+                (type, size, base, input) -> readCommitTime(type, size, input)))
+                .orElseThrow(() -> missing(id));
+    }
+
+    private static long readCommitTime(GitObjectType type, long remaining, BufferedByteInputV2 input)
+            throws IOException {
+        if (type != GitObjectType.COMMIT) {
+            throw new IOException("Commit parent is not a commit");
+        }
+        StringBuilder prefix = new StringBuilder(10);
+        StringBuilder suffix = new StringBuilder(64);
+        while (remaining-- > 0) {
+            int next = input.readUnsignedByte();
+            if (next == '\n') {
+                if (prefix.toString().equals("committer ")) {
+                    String value = suffix.toString();
+                    int zone = value.lastIndexOf(' ');
+                    int timestamp = zone < 0 ? -1 : value.lastIndexOf(' ', zone - 1);
+                    if (timestamp < 0) {
+                        throw new IOException("Invalid commit timestamp");
+                    }
+                    try {
+                        return Long.parseLong(value.substring(timestamp + 1, zone));
+                    } catch (NumberFormatException failure) {
+                        throw new IOException("Invalid commit timestamp", failure);
+                    }
+                }
+                if (prefix.isEmpty()) {
+                    break;
+                }
+                prefix.setLength(0);
+                suffix.setLength(0);
+            } else {
+                if (prefix.length() < 10) {
+                    prefix.append((char) next);
+                }
+                if (suffix.length() == 64) {
+                    suffix.deleteCharAt(0);
+                }
+                suffix.append((char) next);
+            }
+        }
+        throw new IOException("Missing commit timestamp");
+    }
+
+    public Map<PackId, URI> selectPackUris(GitRepositoryContext repository, Set<String> protocols)
+            throws IOException {
+        Map<PackId, URI> selected = new LinkedHashMap<>();
+        if (protocols.isEmpty() || objects.isEmpty()) {
+            return selected;
+        }
+        for (PackId id : storage.packIds()) {
+            Optional<URI> uri = repository.packUri(id);
+            if (uri.isEmpty() || !protocols.contains(uri.orElseThrow().getScheme())) {
+                continue;
+            }
+            Optional<IndexedPack> candidate = storage.openPack(id);
+            if (candidate.isEmpty()) {
+                continue;
+            }
+            try (IndexedPack pack = candidate.orElseThrow()) {
+                Set<ObjectId> covered = pack.objectIds();
+                if (!covered.isEmpty() && objects.containsAll(covered)) {
+                    selected.put(id, uri.orElseThrow());
+                    objects.removeAll(covered);
+                    common.addAll(covered);
+                }
+            }
+            if (objects.isEmpty()) {
+                break;
+            }
+        }
+        return selected;
     }
 
     public long objectCount() {

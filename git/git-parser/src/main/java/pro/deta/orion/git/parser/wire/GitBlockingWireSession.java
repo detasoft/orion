@@ -1,1518 +1,288 @@
 package pro.deta.orion.git.parser.wire;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import pro.deta.orion.git.nativestorage.GitObjectId;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
-import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
-import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
-import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
-import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
+import pro.deta.orion.git.parser.v2.command.PushCommand;
+import pro.deta.orion.git.parser.v2.command.RefsCommand;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
+import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
-import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
-import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.wire.exchange.LegacyUploadNegotiation;
-import pro.deta.orion.git.parser.wire.exchange.LegacyUploadRequest;
-import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
-import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.git.parser.wire.error.GitGeneralException;
-import pro.deta.orion.git.parser.wire.error.GitWireError;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class GitBlockingWireSession {
     public static final int DEFAULT_INPUT_BUFFER_SIZE = 16 * 1024;
-
-    private static final String REF_PREFIX = "ref-prefix ";
-    private static final int MAX_REF_PREFIX_COUNT = 256;
-    private static final int MAX_REF_PREFIX_CHARS = 65_536;
-    private static final String NULL_ID = "0".repeat(40);
-
-    private final GitBlockingWireTransport wire;
-    private final GitNativeRepositoryService repositoryService;
-    private final GitNativeRepositoryAccessHook accessHook;
+    private final GitNativeRepositoryService repositories;
     private final GitWireConfiguration configuration;
-    private final NativePackfileUriSourceFactory packfileUriSourceFactory;
+    private final GitBlockingWireTransport wire;
 
-    public GitBlockingWireSession(
-            GitNativeRepositoryService repositoryService,
-            GitNativeRepositoryAccessHook accessHook,
-            GitWireConfiguration configuration,
-            NativePackfileUriSourceFactory packfileUriSourceFactory,
-            GitBlockingWireTransport wire) {
+    public GitBlockingWireSession(GitNativeRepositoryService repositories, GitWireConfiguration configuration,
+                                  GitBlockingWireTransport wire) {
+        this.repositories = Objects.requireNonNull(repositories, "repositories");
+        this.configuration = Objects.requireNonNull(configuration, "configuration");
         this.wire = Objects.requireNonNull(wire, "wire");
-        this.repositoryService = Objects.requireNonNull(
-                repositoryService,
-                "repositoryService");
-        this.accessHook = Objects.requireNonNull(accessHook, "accessHook");
-        this.configuration = Objects.requireNonNull(
-                configuration,
-                "configuration");
-        this.packfileUriSourceFactory = Objects.requireNonNull(
-                packfileUriSourceFactory,
-                "packfileUriSourceFactory");
     }
 
-    public void advertise(InitialRequestData data) throws IOException {
-        Objects.requireNonNull(data, "data");
-        if (data.service() == InitialRequestService.UPLOAD_PACK
-                && data.getProtocolVersion()
-                        .orElse(null)
-                == GitProtocolVersion.V2) {
-            wire.sendV2UploadPackAdvertisement(
-                    configuration.protocolV2());
-            return;
+    public void advertise(InitialRequestData request) throws IOException {
+        advertise(request, repositories.open(request));
+    }
+
+    public void serveCommand(InitialRequestData request) throws IOException {
+        GitRepositoryContext repository = repositories.open(request);
+        advertise(request, repository);
+        serveRequest(request, repository, GitTransport.SSH);
+    }
+
+    public void serveSmartHttpPost(InitialRequestData request) throws IOException {
+        serveRequest(request, repositories.open(request), GitTransport.HTTP);
+    }
+
+    private void advertise(InitialRequestData request, GitRepositoryContext repository) throws IOException {
+        GitProtocolVersion version = version(request);
+        GitCapabilities capabilities = capabilities(request);
+        if (version == GitProtocolVersion.V2) {
+            wire.writeTextLine("version 2");
+            if (configuration.protocolV2().lsRefs()) {
+                for (GitCapabilityValue value : capabilities) {
+                    if (value.capability().orElse(null) == GitCapability.LS_REFS) {
+                        wire.writeTextLine(value.wireToken());
+                    }
+                }
+            }
+            if (configuration.protocolV2().fetch()) {
+                List<String> features = new ArrayList<>();
+                for (GitCapabilityValue value : capabilities) {
+                    if (value.capability().orElse(null) != GitCapability.LS_REFS) {
+                        features.add(value.wireToken());
+                    }
+                }
+                wire.writeTextLine(features.isEmpty() ? "fetch" : "fetch=" + String.join(" ", features));
+            }
+            wire.writeTextLine(GitCapabilityValue.value(GitCapability.OBJECT_FORMAT,
+                    GitHashAlgorithm.SHA1.wireName()).wireToken());
+            wire.writeTextLine(GitCapabilityValue.value(GitCapability.AGENT, "orion-native").wireToken());
+            if (configuration.protocolV2().serverOption()) {
+                wire.writeTextLine("server-option");
+            }
+            wire.writeFlush();
+        } else {
+            if (version == GitProtocolVersion.V1) {
+                wire.writeTextLine("version 1");
+            }
+            wire.sendAdvertisement(legacyAdvertisement(repository, capabilities,
+                    request.service() == InitialRequestService.UPLOAD_PACK && configuration.uploadPack().symref()));
         }
-        if (data.service() == InitialRequestService.UPLOAD_PACK) {
-            sendProtocolV1Marker(data);
-            wire.sendAdvertisement(
-                    repositoryService.legacyUploadPackAdvertisement(
-                            data,
-                            accessHook,
-                            configuration));
-            return;
-        }
-        sendProtocolV1Marker(data);
-        wire.sendAdvertisement(
-                repositoryService.legacyReceivePackAdvertisement(
-                        data,
-                        accessHook,
-                        configuration));
+        wire.flush();
     }
 
-    public void serveCommand(InitialRequestData data) throws IOException {
-        advertise(data);
-        serveRequest(data, false);
-    }
-
-    public void serveSmartHttpPost(InitialRequestData data)
+    private void serveRequest(InitialRequestData request, GitRepositoryContext repository, GitTransport transport)
             throws IOException {
-        serveRequest(data, true);
+        GitProtocolContext protocol = wire.protocolContext(version(request), transport);
+        GitCapabilities capabilities = capabilities(request);
+        if (request.service() == InitialRequestService.RECEIVE_PACK) {
+            new PushCommand(repository, capabilities).action(protocol);
+        } else if (protocol.version() == GitProtocolVersion.V2) {
+            serveV2(repository, protocol, capabilities);
+        } else {
+            new FetchCommand(repository, capabilities).action(protocol);
+        }
     }
 
-    private void serveRequest(
-            InitialRequestData data,
-            boolean stateless) throws IOException {
-        Objects.requireNonNull(data, "data");
-        GitProtocolVersion version =
-                data.getProtocolVersion().orElse(null);
-        if (version == GitProtocolVersion.V2
-                && data.service() == InitialRequestService.UPLOAD_PACK) {
-            if (!configuration.protocolV2().fetch()
-                    && !configuration.protocolV2().lsRefs()) {
-                throw new IOException(
-                        "Blocking parser only supports protocol v2 upload-pack");
-            }
-            readV2UploadCommands(data);
-            return;
-        }
-        if (data.service() == InitialRequestService.UPLOAD_PACK) {
-            serveLegacyUpload(data, stateless);
-            return;
-        }
-        serveLegacyReceive(data);
-    }
-
-    private void sendProtocolV1Marker(InitialRequestData data)
+    private void serveV2(GitRepositoryContext repository, GitProtocolContext protocol, GitCapabilities capabilities)
             throws IOException {
-        if (data.getProtocolVersion().orElse(null)
-                == GitProtocolVersion.V1) {
-            wire.writeTextLine("version 1");
-        }
-    }
-
-    private void readV2UploadCommands(InitialRequestData data)
-            throws IOException {
-        V2Command command = null;
-        while (true) {
-            var next = wire.readNextPacket();
-            if (next.isEmpty()) {
-                if (command == null) {
-                    return;
-                }
-                throw new EOFException("Incomplete protocol v2 command");
-            }
-            GitPktLine control = next.get();
-            switch (control) {
-                case GitPktLine.Data packet -> {
-                    String payload = readAsciiPayload(packet);
-                    if (command == null) {
-                        command = readV2CommandPayload(payload);
-                    } else if (!isSupportedV2CommandCapability(payload)) {
-                        throw invalidV2Request();
-                    }
-                }
-                case GitPktLine.Control.DELIMITER -> {
-                    if (command == null) {
-                        throw invalidV2Request();
-                    }
-                    serveV2Command(data, command);
-                    command = null;
-                }
-                case GitPktLine.Control.FLUSH -> {
-                    return;
-                }
-                case GitPktLine.Control.RESPONSE_END -> throw invalidV2Request();
-            }
-        }
-    }
-
-    private V2Command readV2CommandPayload(String payload) throws IOException {
-        if (payload.isEmpty()) {
-            throw invalidV2Request();
-        }
-        if ("command=ls-refs".equals(payload)) {
-            return V2Command.LS_REFS;
-        }
-        if ("command=fetch".equals(payload)) {
-            return V2Command.FETCH;
-        }
-        throw invalidV2Request();
-    }
-
-    private boolean isSupportedV2CommandCapability(String payload) {
-        return configuration.protocolV2().serverOption()
-                && payload.startsWith("server-option=");
-    }
-
-    private void serveV2Command(
-            InitialRequestData data,
-            V2Command command) throws IOException {
-        switch (command) {
-            case LS_REFS -> serveLsRefs(data);
-            case FETCH -> serveFetch(data);
-        }
-    }
-
-    private void serveLsRefs(
-            InitialRequestData data) throws IOException {
-        LsRefsAccumulator request = new LsRefsAccumulator(configuration);
-        while (true) {
-            GitPktLine control = wire.readPacket();
-            switch (control) {
-                case GitPktLine.Data packet -> request.accept(readAsciiPayload(packet));
-                case GitPktLine.Control.FLUSH -> {
-                    GitLsRefsResponse response = repositoryService.lsRefs(
-                            data,
-                            request.complete(),
-                            accessHook);
-                    wire.sendLsRefs(response);
-                    return;
-                }
-                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw invalidV2Request();
-            }
-        }
-    }
-
-    private String readAsciiPayload(GitPktLine control) throws IOException {
-        ByteBuf payload = wire.payloadBuffer(control);
-        try {
-            return asciiLine(payload);
-        } finally {
-            payload.release();
-        }
-    }
-
-    private static String asciiLine(ByteBuf payload) throws IOException {
-        StringBuilder builder = new StringBuilder(payload.readableBytes());
-        while (payload.isReadable()) {
-            int value = payload.readUnsignedByte();
-            boolean last = !payload.isReadable();
-            if (last && value == '\n') {
-                continue;
-            }
-            if (value < 0x20 || value > 0x7e) {
-                throw invalidV2Request();
-            }
-            builder.append((char) value);
-        }
-        if (builder.isEmpty()) {
-            throw invalidV2Request();
-        }
-        return builder.toString();
-    }
-
-    private static IOException invalidV2Request() {
-        return new IOException(
-                GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST.getMessage(),
-                new GitGeneralException(
-                        GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST));
-    }
-
-    private static IOException invalidV2FetchRequest() {
-        return new IOException(
-                GitWireError.Kind.INVALID_PROTOCOL_V2_FETCH_REQUEST
-                        .getMessage(),
-                new GitGeneralException(
-                        GitWireError.Kind.INVALID_PROTOCOL_V2_FETCH_REQUEST));
-    }
-
-    private static IOException invalidLegacyUploadRequest(
-            GitWireError.Kind kind) {
-        return new IOException(
-                kind.getMessage(),
-                new GitGeneralException(kind));
-    }
-
-    private static IOException invalidLegacyReceiveRequest(
-            GitWireError.Kind kind) {
-        return new IOException(
-                kind.getMessage(),
-                new GitGeneralException(kind));
-    }
-
-    private enum V2Command {
-        LS_REFS,
-        FETCH
-    }
-
-    private void serveFetch(
-            InitialRequestData data) throws IOException {
-        FetchAccumulator fetch = new FetchAccumulator(configuration);
-        while (true) {
-            GitPktLine control = wire.readPacket();
-            switch (control) {
-                case GitPktLine.Data packet -> fetch.accept(readAsciiPayload(packet));
-                case GitPktLine.Control.FLUSH -> {
-                    serveFetch(data, fetch.complete());
-                    return;
-                }
-                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw invalidV2FetchRequest();
-            }
-        }
-    }
-
-    private void serveFetch(
-            InitialRequestData data,
-            FetchRequest request) throws IOException {
-        NativeFetchRequest nativeRequest = request.nativeRequest();
-        if (!nativeRequest.done()) {
-            wire.sendProtocolV2FetchAcknowledgments(
-                    repositoryService.protocolV2FetchAcknowledgments(
-                            data,
-                            nativeRequest,
-                            accessHook),
-                    request.sidebandAll());
-            return;
-        }
-        GitBlockingWireTransport.ProtocolV2PackfileResponse response = null;
-        try {
-            NativeFetchResponse fetch =
-                    repositoryService.protocolV2Fetch(
-                            data,
-                            nativeRequest,
-                            accessHook,
-                            packfileUriSourceFactory);
-            response = wire.beginProtocolV2Packfile(
-                    fetch.packProducer(),
-                    fetch.shallowBoundaries(),
-                    fetch.unshallowBoundaries(),
-                    fetch.wantedRefs(),
-                    packfileUrisForClient(fetch, nativeRequest),
-                    request.sidebandAll());
-            response.advance();
-        } finally {
-            if (response != null) {
-                response.close();
-            }
-        }
-    }
-
-    private static List<NativePackfileUri> packfileUrisForClient(
-            NativeFetchResponse fetch,
-            NativeFetchRequest request) {
-        if (request.packfileUriProtocols().isEmpty()) {
-            return List.of();
-        }
-        List<NativePackfileUri> allowed = new ArrayList<>();
-        for (NativePackfileUri packfileUri : fetch.packfileUris()) {
-            if (request.packfileUriProtocols()
-                    .contains(packfileUri.protocol())) {
-                allowed.add(packfileUri);
-            }
-        }
-        return List.copyOf(allowed);
-    }
-
-    private record FetchRequest(
-            NativeFetchRequest nativeRequest,
-            boolean sidebandAll) {
-        private FetchRequest {
-            Objects.requireNonNull(nativeRequest, "nativeRequest");
-        }
-    }
-
-    private void serveLegacyUpload(
-            InitialRequestData data,
-            boolean stateless)
-            throws IOException {
-        GitV1Advertisement advertisement =
-                repositoryService.legacyUploadPackAdvertisement(
-                        data,
-                        accessHook,
-                        configuration);
-        LegacyUploadRequest request = readLegacyUploadRequest(
-                data,
-                advertisement);
-        sendLegacyUploadShallowInfo(request);
-        readLegacyUploadNegotiation(request, stateless);
-    }
-
-    private void sendLegacyUploadShallowInfo(
-            LegacyUploadRequest request) throws IOException {
-        if (!request.shallow()) {
-            return;
-        }
-        NativeFetchResponse response = repositoryService.legacyUploadFetch(
-                request.initialRequest(),
-                new LegacyUploadNegotiation(request, Set.of())
-                        .nativeFetchRequest(),
-                accessHook);
-        try {
-            wire.sendLegacyShallowInfo(
-                    response.shallowBoundaries(),
-                    response.unshallowBoundaries());
-        } finally {
-            response.packProducer().close();
-        }
-    }
-
-    private LegacyUploadRequest readLegacyUploadRequest(
-            InitialRequestData data,
-            GitV1Advertisement advertisement) throws IOException {
-        LegacyUploadRequestBuilder request =
-                new LegacyUploadRequestBuilder();
-        while (true) {
-            GitPktLine control = wire.readPacket();
-            switch (control) {
-                case GitPktLine.Data packet -> request.accept(readAsciiPayload(packet));
-                case GitPktLine.Control.FLUSH -> {
-                    if (request.wants.isEmpty()) {
-                        throw invalidLegacyUploadRequest(
-                                GitWireError.Kind.MISSING_LEGACY_UPLOAD_WANT);
-                    }
-                    return request.complete(data, advertisement);
-                }
-                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
-                        throw invalidLegacyUploadRequest(
-                                GitWireError.Kind
-                                        .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
-            }
-        }
-    }
-
-    private static void validateLegacyUploadWants(
-            Set<GitObjectId> wants,
-            GitV1Advertisement advertisement) throws IOException {
-        Set<String> advertisedObjectIds = new LinkedHashSet<>();
-        for (var advertisedRef : advertisement.refs()) {
-            advertisedObjectIds.add(advertisedRef.objectId().toLowerCase());
-            advertisedRef.peeledObjectId()
-                    .map(String::toLowerCase)
-                    .ifPresent(advertisedObjectIds::add);
-        }
-        for (GitObjectId want : wants) {
-            if (!advertisedObjectIds.contains(want.value().toLowerCase())) {
-                throw invalidLegacyUploadRequest(
-                        GitWireError.Kind.UNADVERTISED_LEGACY_UPLOAD_WANT);
-            }
-        }
-    }
-
-    private static void acceptLegacyUploadWant(
-            Set<GitObjectId> wants,
-            GitCapabilities capabilities,
-            String line) throws IOException {
-        if (!line.startsWith("want ")) {
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind.UNSUPPORTED_LEGACY_UPLOAD_COMMAND);
-        }
-        String arguments = line.substring("want ".length());
-        String[] tokens = arguments.split(" ", -1);
-        if (tokens.length == 0 || !isObjectId(tokens[0])) {
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind.INVALID_LEGACY_UPLOAD_OBJECT_ID);
-        }
-        boolean firstWant = wants.isEmpty();
-        if (!firstWant && tokens.length > 1) {
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind.LATE_LEGACY_UPLOAD_CAPABILITIES);
-        }
-        if (firstWant) {
-            for (int index = 1; index < tokens.length; index++) {
-                if (tokens[index].isEmpty()) {
-                    throw invalidLegacyUploadRequest(
-                            GitWireError.Kind.EMPTY_LEGACY_UPLOAD_CAPABILITY);
-                }
-            }
-        }
-        wants.add(GitObjectId.of(tokens[0]));
-        if (firstWant) {
-            for (int index = 1; index < tokens.length; index++) {
-                capabilities.add(GitCapabilityValue.parse(tokens[index]));
-            }
-        }
-    }
-
-    private void readLegacyUploadNegotiation(
-            LegacyUploadRequest request,
-            boolean stateless) throws IOException {
-        Set<GitObjectId> haves = new LinkedHashSet<>();
-        Set<GitObjectId> commonHaves = new LinkedHashSet<>();
-        GitObjectId lastCommon = null;
-        while (true) {
-            GitPktLine control = wire.readPacket();
-            switch (control) {
-                case GitPktLine.Data packet -> {
-                    String line = readAsciiPayload(packet);
-                    if ("done".equals(line)) {
-                        if (lastCommon == null) {
-                            wire.sendNak();
-                        } else {
-                            wire.sendAck(
-                                    lastCommon,
-                                    GitBlockingWireTransport.AckStatus.FINAL);
-                        }
-                        serveLegacyUploadResponse(
-                                new LegacyUploadNegotiation(request, haves));
-                        return;
-                    }
-                    GitObjectId have = acceptLegacyUploadHave(haves, line);
-                    if (repositoryService.commonHaves(
-                            request.initialRequest(),
-                            List.of(have),
-                            accessHook).isEmpty()) {
-                        continue;
-                    }
-                    lastCommon = have;
-                    commonHaves.add(have);
-                    if (request.negotiated(GitCapability.MULTI_ACK_DETAILED)) {
-                        wire.sendAck(
-                                have,
-                                GitBlockingWireTransport.AckStatus.COMMON);
-                    } else if (request.negotiated(GitCapability.MULTI_ACK)) {
-                        wire.sendAck(
-                                have,
-                                GitBlockingWireTransport.AckStatus.CONTINUE);
-                    }
-                }
-                case GitPktLine.Control.FLUSH -> {
-                    if (lastCommon != null
-                            && request.negotiated(
-                                    GitCapability.MULTI_ACK_DETAILED)
-                            && repositoryService.legacyUploadReady(
-                                    request.initialRequest(),
-                                    request.wants(),
-                                    commonHaves,
-                                    accessHook)) {
-                        wire.sendAck(
-                                lastCommon,
-                                GitBlockingWireTransport.AckStatus.READY);
-                    }
-                    wire.sendNak();
-                    if (stateless) {
-                        return;
-                    }
-                }
-                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
-                        throw invalidLegacyUploadRequest(
-                                GitWireError.Kind
-                                        .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
-            }
-        }
-    }
-
-    private static GitObjectId acceptLegacyUploadHave(
-            Set<GitObjectId> haves,
-            String line) throws IOException {
-        if (!line.startsWith("have ")) {
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind
-                            .UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_COMMAND);
-        }
-        String objectId = line.substring("have ".length());
-        if (!isObjectId(objectId)) {
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind.INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID);
-        }
-        GitObjectId have = GitObjectId.of(objectId);
-        haves.add(have);
-        return have;
-    }
-
-    private void serveLegacyUploadResponse(
-            LegacyUploadNegotiation negotiation) throws IOException {
-        if (negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
-            GitBlockingWireTransport.LegacySideBandResponse response = null;
-            try {
-                response = wire.beginLegacySideBand64k(
-                        legacyUploadProducer(negotiation),
-                        false);
-                response.advance();
-            } finally {
-                if (response != null) {
-                    response.close();
-                }
-            }
-            return;
-        }
-        GitBlockingWireTransport.LegacyPackResponse response = null;
-        try {
-            response = wire.beginLegacyPack(
-                    legacyUploadProducer(negotiation),
-                    false);
-            response.advance();
-        } finally {
-            if (response != null) {
-                response.close();
-            }
-        }
-    }
-
-    private pro.deta.orion.git.nativestorage.pack.NativePackProducer
-            legacyUploadProducer(LegacyUploadNegotiation negotiation) {
-        return repositoryService.legacyUploadPack(
-                negotiation.request().initialRequest(),
-                negotiation.nativeFetchRequest(),
-                accessHook);
-    }
-
-    private void serveLegacyReceive(InitialRequestData data)
-            throws IOException {
-        GitV1Advertisement advertisement =
-                repositoryService.legacyReceivePackAdvertisement(
-                        data,
-                        accessHook,
-                        configuration);
-        LegacyReceiveCommandSection section = readLegacyReceiveCommands(
-                data,
-                advertisement);
-        if (section == null) {
-            return;
-        }
-        LegacyReceivePack receivePack;
-        try {
-            receivePack = section.requiresPack()
-                    ? readLegacyReceivePack(section)
-                    : new LegacyReceivePack(section, new PackIngestionResult.Complete(new LooseObjectStore()));
-        } catch (IOException error) {
-            if (!isReceivePackInputFailure(error)) {
-                throw error;
-            }
-            sendLegacyReceiveFailure(section, "unpacker-error", true);
-            return;
-        }
-        try {
-            completeLegacyReceivePack(receivePack);
-        } catch (RuntimeException error) {
-            sendLegacyReceiveFailure(section, "failed-to-update-ref", false);
-        }
-    }
-
-    private LegacyReceiveCommandSection readLegacyReceiveCommands(
-            InitialRequestData data,
-            GitV1Advertisement advertisement) throws IOException {
-        List<LegacyReceiveCommand> commands = new ArrayList<>();
-        Set<GitObjectId> shallowObjectIds = new LinkedHashSet<>();
-        Set<String> capabilities = new LinkedHashSet<>();
-        Set<String> refNames = new LinkedHashSet<>();
-        while (true) {
-            GitPktLine control = wire.readPacket();
-            switch (control) {
-                case GitPktLine.Data packet -> acceptLegacyReceiveLine(
-                        commands,
-                        shallowObjectIds,
-                        capabilities,
-                        refNames,
-                        packet.content());
-                case GitPktLine.Control.FLUSH -> {
-                    if (commands.isEmpty()) {
-                        return null;
-                    }
-                    return new LegacyReceiveCommandSection(
-                            data,
-                            commands,
-                            shallowObjectIds,
-                            capabilities,
-                            advertisement);
-                }
-                case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END ->
-                        throw invalidLegacyReceiveRequest(
-                                GitWireError.Kind
-                                        .UNSUPPORTED_LEGACY_RECEIVE_CONTROL);
-            }
-        }
-    }
-
-    private static void acceptLegacyReceiveLine(
-            List<LegacyReceiveCommand> commands,
-            Set<GitObjectId> shallowObjectIds,
-            Set<String> capabilities,
-            Set<String> refNames,
-            byte[] rawPayload) throws IOException {
-        String line = new String(rawPayload, StandardCharsets.US_ASCII);
-        if (line.endsWith("\n")) {
-            line = line.substring(0, line.length() - 1);
-        }
-        if (!line.startsWith("shallow ")) {
-            acceptLegacyReceiveCommand(
-                    commands,
-                    capabilities,
-                    refNames,
-                    rawPayload);
-            return;
-        }
-        String objectId = line.substring("shallow ".length());
-        if (!commands.isEmpty() || !isObjectId(objectId)) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_SHALLOW);
-        }
-        shallowObjectIds.add(GitObjectId.of(objectId.toLowerCase()));
-    }
-
-    private static void acceptLegacyReceiveCommand(
-            List<LegacyReceiveCommand> commands,
-            Set<String> capabilities,
-            Set<String> refNames,
-            byte[] rawPayload) throws IOException {
-        int length = rawPayload.length;
-        if (length > 0 && rawPayload[length - 1] == '\n') {
-            length--;
-        }
-        if (length == 0) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.EMPTY_LEGACY_RECEIVE_COMMAND);
-        }
-        int separator = receivePayloadSeparator(rawPayload, length);
-        if (!commands.isEmpty() && separator >= 0) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.LATE_LEGACY_RECEIVE_CAPABILITIES);
-        }
-
-        int commandLength = separator >= 0 ? separator : length;
-        String legacyCommand = new String(
-                rawPayload,
-                0,
-                commandLength,
-                StandardCharsets.US_ASCII);
-        String[] legacyTokens = legacyCommand.split(" ", -1);
-        if (legacyTokens.length == 3
-                && (!isObjectId(legacyTokens[0])
-                        || !isObjectId(legacyTokens[1]))) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_OBJECT_ID);
-        }
-        if (commandLength <= 82
-                || rawPayload[40] != ' '
-                || rawPayload[81] != ' ') {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-        }
-        String oldObjectId = new String(
-                rawPayload, 0, 40, StandardCharsets.US_ASCII);
-        String newObjectId = new String(
-                rawPayload, 41, 40, StandardCharsets.US_ASCII);
-        if (!isObjectId(oldObjectId) || !isObjectId(newObjectId)) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_OBJECT_ID);
-        }
-        if (NULL_ID.equalsIgnoreCase(oldObjectId)
-                && NULL_ID.equalsIgnoreCase(newObjectId)) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-        }
-        for (int index = 82; index < commandLength; index++) {
-            int value = rawPayload[index] & 0xff;
-            if (value <= 32 || value == 127) {
-                throw invalidLegacyReceiveRequest(
-                        GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-            }
-        }
-        String refName = new String(
-                rawPayload,
-                82,
-                commandLength - 82,
-                StandardCharsets.UTF_8);
-        if (!refNames.add(refName)) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.DUPLICATE_LEGACY_RECEIVE_REF);
-        }
-
-        try {
-            commands.add(new LegacyReceiveCommand(
-                    GitObjectId.of(oldObjectId.toLowerCase()),
-                    GitObjectId.of(newObjectId.toLowerCase()),
-                    refName));
-        } catch (IllegalArgumentException error) {
-            refNames.remove(refName);
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-        }
-        if (separator >= 0) {
-            acceptLegacyReceiveCapabilities(
-                    capabilities,
-                    rawPayload,
-                    separator,
-                    length);
-        }
-    }
-
-    private static int receivePayloadSeparator(
-            byte[] rawPayload,
-            int length) throws IOException {
-        int separator = -1;
-        for (int index = 0; index < length; index++) {
-            int value = rawPayload[index] & 0xff;
-            if (value == 0) {
-                if (separator >= 0) {
-                    throw invalidLegacyReceiveRequest(
-                            GitWireError.Kind
-                                    .INVALID_LEGACY_RECEIVE_COMMAND);
-                }
-                separator = index;
-            } else if (value < 32 || value == 127) {
-                throw invalidLegacyReceiveRequest(
-                        GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-            }
-        }
-        return separator;
-    }
-
-    private static void acceptLegacyReceiveCapabilities(
-            Set<String> capabilities,
-            byte[] rawPayload,
-            int separator,
-            int length) throws IOException {
-        String capabilityLine = new String(
-                rawPayload,
-                separator + 1,
-                length - separator - 1,
-                StandardCharsets.US_ASCII).trim();
-        if (capabilityLine.isEmpty()) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.EMPTY_LEGACY_RECEIVE_CAPABILITY);
-        }
-        String[] capabilityTokens = capabilityLine.split(" ", -1);
-        for (String capability : capabilityTokens) {
-            if (capability.isEmpty()) {
-                throw invalidLegacyReceiveRequest(
-                        GitWireError.Kind.EMPTY_LEGACY_RECEIVE_CAPABILITY);
-            }
-            capabilities.add(capability);
-        }
-    }
-
-    private LegacyReceivePack readLegacyReceivePack(
-            LegacyReceiveCommandSection section) throws IOException {
-        try (PackIngestionOutput target = new PackIngestionOutput(
-                repositoryService.beginLegacyReceivePack(
-                        section.initialRequest(),
-                        accessHook))) {
-            while (true) {
-                ByteBuf buffer = Unpooled.buffer(DEFAULT_INPUT_BUFFER_SIZE);
-                try {
-                    int read = wire.readRawInto(
-                            buffer,
-                            DEFAULT_INPUT_BUFFER_SIZE);
-                    if (read == 0) {
-                        return receivePack(section, completeReceivePack(target));
-                    }
-                    writeReceivePack(target, buffer);
-                    if (target.completed()) {
-                        return receivePack(section, completeReceivePack(target));
-                    }
-                } finally {
-                    buffer.release();
-                }
-            }
-        }
-    }
-
-    private static void writeReceivePack(
-            PackIngestionOutput target,
-            ByteBuf buffer) throws IOException {
-        try {
-            target.write(buffer);
-        } catch (IOException failure) {
-            throw receivePackFailure(failure);
-        }
-    }
-
-    private static PackIngestionResult.Complete
-            completeReceivePack(PackIngestionOutput target) throws IOException {
-        try {
-            return target.complete();
-        } catch (PackIngestionOutput.IncompleteException incomplete) {
-            EOFException failure = new EOFException(
-                    "Legacy receive-pack body ended before pack completed");
-            failure.initCause(incomplete);
-            throw failure;
-        } catch (IOException failure) {
-            throw receivePackFailure(failure);
-        }
-    }
-
-    private static IOException receivePackFailure(IOException failure) {
-        Throwable cause = failure.getCause() == null
-                ? failure
-                : failure.getCause();
-        return new IOException("Failed to ingest native Git receive pack", cause);
-    }
-
-    private static LegacyReceivePack receivePack(
-            LegacyReceiveCommandSection section,
-            PackIngestionResult.Complete complete) {
-        return new LegacyReceivePack(section, complete);
-    }
-
-    private void completeLegacyReceivePack(LegacyReceivePack receivePack)
-            throws IOException {
-        List<GitBlockingWireTransport.ReceiveCommandStatus> outputStatuses =
-                new ArrayList<>();
-        for (ReceivePackStatus status
-                : repositoryService.completeLegacyReceivePack(
-                        receivePack,
-                        accessHook)) {
-            outputStatuses.add(
-                    new GitBlockingWireTransport.ReceiveCommandStatus(
-                            status.refName(),
-                            status.ok(),
-                            status.message()));
-        }
-        Set<String> requestedCapabilities =
-                receivePack.commandSection().capabilities();
-        if (!reportsReceiveStatus(requestedCapabilities)) {
-            return;
-        }
-        boolean sideBand64k = configuration.receivePack().sideBand64k()
-                && requestedCapabilities.contains("side-band-64k");
-        wire.sendLegacyReceivePackStatus(
-                outputStatuses,
-                sideBand64k);
-    }
-
-    private void sendLegacyReceiveFailure(
-            LegacyReceiveCommandSection section,
-            String message,
-            boolean unpackFailed) throws IOException {
-        Set<String> capabilities = section.capabilities();
-        if (!reportsReceiveStatus(capabilities)) {
-            return;
-        }
-        List<GitBlockingWireTransport.ReceiveCommandStatus> statuses =
-                new ArrayList<>();
-        for (LegacyReceiveCommand command : section.commands()) {
-            statuses.add(new GitBlockingWireTransport.ReceiveCommandStatus(
-                    command.refName(),
-                    false,
-                    message));
-        }
-        boolean sideBand64k = configuration.receivePack().sideBand64k()
-                && capabilities.contains("side-band-64k");
-        wire.sendLegacyReceivePackStatus(
-                unpackFailed ? "error" : "ok",
-                statuses,
-                sideBand64k);
-    }
-
-    private boolean reportsReceiveStatus(Set<String> capabilities) {
-        return configuration.receivePack().reportStatus()
-                && (capabilities.contains("report-status")
-                        || capabilities.contains("report-status-v2"));
-    }
-
-    private static boolean isReceivePackInputFailure(IOException error) {
-        return error instanceof EOFException
-                || error.getMessage() != null
-                && error.getMessage().startsWith(
-                        "Failed to ingest native Git receive pack");
-    }
-
-    private static final class LegacyUploadRequestBuilder {
-        private final Set<GitObjectId> wants = new LinkedHashSet<>();
-        private final Set<GitObjectId> clientShallowCommits =
-                new LinkedHashSet<>();
-        private final Set<String> deepenNotRefs = new LinkedHashSet<>();
-        private final GitCapabilities capabilities = new GitCapabilities();
-        private boolean wantsFinished;
-        private boolean deepenRelative;
-        private int depth;
-        private long deepenSince = -1;
-
-        private void accept(String line) throws IOException {
-            if (line.startsWith("want ")) {
-                if (wantsFinished) {
-                    throw invalidLegacyUploadRequest(
-                            GitWireError.Kind
-                                    .INVALID_LEGACY_UPLOAD_SHALLOW_REQUEST);
-                }
-                acceptLegacyUploadWant(wants, capabilities, line);
+        for (;;) {
+            Optional<GitPktLine> next = wire.readNextPacket();
+            if (next.isEmpty() || next.orElseThrow() == GitPktLine.Control.FLUSH) {
                 return;
             }
-            wantsFinished = true;
-            if (wants.isEmpty()) {
-                throw invalidLegacyUploadRequest(
-                        GitWireError.Kind.MISSING_LEGACY_UPLOAD_WANT);
+            String command = text(next.orElseThrow());
+            if (!command.equals("command=fetch") && !command.equals("command=ls-refs")) {
+                throw new IOException("Unsupported protocol v2 command");
             }
-            if (line.startsWith("shallow ")) {
-                GitObjectId shallow = legacyUploadObjectId(
-                        line,
-                        "shallow ");
-                if (!clientShallowCommits.add(shallow)) {
-                    throw invalidShallowRequest();
+            Set<String> seen = new HashSet<>();
+            for (;;) {
+                GitPktLine packet = wire.readNextPacket()
+                        .orElseThrow(() -> new EOFException("Incomplete protocol v2 command"));
+                if (packet == GitPktLine.Control.DELIMITER) {
+                    break;
                 }
+                GitCapabilityValue value = GitCapabilityValue.parse(text(packet), GitHashAlgorithm.SHA1);
+                if (value.name().equals("server-option") && configuration.protocolV2().serverOption()
+                        && value.value().isPresent()) {
+                    continue;
+                }
+                GitCapability capability = value.capability().orElse(null);
+                if ((capability != GitCapability.AGENT && capability != GitCapability.OBJECT_FORMAT)
+                        || value.value().isEmpty() || !seen.add(value.name())) {
+                    throw new IOException("Unsupported protocol v2 command capability: " + value.name());
+                }
+            }
+            if (command.equals("command=fetch") && configuration.protocolV2().fetch()) {
+                new FetchCommand(repository, capabilities).action(protocol);
+            } else if (command.equals("command=ls-refs") && configuration.protocolV2().lsRefs()) {
+                new RefsCommand(repository.storage(), capabilities).action(protocol);
+            } else {
+                throw new IOException("Protocol v2 command was not advertised");
+            }
+            if (protocol.transport() == GitTransport.HTTP) {
+                wire.writeResponseEnd();
+                wire.flush();
                 return;
             }
-            if (line.startsWith("deepen ")) {
-                if (depth > 0 || deepenSince >= 0
-                        || !deepenNotRefs.isEmpty()) {
-                    throw invalidShallowRequest();
-                }
-                depth = positiveInt(line.substring("deepen ".length()));
-                return;
-            }
-            if (line.startsWith("deepen-since ")) {
-                if (depth > 0 || deepenSince >= 0) {
-                    throw invalidShallowRequest();
-                }
-                deepenSince = positiveLong(
-                        line.substring("deepen-since ".length()));
-                return;
-            }
-            if (line.startsWith("deepen-not ")) {
-                String ref = line.substring("deepen-not ".length());
-                if (depth > 0 || ref.isEmpty()
-                        || !deepenNotRefs.add(ref)) {
-                    throw invalidShallowRequest();
-                }
-                for (int index = 0; index < ref.length(); index++) {
-                    char value = ref.charAt(index);
-                    if (value <= 0x20 || value >= 0x7f) {
-                        throw invalidShallowRequest();
-                    }
-                }
-                return;
-            }
-            if ("deepen-relative".equals(line)) {
-                if (deepenRelative) {
-                    throw invalidShallowRequest();
-                }
-                deepenRelative = true;
-                return;
-            }
-            throw invalidLegacyUploadRequest(
-                    GitWireError.Kind.UNSUPPORTED_LEGACY_UPLOAD_COMMAND);
-        }
-
-        private LegacyUploadRequest complete(
-                InitialRequestData data,
-                GitV1Advertisement advertisement) throws IOException {
-            if (deepenRelative && depth == 0) {
-                throw invalidShallowRequest();
-            }
-            validateLegacyUploadWants(wants, advertisement);
-            return new LegacyUploadRequest(
-                    data,
-                    wants,
-                    clientShallowCommits,
-                    depth,
-                    deepenRelative,
-                    deepenSince,
-                    deepenNotRefs,
-                    capabilities,
-                    advertisement);
-        }
-
-        private static GitObjectId legacyUploadObjectId(
-                String line,
-                String prefix) throws IOException {
-            String value = line.substring(prefix.length());
-            if (!isObjectId(value)) {
-                throw invalidShallowRequest();
-            }
-            return GitObjectId.of(value.toLowerCase());
-        }
-
-        private static int positiveInt(String value) throws IOException {
-            long parsed = positiveLong(value);
-            if (parsed > Integer.MAX_VALUE) {
-                throw invalidShallowRequest();
-            }
-            return (int) parsed;
-        }
-
-        private static long positiveLong(String value) throws IOException {
-            if (value.isEmpty()) {
-                throw invalidShallowRequest();
-            }
-            long parsed = 0;
-            for (int index = 0; index < value.length(); index++) {
-                char digit = value.charAt(index);
-                if (digit < '0' || digit > '9') {
-                    throw invalidShallowRequest();
-                }
-                long next = parsed * 10 + digit - '0';
-                if (next < parsed) {
-                    throw invalidShallowRequest();
-                }
-                parsed = next;
-            }
-            if (parsed == 0) {
-                throw invalidShallowRequest();
-            }
-            return parsed;
-        }
-
-        private static IOException invalidShallowRequest() {
-            return invalidLegacyUploadRequest(
-                    GitWireError.Kind.INVALID_LEGACY_UPLOAD_SHALLOW_REQUEST);
         }
     }
 
-    private static boolean isObjectId(String value) {
-        if (value.length() != 40) {
-            return false;
+    private static String text(GitPktLine packet) throws IOException {
+        if (!(packet instanceof GitPktLine.Data data)) {
+            throw new IOException("Expected protocol v2 command data");
         }
-        for (int index = 0; index < value.length(); index++) {
-            if (!isHexadecimal(value.charAt(index))) {
-                return false;
-            }
-        }
-        return true;
+        String text = data.text();
+        return text.endsWith("\n") ? text.substring(0, text.length() - 1) : text;
     }
 
-    private static boolean isHexadecimal(int value) {
-        return value >= '0' && value <= '9'
-                || value >= 'a' && value <= 'f'
-                || value >= 'A' && value <= 'F';
+    private static GitProtocolVersion version(InitialRequestData request) {
+        GitProtocolVersion version = request.getProtocolVersion().orElse(GitProtocolVersion.V0);
+        return request.service() == InitialRequestService.RECEIVE_PACK && version == GitProtocolVersion.V2
+                ? GitProtocolVersion.V0 : version;
     }
 
-    private static final class FetchAccumulator {
-        private static final int OBJECT_ID_LENGTH = 40;
-
-        private final GitWireConfiguration configuration;
-        private final Set<GitObjectId> wants = new LinkedHashSet<>();
-        private final Set<String> wantRefs = new LinkedHashSet<>();
-        private final Set<String> packfileUriProtocols = new LinkedHashSet<>();
-        private final Set<GitObjectId> haves = new LinkedHashSet<>();
-        private final Set<GitObjectId> clientShallowCommits =
-                new LinkedHashSet<>();
-        private final Set<String> deepenNotRefs = new LinkedHashSet<>();
-        private boolean done;
-        private boolean thinPack;
-        private boolean ofsDelta;
-        private boolean includeTag;
-        private boolean waitForDone;
-        private boolean sidebandAll;
-        private boolean deepenRelative;
-        private int depth;
-        private long deepenSince = -1;
-        private NativeObjectFilter objectFilter = NativeObjectFilter.NONE;
-        private boolean invalid;
-
-        private FetchAccumulator(GitWireConfiguration configuration) {
-            this.configuration = Objects.requireNonNull(
-                    configuration,
-                    "configuration");
+    private GitCapabilities capabilities(InitialRequestData request) {
+        if (request.service() == InitialRequestService.RECEIVE_PACK) {
+            return receivePackCapabilities(configuration);
         }
-
-        private void accept(String value) throws IOException {
-            if (done) {
-                invalid = true;
-                return;
-            }
-            if (value.startsWith("want ")) {
-                wants.add(objectId(value, "want "));
-                return;
-            }
-            if (value.startsWith("have ")) {
-                haves.add(objectId(value, "have "));
-                return;
-            }
-            if (value.startsWith("shallow ")) {
-                acceptShallow(value);
-                return;
-            }
-            if (value.startsWith("deepen ")) {
-                acceptDepth(value);
-                return;
-            }
-            if (value.startsWith("deepen-since ")) {
-                acceptDeepenSince(value);
-                return;
-            }
-            if (value.startsWith("deepen-not ")) {
-                acceptDeepenNot(value);
-                return;
-            }
-            if (value.startsWith("filter ")) {
-                acceptFilter(value);
-                return;
-            }
-            if (value.startsWith("want-ref ")) {
-                acceptRef(value);
-                return;
-            }
-            if (value.startsWith(GitCapability.PACKFILE_URIS.wireName() + " ")) {
-                acceptPackfileUriProtocols(value);
-                return;
-            }
-            acceptSimple(value);
+        if (version(request) != GitProtocolVersion.V2) {
+            return uploadPackCapabilities(configuration);
         }
-
-        private FetchRequest complete() throws IOException {
-            if (invalid
-                    || (wants.isEmpty() && wantRefs.isEmpty())
-                    || deepenRelative && depth == 0) {
-                throw invalidV2FetchRequest();
-            }
-            NativeFetchOptions options = new NativeFetchOptions(
-                    thinPack,
-                    ofsDelta,
-                    includeTag,
-                    waitForDone,
-                    depth,
-                    objectFilter,
-                    packfileUriProtocols,
-                    clientShallowCommits,
-                    deepenRelative,
-                    deepenSince,
-                    deepenNotRefs);
-            return new FetchRequest(
-                    new NativeFetchRequest(
-                            wants,
-                            haves,
-                            done,
-                            wantRefs,
-                            options),
-                    sidebandAll);
+        GitCapabilities values = new GitCapabilities();
+        GitWireConfiguration.ProtocolV2 v2 = configuration.protocolV2();
+        if (v2.lsRefs()) {
+            values.add(v2.lsRefsUnborn()
+                    ? GitCapabilityValue.value(GitCapability.LS_REFS, LsRefsArgument.UNBORN.wireName())
+                    : GitCapabilityValue.value(GitCapability.LS_REFS));
         }
-
-        private void acceptSimple(String value) throws IOException {
-            switch (value) {
-                case "done" -> done = true;
-                case "thin-pack" -> thinPack = true;
-                case "ofs-delta" -> ofsDelta = true;
-                case "include-tag" -> includeTag = true;
-                case "wait-for-done" -> waitForDone = true;
-                case "deepen-relative" -> {
-                    if (deepenRelative
-                            || !configuration.protocolV2().shallow()) {
-                        invalid = true;
-                    } else {
-                        deepenRelative = true;
-                    }
-                }
-                case "sideband-all" -> {
-                    if (!configuration.protocolV2().sidebandAll()) {
-                        invalid = true;
-                    } else {
-                        sidebandAll = true;
-                    }
-                }
-                case "no-progress" -> {
-                }
-                default -> throw invalidV2FetchRequest();
-            }
+        if (v2.shallow()) {
+            values.add(GitCapabilityValue.value(GitCapability.SHALLOW));
         }
-
-        private void acceptShallow(String value) throws IOException {
-            if (!configuration.protocolV2().shallow()
-                    || !clientShallowCommits.add(
-                            objectId(value, "shallow "))) {
-                invalid = true;
-            }
+        if (v2.packfileUris()) {
+            values.add(GitCapabilityValue.value(GitCapability.PACKFILE_URIS));
         }
-
-        private void acceptDepth(String value) throws IOException {
-            if (depth > 0
-                    || deepenSince >= 0
-                    || !deepenNotRefs.isEmpty()
-                    || !configuration.protocolV2().shallow()) {
-                invalid = true;
-                return;
-            }
-            String depthValue = value.substring("deepen ".length());
-            if (depthValue.isEmpty()) {
-                throw invalidV2FetchRequest();
-            }
-            long parsed = 0;
-            for (int index = 0; index < depthValue.length(); index++) {
-                char digit = depthValue.charAt(index);
-                if (digit < '0' || digit > '9') {
-                    throw invalidV2FetchRequest();
-                }
-                parsed = parsed * 10 + digit - '0';
-                if (parsed > Integer.MAX_VALUE) {
-                    throw invalidV2FetchRequest();
-                }
-            }
-            if (parsed == 0) {
-                throw invalidV2FetchRequest();
-            }
-            depth = (int) parsed;
+        if (v2.filter()) {
+            values.add(GitCapabilityValue.value(GitCapability.FILTER));
         }
-
-        private void acceptDeepenSince(String value) throws IOException {
-            if (depth > 0
-                    || deepenSince >= 0
-                    || !deepenNotRefs.isEmpty()
-                    || !configuration.protocolV2().shallow()) {
-                invalid = true;
-                return;
-            }
-            String timestampValue = value.substring(
-                    "deepen-since ".length());
-            if (timestampValue.isEmpty()) {
-                throw invalidV2FetchRequest();
-            }
-            long parsed = 0;
-            for (int index = 0; index < timestampValue.length(); index++) {
-                char digit = timestampValue.charAt(index);
-                if (digit < '0' || digit > '9') {
-                    throw invalidV2FetchRequest();
-                }
-                parsed = parsed * 10 + digit - '0';
-                if (parsed < 0) {
-                    throw invalidV2FetchRequest();
-                }
-            }
-            deepenSince = parsed;
+        if (v2.waitForDone()) {
+            values.add(GitCapabilityValue.value(GitCapability.WAIT_FOR_DONE));
         }
-
-        private void acceptDeepenNot(String value) throws IOException {
-            if (depth > 0
-                    || deepenSince >= 0
-                    || !configuration.protocolV2().shallow()) {
-                invalid = true;
-                return;
-            }
-            String refOrRevision = value.substring("deepen-not ".length());
-            if (!isValidDeepenNotRef(refOrRevision)
-                    || !deepenNotRefs.add(refOrRevision)) {
-                throw invalidV2FetchRequest();
-            }
+        if (v2.refInWant()) {
+            values.add(GitCapabilityValue.value(GitCapability.REF_IN_WANT));
         }
-
-        private void acceptFilter(String value) throws IOException {
-            if (objectFilter != NativeObjectFilter.NONE
-                    || !configuration.protocolV2().filter()) {
-                invalid = true;
-                return;
-            }
-            String filter = value.substring("filter ".length());
-            if ("blob:none".equals(filter)) {
-                objectFilter = NativeObjectFilter.BLOB_NONE;
-                return;
-            }
-            throw invalidV2FetchRequest();
+        if (v2.sidebandAll()) {
+            values.add(GitCapabilityValue.value(GitCapability.SIDEBAND_ALL));
         }
-
-        private void acceptRef(String value) throws IOException {
-            if (!configuration.protocolV2().refInWant()) {
-                invalid = true;
-                return;
-            }
-            String refName = value.substring("want-ref ".length());
-            if (!isValidWantedRefName(refName)) {
-                throw invalidV2FetchRequest();
-            }
-            if (!wantRefs.add(refName)) {
-                throw invalidV2FetchRequest();
-            }
-        }
-
-        private void acceptPackfileUriProtocols(String value)
-                throws IOException {
-            if (!configuration.protocolV2().packfileUris()
-                    || !packfileUriProtocols.isEmpty()) {
-                invalid = true;
-                return;
-            }
-            String rawProtocols = value.substring(
-                    GitCapability.PACKFILE_URIS.wireName().length() + 1);
-            if (rawProtocols.isEmpty()) {
-                throw invalidV2FetchRequest();
-            }
-            for (String protocol : rawProtocols.split(",", -1)) {
-                if (!isValidProtocol(protocol)) {
-                    throw invalidV2FetchRequest();
-                }
-                packfileUriProtocols.add(protocol);
-            }
-        }
-
-        private static GitObjectId objectId(
-                String value,
-                String prefix) throws IOException {
-            String objectId = value.substring(prefix.length());
-            if (objectId.length() != OBJECT_ID_LENGTH) {
-                throw invalidV2FetchRequest();
-            }
-            for (int index = 0; index < objectId.length(); index++) {
-                if (!isHexadecimal(objectId.charAt(index))) {
-                    throw invalidV2FetchRequest();
-                }
-            }
-            return GitObjectId.of(objectId);
-        }
-
-        private static boolean isValidProtocol(String protocol) {
-            if (protocol.isEmpty()
-                    || !isAsciiLetter(protocol.charAt(0))) {
-                return false;
-            }
-            for (int index = 1; index < protocol.length(); index++) {
-                char character = protocol.charAt(index);
-                if (!isAsciiLetter(character)
-                        && (character < '0' || character > '9')
-                        && character != '+'
-                        && character != '.'
-                        && character != '-') {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static boolean isAsciiLetter(char character) {
-            return character >= 'a' && character <= 'z'
-                    || character >= 'A' && character <= 'Z';
-        }
-
-        private static boolean isValidWantedRefName(String refName) {
-            return "HEAD".equals(refName) || isValidFullRefName(refName);
-        }
-
-        private static boolean isValidDeepenNotRef(String value) {
-            if (value.isEmpty()) {
-                return false;
-            }
-            for (int index = 0; index < value.length(); index++) {
-                char character = value.charAt(index);
-                if (character <= 0x20 || character >= 0x7f) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static boolean isValidFullRefName(String refName) {
-            if (!refName.startsWith("refs/")
-                    || refName.length() == "refs/".length()
-                    || refName.endsWith("/")
-                    || refName.contains("//")
-                    || refName.contains("..")
-                    || refName.contains("@{")) {
-                return false;
-            }
-            for (int index = 0; index < refName.length(); index++) {
-                char value = refName.charAt(index);
-                if (value <= 0x20
-                        || value >= 0x7f
-                        || value == '~'
-                        || value == '^'
-                        || value == ':'
-                        || value == '?'
-                        || value == '*'
-                        || value == '['
-                        || value == '\\') {
-                    return false;
-                }
-            }
-            return true;
-        }
+        return values;
     }
 
-    private static final class LsRefsAccumulator {
-        private final GitWireConfiguration configuration;
-        private final List<String> refPrefixes = new ArrayList<>();
-        private int refPrefixChars;
-        private boolean peel;
-        private boolean symrefs;
-        private boolean unborn;
-
-        private LsRefsAccumulator(GitWireConfiguration configuration) {
-            this.configuration = Objects.requireNonNull(
-                    configuration,
-                    "configuration");
+    private static GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
+            GitCapabilities capabilities, boolean advertiseSymref) throws IOException {
+        RefsSnapshot snapshot = repository.storage().snapshotRefs();
+        List<GitAdvertisedRef> refs = new ArrayList<>();
+        ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
+                ? snapshot.refs().get(symbolic.target())
+                : new ObjectId(((Head.Detached) snapshot.head()).target().toBytes());
+        if (head != null) {
+            refs.add(GitAdvertisedRef.direct(head.toHex(), "HEAD"));
         }
-
-        private void accept(String value) throws IOException {
-            switch (value) {
-                case "peel" -> peel = true;
-                case "symrefs" -> symrefs = true;
-                case "unborn" -> {
-                    if (!configuration.protocolV2().lsRefsUnborn()) {
-                        throw invalidV2Request();
-                    }
-                    unborn = true;
-                }
-                default -> acceptOther(value);
-            }
+        if (advertiseSymref && snapshot.head() instanceof Head.Symbolic symbolic) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.SYMREF, "HEAD:" + symbolic.target().value()));
         }
-
-        private LsRefsRequest complete() {
-            return new LsRefsRequest(
-                    peel,
-                    symrefs,
-                    unborn,
-                    refPrefixes);
+        List<RefId> names = new ArrayList<>(snapshot.refs().keySet());
+        names.sort(Comparator.comparing(RefId::value));
+        for (RefId name : names) {
+            refs.add(GitAdvertisedRef.direct(snapshot.refs().get(name).toHex(), name.value()));
         }
-
-        private void acceptOther(String value) throws IOException {
-            if (value.equals("ref-prefix")
-                    || malformedKnownFlag(value)) {
-                throw invalidV2Request();
-            }
-            if (!value.startsWith(REF_PREFIX)) {
-                return;
-            }
-            String prefix = value.substring(REF_PREFIX.length());
-            if (prefix.isEmpty()) {
-                throw invalidV2Request();
-            }
-            int prefixChars = prefix.length();
-            if (refPrefixes.size() >= MAX_REF_PREFIX_COUNT
-                    || prefixChars > MAX_REF_PREFIX_CHARS - refPrefixChars) {
-                throw invalidV2Request();
-            }
-            refPrefixes.add(prefix);
-            refPrefixChars += prefixChars;
+        if (refs.isEmpty()) {
+            refs.add(GitAdvertisedRef.direct("0".repeat(40), "capabilities^{}"));
         }
-
-        private static boolean malformedKnownFlag(String value) {
-            return startsWithFlagAndExtra(value, "peel")
-                    || startsWithFlagAndExtra(value, "symrefs")
-                    || startsWithFlagAndExtra(value, "unborn");
-        }
-
-        private static boolean startsWithFlagAndExtra(
-                String value,
-                String flag) {
-            return value.length() > flag.length()
-                    && value.startsWith(flag)
-                    && value.charAt(flag.length()) == ' ';
-        }
+        return new GitV1Advertisement(capabilities, refs);
     }
+    private static GitCapabilities uploadPackCapabilities(
+            GitWireConfiguration configuration) {
+        GitWireConfiguration.LegacyUploadPack uploadPack =
+                configuration.uploadPack();
+        GitCapabilities capabilities = new GitCapabilities();
+        if (uploadPack.multiAckDetailed()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.MULTI_ACK_DETAILED));
+            capabilities.add(GitCapabilityValue.value(GitCapability.MULTI_ACK));
+        }
+        if (uploadPack.thinPack()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.THIN_PACK));
+        }
+        if (uploadPack.sideBand64k()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.SIDE_BAND_64K));
+        }
+        if (uploadPack.ofsDelta()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.OFS_DELTA));
+        }
+        capabilities.add(GitCapabilityValue.value(GitCapability.SHALLOW));
+        capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_SINCE));
+        capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_NOT));
+        capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_RELATIVE));
+        capabilities.add(GitCapabilityValue.value(GitCapability.NO_PROGRESS));
+        capabilities.add(GitCapabilityValue.value(GitCapability.INCLUDE_TAG));
+        if (uploadPack.agent()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.AGENT, "orion-native"));
+        }
+        return capabilities;
+    }
+
+    private static GitCapabilities receivePackCapabilities(
+            GitWireConfiguration configuration) {
+        GitWireConfiguration.LegacyReceivePack receivePack =
+                configuration.receivePack();
+        GitCapabilities capabilities = new GitCapabilities();
+        if (receivePack.reportStatus()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.REPORT_STATUS));
+            capabilities.add(GitCapabilityValue.value(GitCapability.REPORT_STATUS_V2));
+        }
+        capabilities.add(GitCapabilityValue.value(GitCapability.DELETE_REFS));
+        if (receivePack.sideBand64k()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.SIDE_BAND_64K));
+        }
+        capabilities.add(GitCapabilityValue.value(GitCapability.QUIET));
+        if (receivePack.atomic()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.ATOMIC));
+        }
+        if (receivePack.ofsDelta()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.OFS_DELTA));
+        }
+        if (receivePack.objectFormat()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.OBJECT_FORMAT, "sha1"));
+        }
+        if (receivePack.agent()) {
+            capabilities.add(GitCapabilityValue.value(GitCapability.AGENT, "orion-native"));
+        }
+        return capabilities;
+    }
+
 }

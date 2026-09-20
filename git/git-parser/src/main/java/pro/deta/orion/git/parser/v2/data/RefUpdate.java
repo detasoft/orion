@@ -22,4 +22,13 @@ public record RefUpdate(RefId ref, Optional<ObjectId> expectedOld, Optional<Obje
             throw new IllegalArgumentException("Ref update must contain an expected or new object ID");
         }
     }
+
+    public static RefUpdate fromWire(String ref, String expectedOld, String newId) {
+        ObjectId oldObject = new ObjectId(expectedOld);
+        ObjectId newObject = new ObjectId(newId);
+        String zero = "0".repeat(40);
+        return new RefUpdate(new RefId(ref), expectedOld.equals(zero) ? Optional.empty() : Optional.of(oldObject),
+                newId.equals(zero) ? Optional.empty() : Optional.of(newObject));
+    }
+
 }
