@@ -1,6 +1,5 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
@@ -25,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -132,39 +132,87 @@ final class GitPackStorage {
     }
 
     <R> Optional<R> read(ObjectId id, GitObjectRead<R> reader) throws IOException {
+        List<PackObjectLocation> locations = locate(List.of(id));
+        return locations.isEmpty() ? Optional.empty() : Optional.of(read(locations.getFirst(), reader));
+    }
+
+    <R> R read(PackObjectLocation location, GitObjectRead<R> reader) throws IOException {
         if (memory != null) {
-            for (IndexedPack pack : memory.values()) {
-                Optional<IndexedPack.EntryMetadata> found = pack.find(id);
-                if (found.isPresent()) {
-                    IndexedPack.EntryMetadata entry = found.orElseThrow();
-                    return Optional.of(pack.readObject(entry.offset(), (type, size, base, input) ->
-                            reader.read(type == GitObjectType.OFS_DELTA
-                                    ? GitObjectType.REF_DELTA : type,
-                                    size, pack.baseId(entry.offset()), input)));
-                }
+            IndexedPack pack = memory.get(location.packId());
+            if (pack == null) {
+                throw new IOException("Missing source pack: " + location.packId());
             }
-            return Optional.empty();
+            return pack.readObject(location.entry(), location.end(), location.baseId(), reader);
         }
-        Optional<Location> found = scan((packId, indexPath) -> {
-            try (GitLock.Lease lease = lockPack(packId); IndexedPack index = IndexedPack.open(packPath(packId), indexPath)) {
-                Optional<IndexedPack.EntryMetadata> foundEntry = index.find(id);
-                if (foundEntry.isEmpty()) {
-                    return Optional.empty();
-                }
-                if (!index.id().equals(packId)) {
-                    throw new IOException("Stored pack checksum does not match its identity");
-                }
-                IndexedPack.EntryMetadata entry = foundEntry.orElseThrow();
-                return Optional.of(new Location(packId, entry, index.dataEnd(entry.offset()),
-                        index.baseId(entry.offset())));
-            }
-        });
+        return IndexedPack.readObject(packPath(location.packId()), location.entry(),
+                location.end(), location.baseId(), reader);
+    }
+
+    List<PackObjectLocation> locate(Collection<ObjectId> ids) throws IOException {
+        Map<ObjectId, PackObjectLocation> found = new LinkedHashMap<>();
+        for (ObjectId id : ids) {
+            found.put(Objects.requireNonNull(id, "objectId"), null);
+        }
         if (found.isEmpty()) {
-            return Optional.empty();
+            return List.of();
         }
-        Location location = found.orElseThrow();
-        return Optional.of(IndexedPack.readObject(packPath(location.packId()), location.entry(),
-                location.end(), location.baseId(), reader));
+        if (memory != null) {
+            for (Map.Entry<PackId, IndexedPack> pack : memory.entrySet()) {
+                if (locate(pack.getKey(), pack.getValue(), found)) {
+                    break;
+                }
+            }
+        } else {
+            scan((packId, path) -> {
+                try (GitLock.Lease lease = lockPack(packId);
+                     IndexedPack index = IndexedPack.open(packPath(packId), path)) {
+                    if (!index.id().equals(packId)) {
+                        throw new IOException("Stored pack checksum does not match its identity");
+                    }
+                    return locate(packId, index, found) ? Optional.of(true) : Optional.empty();
+                }
+            });
+        }
+        List<PackObjectLocation> result = new ArrayList<>(found.size());
+        for (PackObjectLocation location : found.values()) {
+            if (location != null) {
+                result.add(location);
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static boolean locate(PackId packId, IndexedPack pack,
+                                  Map<ObjectId, PackObjectLocation> found) throws IOException {
+        boolean complete = true;
+        for (Map.Entry<ObjectId, PackObjectLocation> requested : found.entrySet()) {
+            if (requested.getValue() != null) {
+                continue;
+            }
+            Optional<IndexedPack.EntryMetadata> candidate = pack.find(requested.getKey());
+            if (candidate.isEmpty()) {
+                complete = false;
+                continue;
+            }
+            IndexedPack.EntryMetadata entry = candidate.orElseThrow();
+            requested.setValue(new PackObjectLocation(requested.getKey(), packId, entry,
+                    pack.dataEnd(entry.offset()), pack.baseId(entry.offset())));
+        }
+        return complete;
+    }
+
+    Set<ObjectId> objectIds(PackId id) throws IOException {
+        if (memory != null) {
+            IndexedPack pack = memory.get(id);
+            return pack == null ? Set.of() : pack.objectIds();
+        }
+        Optional<IndexedPack> found = open(id);
+        if (found.isEmpty()) {
+            return Set.of();
+        }
+        try (IndexedPack pack = found.orElseThrow()) {
+            return pack.objectIds();
+        }
     }
 
     Map<ObjectId, List<PackId>> find(Collection<ObjectId> ids) throws IOException {
@@ -263,8 +311,6 @@ final class GitPackStorage {
             throw new IOException("Interrupted while acquiring pack ownership", interrupted);
         }
     }
-
-    private record Location(PackId packId, IndexedPack.EntryMetadata entry, long end, Optional<ObjectId> baseId) { }
 
     private static void forceDirectory(Path directory) throws IOException {
         try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {

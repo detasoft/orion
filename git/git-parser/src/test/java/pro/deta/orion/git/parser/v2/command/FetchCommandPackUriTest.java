@@ -63,6 +63,22 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
     }
 
     @Test
+    void mixesUriPackWithOnlyRequestedEntriesFromAnotherPack() throws Exception {
+        List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
+        PackId externalPack = storage().packIds().getFirst();
+        List<ObjectId> shared = store(new byte[]{3}, new byte[]{4});
+        List<ObjectId> wanted = new ArrayList<>(external);
+        wanted.add(shared.getFirst());
+        byte[] response = fetch(wanted, "https");
+        assertThat(new String(response, StandardCharsets.ISO_8859_1))
+                .contains(externalPack.toHex() + " " + packUri(externalPack).orElseThrow() + "\n");
+        try (IndexedPack inline = inlinePack(response)) {
+            assertThat(inline.entryCount()).isEqualTo(1);
+            assertThat(inline.objectIds()).containsExactly(shared.getFirst());
+        }
+    }
+
+    @Test
     void leavesObjectsInlineWhenClientDoesNotAcceptUriProtocol() throws Exception {
         List<ObjectId> ids = store(new byte[]{1});
         byte[] response = fetch(ids, "http");

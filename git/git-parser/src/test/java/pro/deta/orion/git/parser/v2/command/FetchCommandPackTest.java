@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -49,9 +50,9 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     private ByteBuffer source;
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll) throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll, boolean disk) throws Exception {
+        GitStorageApi storage = disk ? new GitStorageApi(directory) : new GitStorageApi();
         byte[] content = new byte[200000];
         new Random(17).nextBytes(content);
         ObjectId id = store(storage, GitObjectType.BLOB, content);
@@ -66,9 +67,12 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             IndexedPack.EntryMetadata entry = indexed.find(id).orElseThrow();
             assertThat(Arrays.copyOfRange(pack, (int) entry.dataOffset(), pack.length - 20)).isEqualTo(stored);
         }
-        try (DirectoryStream<Path> files = Files.newDirectoryStream(directory.resolve("incoming"))) {
-            assertThat(files.iterator().hasNext()).isFalse();
+        if (disk) {
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(directory.resolve("incoming"))) {
+                assertThat(files.iterator().hasNext()).isFalse();
+            }
         }
+        storage.close();
     }
 
     @Test
@@ -183,11 +187,11 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"thin", "full", "base-in-pack"})
-    void reusesDeltaOnlyWithAnAvailableBaseAndOtherwiseWritesAFullObject(String mode) throws Exception {
+    @CsvSource({"thin,false", "thin,true", "full,false", "full,true", "base-in-pack,false", "base-in-pack,true"})
+    void reusesDeltaOnlyWithAnAvailableBaseAndOtherwiseWritesAFullObject(String mode, boolean disk) throws Exception {
         boolean thin = mode.equals("thin");
         boolean includeBase = mode.equals("base-in-pack");
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = disk ? new GitStorageApi(directory) : new GitStorageApi();
         byte[] base = {1, 2, 3};
         byte[] target = {1, 2, 4};
         byte[] delta = {3, 3, 3, 1, 2, 4};
@@ -225,6 +229,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                 assertThat(indexed.find(baseId)).isEmpty();
             }
         }
+        storage.close();
     }
 
     @Test

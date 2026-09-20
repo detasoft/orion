@@ -318,16 +318,33 @@ public final class IndexedPack implements AutoCloseable {
                                    GitObjectRead<R> reader) throws IOException {
         R value = null;
         try (PackDataStorage bytes = PackDataStorage.open(path, StandardOpenOption.READ)) {
-            if (end <= entry.dataOffset() || end > bytes.size() - 20) {
-                throw new EOFException("Invalid stored object boundary");
-            }
-            GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
-                    ? GitObjectType.REF_DELTA : entry.type();
-            try (BufferedByteInputV2 input = new BufferedByteInputV2(
-                    new PackByteSource(bytes, entry.dataOffset(), end))) {
-                value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
-                        "reader result");
-            }
+            value = readBounded(bytes, entry, end, baseId, reader);
+            return value;
+        } catch (IOException | RuntimeException | Error error) {
+            closeUnreturned(value, error);
+            throw error;
+        }
+    }
+
+    public <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
+                           GitObjectRead<R> reader) throws IOException {
+        requireOpen();
+        return readBounded(bytes, entry, end, baseId, reader);
+    }
+
+    private static <R> R readBounded(PackDataStorage bytes, EntryMetadata entry, long end,
+                                     Optional<ObjectId> baseId, GitObjectRead<R> reader) throws IOException {
+        if (entry.dataOffset() <= entry.offset() || entry.offset() < 12
+                || end <= entry.dataOffset() || end > bytes.size() - 20) {
+            throw new EOFException("Invalid stored object boundary");
+        }
+        GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
+                ? GitObjectType.REF_DELTA : entry.type();
+        R value = null;
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
+                new PackByteSource(bytes, entry.dataOffset(), end))) {
+            value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
+                    "reader result");
             return value;
         } catch (IOException | RuntimeException | Error error) {
             closeUnreturned(value, error);

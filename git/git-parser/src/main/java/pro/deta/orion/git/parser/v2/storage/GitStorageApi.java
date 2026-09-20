@@ -46,6 +46,18 @@ public final class GitStorageApi implements AutoCloseable {
         return packs.read(Objects.requireNonNull(objectId, "objectId"), Objects.requireNonNull(reader, "reader"));
     }
 
+    public List<PackObjectLocation> locateObjects(Collection<ObjectId> objectIds) throws IOException {
+        return packs.locate(Objects.requireNonNull(objectIds, "objectIds"));
+    }
+
+    public <R> R readObject(PackObjectLocation location, GitObjectRead<R> reader) throws IOException {
+        return packs.read(Objects.requireNonNull(location, "location"), Objects.requireNonNull(reader, "reader"));
+    }
+
+    public Set<ObjectId> packObjectIds(PackId id) throws IOException {
+        return packs.objectIds(Objects.requireNonNull(id, "packId"));
+    }
+
     public boolean exists(ObjectId objectId) throws IOException {
         return readObject(objectId, new ExistsGitObjectRead()).isPresent();
     }
