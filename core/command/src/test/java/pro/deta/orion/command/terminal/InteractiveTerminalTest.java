@@ -1,9 +1,12 @@
 package pro.deta.orion.command.terminal;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.CommandCompletion;
+import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandDefinition;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandNode;
@@ -13,6 +16,7 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
+import pro.deta.orion.command.resource.ScopedResourceCandidate;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
 
 import java.io.ByteArrayInputStream;
@@ -23,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
@@ -42,35 +47,14 @@ class InteractiveTerminalTest {
             requests.add(request);
             return new CommandResult.Message("handled: " + request.commandLine());
         };
-        CountDownLatch promptDelivered = new CountDownLatch(1);
-        AtomicBoolean resultDelivered = new AtomicBoolean();
-        ByteArrayOutputStream output = new ByteArrayOutputStream() {
-            @Override
-            public void write(byte[] bytes, int offset, int length) {
-                String value = new String(bytes, offset, length, StandardCharsets.UTF_8);
-                if (value.contains("handled:")) {
-                    resultDelivered.set(true);
-                } else if (resultDelivered.get() && value.contains("[alice@orion] > ")) {
-                    promptDelivered.countDown();
-                }
-                super.write(bytes, offset, length);
-            }
-        };
-        InteractiveTerminal terminal = terminal(dispatcher, directExecutor(), output, tree());
-        terminal.resize(96);
-        java.io.PipedInputStream input = new java.io.PipedInputStream();
-        java.io.PipedOutputStream client = new java.io.PipedOutputStream(input);
-        Thread reader = Thread.ofVirtual().start(() -> terminal.run(input));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            InteractiveTerminal terminal = terminal(dispatcher, executor, output, tree());
+            terminal.resize(96);
+            runSteps(terminal, "/session\r", "?\r", "..\r", "help\r",
+                    "touch /tmp/x; echo $(id) | cat >x `id`\r", "quit\r");
+        }
 
-        client.write("/session\r?\r..\rhelp\rtouch /tmp/x; echo $(id) | cat >x `id`\r"
-                .getBytes(StandardCharsets.UTF_8));
-        client.flush();
-        assertThat(promptDelivered.await(5, TimeUnit.SECONDS)).isTrue();
-        client.write("quit\r".getBytes(StandardCharsets.UTF_8));
-        client.flush();
-        reader.join(TimeUnit.SECONDS.toMillis(5));
-
-        assertThat(reader.isAlive()).isFalse();
         assertThat(output.toString(StandardCharsets.UTF_8))
                 .contains("[alice@orion] > ", "[alice@orion /session] > ", "show", "session/")
                 .contains("handled: touch /tmp/x; echo $(id) | cat >x `id`");
@@ -88,7 +72,7 @@ class InteractiveTerminalTest {
     }
 
     @Test
-    void completesVisibleEntriesAndHonorsCtrlDOnlyAtAnEmptyPrompt() {
+    void completesVisibleEntriesAndHonorsCtrlDOnlyAtAnEmptyPrompt() throws Exception {
         List<String> lines = new ArrayList<>();
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         InteractiveTerminal terminal = terminal(
@@ -100,9 +84,7 @@ class InteractiveTerminalTest {
                 output,
                 tree());
 
-        int exit = terminal.run(input("se\t\rvalue\u0004\r\u0004"));
-
-        assertThat(exit).isZero();
+        runSteps(terminal, "se\t", "\r", "value\u0004\r", "\u0004");
         assertThat(output.toString(StandardCharsets.UTF_8)).contains("session/");
         assertThat(lines).containsExactly("value");
     }
@@ -363,7 +345,7 @@ class InteractiveTerminalTest {
     }
 
     @Test
-    void rendersSanitizedUnavailableAndFailedPathOnlyNavigation() {
+    void rendersSanitizedUnavailableAndFailedPathOnlyNavigation() throws Exception {
         RuntimeException cause = new RuntimeException("sensitive failure");
 
         assertPathNavigationFailure(
@@ -376,10 +358,102 @@ class InteractiveTerminalTest {
                 "sensitive failure");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/item\r", "help\r", "it\t"})
+    void cancelsCatalogWorkAndSuppressesLateResults(String keys) throws Exception {
+        assertCatalogCancellation(keys, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/item\r", "help\r", "it\t"})
+    void disconnectCancelsCatalogWorkAndSuppressesLateResults(String keys) throws Exception {
+        assertCatalogCancellation(keys, true);
+    }
+
+    private static void assertCatalogCancellation(String keys, boolean disconnect) throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch consumed = new CountDownLatch(1);
+        CountDownLatch initialConsumed = new CountDownLatch(1);
+        AtomicReference<CommandContext> lookupContext = new AtomicReference<>();
+        CommandNode root = CommandNode.builder().dynamicChild(
+                new ScopedResourceResolver<String>((context, parents) -> {
+                    lookupContext.set(context);
+                    entered.countDown();
+                    boolean waiting = true;
+                    while (waiting) {
+                        try {
+                            waiting = !release.await(5, TimeUnit.SECONDS);
+                            if (waiting) {
+                                throw new AssertionError("catalog was not released");
+                            }
+                        } catch (InterruptedException exception) {
+                            interrupted.countDown();
+                        }
+                    }
+                    return new ScopedResourceCatalogResult.Available<>(List.of(
+                            new ScopedResourceCandidate<>(
+                                    "item", Optional.empty(), "item", AccessDecision.allow("test"))));
+                }, true), CommandNode.builder().build()).build();
+        ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ChunkQueueInput input = new ChunkQueueInput();
+        List<CommandRequest> requests = new ArrayList<>();
+        InteractiveTerminal terminal = terminal(request -> {
+            requests.add(request);
+            return new CommandResult.Message("next result");
+        }, executor, output, root);
+        terminal.onInputChunkConsumed(initialConsumed::countDown);
+        Thread reader = Thread.ofVirtual().start(() -> terminal.run(input));
+        try {
+            input.send(keys.getBytes(StandardCharsets.UTF_8));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(initialConsumed.await(5, TimeUnit.SECONDS)).isTrue();
+            if (disconnect) {
+                terminal.close();
+            } else {
+                terminal.onInputChunkConsumed(consumed::countDown);
+                input.send(new byte[]{3});
+                assertThat(consumed.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(output.toString(StandardCharsets.UTF_8)).contains("CANCELLED");
+            }
+            assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(lookupContext.get().cancellation().isCancelled()).isTrue();
+            String afterCancellation = output.toString(StandardCharsets.UTF_8);
+            release.countDown();
+            executor.submit(() -> { }).get(5, TimeUnit.SECONDS);
+            assertThat(output.toString(StandardCharsets.UTF_8)).isEqualTo(afterCancellation);
+            assertThat(requests).isEmpty();
+            if (!disconnect) {
+                CountDownLatch nextConsumed = new CountDownLatch(1);
+                terminal.onInputChunkConsumed(nextConsumed::countDown);
+                input.send("next command\r".getBytes(StandardCharsets.UTF_8));
+                assertThat(nextConsumed.await(5, TimeUnit.SECONDS)).isTrue();
+                awaitIdle(terminal);
+                assertThat(requests).singleElement().satisfies(request -> {
+                    assertThat(request.commandLine()).isEqualTo("next command");
+                    assertThat(request.context().currentPath()).isEqualTo(CommandPath.root());
+                    assertThat(request.context().cancellation().isCancelled()).isFalse();
+                });
+                assertThat(output.toString(StandardCharsets.UTF_8)).contains("next result");
+            }
+            terminal.close();
+            reader.join(TimeUnit.SECONDS.toMillis(5));
+            assertThat(reader.isAlive()).isFalse();
+        } finally {
+            release.countDown();
+            terminal.close();
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+            reader.join(TimeUnit.SECONDS.toMillis(5));
+        }
+    }
+
     private static void assertPathNavigationFailure(
             ScopedResourceCatalogResult<String> result,
             String expected,
-            String sensitive) {
+            String sensitive) throws Exception {
         CommandNode root = CommandNode.builder()
                 .child("repository", CommandNode.builder()
                         .dynamicChild(
@@ -394,9 +468,38 @@ class InteractiveTerminalTest {
             return new CommandResult.Message("unexpected");
         }, directExecutor(), output, root);
 
-        assertThat(terminal.run(input("/repository/item\r\u0004"))).isZero();
+        runSteps(terminal, "/repository/item\r", "\u0004");
         assertThat(output.toString(StandardCharsets.UTF_8)).contains(expected).doesNotContain(sensitive);
         assertThat(dispatched).isFalse();
+    }
+
+    private static void runSteps(InteractiveTerminal terminal, String... steps) throws Exception {
+        ChunkQueueInput input = new ChunkQueueInput();
+        AtomicInteger exit = new AtomicInteger(-1);
+        Thread reader = Thread.ofVirtual().start(() -> exit.set(terminal.run(input)));
+        try {
+            for (String step : steps) {
+                CountDownLatch consumed = new CountDownLatch(1);
+                terminal.onInputChunkConsumed(consumed::countDown);
+                input.send(step.getBytes(StandardCharsets.UTF_8));
+                assertThat(consumed.await(5, TimeUnit.SECONDS)).isTrue();
+                awaitIdle(terminal);
+            }
+            reader.join(TimeUnit.SECONDS.toMillis(5));
+            assertThat(reader.isAlive()).isFalse();
+            assertThat(exit.get()).isZero();
+        } finally {
+            terminal.close();
+            reader.join(TimeUnit.SECONDS.toMillis(5));
+        }
+    }
+
+    private static void awaitIdle(InteractiveTerminal terminal) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!terminal.isIdle() && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        assertThat(terminal.isIdle()).isTrue();
     }
 
     private static InteractiveTerminal terminal(

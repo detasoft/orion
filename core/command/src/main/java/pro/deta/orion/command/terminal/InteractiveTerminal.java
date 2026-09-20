@@ -6,7 +6,6 @@ import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
-import pro.deta.orion.command.CommandLocation;
 import pro.deta.orion.command.CommandNavigation;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandPath;
@@ -27,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 public final class InteractiveTerminal implements AutoCloseable {
     private static final int INPUT_BUFFER_SIZE = 256;
@@ -106,6 +106,11 @@ public final class InteractiveTerminal implements AutoCloseable {
         inputConsumedHook.set(Objects.requireNonNull(hook, "hook"));
     }
 
+    @TestOnly
+    boolean isIdle() {
+        return active.get() == null;
+    }
+
     @Override
     public void close() {
         shutdown(exitCode.get());
@@ -170,61 +175,82 @@ public final class InteractiveTerminal implements AutoCloseable {
             shutdown(0);
             return;
         }
-        if (control.equals("?") || control.equalsIgnoreCase("help")) {
-            help();
-            prompt();
-            return;
-        }
-        if (isSingleToken(control)) {
-            CommandContext navigationContext = context(CommandCancellation.never());
-            CommandNavigation navigation = navigator.navigate(navigationContext, currentPath.get(), control);
-            if (navigation instanceof CommandNavigation.Located located) {
-                currentPath.set(located.location().path());
-                prompt();
-                return;
-            }
-            if (isExplicitPath(control)) {
-                renderNavigationFailure(navigation);
-                prompt();
-                return;
-            }
-        }
-        dispatch(enteredLine);
+        start(context -> prepareSubmission(context, enteredLine, control));
     }
 
-    private void dispatch(String line) {
+    private Runnable prepareSubmission(CommandContext context, String enteredLine, String control) {
+        if (control.equals("?") || control.equalsIgnoreCase("help")) {
+            CommandNavigation navigation = navigator.locate(context, context.currentPath());
+            List<String> entries = !context.cancellation().isCancelled()
+                    && navigation instanceof CommandNavigation.Located located
+                    ? navigator.visibleEntries(context, located.location()) : List.of();
+            return () -> {
+                write(TerminalDisplay.columns(entries, columns.get()));
+                prompt();
+            };
+        }
+        if (isSingleToken(control)) {
+            CommandNavigation navigation = navigator.navigate(context, context.currentPath(), control);
+            if (navigation instanceof CommandNavigation.Located located) {
+                return () -> {
+                    currentPath.set(located.location().path());
+                    prompt();
+                };
+            }
+            if (isExplicitPath(control)) {
+                return () -> {
+                    renderNavigationFailure(navigation);
+                    prompt();
+                };
+            }
+        }
+        if (context.cancellation().isCancelled()) {
+            return () -> { };
+        }
+        CommandResult result = Objects.requireNonNull(
+                dispatcher.dispatch(new CommandRequest(enteredLine, context)), "dispatcher result");
+        return () -> {
+            render(result);
+            if (result instanceof CommandResult.Exit exit) {
+                shutdown(exit.exitCode());
+            } else if (!closed.get()) {
+                prompt();
+            }
+        };
+    }
+
+    private void start(Function<CommandContext, Runnable> operation) {
         ActiveCommand command = new ActiveCommand();
         if (!active.compareAndSet(null, command)) {
             write("\u0007");
             return;
         }
+        CommandContext context = context(command.cancellation);
         try {
-            Future<?> future = executor.submit(() -> dispatch(command, line));
+            Future<?> future = executor.submit(() -> execute(command, context, operation));
             command.attach(future);
         } catch (RuntimeException exception) {
-            if (active.compareAndSet(command, null)) {
-                render(new CommandResult.Failure(
-                        CommandFailureCode.HANDLER_FAILED,
-                        "Command handler failed",
-                        List.of()));
-                prompt();
-            }
+            complete(command, this::handlerFailed);
         }
     }
 
-    private void dispatch(ActiveCommand command, String line) {
-        CommandResult result;
-        try {
-            result = Objects.requireNonNull(
-                    dispatcher.dispatch(new CommandRequest(line, context(command.cancellation))),
-                    "dispatcher result");
-        } catch (RuntimeException exception) {
-            result = new CommandResult.Failure(
-                    CommandFailureCode.HANDLER_FAILED,
-                    "Command handler failed",
-                    List.of());
+    private void execute(
+            ActiveCommand command,
+            CommandContext context,
+            Function<CommandContext, Runnable> operation) {
+        if (command.cancellation.isCancelled() || closed.get()) {
+            return;
         }
-        CommandResult completedResult = result;
+        Runnable result;
+        try {
+            result = operation.apply(context);
+        } catch (RuntimeException exception) {
+            result = this::handlerFailed;
+        }
+        if (command.cancellation.isCancelled() || closed.get()) {
+            return;
+        }
+        Runnable completedResult = result;
         Thread completion = Thread.ofVirtual()
                 .name("orion-terminal-completion-", 0)
                 .unstarted(() -> complete(command, completedResult));
@@ -232,18 +258,20 @@ public final class InteractiveTerminal implements AutoCloseable {
         completion.start();
     }
 
-    private void complete(ActiveCommand command, CommandResult result) {
+    private void handlerFailed() {
+        render(new CommandResult.Failure(
+                CommandFailureCode.HANDLER_FAILED,
+                "Command handler failed",
+                List.of()));
+        prompt();
+    }
+
+    private void complete(ActiveCommand command, Runnable result) {
         if (!command.beginCompletion() || active.get() != command || closed.get()) {
             return;
         }
         try {
-            render(result);
-            if (result instanceof CommandResult.Exit exit) {
-                command.finishCompletion();
-                shutdown(exit.exitCode());
-            } else if (!closed.get()) {
-                prompt();
-            }
+            result.run();
         } finally {
             command.finishCompletion();
             active.compareAndSet(command, null);
@@ -270,30 +298,20 @@ public final class InteractiveTerminal implements AutoCloseable {
     private void complete() {
         String line = editor.line();
         int characterCursor = line.offsetByCodePoints(0, editor.cursor());
-        CommandCompletion.Result result = navigator.complete(
-                context(CommandCancellation.never()),
-                currentPath.get(),
-                line,
-                characterCursor);
-        int codePointCursor = result.line().codePointCount(0, result.cursor());
-        boolean changed = !result.line().equals(line) || codePointCursor != editor.cursor();
-        editor.replace(result.line(), codePointCursor);
-        if (!changed && result.candidates().size() > 1) {
-            write("\r\n" + TerminalDisplay.columns(result.candidates(), columns.get()));
-        }
-        redraw();
-    }
-
-    private void help() {
-        CommandNavigation navigation = navigator.locate(
-                context(CommandCancellation.never()),
-                currentPath.get());
-        if (navigation instanceof CommandNavigation.Located located) {
-            List<String> entries = navigator.visibleEntries(
-                    context(CommandCancellation.never()),
-                    located.location());
-            write(TerminalDisplay.columns(entries, columns.get()));
-        }
+        int cursor = editor.cursor();
+        start(context -> {
+            CommandCompletion.Result result = navigator.complete(
+                    context, context.currentPath(), line, characterCursor);
+            return () -> {
+                int codePointCursor = result.line().codePointCount(0, result.cursor());
+                boolean changed = !result.line().equals(line) || codePointCursor != cursor;
+                editor.replace(result.line(), codePointCursor);
+                if (!changed && result.candidates().size() > 1) {
+                    write("\r\n" + TerminalDisplay.columns(result.candidates(), columns.get()));
+                }
+                redraw();
+            };
+        });
     }
 
     private void renderNavigationFailure(CommandNavigation navigation) {
