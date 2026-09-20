@@ -434,12 +434,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public boolean userExists(String userName) {
-        return findSingleUser(userName) instanceof Result.Success<?>;
+        return findSingleUser(accessControl.get(), userName) instanceof Result.Success<?>;
     }
 
     @Override
     public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
-        Result<AccessControl.User> user = findSingleUser(userName);
+        AccessControl snapshot = accessControl.get();
+        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
             if (isLockedRoot(u)) {
                 return AuthenticationResult.failure("authentication failed");
@@ -449,7 +450,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 return AuthenticationResult.failure("authentication failed");
             }
             if (performAuthentication(u, encodedData))
-                return createUserIdentity(u);
+                return createUserIdentity(snapshot, u);
         }
         log.warn("Attempt to authenticate as '{}' failed.", userName);
         return AuthenticationResult.failure("authentication failed");
@@ -459,7 +460,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public SshKeyEnrollmentAuthentication authenticateSshKeyEnrollment(
             String userName,
             byte[] credential) {
-        Result<AccessControl.User> user = findSingleUser(userName);
+        AccessControl snapshot = accessControl.get();
+        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
                 && performPasswordAuthentication(matchedUser, credential)) {
@@ -467,7 +469,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             if (isGenerationAwareRoot(matchedUser) && recoveryGeneration == null) {
                 return SshKeyEnrollmentAuthentication.failure("authentication failed");
             }
-            return switch (createUserIdentity(matchedUser)) {
+            return switch (createUserIdentity(snapshot, matchedUser)) {
                 case AuthenticationResult.Success(var identity) -> SshKeyEnrollmentAuthentication.success(
                         identity,
                         recoveryGeneration);
@@ -547,11 +549,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
-        Result<AccessControl.User> user = findSingleUser(userName);
+        AccessControl snapshot = accessControl.get();
+        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
                 && performPublicKeyAuthentication(matchedUser, encodedPublicKey)) {
-            return createUserIdentity(matchedUser);
+            return createUserIdentity(snapshot, matchedUser);
         }
         log.warn("SSH public-key authentication as '{}' failed.", userName);
         return AuthenticationResult.failure("authentication failed");
@@ -569,7 +572,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
         if (matchingUsers.size() == 1) {
-            return createUserIdentity(matchingUsers.getFirst());
+            return createUserIdentity(currentAccessControl, matchingUsers.getFirst());
         }
         log.warn("Git SSH public key resolved to {} users.", matchingUsers.size());
         return AuthenticationResult.failure("authentication failed");
@@ -585,7 +588,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     var subject,
                     var authenticationGeneration,
                     var tokenId) -> {
-                Result<AccessControl.User> user = findSingleUser(subject);
+                AccessControl snapshot = accessControl.get();
+                Result<AccessControl.User> user = findSingleUser(snapshot, subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
                     if (isLockedRoot(u)) {
                         yield TokenAuthenticationResult.failure("authentication failed");
@@ -595,7 +599,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             && (currentGeneration == null || !currentGeneration.equals(authenticationGeneration))) {
                         yield TokenAuthenticationResult.failure("authentication failed");
                     }
-                    AuthenticationResult authenticated = createUserIdentity(u);
+                    AuthenticationResult authenticated = createUserIdentity(snapshot, u);
                     if (authenticated instanceof AuthenticationResult.Success(var userIdentity)) {
                         yield TokenAuthenticationResult.success(
                                 userIdentity,
@@ -639,7 +643,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 || userIdentity.getUserId().isBlank()) {
             return TokenIssueResult.failure("authenticated user is required");
         }
-        Result<AccessControl.User> user = findSingleUser(userIdentity.getUserId());
+        Result<AccessControl.User> user = findSingleUser(accessControl.get(), userIdentity.getUserId());
         if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
             return TokenIssueResult.failure("user is not available for token issue", throwable);
         }
@@ -1229,8 +1233,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return false;
     }
 
-    private AuthenticationResult createUserIdentity(AccessControl.User u) {
-        Result<List<AccessControl.Grant>> assembledGrants = mergeGrants(u);
+    private AuthenticationResult createUserIdentity(AccessControl snapshot, AccessControl.User u) {
+        Result<List<AccessControl.Grant>> assembledGrants = mergeGrants(snapshot, u);
         return switch (assembledGrants) {
             case Result.Failure<List<AccessControl.Grant>>(var code, var message, var throwable) ->
                     AuthenticationResult.failure("User " + u.getId() + " failed to auth: [" + code + "] " + message, throwable);
@@ -1239,18 +1243,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         };
     }
 
-    private Result<List<AccessControl.Grant>> mergeGrants(AccessControl.User u) {
+    private Result<List<AccessControl.Grant>> mergeGrants(AccessControl snapshot, AccessControl.User u) {
         List<AccessControl.Grant> l = new ArrayList<>(u.getGrants());
 
         for (String r : u.getRoles()) {
-            List<AccessControl.Role> roles = findRolesByReference(r);
+            List<AccessControl.Role> roles = findRolesByReference(snapshot, r);
             if (roles.size() != 1) {
                 return generalFailure("Number of roles [" + r + "] not " + roles.size());
             } else {
                 AccessControl.Role role = roles.getFirst();
                 l.addAll(role.getGrants());
                 for (String grantReference : role.getGrantReferences()) {
-                    List<AccessControl.Grant> grs = findGrantByReference(grantReference);
+                    List<AccessControl.Grant> grs = findGrantByReference(snapshot, grantReference);
                     if (grs.size() > 1)
                         return generalFailure("Number of grants [" + grantReference + "] not " + grs.size());
                     l.addAll(grs);
@@ -1260,12 +1264,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new Result.Success<>(l);
     }
 
-    private List<AccessControl.Role> findRolesByReference(String r) {
-        return accessControl.get().getRoles().stream().filter(r1 -> r1.getId().equalsIgnoreCase(r)).toList();
+    private List<AccessControl.Role> findRolesByReference(AccessControl snapshot, String r) {
+        return snapshot.getRoles().stream().filter(r1 -> r1.getId().equalsIgnoreCase(r)).toList();
     }
 
-    private List<AccessControl.Grant> findGrantByReference(String grantReference) {
-        return accessControl.get().getGrants().stream().filter(r1 -> r1.getId().equalsIgnoreCase(grantReference)).toList();
+    private List<AccessControl.Grant> findGrantByReference(AccessControl snapshot, String grantReference) {
+        return snapshot.getGrants().stream().filter(r1 -> r1.getId().equalsIgnoreCase(grantReference)).toList();
     }
 
     private boolean performAuthentication(AccessControl.User u, byte[] encodedData) {
@@ -1367,18 +1371,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private Result<AccessControl.User> findSingleUser(String userName) {
+    private Result<AccessControl.User> findSingleUser(AccessControl snapshot, String userName) {
         ArrayList<AccessControl.User> result = new ArrayList<>();
-        consumeUsersById(userName, result::add);
+        consumeUsersInAccessControl(userName, result::add, snapshot);
         if (result.size() == 1) {
             return new Result.Success<>(result.getFirst());
         } else {
             return generalFailure("Could't find a single user: <" + userName + "> " + result.size() + " users found.");
         }
-    }
-
-    private void consumeUsersById(String userId, Consumer<AccessControl.User> userConsumer) {
-        consumeUsersInAccessControl(userId, userConsumer, accessControl.get());
     }
 
     private static void consumeUsersInAccessControl(String userId, Consumer<AccessControl.User> userConsumer, AccessControl acl) {

@@ -6,6 +6,7 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
@@ -49,6 +50,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 
@@ -61,6 +63,78 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
+
+    @Test
+    void authenticationKeepsRoleGrantsFromItsUserSnapshotDuringReload() {
+        authenticationKeepsGrantsDuringReload(false);
+    }
+
+    @Test
+    void authenticationKeepsReferencedGrantsFromItsUserSnapshotDuringReload() {
+        authenticationKeepsGrantsDuringReload(true);
+    }
+
+    private void authenticationKeepsGrantsDuringReload(boolean referenced) {
+        AtomicReference<Runnable> duringPasswordCheck = new AtomicReference<>();
+        OrionPasswordHashingService hashing = new OrionPasswordHashingService() {
+            @Override
+            public boolean comparePassword(PasswordHashingAlgorithm algorithm, String expected, byte[] provided) {
+                Runnable reload = duringPasswordCheck.getAndSet(null);
+                if (reload != null) {
+                    reload.run();
+                }
+                return super.comparePassword(algorithm, expected, provided);
+            }
+        };
+        AccessControlDraft primary = new AccessControlDraft();
+        AccessControlDraft.User alice = user("alice");
+        String passwordHash = hashing.calculateHash(PasswordHashingAlgorithm.SHA1, "password".toCharArray());
+        alice.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
+        alice.addRole("operators");
+        primary.getUsers().add(alice);
+        AccessControlDraft.User bob = user("bob");
+        bob.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
+        primary.getUsers().add(bob);
+        AccessControlDraft.Role role = new AccessControlDraft.Role();
+        role.setId("operators");
+        AccessControlDraft.Grant grant = new AccessControlDraft.Grant();
+        grant.setId("operator-rights");
+        grant.addKey(AccessControl.GrantKey.READ, "team/*");
+        AccessControl.Grant originalGrant = grant.toAccessControl();
+        if (referenced) {
+            role.addGrantReference(grant.getId());
+            primary.getGrants().add(grant);
+        } else {
+            role.addGrant(grant);
+        }
+        primary.getRoles().add(role);
+        byte[] password = "password".getBytes(StandardCharsets.UTF_8);
+        try (ServiceFixture fixture = fixture(primary, new AccessControlDraft(), testServerIdentity(), hashing)) {
+            AuthenticationResult.Success before = (AuthenticationResult.Success)
+                    fixture.service.authenticateUser("alice", password);
+            assertThat(before.userIdentity().getGrants()).containsExactly(originalGrant);
+            alice.getRoles().clear();
+            bob.addRole("operators");
+            grant.getInfo().clear();
+            grant.addKey(AccessControl.GrantKey.ADMIN, "true");
+            duringPasswordCheck.set(() -> {
+                Map<String, byte[]> files = new LinkedHashMap<>(fixture.storage.snapshot.files());
+                files.put(ACL_PATH, serialize(primary.toAccessControl()));
+                fixture.storage.snapshot = new AccessControlSnapshot(files, Optional.of("version-two"));
+                fixture.eventManager.publishAndWait(new RequestToAclUpdate("replace operators membership"));
+            });
+
+            AuthenticationResult.Success overlapping = (AuthenticationResult.Success)
+                    fixture.service.authenticateUser("alice", password);
+            assertThat(overlapping.userIdentity().getGrants()).containsExactly(originalGrant);
+            AuthenticationResult.Success aliceAfter = (AuthenticationResult.Success)
+                    fixture.service.authenticateUser("alice", password);
+            assertThat(aliceAfter.userIdentity().getGrants()).isEmpty();
+            AuthenticationResult.Success bobAfter = (AuthenticationResult.Success)
+                    fixture.service.authenticateUser("bob", password);
+            assertThat(bobAfter.userIdentity().getGrants()).containsExactly(grant.toAccessControl());
+        }
+    }
 
     @Test
     void updatesPrimaryConfigurationAtTheReadRevisionAndPreservesSecondaryFiles() throws Exception {
@@ -618,6 +692,14 @@ class OrionAccessControlServiceImplTest {
             AccessControlDraft primary,
             AccessControlDraft secondary,
             ServerIdentityCapability serverIdentity) {
+        return fixture(primary, secondary, serverIdentity, new OrionPasswordHashingService());
+    }
+
+    private static ServiceFixture fixture(
+            AccessControlDraft primary,
+            AccessControlDraft secondary,
+            ServerIdentityCapability serverIdentity,
+            OrionPasswordHashingService hashing) {
         Map<String, byte[]> files = new LinkedHashMap<>();
         files.put(ACL_PATH, serialize(primary.toAccessControl()));
         files.put(EXTRA_ACL_PATH, serialize(secondary.toAccessControl()));
@@ -627,7 +709,7 @@ class OrionAccessControlServiceImplTest {
         OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage,
-                new OrionPasswordHashingService(),
+                hashing,
                 provider,
                 OrionRuntimeOptions.defaults(),
                 serverIdentity,
