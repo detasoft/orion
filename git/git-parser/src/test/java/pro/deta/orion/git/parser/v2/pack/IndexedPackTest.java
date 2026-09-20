@@ -106,6 +106,9 @@ class IndexedPackTest {
             pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
             assertThatThrownBy(() -> pack.readObject(12, new ExistsGitObjectRead()))
                     .isInstanceOf(EOFException.class);
+            pack.truncate(12);
+            assertThatThrownBy(() -> pack.readObject(12, new ExistsGitObjectRead()))
+                    .isInstanceOf(EOFException.class);
         }
         assertThatThrownBy(() -> pack.readObject(12, new ExistsGitObjectRead()))
                 .isInstanceOf(ClosedChannelException.class);

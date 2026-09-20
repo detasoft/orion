@@ -14,7 +14,6 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
@@ -267,7 +266,7 @@ public final class IndexedPack implements AutoCloseable {
             GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
                     ? GitObjectType.REF_DELTA : entry.type();
             try (BufferedByteInputV2 input = new BufferedByteInputV2(
-                    new StoredInput(bytes, entry.dataOffset(), end))) {
+                    new PackByteSource(bytes, entry.dataOffset(), end))) {
                 value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
                         "reader result");
             }
@@ -474,9 +473,12 @@ public final class IndexedPack implements AutoCloseable {
     private static <R> R readStored(EntryMetadata entry, PackDataStorage byteStore, long end,
                                    GitObjectRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
+        if (end < entry.dataOffset()) {
+            throw new EOFException("Truncated stored object");
+        }
         R value = null;
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ZlibBoundaryInputStream(
-                new StoredInput(byteStore, entry.dataOffset(), end), entry.inflatedSize()))) {
+        try (BufferedByteInputV2 raw = new BufferedByteInputV2(new PackByteSource(byteStore, entry.dataOffset(), end));
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ZlibBoundaryByteSource(raw, entry.inflatedSize()))) {
             value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
                     input), "reader result");
             ByteBuffer remaining;
@@ -499,62 +501,6 @@ public final class IndexedPack implements AutoCloseable {
                     failure.addSuppressed(cleanup);
                 }
             }
-        }
-    }
-
-    private static final class StoredInput extends InputStream {
-        private final ByteBuffer buffer = ByteBuffer.allocate(8192);
-        private final PackDataStorage byteStore;
-        private final long end;
-        private long position;
-
-        private StoredInput(PackDataStorage byteStore, long position, long end) {
-            this.byteStore = byteStore;
-            this.position = position;
-            this.end = end;
-            buffer.limit(0);
-        }
-
-        @Override
-        public int read() throws IOException {
-            if (!buffer.hasRemaining()) {
-                if (position >= end) {
-                    return -1;
-                }
-                buffer.clear();
-                buffer.limit((int) Math.min(buffer.capacity(), end - position));
-                int count = byteStore.read(position, buffer);
-                if (count == -1) {
-                    throw new EOFException("Truncated stored object");
-                }
-                if (count == 0) {
-                    throw new IOException("Pack byte store made no read progress");
-                }
-                position += count;
-                buffer.flip();
-            }
-            return buffer.get() & 255;
-        }
-
-        @Override
-        public int read(byte[] target, int offset, int length) throws IOException {
-            Objects.checkFromIndexSize(offset, length, target.length);
-            if (length == 0) {
-                return 0;
-            }
-            if (!buffer.hasRemaining()) {
-                int first = read();
-                if (first < 0) {
-                    return -1;
-                }
-                target[offset] = (byte) first;
-                int count = Math.min(length - 1, buffer.remaining());
-                buffer.get(target, offset + 1, count);
-                return count + 1;
-            }
-            int count = Math.min(length, buffer.remaining());
-            buffer.get(target, offset, count);
-            return count;
         }
     }
 
