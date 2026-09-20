@@ -18,7 +18,6 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -37,7 +36,8 @@ public final class FetchPack {
     private final Set<ObjectId> shallow = new LinkedHashSet<>();
     private final Set<ObjectId> unshallow = new LinkedHashSet<>();
     private final boolean thin;
-    private final List<PackObjectLocation> entries = new ArrayList<>();
+    private List<PackObjectLocation> entries = List.of();
+    private Map<PackId, URI> packUris = Map.of();
 
     private FetchPack(GitStorageApi storage, boolean thin) {
         this.storage = Objects.requireNonNull(storage, "storage");
@@ -45,6 +45,11 @@ public final class FetchPack {
     }
 
     public static FetchPack prepare(GitStorageApi storage, FetchPlan plan) throws IOException {
+        return prepare(new GitRepositoryContext(storage), plan);
+    }
+
+    public static FetchPack prepare(GitRepositoryContext repository, FetchPlan plan) throws IOException {
+        GitStorageApi storage = Objects.requireNonNull(repository, "repository").storage();
         Objects.requireNonNull(plan, "plan");
         if (plan.filter().isPresent() && !plan.filter().orElseThrow().equals("blob:none")) {
             throw new IOException("Unsupported object filter: " + plan.filter().orElseThrow());
@@ -73,7 +78,8 @@ public final class FetchPack {
         if (plan.capabilities().has(GitCapability.INCLUDE_TAG)) {
             pack.includeTags();
         }
-        pack.entries.addAll(storage.locateObjects(pack.objects));
+        pack.packUris = Collections.unmodifiableMap(pack.selectPackUris(repository, plan.packfileUriProtocols()));
+        pack.entries = storage.locateObjects(pack.objects);
         if (pack.entries.size() != pack.objects.size()) {
             throw new IOException("Missing fetch objects while preparing pack entries");
         }
@@ -228,7 +234,7 @@ public final class FetchPack {
         throw new IOException("Missing commit timestamp");
     }
 
-    public Map<PackId, URI> selectPackUris(GitRepositoryContext repository, Set<String> protocols)
+    private Map<PackId, URI> selectPackUris(GitRepositoryContext repository, Set<String> protocols)
             throws IOException {
         Map<PackId, URI> selected = new LinkedHashMap<>();
         if (protocols.isEmpty() || objects.isEmpty()) {
@@ -243,7 +249,6 @@ public final class FetchPack {
             if (!covered.isEmpty() && objects.containsAll(covered)) {
                 selected.put(id, uri.orElseThrow());
                 objects.removeAll(covered);
-                entries.removeIf(entry -> covered.contains(entry.objectId()));
                 common.addAll(covered);
             }
             if (objects.isEmpty()) {
@@ -251,6 +256,10 @@ public final class FetchPack {
             }
         }
         return selected;
+    }
+
+    public Map<PackId, URI> packUris() {
+        return packUris;
     }
 
     public long objectCount() {

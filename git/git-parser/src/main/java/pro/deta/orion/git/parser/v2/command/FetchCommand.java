@@ -63,14 +63,14 @@ public class FetchCommand implements GitCommand {
             return;
         }
         FetchPlan plan = response.orElseThrow();
-        FetchPack pack = FetchPack.prepare(storage, plan);
+        FetchPack pack = FetchPack.prepare(repository, plan);
         if (request.mode() == FetchRequest.Mode.PROTOCOL_V2) {
             SideBand sideBand = request.capabilities().has(GitCapability.SIDEBAND_ALL)
                     ? SideBand.DATA : SideBand.NONE;
             writer.writeShallowInfo(pack.shallowCommits(), pack.unshallowCommits(), sideBand);
         }
         BufferedByteOutput output = writer.beginPack(plan.capabilities(), plan.wantedRefs(),
-                pack.selectPackUris(repository, plan.packfileUriProtocols()));
+                pack.packUris());
         try (PackWriter packWriter = new PackWriter(output, pack.objectCount())) {
             pack.writeTo(packWriter);
             packWriter.finish();

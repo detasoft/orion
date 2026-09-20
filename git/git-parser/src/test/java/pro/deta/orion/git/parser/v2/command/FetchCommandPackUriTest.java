@@ -2,6 +2,8 @@ package pro.deta.orion.git.parser.v2.command;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
@@ -9,6 +11,8 @@ import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.fetch.FetchPack;
+import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
@@ -27,8 +31,13 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,6 +54,33 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
     @AfterEach
     void closeStorage() throws IOException {
         storage().close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void preparationReturnsFinalUrisAndInlineCount(boolean mixed) throws Exception {
+        List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
+        PackId externalPack = storage().packIds().getFirst();
+        Set<ObjectId> wanted = new LinkedHashSet<>(external);
+        Set<ObjectId> inlineIds = mixed ? Set.of(store(new byte[]{3}, new byte[]{4}).getFirst()) : Set.of();
+        wanted.addAll(inlineIds);
+        FetchPlan plan = new FetchPlan(wanted, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
+                OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of("https"));
+        FetchPack pack = FetchPack.prepare(this, plan);
+        Map<PackId, URI> expectedUris = Map.of(externalPack, packUri(externalPack).orElseThrow());
+        assertThat(pack.packUris()).isEqualTo(expectedUris);
+        assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
+        store(new byte[]{9});
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
+            pack.writeTo(writer);
+            writer.finish();
+        }
+        try (IndexedPack inline = ingest(output.toByteArray())) {
+            assertThat(inline.objectIds()).containsExactlyInAnyOrderElementsOf(inlineIds);
+        }
+        assertThat(pack.packUris()).isEqualTo(expectedUris);
+        assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
     }
 
     @Test
