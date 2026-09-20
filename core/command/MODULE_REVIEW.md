@@ -1,130 +1,129 @@
-# Module Review: Interactive Terminal
+# Module Review: core/command
 
-Date: 2026-09-08
+## 1. Navigation, help and completion bypass cancellable operation ownership
 
-Status: static review; correctness findings remain open
+**Problem.** Navigation into a repository catalog, help and Tab completion run synchronously on the input
+reader with CommandCancellation.never(). A slow repository lookup prevents that same reader from processing
+Ctrl-C, unlike ordinary commands dispatched through ActiveCommand and the shared executor.
 
-## Scope and verification
+**Sources.** [Navigation](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L178),
+[completion and help](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L270),
+[repository catalog caller](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/ReadOnlyDomainCommandCatalog.java#L376),
+[repository enumeration](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/read/DefaultOperatorDomainSource.java#L35),
+and [ordinary cancellation tests](src/test/java/pro/deta/orion/command/terminal/InteractiveTerminalTest.java#L130).
+The latter do not hold a navigation catalog while attempting cancellation.
 
-This review covers the interactive terminal in `core/command`, its navigation and completion calls,
-and its SSH integration through `OrionShell` in `net/git-transport`. It includes the production domain
-source, related test sources, and the interactive SSH task tree. It is not a review of the entire
-command subsystem or Git transport.
+**Documented behavior.** [Interactive-shell requirements](../../docs/plans/tasks/08_interactive-ssh-shell/TASK.md#L106)
+include navigation, help, completion and cancellation returning to the prompt.
+[OrionShell's local rule](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/OrionShell.java)
+requires one session reader and command work on OrionExecutor.
 
-The findings below follow from source inspection. Slow catalog calls, terminal wrapping, and completion
-inside a token were not reproduced in a live SSH session during this review. Maven verification was not
-run, following [the repository review rules](../../docs/reviews/RULES.md). No local Surefire reports for
-these modules or Failsafe reports for the integration tests were available, so this review does not
-establish that the current build passes.
+**Contract.** Slow lookup work must not own the reader needed for cancellation. Preserve authorization,
+serialized editor updates and prompt ownership; canceled/disconnected operations must not apply late results.
 
-## Current implementation
+**Minimal repair.** Reuse active-operation/cancellation ownership and the existing executor for catalog work.
+Propagate cancellation through the catalog boundary and serialize accepted results with terminal state.
+Verify held lookups followed by Ctrl-C/disconnect, including late-result suppression.
 
-The terminal is implemented and connected to SSH; it is not merely a design or task placeholder.
+**Alternatives and consequences.** Restricting catalogs to memory-only data removes current functionality.
+A separate executor or lookup manager adds ownership without solving the problem. Moving work alone does not
+bound an underlying uncancellable lookup; repair must establish its cancellation behavior.
 
-- [InteractiveTerminal] owns input editing, history, navigation, completion, command submission,
-  cancellation, and prompt restoration. It uses the existing command graph and dispatcher.
-- [OrionShell] adapts Mina asynchronous streams, starts a dedicated virtual reader for the SSH session,
-  forwards terminal width changes, and closes the terminal with the channel. Command execution uses
-  the shared executor; asynchronous command completion uses a virtual thread per active operation.
-- The editor bounds history and line length and handles code-point editing and fragmented input.
-  Command cancellation and late-result suppression have explicit lifecycle handling.
-- Resource resolution and completion use the authorization-aware command model. The administrative
-  terminal does not launch an operating-system shell, and recovery-enrollment sessions are rejected.
+**Confidence.** High in reader blocking; backend latency was not reproduced and excluded Git implementations
+were not inspected.
 
-These are existing implementation properties to preserve when addressing the findings.
+**Priority signals.** Importance: medium, because a slow backend disables interactive cancellation.
+Repair ease: medium-to-low due to operation/editor races and cancellation propagation.
 
-## Findings
+## 2. Redraw assumes one physical row and counts code points as display cells
 
-### 1. Navigation, help, and Tab can block the input reader and delay Ctrl-C
+**Problem.** A prompt/input longer than the terminal width wraps, but redraw clears only its current physical
+line. Resizing or editing leaves stale fragments and mispositions the cursor. Wide and combining characters
+also invalidate the code-point-based horizontal movement.
 
-**Evidence.** [InteractiveTerminal] calls `navigator.navigate` in `submit`, `navigator.complete` in
-`complete`, and `navigator.locate` / `visibleEntries` in `help` synchronously from the input reader.
-All these calls receive `CommandCancellation.never()`, bypassing the cancellable `ActiveCommand`
-lifecycle used for dispatched commands.
+**Sources.** [Redraw](src/main/java/pro/deta/orion/command/terminal/TerminalDisplay.java#L33),
+[width handling](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L98),
+[prompt redraw](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L351),
+and [short single-row tests](src/test/java/pro/deta/orion/command/terminal/TerminalDisplayTest.java#L23).
+[OrionShell](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/OrionShell.java) forwards WINCH
+but the prompt renderer receives no viewport width.
 
-The calls can reach real repository work. [DefaultOperatorDomainSource] implements `repositories()`
-by finding every repository and reading its default head and refs before returning a snapshot.
-Catalog lookup therefore cannot be assumed to be a cheap in-memory operation.
+**Documented behavior.** [The shell plan](../../docs/plans/tasks/08_interactive-ssh-shell/TASK.md)
+promises cursor editing and resize-aware presentation.
 
-**Impact.** A slow repository lookup during navigation, help, or completion prevents that session's
-reader from consuming further input, including Ctrl-C. Normal command cancellation does not cover
-this path. The risk follows from the call chain; no slow-backend reproduction was performed.
+**Contract.** Displayed text and cursor must correspond to logical editor state after typing, movement and
+resize. Ordinary long input cannot depend on an undocumented one-row restriction.
 
-**Correction direction.** Keep the reader available while catalog work runs, reusing the existing
-operation and cancellation lifecycle where possible. Cancellation must reach the underlying work;
-merely moving an indefinitely blocked call to another thread is insufficient.
+**Minimal repair.** Choose a bounded horizontal input viewport, including prompt clipping, or track occupied
+rows and display-cell coordinates. A single-row viewport is smaller if multiline presentation is unnecessary.
+Verify observable screen state for wrapping, shrinking, wide characters and combining sequences.
 
-**Missing coverage.** A delayed catalog lookup followed by Ctrl-C or channel close, including prompt
-restoration and suppression of a result that arrives after cancellation.
+**Alternatives and consequences.** Row tracking preserves complete multiline display but adds reflow state.
+Horizontal clipping hides off-screen input while preserving editing. Both need cell-aware cursor placement;
+the viewport behavior requires a decision before repair.
 
-### 2. Redraw assumes that the entire prompt and input occupy one screen row
+**Confidence.** High from the emitted redraw sequence; no live terminal-emulator reproduction was run.
 
-**Evidence.** [TerminalDisplay] implements `redraw` with carriage return, clearing the current line
-using `CSI 2 K`, rewriting the full prompt and input, and moving the cursor left. It has no terminal
-width or record of previously occupied screen rows. The non-ANSI path similarly erases by writing
-`previousFrameWidth` spaces. `InteractiveTerminal.resize` only updates the width value used for
-rendering results and candidate lists; that value is not passed into `TerminalDisplay.redraw`.
+**Priority signals.** Importance: medium, triggered by normal long input. Repair ease: medium because viewport
+policy and Unicode cell handling must be established.
 
-**Impact.** Once input or a long prompt wraps, the next redraw begins on the current physical row
-instead of the original prompt row. Previous fragments can remain visible, and horizontal cursor
-movement cannot correctly return across wrapped rows. Shrinking the terminal can expose the same
-problem. This is a static conclusion, not a recorded terminal-emulator reproduction.
+## 3. Completion inside a token duplicates its remaining suffix
 
-**Correction direction.** Give redraw a defined viewport policy: either track and clear occupied rows
-with width-aware cursor positioning, or render a bounded horizontal input view. Account for terminal
-display-cell width when positioning the cursor.
+**Problem.** Completing who|ami produces `whoami ami`: completion replaces the prefix through the cursor and
+then appends the old suffix. Resource and argument completion use the same assembly.
 
-**Missing coverage.** Input longer than the viewport, a long prompt, deletion after wrapping, cursor
-movement across the wrap boundary, and shrinking the viewport with non-empty input.
+**Sources.** [Completion assembly](src/main/java/pro/deta/orion/command/CommandNavigator.java#L77),
+[actual editor cursor caller](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L270),
+and [end-of-token coverage](src/test/java/pro/deta/orion/command/CommandNavigatorTest.java#L94).
 
-### 3. Completion inside a token preserves and duplicates its old suffix
+**Documented behavior.** [The shell plan](../../docs/plans/tasks/08_interactive-ssh-shell/TASK.md)
+promises Tab completion together with cursor editing, without an end-of-line-only restriction.
 
-**Evidence.** [CommandNavigator] builds the replacement from `line.substring(0, cursor)` and then
-appends `line.substring(cursor)`. It finds the start of the current token but does not find its end.
-For a unique `whoami` candidate, completing `who|ami` produces `whoami ami`, where `|` denotes the
-cursor position before completion. The inserted space is the normal suffix for a unique action.
+**Contract.** Completion replaces the current token while preserving subsequent arguments and valid cursor
+indices. UTF-16 positions at the navigator boundary must remain consistent with editor code-point positions.
 
-**Impact.** Tab can turn an already valid command into a command with an unintended argument when
-the cursor is inside the command name. Resource and argument completions use the same assembly path.
-The example is derived directly from the implementation; no test was executed for it in this review.
+**Minimal repair.** Find both token boundaries, using the existing token rules where needed, and replace the
+whole token span. Test beginning/middle positions, subsequent arguments and supplementary characters.
 
-**Correction direction.** Replace the complete token containing the cursor while preserving subsequent
-arguments and placing the cursor after the replacement. Keep the existing conversion between UTF-16
-indices in navigation and code-point indices in the editor.
+**Alternatives and consequences.** Disabling mid-token completion reduces promised behavior. Appending only a
+suffix cannot handle an existing suffix that differs from the selected completion. No new public API or
+second command parser is required.
 
-**Missing coverage.** Completion at the beginning and middle of a token, preservation of following
-arguments, and tokens containing supplementary Unicode characters.
+**Confidence.** High from deterministic string assembly; no runtime reproduction was performed.
 
-## Remaining integration work
+**Priority signals.** Importance: medium, corrupting ordinary edited commands. Repair ease: high for the local
+replacement, with token boundaries and cursor conversion covered behaviorally.
 
-- [Streaming and monitoring](../../docs/plans/tasks/08_interactive-ssh-shell/02_streaming-monitoring.md)
-  remains pending: bounded streams, backpressure, cancellation, and per-event authorization.
-- [The session-host PTY gateway](../../docs/plans/tasks/08_interactive-ssh-shell/03_session-host-pty-gateway.md)
-  remains pending: authorized attachment, binary input/output forwarding, resize, and detach without
-  terminating the host session.
-- [DefaultOperatorDomainSource] currently returns `Unavailable` for organizations, organization users
-  and repositories, sessions, and proxies. Command definitions alone do not provide those integrations.
-- Both task files above still depend on `../command-core-and-exec/TASK.md` and
-  `../interactive-terminal/TASK.md`, whose task nodes have already been removed. Those dependencies
-  need to be reconciled with the implemented foundation.
+## 4. Fixed action vocabulary consumes valid custom-command arguments
 
-These pending features and stale task references are separate from the three correctness findings.
+**Problem.** `issue-launch-permit show https://example.test /tmp/agent dev` selects `show` as its action and
+`/issue-launch-permit` as its path, rather than issuing a permit for valid label `show`. A later positional
+value matching an action instead produces "Unexpected token before action". Quotes do not help because
+tokenization removes them before action selection.
 
-## Existing test coverage
+**Sources.** [Action search](src/main/java/pro/deta/orion/command/CommandLineParser.java#L85),
+[fixed vocabulary](src/main/java/pro/deta/orion/command/CommandAction.java),
+[real custom command](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalog.java#L118),
+[label consumer](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalog.java#L216),
+[identifier validation](../../agent-protocol/src/main/java/pro/deta/orion/agent/protocol/ProtocolValidation.java#L16),
+[parser tests](src/test/java/pro/deta/orion/command/CommandLineParserTest.java#L32), and
+[catalog tests](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalogTest.java#L99).
+Current tests use noncolliding positional values.
 
-There are 33 `@Test` methods across the [terminal test package](src/test/java/pro/deta/orion/command/terminal)
-and [OrionShellTest]. Their source covers editing, history, fragmented input, rendering, cancellation,
-result ordering, completion-thread behavior, blocked-output shutdown, and SSH lifecycle handling.
-Navigator tests additionally cover navigation and completion through the authorized command graph.
+**Documented behavior.** The registered CommandDefinition accepts four positional arguments; AgentLabel accepts
+`show`, `ls` and other action words. No positional-value reservation was found.
 
-[GitSshTransportEndToEndIT] contains live SSH scenarios for interactive PTY editing, completion, resize,
-and preventing operating-system shell execution. These are existing test scenarios, not verification
-results from this review. They do not establish coverage of the three cases identified above.
+**Contract.** Registered custom actions must remain distinct from their valid arguments. Preserve existing
+root-action and relative-path forms, including `repository ls`, and existing authorization checks.
 
-[InteractiveTerminal]: src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java
-[TerminalDisplay]: src/main/java/pro/deta/orion/command/terminal/TerminalDisplay.java
-[CommandNavigator]: src/main/java/pro/deta/orion/command/CommandNavigator.java
-[OrionShell]: ../../net/git-transport/src/main/java/pro/deta/orion/transport/git/OrionShell.java
-[DefaultOperatorDomainSource]: ../../net/git-transport/src/main/java/pro/deta/orion/transport/git/command/read/DefaultOperatorDomainSource.java
-[OrionShellTest]: ../../net/git-transport/src/test/java/pro/deta/orion/transport/git/OrionShellTest.java
-[GitSshTransportEndToEndIT]: ../../tests/integration-test/src/integration-test/java/pro/deta/orion/test/GitSshTransportEndToEndIT.java
+**Minimal repair.** Select the action using existing registered definitions/current scope, then stop searching
+its arguments for another action. Exercise collisions at several argument positions and relative paths.
+
+**Alternatives and consequences.** Adding each custom command to CommandAction retains duplicate declarations.
+A new delimiter changes existing syntax. Reuse command metadata rather than patching forbidden label lists;
+this needs a contained parser/dispatcher integration change, not a new execution framework.
+
+**Confidence.** High in the misparse and valid consumer input; static review only.
+
+**Priority signals.** Importance: medium, because valid launch-permit commands fail depending on their values.
+Repair ease: medium because the parser currently has no registered-action context.
