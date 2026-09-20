@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
@@ -14,20 +15,23 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
-public final class GitStorageApi {
-    private final GitObjectStorage objects;
+import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
+
+public final class GitStorageApi implements AutoCloseable {
     private final GitRefsStorage refs;
     private final GitPackStorage packs;
 
     public GitStorageApi(Path repository) throws IOException {
         packs = new GitPackStorage(Objects.requireNonNull(repository, "repository"));
-        objects = new GitObjectStorage(packs);
-        refs = new GitRefsStorage(repository, objects);
+        refs = new GitRefsStorage(repository);
     }
 
     public IndexedPack newPack() throws IOException {
@@ -39,7 +43,7 @@ public final class GitStorageApi {
     }
 
     public <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException {
-        return objects.read(Objects.requireNonNull(objectId, "objectId"), Objects.requireNonNull(reader, "reader"));
+        return packs.read(Objects.requireNonNull(objectId, "objectId"), Objects.requireNonNull(reader, "reader"));
     }
 
     public boolean exists(ObjectId objectId) throws IOException {
@@ -51,13 +55,48 @@ public final class GitStorageApi {
     }
 
     public void updateHead(Head head) throws IOException {
+        Objects.requireNonNull(head, "head");
+        if (head instanceof Head.Detached detached && !exists(new ObjectId(detached.target().toBytes()))) {
+            throw new IOException("Detached HEAD object does not exist: " + detached.target());
+        }
         refs.updateHead(head);
     }
 
     public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
         updates = List.copyOf(updates);
+        Set<RefId> names = new HashSet<>();
+        for (RefUpdate update : updates) {
+            update.ref().requireFullName();
+            if (!names.add(update.ref())) {
+                throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
+            }
+        }
         try {
-            return refs.updateAll(updates, atomic);
+            List<RefUpdate> ready = new ArrayList<>(updates.size());
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (RefUpdate update : updates) {
+                boolean missing = update.newId().isPresent() && !exists(update.newId().orElseThrow());
+                results.add(new RefUpdateResult(update, missing ? OBJECT_NOT_FOUND : APPLIED, Optional.empty()));
+                if (!missing) {
+                    ready.add(update);
+                }
+            }
+            if (atomic && ready.size() != updates.size()) {
+                for (int index = 0; index < results.size(); index++) {
+                    RefUpdateResult result = results.get(index);
+                    if (result.status() == APPLIED) {
+                        results.set(index, new RefUpdateResult(result.update(), ATOMIC_ABORTED, Optional.empty()));
+                    }
+                }
+            } else {
+                Iterator<RefUpdateResult> applied = refs.updateAll(ready, atomic).iterator();
+                for (int index = 0; index < results.size(); index++) {
+                    if (results.get(index).status() == APPLIED) {
+                        results.set(index, applied.next());
+                    }
+                }
+            }
+            return List.copyOf(results);
         } catch (IOException error) {
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
             for (RefUpdate update : updates) {
@@ -80,13 +119,28 @@ public final class GitStorageApi {
      * @throws IOException if a published pack or index cannot be read
      */
     public Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException {
-        return requirePacks().find(Objects.requireNonNull(objectIds, "objectIds"));
+        return packs.find(Objects.requireNonNull(objectIds, "objectIds"));
     }
 
-    private GitPackStorage requirePacks() {
-        if (packs == null) {
-            throw new IllegalStateException("Persistent pack storage requires a repository path");
+    public GitStorageApi() {
+        packs = new GitPackStorage();
+        refs = new GitRefsStorage();
+    }
+
+    public List<PackId> packIds() throws IOException {
+        return packs.ids();
+    }
+
+    public Optional<IndexedPack> openPack(PackId id) throws IOException {
+        return packs.open(id);
+    }
+
+    @Override
+    public void close() throws IOException {
+        try {
+            refs.close();
+        } finally {
+            packs.close();
         }
-        return packs;
     }
 }

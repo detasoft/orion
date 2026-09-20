@@ -11,7 +11,6 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -35,13 +34,13 @@ final class GitRefsStorage {
     private static final String SYMBOLIC = "ref: ";
     private final Path path;
     private final GitLock lock;
-    private final GitObjectStorage objects;
+    private final MVStore memory;
 
-    GitRefsStorage(Path repository, GitObjectStorage objects) throws IOException {
+    GitRefsStorage(Path repository) throws IOException {
+        memory = null;
         Path root = repository.toRealPath();
         path = root.resolve("refs.mv");
         lock = new GitLock(root);
-        this.objects = Objects.requireNonNull(objects, "objects");
         try (GitLock.Lease lease = lockRefs(List.of(HEAD))) {
             boolean create = Files.notExists(path);
             MVStore store = open(false);
@@ -58,16 +57,35 @@ final class GitRefsStorage {
                     readHead(existingMap(store));
                 }
             } finally {
-                store.closeImmediately();
+                if (memory == null) {
+                    store.closeImmediately();
+                }
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
         }
     }
 
+    GitRefsStorage() {
+        path = null;
+        lock = new GitLock(this);
+        memory = new MVStore.Builder().autoCommitDisabled().open();
+        memory.setStoreVersion(1);
+        map(memory).put(HEAD.value(), SYMBOLIC + "refs/heads/main");
+        memory.commit();
+    }
+
+    void close() {
+        if (memory != null) {
+            memory.close();
+        }
+    }
+
     RefsSnapshot snapshot() throws IOException {
         try (GitLock.Lease lease = lockRefs(List.of(HEAD))) {
-            Files.size(path);
+            if (path != null) {
+                Files.size(path);
+            }
             MVStore store = open(true);
             try {
                 MVMap<String, String> values = existingMap(store);
@@ -82,7 +100,9 @@ final class GitRefsStorage {
                 }
                 return new RefsSnapshot(refs, head);
             } finally {
-                store.closeImmediately();
+                if (memory == null) {
+                    store.closeImmediately();
+                }
             }
         } catch (MVStoreException | IllegalArgumentException error) {
             throw storageFailure(error);
@@ -99,20 +119,20 @@ final class GitRefsStorage {
             case Head.Detached detached -> detached.target().toHex();
         };
         try (GitLock.Lease lease = lockRefs(List.of(HEAD))) {
-            Files.size(path);
+            if (path != null) {
+                Files.size(path);
+            }
             MVStore store = open(false);
             try {
                 MVMap<String, String> refs = existingMap(store);
                 readHead(refs);
-                if (head instanceof Head.Detached detached
-                        && !exists(new ObjectId(detached.target().toBytes()))) {
-                    throw new IOException("Detached HEAD object does not exist: " + detached.target());
-                }
                 refs.put(HEAD.value(), value);
                 store.commit();
                 store.sync();
             } finally {
-                store.closeImmediately();
+                if (memory == null) {
+                    store.closeImmediately();
+                }
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
@@ -125,13 +145,12 @@ final class GitRefsStorage {
         }
         Set<RefId> names = new HashSet<>();
         for (RefUpdate update : updates) {
-            update.ref().requireFullName();
-            if (!names.add(update.ref())) {
-                throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
-            }
+            names.add(update.ref());
         }
         try (GitLock.Lease lease = lockRefs(names)) {
-            Files.size(path);
+            if (path != null) {
+                Files.size(path);
+            }
             MVStore store = open(false);
             try {
                 MVMap<String, String> refs = existingMap(store);
@@ -143,8 +162,6 @@ final class GitRefsStorage {
                     RefUpdateResult.Status status;
                     if (!Objects.equals(current, update.expectedOld().map(ObjectId::toHex).orElse(null))) {
                         status = EXPECTED_OLD_MISMATCH;
-                    } else if (update.newId().isPresent() && !exists(update.newId().get())) {
-                        status = OBJECT_NOT_FOUND;
                     } else {
                         status = APPLIED;
                     }
@@ -174,18 +191,19 @@ final class GitRefsStorage {
                 store.sync();
                 return List.copyOf(results);
             } finally {
-                store.closeImmediately();
+                if (memory == null) {
+                    store.closeImmediately();
+                }
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
         }
     }
 
-    private boolean exists(ObjectId id) throws IOException {
-        return objects.read(id, new ExistsGitObjectRead()).isPresent();
-    }
-
     private MVStore open(boolean readOnly) {
+        if (memory != null) {
+            return memory;
+        }
         MVStore.Builder builder = new MVStore.Builder().fileName(path.toString()).cacheSize(1)
                 .autoCommitDisabled().autoCommitBufferSize(0);
         if (readOnly) {

@@ -110,6 +110,43 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     }
 
     @Test
+    void objectValidationPreservesResultOrderAndDoesNotRequireObjectsForDeletion() throws Exception {
+        GitStorageApi storage = new GitStorageApi(repository);
+        ObjectId first = publish(storage, "first");
+        ObjectId second = publish(storage, "second");
+        RefId stale = new RefId("refs/heads/stale");
+        RefId created = new RefId("refs/heads/created");
+        storage.updateRefs(List.of(create(MAIN, first), create(stale, first)), true);
+        List<RefUpdate> updates = List.of(
+                create(OTHER, MISSING),
+                new RefUpdate(MAIN, Optional.of(first), Optional.empty()),
+                new RefUpdate(stale, Optional.of(second), Optional.of(first)),
+                create(created, second));
+
+        List<RefUpdateResult> atomic = storage.updateRefs(updates, true);
+        assertThat(atomic).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
+        assertThat(atomic).extracting(RefUpdateResult::status)
+                .containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED, ATOMIC_ABORTED, ATOMIC_ABORTED);
+        assertThat(storage.snapshotRefs().refs()).containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, first, stale, first));
+
+        List<RefUpdateResult> independent = storage.updateRefs(updates, false);
+        assertThat(independent).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
+        assertThat(independent).extracting(RefUpdateResult::status)
+                .containsExactly(OBJECT_NOT_FOUND, APPLIED, EXPECTED_OLD_MISMATCH, APPLIED);
+        assertThat(storage.snapshotRefs().refs())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(stale, first, created, second));
+    }
+
+    @Test
+    void rejectsDuplicateRefsEvenWhenOneTargetObjectIsMissing() throws Exception {
+        GitStorageApi storage = new GitStorageApi(repository);
+        ObjectId first = publish(storage, "first");
+        assertThatThrownBy(() -> storage.updateRefs(List.of(create(MAIN, MISSING), create(MAIN, first)), false))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(storage.snapshotRefs().refs()).isEmpty();
+    }
+
+    @Test
     void concurrentVirtualThreadUpdatesCompareAgainstThePublishedValue() throws Exception {
         GitStorageApi firstStorage = new GitStorageApi(repository);
         GitStorageApi secondStorage = new GitStorageApi(repository);
@@ -177,10 +214,11 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void unreadableStoreIsReportedInsteadOfReturningAnEmptySnapshot() throws Exception {
         GitStorageApi storage = new GitStorageApi(repository);
+        ObjectId first = publish(storage, "first");
         Files.delete(repository.resolve("refs.mv"));
         Files.createDirectory(repository.resolve("refs.mv"));
         assertThatThrownBy(storage::snapshotRefs).isInstanceOf(java.io.IOException.class);
-        assertThat(storage.updateRefs(List.of(create(MAIN, MISSING)), true))
+        assertThat(storage.updateRefs(List.of(create(MAIN, first)), true))
                 .extracting(RefUpdateResult::status).containsExactly(STORAGE_ERROR);
     }
 

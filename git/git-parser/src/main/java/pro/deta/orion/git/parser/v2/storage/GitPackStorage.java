@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
@@ -26,13 +27,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class GitPackStorage {
     private final Path packs;
     private final Path incoming;
     private final GitLock lock;
+    private final Map<PackId, IndexedPack> memory;
 
     GitPackStorage(Path repository) throws IOException {
+        memory = null;
         Path root = repository.toRealPath();
         packs = root.resolve("packs");
         incoming = root.resolve("incoming");
@@ -42,11 +46,68 @@ final class GitPackStorage {
         lock = new GitLock(root);
     }
 
+    GitPackStorage() {
+        packs = null;
+        incoming = null;
+        lock = new GitLock(this);
+        memory = new ConcurrentHashMap<>();
+    }
+
+    void close() throws IOException {
+        if (memory != null) {
+            for (IndexedPack pack : memory.values()) {
+                pack.close();
+            }
+            memory.clear();
+        }
+    }
+
+    List<PackId> ids() throws IOException {
+        if (memory != null) {
+            return List.copyOf(memory.keySet());
+        }
+        List<PackId> ids = new ArrayList<>();
+        scan((id, path) -> {
+            ids.add(id);
+            return Optional.empty();
+        });
+        return List.copyOf(ids);
+    }
+
+    Optional<IndexedPack> open(PackId id) throws IOException {
+        if (memory != null) {
+            IndexedPack pack = memory.get(id);
+            return pack == null ? Optional.empty() : Optional.of(pack.copy());
+        }
+        try (GitLock.Lease lease = lockPack(id)) {
+            Path path = packPath(id);
+            Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
+            return Files.exists(index) ? Optional.of(IndexedPack.open(path, index)) : Optional.empty();
+        }
+    }
+
     IndexedPack createPack() throws IOException {
+        if (memory != null) {
+            return IndexedPack.create();
+        }
         return IndexedPack.create(incoming.resolve("pack-" + UUID.randomUUID()));
     }
 
     PackId persist(IndexedPack pack) throws IOException {
+        if (memory != null) {
+            try {
+                PackId id = validate(pack);
+                IndexedPack copy = pack.copy();
+                if (memory.putIfAbsent(id, copy) != null) {
+                    copy.close();
+                }
+                pack.discard();
+                return id;
+            } catch (IOException | RuntimeException | Error failure) {
+                closeFailed(pack::discard, failure);
+                throw failure;
+            }
+        }
         if (pack.isInMemory()) {
             try {
                 IndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
@@ -60,22 +121,7 @@ final class GitPackStorage {
         }
         Path directory = pack.directory();
         try {
-            PackId id = pack.id();
-            long size = pack.size();
-            ByteBuffer header = ByteBuffer.wrap(readExactly(pack, 0, 12));
-            if (header.getInt() != 0x5041434b || header.getInt() != 2
-                    || Integer.toUnsignedLong(header.getInt()) != pack.entryCount()) {
-                throw new IOException("Pack header does not match its index");
-            }
-            if (pack.entryCount() != pack.objectCount()) {
-                throw new IOException("Pack contains unresolved or duplicate objects");
-            }
-            if (!MessageDigest.isEqual(digest(pack, size - 20), id.toBytes())) {
-                throw new IOException("Pack checksum mismatch");
-            }
-            try (PackUploadIndex state = PackUploadIndex.create(pack)) {
-                state.finish();
-            }
+            PackId id = validate(pack);
             pack.close();
             publish(directory, id);
             pack.discard();
@@ -86,7 +132,40 @@ final class GitPackStorage {
         }
     }
 
+    private static PackId validate(IndexedPack pack) throws IOException {
+        PackId id = pack.id();
+        long size = pack.size();
+        ByteBuffer header = ByteBuffer.wrap(readExactly(pack, 0, 12));
+        if (header.getInt() != 0x5041434b || header.getInt() != 2
+                || Integer.toUnsignedLong(header.getInt()) != pack.entryCount()) {
+            throw new IOException("Pack header does not match its index");
+        }
+        if (pack.entryCount() != pack.objectCount()) {
+            throw new IOException("Pack contains unresolved or duplicate objects");
+        }
+        if (!MessageDigest.isEqual(digest(pack, size - 20), id.toBytes())) {
+            throw new IOException("Pack checksum mismatch");
+        }
+        try (PackUploadIndex state = PackUploadIndex.create(pack)) {
+            state.finish();
+        }
+        return id;
+    }
+
     <R> Optional<R> read(ObjectId id, GitObjectRead<R> reader) throws IOException {
+        if (memory != null) {
+            for (IndexedPack pack : memory.values()) {
+                Optional<IndexedPack.EntryMetadata> found = pack.find(id);
+                if (found.isPresent()) {
+                    IndexedPack.EntryMetadata entry = found.orElseThrow();
+                    return Optional.of(pack.readObject(entry.offset(), (type, size, base, input) ->
+                            reader.read(type == GitObjectType.OFS_DELTA
+                                    ? GitObjectType.REF_DELTA : type,
+                                    size, pack.baseId(entry.offset()), input)));
+                }
+            }
+            return Optional.empty();
+        }
         Optional<Location> found = scan((packId, indexPath) -> {
             try (GitLock.Lease lease = lockPack(packId); IndexedPack index = IndexedPack.open(packPath(packId), indexPath)) {
                 Optional<IndexedPack.EntryMetadata> foundEntry = index.find(id);
@@ -110,6 +189,16 @@ final class GitPackStorage {
         Map<ObjectId, List<PackId>> result = new LinkedHashMap<>();
         for (ObjectId id : ids) {
             Objects.requireNonNull(id, "objectId");
+        }
+        if (memory != null) {
+            for (Map.Entry<PackId, IndexedPack> pack : memory.entrySet()) {
+                for (ObjectId id : ids) {
+                    if (pack.getValue().find(id).isPresent()) {
+                        result.computeIfAbsent(id, ignored -> new ArrayList<>()).add(pack.getKey());
+                    }
+                }
+            }
+            return result;
         }
         scan((packId, path) -> {
             try (GitLock.Lease lease = lockPack(packId); IndexedPack index = IndexedPack.open(packPath(packId), path)) {

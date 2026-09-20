@@ -5,7 +5,6 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.util.Collection;
-import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -35,9 +34,9 @@ import java.util.concurrent.ExecutionException;
  */
 final class GitLock {
     private static final ConcurrentHashMap<Key, CompletableFuture<Void>> OWNERS = new ConcurrentHashMap<>();
-    private final Path repository;
+    private final Object repository;
 
-    GitLock(Path canonicalRepository) {
+    GitLock(Object canonicalRepository) {
         repository = canonicalRepository;
     }
 
@@ -78,7 +77,7 @@ final class GitLock {
         }
     }
 
-    private record Key(Path repository, Object identity) { }
+    private record Key(Object repository, Object identity) { }
 
     interface Lease extends AutoCloseable {
         @Override

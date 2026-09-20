@@ -178,7 +178,15 @@ public final class IndexedPack implements AutoCloseable {
 
     public IndexedPack copyTo(Path directory) throws IOException {
         requireOpen();
-        IndexedPack copy = create(directory);
+        return copyTo(create(directory));
+    }
+
+    public IndexedPack copy() throws IOException {
+        requireOpen();
+        return copyTo(create());
+    }
+
+    private IndexedPack copyTo(IndexedPack copy) throws IOException {
         try {
             ByteBuffer buffer = ByteBuffer.allocate(8192);
             long length = size();
@@ -399,6 +407,15 @@ public final class IndexedPack implements AutoCloseable {
 
     public long objectCount() {
         return objects.sizeAsLong();
+    }
+
+    public Set<ObjectId> objectIds() {
+        return Set.copyOf(objects.keySet());
+    }
+
+    public BufferedByteInputV2 input() throws IOException {
+        requireOpen();
+        return new BufferedByteInputV2(new PackByteSource(bytes, 0, size()));
     }
 
     Long objectOffset(ObjectId id) {
