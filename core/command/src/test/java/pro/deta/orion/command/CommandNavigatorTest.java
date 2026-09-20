@@ -122,6 +122,59 @@ class CommandNavigatorTest {
     }
 
     @Test
+    void replacesTheWholeActionAtBeginningMiddleAndEnd() {
+        CommandNavigator single = new CommandNavigator(CommandNode.builder()
+                .action(definition("whoami", true)).build());
+        for (int cursor : List.of(0, 3, 6)) {
+            CommandCompletion.Result result = single.complete(context, CommandPath.root(), "whoami", cursor);
+            assertThat(result.line()).isEqualTo("whoami ");
+            assertThat(result.cursor()).isEqualTo(7);
+        }
+    }
+
+    @Test
+    void preservesFollowingArgumentsAndTheirWhitespace() {
+        CommandCompletion.Result result = navigator.complete(
+                context, CommandPath.root(), "whoWrong  argument\tother", 3);
+        assertThat(result.line()).isEqualTo("whoami  argument\tother");
+        assertThat(result.cursor()).isEqualTo(6);
+    }
+
+    @Test
+    void replacesResourceAndNamedValueSuffixes() {
+        CommandCompletion.Result resource = navigator.complete(
+                context, CommandPath.root(), "organization/acme-123/ show", "organization/acme-".length());
+        assertThat(resource.line()).isEqualTo("organization/acme-123/ show");
+        assertThat(resource.cursor()).isEqualTo("organization/acme-123/".length());
+        CommandCompletion.Result argument = navigator.complete(
+                context, CommandPath.root(), "/session ls format=wrong page=2", "/session ls format=".length());
+        assertThat(argument.line()).isEqualTo("/session ls format=wrong page=2");
+        CommandCompletion.Result unique = navigator.complete(
+                context, CommandPath.root(), "/session ls format=junk page=2", "/session ls format=j".length());
+        assertThat(unique.line()).isEqualTo("/session ls format=json page=2");
+        assertThat(unique.cursor()).isEqualTo("/session ls format=json".length());
+    }
+
+    @Test
+    void preservesTextWhenAmbiguousCandidatesHaveNoSharedPrefix() {
+        CommandCompletion.Result result = navigator.complete(context, CommandPath.root(), "whoami", 0);
+        assertThat(result.line()).isEqualTo("whoami");
+        assertThat(result.cursor()).isZero();
+        assertThat(result.candidates()).contains("organization/", "session/", "whoami");
+    }
+
+    @Test
+    void replacesSuffixAfterSupplementaryCharactersWithAValidCursor() {
+        CommandNavigator unicode = new CommandNavigator(CommandNode.builder()
+                .action(definition("go😀now", true)).build());
+        CommandCompletion.Result result = unicode.complete(
+                context, CommandPath.root(), "go😀wrong next", "go😀".length());
+        assertThat(result.line()).isEqualTo("go😀now next");
+        assertThat(result.cursor()).isEqualTo("go😀now".length());
+        assertThat(result.line().codePointCount(0, result.cursor())).isEqualTo(6);
+    }
+
+    @Test
     void ordersSetBasedParameterAndWhereCompletionsLexically() {
         CommandDefinition inspect = new CommandDefinition(
                 "inspect",

@@ -67,33 +67,6 @@ the viewport behavior requires a decision before repair.
 **Priority signals.** Importance: medium, triggered by normal long input. Repair ease: medium because viewport
 policy and Unicode cell handling must be established.
 
-## 3. Completion inside a token duplicates its remaining suffix
-
-**Problem.** Completing who|ami produces `whoami ami`: completion replaces the prefix through the cursor and
-then appends the old suffix. Resource and argument completion use the same assembly.
-
-**Sources.** [Completion assembly](src/main/java/pro/deta/orion/command/CommandNavigator.java#L77),
-[actual editor cursor caller](src/main/java/pro/deta/orion/command/terminal/InteractiveTerminal.java#L270),
-and [end-of-token coverage](src/test/java/pro/deta/orion/command/CommandNavigatorTest.java#L94).
-
-**Documented behavior.** [The shell plan](../../docs/plans/tasks/08_interactive-ssh-shell/TASK.md)
-promises Tab completion together with cursor editing, without an end-of-line-only restriction.
-
-**Contract.** Completion replaces the current token while preserving subsequent arguments and valid cursor
-indices. UTF-16 positions at the navigator boundary must remain consistent with editor code-point positions.
-
-**Minimal repair.** Find both token boundaries, using the existing token rules where needed, and replace the
-whole token span. Test beginning/middle positions, subsequent arguments and supplementary characters.
-
-**Alternatives and consequences.** Disabling mid-token completion reduces promised behavior. Appending only a
-suffix cannot handle an existing suffix that differs from the selected completion. No new public API or
-second command parser is required.
-
-**Confidence.** High from deterministic string assembly; no runtime reproduction was performed.
-
-**Priority signals.** Importance: medium, corrupting ordinary edited commands. Repair ease: high for the local
-replacement, with token boundaries and cursor conversion covered behaviorally.
-
 ## 4. Fixed action vocabulary consumes valid custom-command arguments
 
 **Problem.** `issue-launch-permit show https://example.test /tmp/agent dev` selects `show` as its action and

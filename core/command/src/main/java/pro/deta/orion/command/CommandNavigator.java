@@ -88,11 +88,18 @@ public final class CommandNavigator {
             return new CommandCompletion.Result(line, cursor, List.of());
         }
         String shared = commonPrefix(matches);
+        if (shared.isEmpty()) {
+            return new CommandCompletion.Result(line, cursor, matches);
+        }
         String replacement = replacementToken(token, shared, pathCandidates);
         boolean unique = matches.size() == 1;
-        String suffix = unique ? completionSuffix(shared) : "";
+        int tokenEnd = cursor;
+        while (tokenEnd < line.length() && !Character.isWhitespace(line.charAt(tokenEnd))) {
+            tokenEnd++;
+        }
+        String suffix = unique && tokenEnd == line.length() ? completionSuffix(shared) : "";
         String completedPrefix = prefix.substring(0, tokenStart) + replacement + suffix;
-        String completed = completedPrefix + line.substring(cursor);
+        String completed = completedPrefix + line.substring(tokenEnd);
         return new CommandCompletion.Result(completed, completedPrefix.length(), matches);
     }
 
