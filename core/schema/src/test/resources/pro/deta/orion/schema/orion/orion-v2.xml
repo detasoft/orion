@@ -33,7 +33,7 @@
           <info>
             <expression>
               <key>REPOSITORY</key>
-              <value>*</value>
+              <value>**</value>
             </expression>
             <expression>
               <key>READ</key>

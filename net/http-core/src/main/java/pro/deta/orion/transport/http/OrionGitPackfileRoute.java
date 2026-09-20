@@ -30,7 +30,7 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorizati
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 public final class OrionGitPackfileRoute implements OrionHttpRoute {
-    public static final String URL_PATTERN = "/r/*/objects/pack/*.pack";
+    public static final String URL_PATTERN = "/r/**/objects/pack/*.pack";
     public static final String PACK_CONTENT_TYPE =
             "application/x-git-packed-objects";
 

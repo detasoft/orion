@@ -20,7 +20,7 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
  * Publishes the session-host binaries packaged in the Orion application resources.
  */
 public final class SessionHostDownloadRoute implements OrionHttpRoute {
-    public static final String URL_PATTERN = "/session-host*";
+    public static final String URL_PATTERN = "/session-host/**";
     public static final String URL = "/session-host";
     public static final String CONTENT_TYPE = "application/octet-stream";
     private static final String RESOURCE_PREFIX = "META-INF/orion/native/session-host/";

@@ -152,7 +152,7 @@ class OrionHttpUnifiedRouteTest {
     void rejectsTheMethodFromTheDefinitionWithTheExactAllowHeader() throws Exception {
         AtomicBoolean invoked = new AtomicBoolean();
         OrionHttpRouteDefinition definition = new OrionHttpRouteDefinition(
-                "/git/*",
+                "/git/**",
                 AUTHENTICATED,
                 List.of(GET, HEAD, POST),
                 request -> request.getPathInfo().endsWith("/info/refs")

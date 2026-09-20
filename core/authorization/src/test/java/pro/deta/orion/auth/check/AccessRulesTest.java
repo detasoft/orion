@@ -3,6 +3,7 @@ package pro.deta.orion.auth.check;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -36,7 +37,33 @@ public class AccessRulesTest {
         Assertions.assertTrue(matchExpressionValue("or*on", "orion"));
         Assertions.assertTrue(matchExpressionValue("*", "http-read-only-project"));
         Assertions.assertTrue(matchExpressionValue("team/*", "team/service-api"));
-        Assertions.assertTrue(matchExpressionValue("team/*", "team/service/api"));
+        Assertions.assertFalse(matchExpressionValue("team/*", "team/service/api"));
+    }
+
+    @Test
+    void defaultAclStillAllowsNestedRepositoriesAndBranches() {
+        AccessControl acl = ACLUtil.generateDefaultAccessControl("unused-test-hash");
+        SecurityContext root = securityContext(new InternalUserImpl("root", acl.getGrants()));
+        assertThatCode(() -> requireRepositoryRead(root, "team/sub/api")).doesNotThrowAnyException();
+        assertThatCode(() -> requireRepositoryWrite(root, "team/sub/api")).doesNotThrowAnyException();
+        assertThatCode(() -> requireBranchFetch(root, "team/sub/api", "feature/nested"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> requireBranchPush(root, "team/sub/api", "feature/nested"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void repositoryStarDoesNotGrantAccessAcrossPathSegments() {
+        SecurityContext prefix = securityContext(
+                new InternalUserImpl("reader", List.of(repositoryGrant("team*"))));
+        SecurityContext child = securityContext(
+                new InternalUserImpl("reader", List.of(repositoryGrant("team/*"))));
+        assertThatCode(() -> requireRepositoryRead(prefix, "teamone")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireRepositoryRead(prefix, "team/one"))
+                .isInstanceOf(OrionSecurityException.class);
+        assertThatCode(() -> requireRepositoryRead(child, "team/one")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireRepositoryRead(child, "team/one/api"))
+                .isInstanceOf(OrionSecurityException.class);
     }
 
     @Test
@@ -55,7 +82,7 @@ public class AccessRulesTest {
     @Test
     void repositoryWildcardIncludesNestedPathsWithoutBypassingOtherGrants() {
         SecurityContext reader = securityContext(
-                new InternalUserImpl("reader", List.of(repositoryGrant("team/*", "main"))));
+                new InternalUserImpl("reader", List.of(repositoryGrant("team/**", "main"))));
 
         assertThatCode(() -> requireRepositoryRead(reader, "team/sub/api.v1"))
                 .doesNotThrowAnyException();
@@ -71,8 +98,8 @@ public class AccessRulesTest {
 
     @Test
     void wildcardPreservesLiteralPartsAndMatchesZeroOrMoreCharacters() {
-        assertThat(matchExpressionValue("*", "team/sub/api.v1")).isTrue();
-        assertThat(matchExpressionValue("team/*/api.*", "team/sub/nested/api.v1")).isTrue();
+        assertThat(matchExpressionValue("**", "team/sub/api.v1")).isTrue();
+        assertThat(matchExpressionValue("team/**/api.*", "team/sub/nested/api.v1")).isTrue();
         assertThat(matchExpressionValue("team/api*", "team/api")).isTrue();
         assertThat(matchExpressionValue("team/*/api.v1", "team/sub/api_v1")).isFalse();
         assertThat(matchExpressionValue("team/api[1]", "team/api[1]")).isTrue();
@@ -313,7 +340,7 @@ public class AccessRulesTest {
 
     @Test
     void branchAccessEvaluatesBranchRestrictionInsideWildcardRepositoryGrant() {
-        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("*", "master"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("**", "master"))));
 
         assertThatCode(() -> requireBranchFetch(reader, "project", "master"))
                 .doesNotThrowAnyException();
@@ -369,12 +396,12 @@ public class AccessRulesTest {
 
     @Test
     void readOnlyWildcardDoesNotExpandPushBranches() {
-        AccessControl.Grant write = repositoryGrantDraft("team/*")
+        AccessControl.Grant write = repositoryGrantDraft("team/**")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
-                "developer", List.of(write, repositoryGrant("team/*", "*"))));
+                "developer", List.of(write, repositoryGrant("team/**", "*"))));
 
         assertThatCode(() -> requireBranchFetch(user, "team/sub/api", "main")).doesNotThrowAnyException();
         assertThatCode(() -> requireBranchPush(user, "team/sub/api", "dev")).doesNotThrowAnyException();

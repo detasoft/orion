@@ -12,7 +12,7 @@ import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 public final class OrionFrontendRoute extends AbstractOrionHttpRoute {
-    public static final String URL_PATTERN = "/*";
+    public static final String URL_PATTERN = "/**";
     private static final String UI_ALIAS = "/ui";
     private static final String RESOURCE_ROOT = "META-INF/orion/frontend/";
     private static final String INDEX = "index.html";

@@ -53,7 +53,7 @@ class OrionHttpRouteServletRoutingTest {
     @Test
     void prefersMoreSpecificUrlPattern() throws Exception {
         OrionHttpRouteServlet servlet = servlet(
-                new TestRoute("/api/items/*", "base"),
+                new TestRoute("/api/items/**", "base"),
                 new TestRoute("/api/items/*/details", "details"));
         ResponseRecorder response = new ResponseRecorder();
 
@@ -61,6 +61,35 @@ class OrionHttpRouteServletRoutingTest {
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.body.toString()).isEqualTo("{\"route\":\"details\"}");
+    }
+
+    @Test
+    void distinguishesNamesChildrenAndDescendants() throws Exception {
+        OrionHttpRouteServlet servlet = servlet(
+                new TestRoute("/team*", "name"),
+                new TestRoute("/team/*", "child"),
+                new TestRoute("/team/**", "descendant"));
+        for (String[] example : new String[][]{
+                {"/teamone", "name"},
+                {"/team/one", "child"},
+                {"/team/one/api", "descendant"}}) {
+            ResponseRecorder response = new ResponseRecorder();
+            servlet.service(request("GET", example[0]), response.proxy());
+            assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+            assertThat(response.body.toString()).isEqualTo("{\"route\":\"" + example[1] + "\"}");
+        }
+    }
+
+    @Test
+    void downloadPrefixDoesNotCaptureSimilarlyNamedFrontendPaths() {
+        SessionHostDownloadRoute download = new SessionHostDownloadRoute();
+        OrionFrontendRoute frontend = new OrionFrontendRoute();
+        OrionHttpRouteRegistry registry = new OrionHttpRouteRegistry(Set.of(download, frontend));
+        assertThat(registry.routeFor("/session-host")).isSameAs(download);
+        assertThat(registry.routeFor("/session-host/")).isSameAs(download);
+        assertThat(registry.routeFor("/session-host/x86_64-unknown-linux-gnu")).isSameAs(download);
+        assertThat(registry.routeFor("/session-hostile")).isSameAs(frontend);
+        assertThat(registry.routeFor("/assets/nested/app.js")).isSameAs(frontend);
     }
 
     @Test

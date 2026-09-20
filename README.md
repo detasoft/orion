@@ -532,10 +532,19 @@ An active system proxy with alias `configuration` is available at
 
 Grant repository access to `proxy/system/configuration` and the required branches
 using the ordinary Git ACL rules. Push also requires `READ_WRITE` permission; force
-updates require force permission. Repository patterns treat every character literally
-except `*`, which matches zero or more characters, including `/`. Thus `team/*` covers `team/api.v1` and
-`team/sub/api`, while `*` grants access to every repository path, including
-`proxy/system/configuration`. Application admin permission alone does not grant Git access.
+updates require force permission. Repository and HTTP route patterns use the same slash-separated syntax.
+All characters other than `*` are literal. `*` matches zero or more characters within one segment,
+never `/`: `team*` matches `teamone`, but not `team/one`; `team/*` matches `team/one`, but not
+`team/one/api`. A standalone `**` segment matches zero or more levels: `team/**` matches `team`
+itself and every descendant, and `team/**/api` also matches `team/api`. Embedded `**`, such as
+`team**`, is invalid and does not match. Separators are literal: `team/*` can match `team/`,
+but not `team`; the resource boundary still validates actual repository names and request paths.
+
+Existing repository ACL expressions that intentionally cover nested paths must change from `team/*`
+to `team/**`, and global repository grants from `*` to `**`. There is no legacy matching mode or
+automatic rewrite of stored ACLs. `**` includes paths such as `proxy/system/configuration`.
+Application admin permission alone does not grant Git access. The separate `BRANCH=*` rule
+continues to mean all branches, including names containing `/`.
 
 Reads refresh from upstream, and a push succeeds only after upstream publication
 succeeds. Aliases remain stable across restart. The `proxy/system/` namespace is

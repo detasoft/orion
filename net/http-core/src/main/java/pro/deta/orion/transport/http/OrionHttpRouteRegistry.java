@@ -2,6 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import pro.deta.orion.auth.check.MatcherUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,7 +31,7 @@ public final class OrionHttpRouteRegistry {
             return route;
         }
         for (OrionHttpRoute patternRoute : patternRoutes) {
-            if (WildcardMatcher.matches(patternRoute.definition().urlPattern(), url)) {
+            if (MatcherUtils.matchExpressionValue(patternRoute.definition().urlPattern(), url)) {
                 return patternRoute;
             }
         }

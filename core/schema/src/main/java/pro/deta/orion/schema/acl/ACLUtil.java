@@ -15,7 +15,7 @@ public class ACLUtil {
                 .addKey(AccessControl.GrantKey.NETWORK_SOURCE, "127.0.0.1");
 
         AccessControlDraft.Grant allRepository = createGrant("ALL_REPOSITORY")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "*")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "**")
                 .addKey(AccessControl.GrantKey.READ, "true")
                 .addKey(AccessControl.GrantKey.READ_WRITE, "true")
                 .addKey(AccessControl.GrantKey.CREATE, "true")

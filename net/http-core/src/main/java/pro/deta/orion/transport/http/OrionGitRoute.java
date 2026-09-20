@@ -34,7 +34,7 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.HEAD
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST;
 
 public class OrionGitRoute implements OrionHttpRoute {
-    public static final String URL_PATTERN = "/r/*";
+    public static final String URL_PATTERN = "/r/**";
     private static final String CACHE_CONTROL = "Cache-Control";
     private static final String NO_CACHE = "no-cache, max-age=0, must-revalidate";
     private static final String EXPIRES = "Expires";

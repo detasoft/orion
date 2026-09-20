@@ -905,7 +905,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .addRole("ALICE"));
         draft.getRoles().add(ACLUtil.createRole("ALICE").addGrantReference("ALICE_READ"));
         draft.getGrants().add(ACLUtil.createGrant("ALICE_READ")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "alice/*")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "alice/**")
                 .addKey(AccessControl.GrantKey.READ, "true"));
         draft.getRoles().add(ACLUtil.createRole("ROOT").addGrantReference("APPLICATION_CONTROL"));
         draft.getGrants().add(ACLUtil.createGrant("CONNECT")
