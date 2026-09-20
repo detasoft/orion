@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -93,6 +94,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
         }
         try (IndexedPack pack = ingest(bytes.toByteArray())) {
             List<ObjectId> ids = new ArrayList<>(pack.objectIds());
+            new GitPackObjectResolver(pack, storage()).complete();
             storage().persist(pack);
             return ids;
         }

@@ -6,9 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -32,6 +34,7 @@ class PackIndexStorageTest {
         var entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
                 OptionalLong.empty(), Optional.of(base));
         try (IndexedPack pack = IndexedPack.create(staging); PackUploadIndex index = PackUploadIndex.create(pack)) {
+            pack.append(ByteBuffer.wrap(PackTestData.pack()));
             index.addEntry(entry);
             assertThat(Files.size(indexPath)).isPositive();
             assertThat(Files.size(temporaryPath)).isPositive();

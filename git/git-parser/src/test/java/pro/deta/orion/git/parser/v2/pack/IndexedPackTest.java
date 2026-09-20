@@ -64,8 +64,7 @@ class IndexedPackTest {
         PackId packId;
         try (IndexedPack pack = IndexedPack.create(staging)) {
             id = writeBlob(pack);
-            packId = pack.id();
-            pack.flush();
+            packId = new GitPackObjectResolver(pack, new GitStorageApi()).complete();
         }
         try (IndexedPack pack = IndexedPack.open(staging.resolve("data.pack"), staging.resolve("data.mv"))) {
             assertThat(pack.id()).isEqualTo(packId);
@@ -144,7 +143,7 @@ class IndexedPackTest {
         IndexedPack pack = memory ? IndexedPack.create() : storage.newPack();
         ObjectId id = writeBlob(pack);
         Path staging = memory ? null : pack.directory();
-        PackId expected = pack.id();
+        PackId expected = new GitPackObjectResolver(pack, storage).complete();
         assertThat(storage.persist(pack)).isEqualTo(expected);
         pack.close();
         pack.discard();
@@ -160,13 +159,48 @@ class IndexedPackTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void persistRejectsAnInvalidChecksumAndDiscardsOnlyTheAttempt(boolean memory) throws Exception {
+    void completionLocksIdentityBytesAndIndexIncludingCopies(boolean memory) throws Exception {
+        try (GitStorageApi storage = new GitStorageApi();
+             IndexedPack pack = memory ? IndexedPack.create() : IndexedPack.create(directory.resolve("staging"))) {
+            ObjectId object = writeBlob(pack);
+            assertThatThrownBy(pack::id).isInstanceOf(IOException.class).hasMessageContaining("not completed");
+            PackId id = new GitPackObjectResolver(pack, storage).complete();
+            assertThat(pack.id()).isEqualTo(id);
+            long size = pack.size();
+            assertThatThrownBy(() -> pack.append(ByteBuffer.wrap(new byte[]{1})))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> pack.write(8, ByteBuffer.allocate(4)))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> pack.truncate(12)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> pack.addEntry(12, 13, 3, GitObjectType.BLOB,
+                    OptionalLong.empty(), Optional.empty())).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> pack.addObject(12, object, GitObjectType.BLOB, 3))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> new GitPackObjectResolver(pack, storage).complete())
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(pack.id()).isEqualTo(id);
+            assertThat(pack.size()).isEqualTo(size);
+            assertThat(pack.objectCount()).isEqualTo(1);
+            try (IndexedPack copy = pack.copy();
+                 IndexedPack diskCopy = pack.copyTo(directory.resolve("copy"))) {
+                assertThat(copy.id()).isEqualTo(id);
+                assertThat(diskCopy.id()).isEqualTo(id);
+                assertThatThrownBy(() -> copy.truncate(0)).isInstanceOf(IllegalStateException.class);
+                assertThatThrownBy(() -> diskCopy.truncate(0)).isInstanceOf(IllegalStateException.class);
+                assertThat(storage.persist(copy)).isEqualTo(id);
+                assertThat(storage.exists(object)).isTrue();
+                diskCopy.discard();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void persistRejectsAnUncompletedPackAndDiscardsOnlyTheAttempt(boolean memory) throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
         IndexedPack pack = memory ? IndexedPack.create() : storage.newPack();
         ObjectId id = writeBlob(pack);
         Path staging = memory ? null : pack.directory();
-        byte last = pack.id().toBytes()[19];
-        pack.write(pack.size() - 1, ByteBuffer.wrap(new byte[]{(byte) (last ^ 1)}));
         assertThatThrownBy(() -> storage.persist(pack)).isInstanceOf(IOException.class);
         if (staging != null) {
             assertThat(staging).doesNotExist();

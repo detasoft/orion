@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 
 import java.io.IOException;
@@ -216,7 +217,9 @@ class PackUploadIndexTest {
     }
 
     private static IndexedPack create(Path path) throws IOException {
-        return IndexedPack.create(path);
+        IndexedPack pack = IndexedPack.create(path);
+        pack.append(ByteBuffer.wrap(PackTestData.pack()));
+        return pack;
     }
 
     private static IndexedPack.EntryMetadata full(long offset) {

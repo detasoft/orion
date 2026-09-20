@@ -4,7 +4,6 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 
 import java.io.EOFException;
@@ -96,7 +95,7 @@ final class GitPackStorage {
     PackId persist(IndexedPack pack) throws IOException {
         if (memory != null) {
             try {
-                PackId id = validate(pack);
+                PackId id = pack.id();
                 IndexedPack copy = pack.copy();
                 if (memory.putIfAbsent(id, copy) != null) {
                     copy.close();
@@ -110,6 +109,7 @@ final class GitPackStorage {
         }
         if (pack.isInMemory()) {
             try {
+                pack.id();
                 IndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
                 PackId id = persist(staged);
                 pack.close();
@@ -121,7 +121,7 @@ final class GitPackStorage {
         }
         Path directory = pack.directory();
         try {
-            PackId id = validate(pack);
+            PackId id = pack.id();
             pack.close();
             publish(directory, id);
             pack.discard();
@@ -130,26 +130,6 @@ final class GitPackStorage {
             closeFailed(pack::discard, failure);
             throw failure;
         }
-    }
-
-    private static PackId validate(IndexedPack pack) throws IOException {
-        PackId id = pack.id();
-        long size = pack.size();
-        ByteBuffer header = ByteBuffer.wrap(readExactly(pack, 0, 12));
-        if (header.getInt() != 0x5041434b || header.getInt() != 2
-                || Integer.toUnsignedLong(header.getInt()) != pack.entryCount()) {
-            throw new IOException("Pack header does not match its index");
-        }
-        if (pack.entryCount() != pack.objectCount()) {
-            throw new IOException("Pack contains unresolved or duplicate objects");
-        }
-        if (!MessageDigest.isEqual(digest(pack, size - 20), id.toBytes())) {
-            throw new IOException("Pack checksum mismatch");
-        }
-        try (PackUploadIndex state = PackUploadIndex.create(pack)) {
-            state.finish();
-        }
-        return id;
     }
 
     <R> Optional<R> read(ObjectId id, GitObjectRead<R> reader) throws IOException {

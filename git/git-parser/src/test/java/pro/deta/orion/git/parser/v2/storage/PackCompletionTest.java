@@ -35,7 +35,7 @@ class PackCompletionTest {
     void leavesSelfContainedAndEmptyPacksUnchanged() throws Exception {
         for (byte[] pack : new byte[][]{pack(), pack(full(new byte[]{1, 2, 3}))}) {
             try (var attempt = new Attempt(pack)) {
-                PackId received = attempt.pack.id();
+                PackId received = checksum(Files.readAllBytes(attempt.packPath));
                 assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
                         .isEqualTo(received);
                 assertThat(Files.readAllBytes(attempt.packPath)).containsExactly(pack);
@@ -57,7 +57,7 @@ class PackCompletionTest {
         try (var attempt = new Attempt(original)) {
             PackTestData.store(attempt.storage, GitObjectType.BLOB, base);
 
-            PackId received = attempt.pack.id();
+            PackId received = checksum(Files.readAllBytes(attempt.packPath));
             PackId completed = new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
             assertThat(attempt.pack.find(objectId(result))).isPresent();
             assertThat(attempt.pack.find(objectId(otherResult))).isPresent();

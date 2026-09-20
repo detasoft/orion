@@ -15,6 +15,8 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -31,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -162,7 +165,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void rejectsExcessivePrefixesAndMalformedUtf8BeforeResponding() throws Exception {
         GitStorageApi storage = new GitStorageApi(repository);
         String[] prefixes = new String[257];
-        java.util.Arrays.fill(prefixes, "ref-prefix refs/heads/");
+        Arrays.fill(prefixes, "ref-prefix refs/heads/");
         assertThatThrownBy(() -> execute(storage, prefixes)).isInstanceOf(IOException.class)
                 .hasMessageContaining("Too many");
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -232,7 +235,9 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         }
         try (BufferedByteInputV2 input = input(bytes.toByteArray());
              PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
-            storage.persist(ingestor.ingest());
+            IndexedPack pack = ingestor.ingest();
+            new GitPackObjectResolver(pack, storage).complete();
+            storage.persist(pack);
         }
         return id;
     }

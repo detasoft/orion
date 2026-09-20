@@ -69,7 +69,10 @@ public final class PackTestData {
 
     public static ObjectId store(GitStorageApi storage,
                                  GitObjectType type, byte[] content) throws IOException {
-        storage.persist(ingest(pack(entry(type, content)), storage.newPack()));
+        try (IndexedPack target = ingest(pack(entry(type, content)), storage.newPack())) {
+            new GitPackObjectResolver(target, storage).complete();
+            storage.persist(target);
+        }
         return objectId(type, content);
     }
 

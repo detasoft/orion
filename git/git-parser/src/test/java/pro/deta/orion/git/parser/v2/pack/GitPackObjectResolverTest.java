@@ -16,10 +16,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTimeout;
-import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class GitPackObjectResolverTest {
     @TempDir
@@ -37,7 +37,7 @@ class GitPackObjectResolverTest {
         byte[] source = pack(forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
         try (IndexedPack target = ingest(source, memory ? IndexedPack.create() : storage.newPack())) {
-            PackId received = target.id();
+            PackId received = target.checksum();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(bytes(target)).containsExactly(source);
             assertThat(target.objectCount()).isEqualTo(5);
@@ -59,7 +59,7 @@ class GitPackObjectResolverTest {
         byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
                 delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
         try (IndexedPack target = ingest(source, IndexedPack.create())) {
-            PackId received = target.id();
+            PackId received = target.checksum();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(target.objectCount()).isEqualTo(3);
             assertThat(bytes(target)).containsExactly(source);

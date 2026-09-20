@@ -6,9 +6,9 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.type.ByteArrayDataType;
 import org.h2.mvstore.type.LongDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -36,6 +36,7 @@ public final class IndexedPack implements AutoCloseable {
     private final MVMap<ObjectId, Long> objects;
     private final Path directory;
     private int pendingChanges;
+    private PackId packId;
 
     public static IndexedPack create() throws IOException {
         PackDataStorage bytes = PackDataStorage.memory();
@@ -96,7 +97,9 @@ public final class IndexedPack implements AutoCloseable {
                 throw new IOException("Unsupported pack index format");
             }
             IndexedPack pack = new IndexedPack(bytes, store, directory);
-            if (directory != null) {
+            if (directory == null) {
+                pack.packId = pack.checksum();
+            } else {
                 store.setStoreVersion(2);
                 store.commit();
             }
@@ -158,6 +161,19 @@ public final class IndexedPack implements AutoCloseable {
     }
 
     public PackId id() throws IOException {
+        requireOpen();
+        if (packId == null) {
+            throw new IOException("Pack is not completed");
+        }
+        return packId;
+    }
+
+    void complete(PackId id) throws IOException {
+        requireMutable();
+        packId = Objects.requireNonNull(id, "id");
+    }
+
+    PackId checksum() throws IOException {
         long size = size();
         if (size < 32) {
             throw new EOFException("Truncated pack file");
@@ -209,6 +225,7 @@ public final class IndexedPack implements AutoCloseable {
                 copy.commitBatch();
             }
             copy.flush();
+            copy.packId = packId;
             return copy;
         } catch (IOException | RuntimeException | Error error) {
             try {
@@ -455,9 +472,9 @@ public final class IndexedPack implements AutoCloseable {
         }
     }
 
-    private void requireMutable() throws IOException {
+    void requireMutable() throws IOException {
         requireOpen();
-        if (store.isReadOnly()) {
+        if (store.isReadOnly() || packId != null) {
             throw new IllegalStateException("Pack is read-only");
         }
     }

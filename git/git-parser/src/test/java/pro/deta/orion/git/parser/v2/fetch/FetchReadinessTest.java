@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -164,6 +165,7 @@ class FetchReadinessTest {
         }
         try (IndexedPack pack = PackTestData.ingest(PackTestData.pack(entries.toArray(byte[][]::new)),
                 storage.newPack())) {
+            new GitPackObjectResolver(pack, storage).complete();
             storage.persist(pack);
         }
         NegotiationContext context = context(tip);

@@ -6,9 +6,9 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.WriteBuffer;
 import org.h2.mvstore.type.BasicDataType;
 import org.h2.mvstore.type.LongDataType;
-import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -31,7 +31,7 @@ public final class PackUploadIndex implements AutoCloseable {
     private boolean temporaryDeleted;
 
     public static PackUploadIndex create(IndexedPack data) throws IOException {
-        Objects.requireNonNull(data, "data").requireOpen();
+        Objects.requireNonNull(data, "data").requireMutable();
         Path temporaryPath = data.isInMemory() ? null : data.directory().resolve("data.tmv");
         MVStore temporary = null;
         if (temporaryPath != null) {

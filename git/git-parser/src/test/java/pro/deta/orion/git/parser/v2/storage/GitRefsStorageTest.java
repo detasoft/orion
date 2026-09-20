@@ -11,6 +11,8 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -242,7 +244,9 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         source = ByteBuffer.wrap(bytes.toByteArray());
         try (BufferedByteInputV2 input = new BufferedByteInputV2(this);
              PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
-            storage.persist(ingestor.ingest());
+            IndexedPack pack = ingestor.ingest();
+            new GitPackObjectResolver(pack, storage).complete();
+            storage.persist(pack);
         }
         return id;
     }

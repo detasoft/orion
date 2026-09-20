@@ -34,10 +34,13 @@ public final class GitPackObjectResolver {
     }
 
     public PackId complete() throws IOException {
-        PackId receivedId = pack.id();
+        pack.requireMutable();
+        PackId receivedId = pack.checksum();
         try (PackUploadIndex index = PackUploadIndex.create(pack)) {
             resolve(index);
-            return complete(pack, index, storage, receivedId);
+            PackId completed = complete(pack, index, storage, receivedId);
+            pack.complete(completed);
+            return completed;
         } catch (IOException | RuntimeException | Error failure) {
             closeFailed(pack, failure);
             throw failure;

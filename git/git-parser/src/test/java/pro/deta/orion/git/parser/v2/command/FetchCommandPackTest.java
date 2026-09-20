@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -26,14 +27,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
@@ -206,6 +207,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         stored.addEntry(deltaOffset, deltaOffset + 2, delta.length, GitObjectType.OFS_DELTA,
                 OptionalLong.of(12), Optional.empty());
         stored.addObject(deltaOffset, targetId, GitObjectType.BLOB, 3);
+        new GitPackObjectResolver(stored, storage).complete();
         storage.persist(stored);
         byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(),
                 thin ? "thin-pack" : "no-progress", "want " + targetId.toHex(),
@@ -326,7 +328,9 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             writer.writeObject(type, content.length, input);
             writer.finish();
         }
-        storage.persist(ingest(bytes.toByteArray()));
+        IndexedPack pack = ingest(bytes.toByteArray());
+        new GitPackObjectResolver(pack, storage).complete();
+        storage.persist(pack);
         return hash(type, content);
     }
 
