@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
+import pro.deta.orion.lifecycle.state.TestOnly;
+
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -225,21 +227,25 @@ final class SegmentReader {
         }
     }
 
+    @TestOnly
     List<SessionEventRecord> readRecords(SegmentCatalog snapshot) throws JournalStorageException {
-        return readRecords(snapshot, Optional.empty());
+        return readRecords(snapshot, Optional.empty(), Optional.empty());
     }
 
     List<SessionEventRecord> readRecords(
             SegmentCatalog snapshot,
-            List<DurableFileOperations.SegmentContent> expectedContents)
+            List<DurableFileOperations.SegmentContent> expectedContents,
+            Optional<EventId> after)
             throws JournalStorageException {
-        return readRecords(snapshot, Optional.of(List.copyOf(expectedContents)));
+        return readRecords(snapshot, Optional.of(List.copyOf(expectedContents)), after);
     }
 
     private List<SessionEventRecord> readRecords(
             SegmentCatalog snapshot,
-            Optional<List<DurableFileOperations.SegmentContent>> expectedContents)
+            Optional<List<DurableFileOperations.SegmentContent>> expectedContents,
+            Optional<EventId> after)
             throws JournalStorageException {
+        Objects.requireNonNull(after, "after");
         if (snapshot.segments().isEmpty()) {
             return List.of();
         }
@@ -247,14 +253,14 @@ final class SegmentReader {
         List<SessionEventRecord> records = new ArrayList<>();
         EventId previousEventId = null;
         for (int index = 0; index < snapshot.segments().size(); index++) {
-            ReadSegment read = readCommittedSegment(snapshot, index, expectedContents);
-            for (SessionEventRecord record : read.records()) {
-                if (previousEventId != null && previousEventId.compareTo(record.eventId()) >= 0) {
-                    throw corruption("Stored event IDs are not strictly increasing");
-                }
-                records.add(record);
-                previousEventId = record.eventId();
+            ReadSegment read = readCommittedSegment(snapshot, index, expectedContents,
+                    new DecodedRecords(true, after, operations::decodedRecordRetained));
+            if (previousEventId != null && read.firstEventId().isPresent()
+                    && previousEventId.compareTo(read.firstEventId().get()) >= 0) {
+                throw corruption("Stored event IDs are not strictly increasing");
             }
+            records.addAll(read.records());
+            previousEventId = read.lastEventId().orElse(previousEventId);
         }
         return List.copyOf(records);
     }
@@ -290,7 +296,7 @@ final class SegmentReader {
                     contents,
                     new DecodedRecords(
                             requestedEventIds,
-                            operations::retryLookupRecordRetained));
+                            operations::decodedRecordRetained));
             int storedIndex = 0;
             for (RequestedRecord request : entry.getValue()) {
                 while (storedIndex < segment.records().size()
@@ -315,15 +321,6 @@ final class SegmentReader {
             throw new JournalStorageException(
                     IO_FAILURE, "The journal content fingerprints do not match the snapshot");
         }
-    }
-
-    private ReadSegment readCommittedSegment(
-            SegmentCatalog snapshot,
-            int index,
-            Optional<List<DurableFileOperations.SegmentContent>> expectedContents)
-            throws JournalStorageException {
-        return readCommittedSegment(
-                snapshot, index, expectedContents, new DecodedRecords(true));
     }
 
     private ReadSegment readCommittedSegment(
@@ -668,7 +665,7 @@ final class SegmentReader {
                 representation,
                 byteLimit,
                 expectedDigest,
-                new DecodedRecords(retainRecords));
+                new DecodedRecords(retainRecords, Optional.empty(), operations::decodedRecordRetained));
     }
 
     private ReadSegment decode(
@@ -1067,7 +1064,8 @@ final class SegmentReader {
     }
 
     private static final class DecodedRecords {
-        private final boolean retainAllRecords;
+        private final boolean retainRecords;
+        private final Optional<EventId> after;
         private final List<EventId> requestedEventIds;
         private final Consumer<SessionEventRecord> retentionObserver;
         private final List<SessionEventRecord> records = new ArrayList<>();
@@ -1075,17 +1073,21 @@ final class SegmentReader {
         private EventId firstEventId;
         private EventId lastEventId;
 
-        private DecodedRecords(boolean retainRecords) {
-            retainAllRecords = retainRecords;
+        private DecodedRecords(
+                boolean retainRecords,
+                Optional<EventId> after,
+                Consumer<SessionEventRecord> retentionObserver) {
+            this.retainRecords = retainRecords;
+            this.after = Objects.requireNonNull(after, "after");
             requestedEventIds = List.of();
-            retentionObserver = ignored -> {
-            };
+            this.retentionObserver = Objects.requireNonNull(retentionObserver, "retentionObserver");
         }
 
         private DecodedRecords(
                 List<EventId> requestedEventIds,
                 Consumer<SessionEventRecord> retentionObserver) {
-            retainAllRecords = false;
+            retainRecords = false;
+            after = Optional.empty();
             this.requestedEventIds = List.copyOf(requestedEventIds);
             this.retentionObserver = Objects.requireNonNull(
                     retentionObserver, "retentionObserver");
@@ -1100,8 +1102,11 @@ final class SegmentReader {
                     firstEventId = record.eventId();
                 }
                 lastEventId = record.eventId();
-                if (retainAllRecords) {
-                    records.add(record);
+                if (retainRecords) {
+                    if (after.isEmpty() || record.eventId().compareTo(after.get()) > 0) {
+                        records.add(record);
+                        retentionObserver.accept(record);
+                    }
                 } else {
                     retainIfRequested(record);
                 }

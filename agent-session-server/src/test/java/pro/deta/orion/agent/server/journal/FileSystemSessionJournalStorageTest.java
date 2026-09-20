@@ -1,6 +1,8 @@
 package pro.deta.orion.agent.server.journal;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -368,6 +370,68 @@ class FileSystemSessionJournalStorageTest {
                     .isEqualTo(encoded(second, third, fourth, fifth));
             assertThat(recoveredOperations.bytesRead(
                     root.resolve("recovered-overlap/00000001.cbor"))).isZero();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cursorReadsRetainOnlyTheSuffixWhileStillReadingTheWholeHistory(boolean compressed) throws Exception {
+        int count = 30_000;
+        List<SessionEventRecord> prefix = new ArrayList<>(count);
+        for (int id = 1; id <= count; id++) {
+            prefix.add(event(id));
+        }
+        SessionId session = new SessionId("cursor-retention");
+        if (compressed) {
+            writeCompressedSegment(root, session.value(), 1, prefix.toArray(SessionEventRecord[]::new));
+        } else {
+            writeSegment(root, session.value(), 1, prefix.toArray(SessionEventRecord[]::new));
+        }
+        SessionEventRecord tail = opaqueEvent(count + 1);
+        writeSegment(root, session.value(), 2, tail);
+        RetentionCountingFileOperations operations = new RetentionCountingFileOperations();
+        try (var storage = new FileSystemSessionJournalStorage(root, testConfig(), operations)) {
+            assertThat(storage.lastEventId(session)).contains(tail.eventId());
+            operations.reset();
+            assertThat(storage.readAfter(session, Optional.of(new EventId(count))).records())
+                    .containsExactly(tail);
+            assertThat(operations.retainedEventIds()).containsExactly(tail.eventId());
+            long historyBytes = operations.bytesRead();
+            assertThat(historyBytes).isGreaterThan(tail.encodedRecord().size());
+
+            operations.reset();
+            assertThat(storage.readAfter(session, Optional.of(tail.eventId())).records()).isEmpty();
+            assertThat(operations.retainedEventIds()).isEmpty();
+            assertThat(operations.bytesRead()).isEqualTo(historyBytes);
+
+            operations.reset();
+            assertThat(storage.readAfter(session, Optional.empty()).records()).hasSize(count + 1);
+            assertThat(operations.retainedEventIds()).hasSize(count + 1);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cursorUsesUnsignedOrderAndStillRejectsCorruptionBeforeTheCursor(boolean compressed) throws Exception {
+        SessionId session = new SessionId("unsigned-cursor");
+        SessionEventRecord first = event(Long.MAX_VALUE);
+        SessionEventRecord second = opaqueEvent(Long.MIN_VALUE);
+        SessionEventRecord last = event(-1L);
+        if (compressed) {
+            writeCompressedSegment(root, session.value(), 1, first, second);
+        } else {
+            writeSegment(root, session.value(), 1, first, second);
+        }
+        writeSegment(root, session.value(), 2, last);
+        try (var storage = new FileSystemSessionJournalStorage(root, testConfig(), new DurableFileOperations())) {
+            assertThat(storage.readAfter(session, Optional.of(first.eventId())).records())
+                    .containsExactly(second, last);
+            assertThat(storage.readAfter(session, Optional.of(last.eventId())).records()).isEmpty();
+            Path prefix = root.resolve(session.value()).resolve(
+                    compressed ? "00000001.cbor.zst" : "00000001.cbor");
+            Files.write(prefix, new byte[]{(byte) 0xff});
+            assertThatExceptionOfType(JournalStorageException.class)
+                    .isThrownBy(() -> storage.readAfter(session, Optional.of(last.eventId())));
         }
     }
 
@@ -941,7 +1005,7 @@ class FileSystemSessionJournalStorageTest {
         }
 
         @Override
-        void retryLookupRecordRetained(SessionEventRecord record) {
+        void decodedRecordRetained(SessionEventRecord record) {
             retainedEventIds.add(record.eventId());
         }
 

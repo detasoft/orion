@@ -94,7 +94,7 @@ class DurableFileOperations {
     }
 
     @TestOnly
-    void retryLookupRecordRetained(SessionEventRecord record) {
+    void decodedRecordRetained(SessionEventRecord record) {
     }
 
     @TestOnly

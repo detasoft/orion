@@ -211,7 +211,7 @@ final class SessionJournal {
 
         List<SessionEventRecord> snapshotRecords;
         try {
-            snapshotRecords = reader.readRecords(snapshot.catalog(), snapshot.contents());
+            snapshotRecords = reader.readRecords(snapshot.catalog(), snapshot.contents(), after);
         } catch (JournalStorageException e) {
             poison();
             operations.afterReadFailurePublished();
@@ -224,22 +224,7 @@ final class SessionJournal {
         } finally {
             releaseReadLease(snapshot.leases());
         }
-        if (snapshotRecords.isEmpty()) {
-            return new JournalReadResult(List.of());
-        }
-
-        if (after.isEmpty()) {
-            return new JournalReadResult(snapshotRecords);
-        }
-
-        EventId cursor = after.get();
-        List<SessionEventRecord> records = new ArrayList<>();
-        for (SessionEventRecord record : snapshotRecords) {
-            if (record.eventId().compareTo(cursor) > 0) {
-                records.add(record);
-            }
-        }
-        return new JournalReadResult(records);
+        return new JournalReadResult(snapshotRecords);
     }
 
     private JournalAppendResult appendDurably(

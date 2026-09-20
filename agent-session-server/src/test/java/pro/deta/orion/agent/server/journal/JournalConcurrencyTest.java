@@ -113,19 +113,19 @@ class JournalConcurrencyTest {
                 ExecutorService reader = namedExecutor("snapshot-reader")) {
             Future<JournalReadResult> snapshot = null;
             try {
-                storage.append(SESSION_A, List.of(event(1)));
+                storage.append(SESSION_A, List.of(event(1), event(2)));
                 operations.arm();
                 snapshot = reader.submit(
-                        () -> storage.readAfter(SESSION_A, Optional.empty()));
+                        () -> storage.readAfter(SESSION_A, Optional.of(new EventId(1))));
                 assertThat(operations.readStarted.await(10, TimeUnit.SECONDS)).isTrue();
 
-                assertThat(storage.append(SESSION_A, List.of(event(2))).durableThrough())
-                        .contains(new EventId(2));
+                assertThat(storage.append(SESSION_A, List.of(event(3))).durableThrough())
+                        .contains(new EventId(3));
                 operations.releaseRead.countDown();
 
-                assertThat(snapshot.get(5, TimeUnit.SECONDS).records()).containsExactly(event(1));
-                assertThat(storage.readAfter(SESSION_A, Optional.of(new EventId(1))).records())
-                        .containsExactly(event(2));
+                assertThat(snapshot.get(5, TimeUnit.SECONDS).records()).containsExactly(event(2));
+                assertThat(storage.readAfter(SESSION_A, Optional.of(new EventId(2))).records())
+                        .containsExactly(event(3));
             } finally {
                 operations.releaseRead.countDown();
                 cancel(snapshot);
