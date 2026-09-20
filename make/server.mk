@@ -49,6 +49,7 @@ require-key-material-password:
 enroll-admin-key: ## Enroll an admin SSH key
 	@env -u ORION_ROOT_PASSWORD -u DISPLAY -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE \
 		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
+		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null \
 		-o PasswordAuthentication=no -p $(ORION_SSH_PORT) \
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
