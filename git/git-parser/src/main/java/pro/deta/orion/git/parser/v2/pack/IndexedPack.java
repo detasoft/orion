@@ -6,6 +6,7 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.type.ByteArrayDataType;
 import org.h2.mvstore.type.LongDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
@@ -20,6 +21,7 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
@@ -142,6 +144,7 @@ public final class IndexedPack implements AutoCloseable {
         if (source.remaining() > Long.MAX_VALUE - offset) {
             throw new IOException("Pack size overflows a signed long");
         }
+        packId = null;
         bytes.write(offset, source);
     }
 
@@ -157,20 +160,31 @@ public final class IndexedPack implements AutoCloseable {
 
     public void truncate(long size) throws IOException {
         requireMutable();
+        packId = null;
         bytes.truncate(size);
     }
 
     public PackId id() throws IOException {
         requireOpen();
         if (packId == null) {
-            throw new IOException("Pack is not completed");
+            throw new IOException("Pack checksum is not calculated");
         }
         return packId;
     }
 
-    void complete(PackId id) throws IOException {
+    void setId(PackId id) throws IOException {
         requireMutable();
         packId = Objects.requireNonNull(id, "id");
+    }
+
+    PackId finish(long dataEnd) throws IOException {
+        requireOpen();
+        if (packId == null) {
+            byte[] checksum = digest(dataEnd);
+            write(dataEnd, ByteBuffer.wrap(checksum));
+            packId = new PackId(checksum);
+        }
+        return packId;
     }
 
     PackId checksum() throws IOException {
@@ -186,6 +200,25 @@ public final class IndexedPack implements AutoCloseable {
             }
         }
         return new PackId(trailer.array());
+    }
+
+    private byte[] digest(long length) throws IOException {
+        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
+        ByteBuffer buffer = ByteBuffer.allocate(8192);
+        long position = 0;
+        while (position < length) {
+            buffer.clear().limit((int) Math.min(buffer.capacity(), length - position));
+            int count = read(position, buffer);
+            if (count < 0) {
+                throw new EOFException("Truncated pack file during checksum calculation");
+            }
+            if (count == 0) {
+                throw new IOException("Pack file read made no progress");
+            }
+            hash.update(buffer.array(), 0, count);
+            position += count;
+        }
+        return hash.digest();
     }
 
     public boolean isInMemory() {
@@ -474,7 +507,7 @@ public final class IndexedPack implements AutoCloseable {
 
     void requireMutable() throws IOException {
         requireOpen();
-        if (store.isReadOnly() || packId != null) {
+        if (store.isReadOnly()) {
             throw new IllegalStateException("Pack is read-only");
         }
     }

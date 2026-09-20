@@ -92,12 +92,11 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
             }
             writer.finish();
         }
-        try (IndexedPack pack = ingest(bytes.toByteArray())) {
-            List<ObjectId> ids = new ArrayList<>(pack.objectIds());
-            new GitPackObjectResolver(pack, storage()).complete();
-            storage().persist(pack);
-            return ids;
-        }
+        IndexedPack pack = ingest(bytes.toByteArray());
+        List<ObjectId> ids = new ArrayList<>(pack.objectIds());
+        new GitPackObjectResolver(pack, storage()).complete();
+        storage().persist(pack);
+        return ids;
     }
 
     private byte[] fetch(List<ObjectId> wants, String protocols) throws IOException {

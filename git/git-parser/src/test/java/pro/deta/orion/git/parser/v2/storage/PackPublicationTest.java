@@ -205,10 +205,9 @@ class PackPublicationTest {
             entries.add(delta(objectId(GitObjectType.BLOB, previous),
                     new byte[]{2, 2, 2, (byte) (value >>> 8), (byte) value}));
         }
-        try (IndexedPack target = ingest(pack(entries.toArray(byte[][]::new)), IndexedPack.create())) {
-            new GitPackObjectResolver(target, storage).complete();
-            storage.persist(target);
-        }
+        IndexedPack target = ingest(pack(entries.toArray(byte[][]::new)), storage.newPack());
+        new GitPackObjectResolver(target, storage).complete();
+        storage.persist(target);
         GitStorageApi reopened = memory ? storage : new GitStorageApi(directory);
         byte[] expected = {(byte) (1100 >>> 8), (byte) 1100};
         ObjectId object = objectId(GitObjectType.BLOB, expected);
@@ -223,6 +222,25 @@ class PackPublicationTest {
                     })).orElseThrow());
             assertThat(result.get(30, TimeUnit.SECONDS)).containsExactly(expected);
         }
+    }
+
+    @Test
+    void memoryPublicationTakesThePackAndDiscardsOnlyDuplicateAttempts() throws Exception {
+        IndexedPack target;
+        ObjectId object = blobId((byte) 1);
+        try (GitStorageApi storage = new GitStorageApi()) {
+            target = ingest(pack(blob(new byte[]{1})), storage.newPack());
+            PackId id = new GitPackObjectResolver(target, storage).complete();
+            assertThat(storage.persist(target)).isEqualTo(id);
+            assertThat(target.id()).isEqualTo(id);
+            assertThat(storage.persist(target)).isEqualTo(id);
+            IndexedPack duplicate = ingest(pack(blob(new byte[]{1})), storage.newPack());
+            new GitPackObjectResolver(duplicate, storage).complete();
+            assertThat(storage.persist(duplicate)).isEqualTo(id);
+            assertThatThrownBy(duplicate::size).isInstanceOf(ClosedChannelException.class);
+            assertThat(storage.readObject(object, new HashedGitObjectRead())).contains(object);
+        }
+        assertThatThrownBy(target::size).isInstanceOf(ClosedChannelException.class);
     }
 
     @Test

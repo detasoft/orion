@@ -55,7 +55,7 @@ final class GitPackStorage {
     void close() throws IOException {
         if (memory != null) {
             for (IndexedPack pack : memory.values()) {
-                pack.close();
+                pack.discard();
             }
             memory.clear();
         }
@@ -96,11 +96,10 @@ final class GitPackStorage {
         if (memory != null) {
             try {
                 PackId id = pack.id();
-                IndexedPack copy = pack.copy();
-                if (memory.putIfAbsent(id, copy) != null) {
-                    copy.close();
+                IndexedPack existing = memory.putIfAbsent(id, pack);
+                if (existing != null && existing != pack) {
+                    pack.discard();
                 }
-                pack.discard();
                 return id;
             } catch (IOException | RuntimeException | Error failure) {
                 closeFailed(pack::discard, failure);

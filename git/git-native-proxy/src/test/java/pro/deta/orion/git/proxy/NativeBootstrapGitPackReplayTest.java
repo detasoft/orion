@@ -136,11 +136,7 @@ class NativeBootstrapGitPackReplayTest {
     private static Optional<PackId> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             IndexedPack pack = repository.ingest(input);
-            try {
-                return Optional.of(repository.storage().persist(pack));
-            } finally {
-                pack.discard();
-            }
+            return Optional.of(repository.storage().persist(pack));
         }
     }
 

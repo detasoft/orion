@@ -174,7 +174,7 @@ class PackIngestorTest {
     void acceptsEmptyPacksAndRejectsInvalidHeaders() throws Exception {
         try (IndexedPack target = PackTestData.ingest(PackTestData.pack(), IndexedPack.create())) {
             assertThat(target.entryCount()).isZero();
-            assertThatThrownBy(target::id).isInstanceOf(IOException.class).hasMessageContaining("not completed");
+            assertThat(target.id()).isEqualTo(target.checksum());
         }
         byte[] magic = PackTestData.pack();
         magic[0] = 'X';

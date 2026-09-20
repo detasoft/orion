@@ -246,11 +246,7 @@ class FileNativeGitRepositoryProviderTest {
     private static PackId persist(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             IndexedPack pack = repository.ingest(input);
-            try {
-                return repository.storage().persist(pack);
-            } finally {
-                pack.discard();
-            }
+            return repository.storage().persist(pack);
         }
     }
 

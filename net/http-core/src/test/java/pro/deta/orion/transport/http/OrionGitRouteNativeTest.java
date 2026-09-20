@@ -393,11 +393,7 @@ class OrionGitRouteNativeTest {
         PackId packId;
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
             IndexedPack pack = repository.ingest(input);
-            try {
-                packId = repository.storage().persist(pack);
-            } finally {
-                pack.discard();
-            }
+            packId = repository.storage().persist(pack);
         }
         repository.updateRef(
                 "refs/heads/main",

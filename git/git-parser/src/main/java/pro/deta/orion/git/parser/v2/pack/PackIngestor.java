@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
@@ -62,6 +63,7 @@ public final class PackIngestor implements AutoCloseable {
             throw new IOException("Pack checksum mismatch");
         }
         flush();
+        target.setId(new PackId(received));
         ownsTarget = false;
         return target;
     }

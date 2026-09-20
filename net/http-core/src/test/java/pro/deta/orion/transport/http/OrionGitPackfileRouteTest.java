@@ -188,11 +188,7 @@ class OrionGitPackfileRouteTest {
         byte[] packBytes = bytes.toByteArray();
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
             IndexedPack pack = repository.ingest(input);
-            try {
-                return new PublishedPackFixture(repository.storage().persist(pack), packBytes);
-            } finally {
-                pack.discard();
-            }
+            return new PublishedPackFixture(repository.storage().persist(pack), packBytes);
         }
     }
 

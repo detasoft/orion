@@ -21,16 +21,11 @@ class NativeGitRepositoryPackIngestionTest {
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
                 IndexedPack first = repository.ingest(firstInput);
                 IndexedPack second = repository.ingest(secondInput);
-                try {
-                    assertThat(first).isNotSameAs(second);
-                    assertThat(repository.storage().packIds()).isEmpty();
-                    first.discard();
-                    repository.storage().persist(second);
-                    assertThat(repository.storage().packIds()).hasSize(1);
-                } finally {
-                    first.discard();
-                    second.discard();
-                }
+                assertThat(first).isNotSameAs(second);
+                assertThat(repository.storage().packIds()).isEmpty();
+                first.discard();
+                repository.storage().persist(second);
+                assertThat(repository.storage().packIds()).hasSize(1);
             }
         }
     }

@@ -159,38 +159,28 @@ class IndexedPackTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void completionLocksIdentityBytesAndIndexIncludingCopies(boolean memory) throws Exception {
+    void byteChangesInvalidateChecksumWhileIndexUpdatesPreserveIt(boolean memory) throws Exception {
         try (GitStorageApi storage = new GitStorageApi();
              IndexedPack pack = memory ? IndexedPack.create() : IndexedPack.create(directory.resolve("staging"))) {
             ObjectId object = writeBlob(pack);
-            assertThatThrownBy(pack::id).isInstanceOf(IOException.class).hasMessageContaining("not completed");
+            assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
             PackId id = new GitPackObjectResolver(pack, storage).complete();
+            pack.addObject(12, object, GitObjectType.BLOB, 3);
             assertThat(pack.id()).isEqualTo(id);
-            long size = pack.size();
-            assertThatThrownBy(() -> pack.append(ByteBuffer.wrap(new byte[]{1})))
-                    .isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pack.write(8, ByteBuffer.allocate(4)))
-                    .isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pack.truncate(12)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pack.addEntry(12, 13, 3, GitObjectType.BLOB,
-                    OptionalLong.empty(), Optional.empty())).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pack.addObject(12, object, GitObjectType.BLOB, 3))
-                    .isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> new GitPackObjectResolver(pack, storage).complete())
-                    .isInstanceOf(IllegalStateException.class);
-            assertThat(pack.id()).isEqualTo(id);
-            assertThat(pack.size()).isEqualTo(size);
-            assertThat(pack.objectCount()).isEqualTo(1);
             try (IndexedPack copy = pack.copy();
                  IndexedPack diskCopy = pack.copyTo(directory.resolve("copy"))) {
                 assertThat(copy.id()).isEqualTo(id);
                 assertThat(diskCopy.id()).isEqualTo(id);
-                assertThatThrownBy(() -> copy.truncate(0)).isInstanceOf(IllegalStateException.class);
-                assertThatThrownBy(() -> diskCopy.truncate(0)).isInstanceOf(IllegalStateException.class);
-                assertThat(storage.persist(copy)).isEqualTo(id);
-                assertThat(storage.exists(object)).isTrue();
+                copy.append(ByteBuffer.wrap(new byte[]{1}));
+                assertThatThrownBy(copy::id).isInstanceOf(IOException.class);
+                diskCopy.truncate(12);
+                assertThatThrownBy(diskCopy::id).isInstanceOf(IOException.class);
                 diskCopy.discard();
             }
+            pack.write(8, ByteBuffer.allocate(4).putInt(1).flip());
+            assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
+            assertThat(new GitPackObjectResolver(pack, storage).complete()).isEqualTo(id);
+            assertThat(pack.id()).isEqualTo(id);
         }
     }
 

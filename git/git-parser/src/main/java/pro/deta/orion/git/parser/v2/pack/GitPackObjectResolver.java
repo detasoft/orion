@@ -35,12 +35,9 @@ public final class GitPackObjectResolver {
 
     public PackId complete() throws IOException {
         pack.requireMutable();
-        PackId receivedId = pack.checksum();
         try (PackUploadIndex index = PackUploadIndex.create(pack)) {
             resolve(index);
-            PackId completed = complete(pack, index, storage, receivedId);
-            pack.complete(completed);
-            return completed;
+            return complete(pack, index, storage);
         } catch (IOException | RuntimeException | Error failure) {
             closeFailed(pack, failure);
             throw failure;
@@ -168,7 +165,7 @@ public final class GitPackObjectResolver {
     }
 
     private static PackId complete(IndexedPack bytes, PackUploadIndex index,
-                                   GitStorageApi storage, PackId receivedId) throws IOException {
+                                   GitStorageApi storage) throws IOException {
         if (index.hasUnresolved()) {
             throw new IOException("Pack contains unresolved objects");
         }
@@ -187,13 +184,8 @@ public final class GitPackObjectResolver {
         if (objectCount != bytes.objectCount()) {
             throw new IOException("Pack contains duplicate objects");
         }
-        byte[] checksum = digest(bytes, size - 20);
-        if (!MessageDigest.isEqual(checksum, receivedId.toBytes())
-                || !MessageDigest.isEqual(checksum, readExactly(bytes, size - 20, 20))) {
-            throw new IOException("Received pack checksum mismatch");
-        }
         Optional<ObjectId> missing = index.nextExternalBase();
-        PackId finalId = receivedId;
+        long dataEnd = size - 20;
         if (missing.isPresent()) {
             bytes.truncate(size - 20);
             while (missing.isPresent()) {
@@ -211,12 +203,11 @@ public final class GitPackObjectResolver {
             }
             ByteBuffer count = ByteBuffer.allocate(4).putInt((int) objectCount).flip();
             bytes.write(8, count);
-            byte[] completedChecksum = digest(bytes, bytes.size());
-            bytes.append(ByteBuffer.wrap(completedChecksum));
-            finalId = new PackId(completedChecksum);
+            dataEnd = bytes.size();
         }
+        PackId id = bytes.finish(dataEnd);
         index.finish();
-        return finalId;
+        return id;
     }
 
     private static IndexedPack.EntryMetadata appendBase(IndexedPack bytes, ObjectId expected,
@@ -262,25 +253,6 @@ public final class GitPackObjectResolver {
             offset += count;
         }
         return buffer.array();
-    }
-
-    private static byte[] digest(IndexedPack bytes, long length) throws IOException {
-        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
-        ByteBuffer buffer = ByteBuffer.allocate(8192);
-        long position = 0;
-        while (position < length) {
-            buffer.clear().limit((int) Math.min(buffer.capacity(), length - position));
-            int count = bytes.read(position, buffer);
-            if (count < 0) {
-                throw new EOFException("Truncated pack file during checksum calculation");
-            }
-            if (count == 0) {
-                throw new IOException("Pack file read made no progress");
-            }
-            hash.update(buffer.array(), 0, count);
-            position += count;
-        }
-        return hash.digest();
     }
 
     private static void closeFailed(AutoCloseable resource, Throwable failure) {

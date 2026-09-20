@@ -42,6 +42,21 @@ class PushCommandTest {
     Path directory;
 
     @Test
+    void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
+        try (GitStorageApi storage = new GitStorageApi()) {
+            ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
+            ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
+            byte[] response = execute(storage, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
+                    ZERO + " " + result + " " + REF + "\0report-status"));
+            assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
+            assertThat(storage.snapshotRefs().refs()).containsEntry(REF, result);
+            assertThat(storage.readObject(result, new ResolvedGitObjectRead<>(storage,
+                    (type, size, unused, input) -> input.readBytes((int) size))))
+                    .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
+        }
+    }
+
+    @Test
     void publishesAThinPackWithItsExternalBaseAndLeavesTheInputOpen() throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1, 2, 3});

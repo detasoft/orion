@@ -69,10 +69,9 @@ public final class PackTestData {
 
     public static ObjectId store(GitStorageApi storage,
                                  GitObjectType type, byte[] content) throws IOException {
-        try (IndexedPack target = ingest(pack(entry(type, content)), storage.newPack())) {
-            new GitPackObjectResolver(target, storage).complete();
-            storage.persist(target);
-        }
+        IndexedPack target = ingest(pack(entry(type, content)), storage.newPack());
+        new GitPackObjectResolver(target, storage).complete();
+        storage.persist(target);
         return objectId(type, content);
     }
 
@@ -81,10 +80,9 @@ public final class PackTestData {
             throws IOException {
         byte[] full = entry(type, base);
         ObjectId id = objectId(type, result);
-        try (IndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack())) {
-            new GitPackObjectResolver(target, storage).complete();
-            storage.persist(target);
-        }
+        IndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack());
+        new GitPackObjectResolver(target, storage).complete();
+        storage.persist(target);
         return id;
     }
 

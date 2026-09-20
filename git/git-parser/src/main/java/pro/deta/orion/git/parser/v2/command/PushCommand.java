@@ -64,14 +64,8 @@ public final class PushCommand implements GitCommand {
                 results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR, Optional.empty()));
             }
         } else {
-            try {
-                results = repository.publish(received, request.updates(),
-                        request.capabilities().has(GitCapability.ATOMIC));
-            } finally {
-                if (received.isPresent()) {
-                    received.orElseThrow().discard();
-                }
-            }
+            results = repository.publish(received, request.updates(),
+                    request.capabilities().has(GitCapability.ATOMIC));
         }
         protocolContext.writer().writePushStatus(request.capabilities(), unpacked, results);
     }

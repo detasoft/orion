@@ -41,13 +41,9 @@ class PackIngestionOutputTest {
                 assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
             }
             ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
-            try {
-                assertThat(pack.find(commit)).isPresent();
-                storage.persist(pack);
-                assertThat(storage.exists(commit)).isTrue();
-            } finally {
-                pack.discard();
-            }
+            assertThat(pack.find(commit)).isPresent();
+            storage.persist(pack);
+            assertThat(storage.exists(commit)).isTrue();
         }
     }
 

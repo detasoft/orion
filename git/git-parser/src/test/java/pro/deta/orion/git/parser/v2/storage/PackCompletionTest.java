@@ -116,11 +116,13 @@ class PackCompletionTest {
     }
 
     @Test
-    void rejectsWrongReceivedChecksums() throws Exception {
-        try (var attempt = new Attempt(pack())) {
+    void recalculatesChecksumAfterAnAcceptedPackIsChanged() throws Exception {
+        try (Attempt attempt = new Attempt(pack())) {
+            PackId received = attempt.pack.id();
             attempt.pack.write(attempt.pack.size() - 1, ByteBuffer.wrap(new byte[]{42}));
-            assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                    .isInstanceOf(IOException.class).hasMessageContaining("checksum");
+            assertThatThrownBy(attempt.pack::id).isInstanceOf(IOException.class);
+            assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete()).isEqualTo(received);
+            assertThat(Files.readAllBytes(attempt.packPath)).containsExactly(pack());
         }
     }
 

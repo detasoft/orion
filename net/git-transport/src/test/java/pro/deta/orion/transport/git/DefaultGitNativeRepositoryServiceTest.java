@@ -119,10 +119,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         RefUpdate feature = prepared.refUpdates().getFirst();
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        try (IndexedPack pack = ingest(repository, prepared.pack())) {
-            results = context.publish(Optional.of(pack), List.of(
-                    RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
-        }
+        IndexedPack pack = ingest(repository, prepared.pack());
+        results = context.publish(Optional.of(pack), List.of(
+                RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
         assertThat(results).extracting(RefUpdateResult::status)
                 .containsExactly(EXPECTED_OLD_MISMATCH, atomic ? ATOMIC_ABORTED : APPLIED);
         assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
@@ -140,10 +139,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        try (IndexedPack pack = ingest(repository, update.pack())) {
-            results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
-                    "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
-        }
+        IndexedPack pack = ingest(repository, update.pack());
+        results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
+                "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
                 .valueOrFailure("repository");
@@ -159,9 +157,8 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        try (IndexedPack pack = ingest(repository, update.pack())) {
-            results = context.publish(Optional.of(pack), update.refUpdates(), true);
-        }
+        IndexedPack pack = ingest(repository, update.pack());
+        results = context.publish(Optional.of(pack), update.refUpdates(), true);
         assertThat(publishCalls).isEqualTo(1);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
         assertThat(repository.refs()).isEmpty();
@@ -200,10 +197,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitFileUpdate next = repository.prepareFileUpdate("main", Map.of("a", new byte[]{2}),
                 "next", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        try (IndexedPack pack = ingest(repository, next.pack())) {
-            assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
-                    .extracting(RefUpdateResult::status).containsExactly(APPLIED);
-        }
+        IndexedPack pack = ingest(repository, next.pack());
+        assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
+                .extracting(RefUpdateResult::status).containsExactly(APPLIED);
         assertThat(calls).contains("update demo refs/heads/main false");
         calls.clear();
         assertThat(context.publish(Optional.empty(), List.of(RefUpdate.fromWire("refs/heads/main",

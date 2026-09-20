@@ -203,11 +203,7 @@ class NativeBootstrapGitPusherTest {
     private static Optional<PackId> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             IndexedPack pack = repository.ingest(input);
-            try {
-                return Optional.of(repository.storage().persist(pack));
-            } finally {
-                pack.discard();
-            }
+            return Optional.of(repository.storage().persist(pack));
         }
     }
 }
