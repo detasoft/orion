@@ -23,15 +23,12 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.render.RenderedCommand;
-import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
-import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
-import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.internal.OrionExecutor;
@@ -65,7 +62,7 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionExecutor orionExecutor;
     private final CommandDispatcher commandDispatcher;
     private final PlainCommandRenderer commandRenderer;
-    private final GitNativeRepositoryService repositoryService;
+    private final DefaultGitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final OrionAccessControlService accessControlService;
 
@@ -74,7 +71,7 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             CommandDispatcher commandDispatcher,
             PlainCommandRenderer commandRenderer,
-            GitNativeRepositoryService repositoryService,
+            DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
             OrionAccessControlService accessControlService) {
         this.orionExecutor = orionExecutor;
@@ -286,11 +283,9 @@ public class SshCommandFactory implements CommandFactory {
                             gitProtocol(environment));
                     try {
                         new GitBlockingWireSession(
-                                repositoryService,
-                                new AuthenticatedRepositoryAccessHook(
-                                        securityContext),
+                                data -> repositoryService.open(data,
+                                        new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase()),
                                 GitWireConfiguration.allSupported(),
-                                packfileUriSourceFactory(),
                                 bootstrap.wire())
                                 .serveCommand(bootstrap.data());
                     } catch (Exception error) {
@@ -393,22 +388,13 @@ public class SshCommandFactory implements CommandFactory {
         return environment.getEnv().get("GIT_PROTOCOL");
     }
 
-    private NativePackfileUriSourceFactory packfileUriSourceFactory() {
+    private Optional<String> packfileUriBase() {
         GitPackfileUriConfig packfileUri = gitTransportConfig == null
-                ? null
-                : gitTransportConfig.getPackfileUri();
-        if (packfileUri == null
-                || !packfileUri.isConfigured()
-                || packfileUri.isAuto()) {
-            return NativePackfileUriSourceFactory.NONE;
+                ? null : gitTransportConfig.getPackfileUri();
+        if (packfileUri == null || !packfileUri.isConfigured() || packfileUri.isAuto()) {
+            return Optional.empty();
         }
-        String baseUri = packfileUri.getBaseUri();
-        return (data, repository) -> new PublishedPackfileUriSource(
-                repository,
-                packId -> NativePackfileUriBuilder.packUri(
-                        baseUri,
-                        data.repositoryPath(),
-                        packId));
+        return Optional.of(packfileUri.getBaseUri());
     }
 
 }

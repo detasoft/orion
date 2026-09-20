@@ -6,8 +6,6 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
-import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.command.SshCommandModule;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
@@ -37,10 +35,4 @@ public class OrionTransportModule {
         return transport.getSsh();
     }
 
-    @Provides
-    @Singleton
-    static GitNativeRepositoryService gitNativeRepositoryService(
-            DefaultGitNativeRepositoryService service) {
-        return service;
-    }
 }

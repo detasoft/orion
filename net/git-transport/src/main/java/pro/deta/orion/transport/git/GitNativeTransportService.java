@@ -5,10 +5,8 @@ import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
-import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -31,7 +29,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     private static final long STOP_WAIT_MILLIS = 500;
 
     private final GitTransportConfig config;
-    private final GitNativeRepositoryService repositoryService;
+    private final DefaultGitNativeRepositoryService repositoryService;
     private final Object lifecycleLock = new Object();
     private final Map<Socket, Thread> activeConnections = new LinkedHashMap<>();
 
@@ -41,7 +39,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     @Inject
     public GitNativeTransportService(
             GitTransportConfig config,
-            GitNativeRepositoryService repositoryService) {
+            DefaultGitNativeRepositoryService repositoryService) {
         this.config = config;
         this.repositoryService = repositoryService;
     }
@@ -253,10 +251,8 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                 new OutputStreamBufferedByteOutput(socket.getOutputStream());
         GitWireBootstrap bootstrap = GitWireBootstrap.nativeDaemon(input, output);
         new GitBlockingWireSession(
-                repositoryService,
-                GitNativeRepositoryAccessHook.ALLOW_ALL,
+                data -> repositoryService.open(data, GitNativeRepositoryAccessHook.ALLOW_ALL),
                 GitWireConfiguration.allSupported(),
-                NativePackfileUriSourceFactory.NONE,
                 bootstrap.wire())
                 .serveCommand(bootstrap.data());
     }

@@ -5,19 +5,15 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.NonNull;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
-import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
-import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
@@ -63,12 +59,12 @@ public class OrionGitRoute implements OrionHttpRoute {
             OrionGitRoute::allowedMethods,
             METHOD_REJECTION_HEADERS);
 
-    private final GitNativeRepositoryService repositoryService;
+    private final DefaultGitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
 
     @Inject
     public OrionGitRoute(
-            GitNativeRepositoryService repositoryService,
+            DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this.repositoryService = Objects.requireNonNull(
                 repositoryService,
@@ -129,7 +125,8 @@ public class OrionGitRoute implements OrionHttpRoute {
             OutputStreamBufferedByteOutput output =
                     new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata));
             GitWireBootstrap bootstrap = gitWireBootstrap(req, request, input, output);
-            NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
+            Optional<String> packfileUriBase = OrionGitPackfileUriBaseResolver.resolve(
+                    req, gitTransportConfig.getPackfileUri());
             if (bootstrap.data()
                     .getProtocolVersion()
                     .filter(GitProtocolVersion.V2::equals)
@@ -137,7 +134,7 @@ public class OrionGitRoute implements OrionHttpRoute {
                 writeServiceAnnouncement(bootstrap.wire(), request.service());
             }
             SecurityContext securityContext = securityContextFrom(req);
-            session(securityContext, packfileUriSourceFactory, bootstrap.wire()).advertise(bootstrap.data());
+            session(securityContext, packfileUriBase, bootstrap.wire()).advertise(bootstrap.data());
         }
     }
 
@@ -158,9 +155,10 @@ public class OrionGitRoute implements OrionHttpRoute {
             OutputStreamBufferedByteOutput output =
                     new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata));
             GitWireBootstrap bootstrap = gitWireBootstrap(req, request, input, output);
-            NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
+            Optional<String> packfileUriBase = OrionGitPackfileUriBaseResolver.resolve(
+                    req, gitTransportConfig.getPackfileUri());
             SecurityContext securityContext = securityContextFrom(req);
-            session(securityContext, packfileUriSourceFactory, bootstrap.wire())
+            session(securityContext, packfileUriBase, bootstrap.wire())
                     .serveSmartHttpPost(bootstrap.data());
         }
     }
@@ -181,28 +179,13 @@ public class OrionGitRoute implements OrionHttpRoute {
 
     private GitBlockingWireSession session(
             SecurityContext securityContext,
-            NativePackfileUriSourceFactory packfileUriSourceFactory,
+            Optional<String> packfileUriBase,
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
-                repositoryService,
-                new AuthenticatedRepositoryAccessHook(securityContext),
+                data -> repositoryService.open(data,
+                        new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase),
                 GitWireConfiguration.allSupported(),
-                packfileUriSourceFactory,
                 wire);
-    }
-
-    private NativePackfileUriSourceFactory packfileUriSourceFactory(HttpServletRequest request) {
-        GitPackfileUriConfig packfileUri = gitTransportConfig.getPackfileUri();
-        Optional<String> baseUri = OrionGitPackfileUriBaseResolver.resolve(request, packfileUri);
-        if (baseUri.isEmpty()) {
-            return NativePackfileUriSourceFactory.NONE;
-        }
-        return (data, repository) -> new PublishedPackfileUriSource(
-                repository,
-                packId -> NativePackfileUriBuilder.packUri(
-                        baseUri.get(),
-                        data.repositoryPath(),
-                        packId));
     }
 
     private Optional<NativeHttpRequest> nativeRequest(

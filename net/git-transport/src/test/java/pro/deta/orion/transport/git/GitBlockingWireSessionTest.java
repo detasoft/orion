@@ -7,14 +7,16 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import java.util.Optional;
+import java.io.UncheckedIOException;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
-import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -34,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitBlockingWireSessionTest {
-    private static final String MAIN_ID = "1".repeat(40);
+    private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     private static final String WANT = "2".repeat(40);
     private static final String NULL_ID = "0".repeat(40);
 
@@ -42,7 +44,7 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        var prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
+        pro.deta.orion.git.nativestorage.NativeGitFileUpdate prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
@@ -62,22 +64,27 @@ class GitBlockingWireSessionTest {
             }
 
             @Override
-            public List<RefUpdateResult> publish(NativeGitRepository selected, PackIngestionResult.Complete received,
-                    List<LooseRefStore.Update> updates, boolean atomic) {
-                assertThat(received.packBytes()).isEqualTo(original);
+            public List<RefUpdateResult> publish(NativeGitRepository selected, Optional<PackId> received,
+                    List<RefUpdate> updates, boolean atomic) {
+                try (IndexedPack pack = selected.storage().openPack(received.orElseThrow()).orElseThrow();
+                     BufferedByteInputV2 raw = pack.input()) {
+                    assertThat(raw.newInputStream().readAllBytes()).isEqualTo(original);
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                }
                 return NativeGitRepositoryProvider.super.publish(selected, received, updates, atomic);
             }
         };
         try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
-            input.feed(legacyReceiveRequest(NULL_ID + " " + prepared.refUpdates().getFirst().newId()
+            input.feed(legacyReceiveRequest(NULL_ID + " " + prepared.refUpdates().getFirst().newId().orElseThrow().toHex()
                     + " refs/heads/main\0report-status\n"));
             input.feed(original);
 
             session(input, output, provider).serveSmartHttpPost(receiveV1Request());
 
             assertThat(output.ascii()).contains("ok refs/heads/main\n");
-            assertThat(repository.refs()).containsEntry("refs/heads/main", prepared.refUpdates().getFirst().newId());
+            assertThat(repository.refs()).containsEntry("refs/heads/main", prepared.refUpdates().getFirst().newId().orElseThrow().toHex());
         }
     }
 
@@ -1003,18 +1010,19 @@ class GitBlockingWireSessionTest {
                 ? new GitBlockingWireTransport(output)
                 : new GitBlockingWireTransport(new BufferedByteInputV2(input), output);
         return new GitBlockingWireSession(
-                new DefaultGitNativeRepositoryService(provider),
-                GitNativeRepositoryAccessHook.ALLOW_ALL,
+                data -> new DefaultGitNativeRepositoryService(provider).open(
+                        data, GitNativeRepositoryAccessHook.ALLOW_ALL),
                 GitWireConfiguration.allSupported(),
-                NativePackfileUriSourceFactory.NONE,
                 wire);
     }
 
     private static InMemoryNativeGitRepositoryProvider providerWithMainRef() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("project").valueOrFailure("repository")
-                .updateRef("refs/heads/main", "0".repeat(40), MAIN_ID);
+        NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
+        GitObjectId id = repository.writeObject(ObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
+        assertThat(id.value()).isEqualTo(MAIN_ID);
+        repository.updateRef("refs/heads/main", "0".repeat(40), id.value());
         return provider;
     }
 
