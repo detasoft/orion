@@ -350,6 +350,42 @@ class SshCommandFactoryTest {
     }
 
     @Test
+    void ordinaryAuthenticatedSessionCanCompleteEnrollmentAndRepeatIt() throws Exception {
+        SshCommandFactory factory = factory(request -> {
+            fail("Enrollment must not enter the ordinary command dispatcher");
+            return null;
+        });
+        TestChannelSession channel = channel(true);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ByteArrayOutputStream error = new ByteArrayOutputStream();
+            ExitOutcome result = run(factory, channel, "enroll-key", output, error);
+
+            assertEquals(0, result.code());
+            assertEquals("SSH authentication completed. Reconnect with an enrolled key.\n",
+                    output.toString(StandardCharsets.UTF_8));
+            assertEquals("", error.toString(StandardCharsets.UTF_8));
+            assertFalse(RootSshKeyEnrollmentSession.isRestricted(channel.getSession()));
+        }
+    }
+
+    @Test
+    void enrollmentWithoutAuthenticatedIdentityFails() throws Exception {
+        SshCommandFactory factory = factory(request -> {
+            fail("Enrollment must not enter the ordinary command dispatcher");
+            return null;
+        });
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream error = new ByteArrayOutputStream();
+
+        ExitOutcome result = run(factory, channel(false), "enroll-key", output, error);
+
+        assertEquals(1, result.code());
+        assertEquals("", output.toString(StandardCharsets.UTF_8));
+        assertEquals("SSH authentication required.\n", error.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
     void recoverySessionRejectsNormalCommandsAndCompletesExactEnrollmentCommand() throws Exception {
         AtomicInteger dispatches = new AtomicInteger();
         AtomicInteger enrollments = new AtomicInteger();

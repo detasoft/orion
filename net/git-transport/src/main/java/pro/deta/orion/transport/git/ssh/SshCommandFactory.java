@@ -85,8 +85,9 @@ public class SshCommandFactory implements CommandFactory {
 
     @Override
     public Command createCommand(ChannelSession channelSession, String commandLine) throws IOException {
-        if (RootSshKeyEnrollmentSession.isRestricted(channelSession.getSession())) {
-            return new RootEnrollmentCommand(ENROLL_KEY.equals(commandLine));
+        if (ENROLL_KEY.equals(commandLine)
+                || RootSshKeyEnrollmentSession.isRestricted(channelSession.getSession())) {
+            return new SshKeyEnrollmentCommand(ENROLL_KEY.equals(commandLine));
         }
         if (commandLine.startsWith("git-")) {
             return new GitSshCommand(commandLine);
@@ -95,7 +96,7 @@ public class SshCommandFactory implements CommandFactory {
     }
 
     @RequiredArgsConstructor
-    private final class RootEnrollmentCommand extends CloseOnDestroyCommand {
+    private final class SshKeyEnrollmentCommand extends CloseOnDestroyCommand {
         private final boolean enrollmentRequested;
 
         @Override
@@ -108,6 +109,14 @@ public class SshCommandFactory implements CommandFactory {
         }
 
         private void execute(ChannelSession channel) {
+            if (!RootSshKeyEnrollmentSession.isRestricted(channel.getSession())) {
+                if (channel.getSession().getAttribute(SSH_AUTHENTICATED_USER) == null) {
+                    finish(1, "SSH authentication required.\n", errorStream);
+                } else {
+                    finish(0, "SSH authentication completed. Reconnect with an enrolled key.\n", outputStream);
+                }
+                return;
+            }
             if (!enrollmentRequested || accessControlService == null) {
                 finish(1, "Root recovery permits only enroll-key.\n", errorStream);
                 return;
