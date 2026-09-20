@@ -90,6 +90,41 @@ class InteractiveTerminalTest {
     }
 
     @Test
+    void resizeRedrawsIdleInputWithoutTruncatingTheSubmittedCommand() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        List<String> submitted = new ArrayList<>();
+        InteractiveTerminal terminal = terminal(request -> {
+            submitted.add(request.commandLine());
+            return new CommandResult.Message("done");
+        }, directExecutor(), output, tree());
+        ChunkQueueInput input = new ChunkQueueInput();
+        CountDownLatch typed = new CountDownLatch(1);
+        terminal.onInputChunkConsumed(typed::countDown);
+        AtomicInteger exit = new AtomicInteger(-1);
+        Thread reader = Thread.ofVirtual().start(() -> exit.set(terminal.run(input)));
+        try {
+            String command = "x".repeat(100);
+            input.send(command.getBytes(StandardCharsets.UTF_8));
+            assertThat(typed.await(5, TimeUnit.SECONDS)).isTrue();
+            output.reset();
+            terminal.resize(12);
+            assertThat(output.toString(StandardCharsets.UTF_8))
+                    .isEqualTo("\r" + " ".repeat(11) + "\r[ali~xxxxx");
+            CountDownLatch entered = new CountDownLatch(1);
+            terminal.onInputChunkConsumed(entered::countDown);
+            input.send(new byte[]{'\r'});
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitIdle(terminal);
+            assertThat(submitted).containsExactly(command);
+        } finally {
+            terminal.close();
+            terminal.resize(30);
+            reader.join(TimeUnit.SECONDS.toMillis(5));
+            assertThat(exit.get()).isZero();
+        }
+    }
+
+    @Test
     void idleCtrlCClearsTheLineBeforeTheNextCommand() {
         List<String> lines = new ArrayList<>();
         ByteArrayOutputStream output = new ByteArrayOutputStream();

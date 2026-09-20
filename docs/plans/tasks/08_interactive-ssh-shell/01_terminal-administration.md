@@ -1,7 +1,6 @@
 # Fix Terminal Interaction and Add Configuration Administration
 
 Status: active
-Review: ../../../../core/command/MODULE_REVIEW.md
 
 - [ ] Fix terminal interaction and expose organization, Git proxy, and material administration.
   - Owner: codex, session terminal-admin-20260908-1639, started 2026-09-08 18:39 Europe/Amsterdam.
@@ -27,7 +26,7 @@ Review: ../../../../core/command/MODULE_REVIEW.md
 
 `InteractiveTerminal` owns one active operation, its cancellation and prompt lifecycle. `CommandNavigator`
 resolves the authorized command graph. `TerminalDisplay` owns serialized output. Reuse these owners for
-the three correctness findings in `core/command/MODULE_REVIEW.md`; do not add a second operation runner.
+the terminal interaction requirements below; do not add a second operation runner.
 
 `OrionDocument` is the immutable versioned configuration. `OrionAccessControlServiceImpl` already loads,
 validates, saves and activates it through `AccessControlStorage`, publishing `OrionDesiredState`. Reuse

@@ -40,7 +40,6 @@ public final class InteractiveTerminal implements AutoCloseable {
     private final TerminalDisplay display;
     private final TerminalCommandRenderer renderer = new TerminalCommandRenderer();
     private final TerminalLineEditor editor = new TerminalLineEditor(HISTORY_LIMIT, LINE_LIMIT);
-    private final AtomicInteger columns;
     private final AtomicReference<CommandPath> currentPath = new AtomicReference<>(CommandPath.root());
     private final AtomicReference<ActiveCommand> active = new AtomicReference<>();
     private final AtomicReference<InputStream> input = new AtomicReference<>();
@@ -61,11 +60,7 @@ public final class InteractiveTerminal implements AutoCloseable {
         this.navigator = Objects.requireNonNull(navigator, "navigator");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.connection = Objects.requireNonNull(connection, "connection");
-        display = new TerminalDisplay(output, ansi);
-        if (columns < 0) {
-            throw new IllegalArgumentException("columns must not be negative");
-        }
-        this.columns = new AtomicInteger(columns);
+        display = new TerminalDisplay(output, ansi, columns);
     }
 
     public int run(InputStream source) {
@@ -96,8 +91,14 @@ public final class InteractiveTerminal implements AutoCloseable {
     }
 
     public void resize(int terminalColumns) {
-        if (terminalColumns >= 0) {
-            columns.set(terminalColumns);
+        if (terminalColumns >= 0 && !closed.get()) {
+            try {
+                display.resize(terminalColumns);
+            } catch (IOException exception) {
+                if (!closed.get()) {
+                    shutdown(1);
+                }
+            }
         }
     }
 
@@ -185,7 +186,7 @@ public final class InteractiveTerminal implements AutoCloseable {
                     && navigation instanceof CommandNavigation.Located located
                     ? navigator.visibleEntries(context, located.location()) : List.of();
             return () -> {
-                write(TerminalDisplay.columns(entries, columns.get()));
+                write(TerminalDisplay.columns(entries, display.columns()));
                 prompt();
             };
         }
@@ -307,7 +308,7 @@ public final class InteractiveTerminal implements AutoCloseable {
                 boolean changed = !result.line().equals(line) || codePointCursor != cursor;
                 editor.replace(result.line(), codePointCursor);
                 if (!changed && result.candidates().size() > 1) {
-                    write("\r\n" + TerminalDisplay.columns(result.candidates(), columns.get()));
+                    write("\r\n" + TerminalDisplay.columns(result.candidates(), display.columns()));
                 }
                 redraw();
             };
@@ -349,7 +350,7 @@ public final class InteractiveTerminal implements AutoCloseable {
     }
 
     private void render(CommandResult result) {
-        RenderedCommand rendered = renderer.render(result, columns.get());
+        RenderedCommand rendered = renderer.render(result, display.columns());
         write(rendered.stdout());
         write(rendered.stderr());
     }
@@ -361,7 +362,7 @@ public final class InteractiveTerminal implements AutoCloseable {
                 connection.sessionId(),
                 connection.sourceAddress(),
                 currentPath.get(),
-                new CommandPresentation(true, display.ansi(), columns.get()),
+                new CommandPresentation(true, display.ansi(), display.columns()),
                 cancellation,
                 connection.auditMetadata());
     }
