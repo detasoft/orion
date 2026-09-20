@@ -1,35 +1,39 @@
 package pro.deta.orion.git.nativestorage;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.PackIngestor;
-import pro.deta.orion.git.nativestorage.pack.PackObjectDirectory;
-import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
-import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
-import pro.deta.orion.git.nativestorage.pack.PublishedPackManifest;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchPackBuilder;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
-import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
-import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
-import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -40,66 +44,19 @@ import java.util.function.Consumer;
 @Slf4j
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
-    private final LooseRefStore looseRefStore;
-    private final LooseObjectStore looseObjectStore;
+    private final GitStorageApi storage;
     private final String defaultHead;
-    private final PackPublicationStore packPublicationStore;
-    private final PackObjectDirectory packObjectDirectory;
-    private final CopyOnWriteArrayList<Consumer<RefUpdate>> refUpdateListeners =
-            new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<Consumer<RefUpdateResult>> refUpdateListeners = new CopyOnWriteArrayList<>();
 
-    public NativeGitRepository(
-            String name,
-            LooseRefStore looseRefStore,
-            LooseObjectStore looseObjectStore,
-            String defaultHead) {
-        this(
-                name,
-                looseRefStore,
-                looseObjectStore,
-                defaultHead,
-                PackPublicationStore.NONE,
-                PackObjectDirectory.NONE);
-    }
-
-    public NativeGitRepository(
-            String name,
-            LooseRefStore looseRefStore,
-            LooseObjectStore looseObjectStore,
-            String defaultHead,
-            PackPublicationStore packPublicationStore) {
-        this(
-                name,
-                looseRefStore,
-                looseObjectStore,
-                defaultHead,
-                packPublicationStore,
-                PackObjectDirectory.NONE);
-    }
-
-    public NativeGitRepository(
-            String name,
-            LooseRefStore looseRefStore,
-            LooseObjectStore looseObjectStore,
-            String defaultHead,
-            PackPublicationStore packPublicationStore,
-            PackObjectDirectory packObjectDirectory) {
+    public NativeGitRepository(String name, GitStorageApi storage, String defaultHead) {
         this.name = Objects.requireNonNull(name, "name");
-        this.looseRefStore = Objects.requireNonNull(
-                looseRefStore,
-                "looseRefStore");
-        this.looseObjectStore = Objects.requireNonNull(
-                looseObjectStore,
-                "looseObjectStore");
+        this.storage = Objects.requireNonNull(storage, "storage");
         this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
-        this.packPublicationStore = Objects.requireNonNull(
-                packPublicationStore,
-                "packPublicationStore");
-        this.packObjectDirectory = Objects.requireNonNull(
-                packObjectDirectory,
-                "packObjectDirectory");
     }
 
+    public GitStorageApi storage() {
+        return storage;
+    }
     public String name() {
         return name;
     }
@@ -182,237 +139,162 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public Map<String, String> refs() {
-        return looseRefStore.snapshot();
+        try {
+            Map<String, String> refs = new LinkedHashMap<>();
+            for (Map.Entry<RefId, ObjectId> ref : storage().snapshotRefs().refs().entrySet()) {
+                refs.put(ref.getKey().value(), ref.getValue().toHex());
+            }
+            return Map.copyOf(refs);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
     }
 
-    public RefUpdateResult updateRef(
-            String refName,
-            String expectedOldId,
-            String newId) {
-        RefUpdateResult result = looseRefStore.update(
-                refName,
-                expectedOldId,
-                newId);
-        notifyRefUpdate(new RefUpdate(refName, expectedOldId, newId, result));
-        return result;
+    public RefUpdateResult updateRef(String refName, String expectedOldId, String newId) {
+        return publishRefs(List.of(RefUpdate.fromWire(refName, expectedOldId, newId)), true).getFirst();
     }
 
-    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdate> listener) {
-        Consumer<RefUpdate> registered = Objects.requireNonNull(listener, "listener");
+    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdateResult> listener) {
+        Consumer<RefUpdateResult> registered = Objects.requireNonNull(listener, "listener");
         refUpdateListeners.add(registered);
         return () -> refUpdateListeners.remove(registered);
     }
 
     public GitObjectId writeObject(ObjectType type, byte[] data) {
-        return looseObjectStore.write(type, data);
+        GitObjectType objectType = GitObjectType.valueOf(type.name());
+        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
+        hash.update((objectType.name().toLowerCase(Locale.ROOT) + " " + data.length + "\0")
+                .getBytes(StandardCharsets.US_ASCII));
+        ObjectId id = new ObjectId(hash.digest(data));
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (BufferedByteInputV2 content = new BufferedByteInputV2(new ByteArrayInputStream(data));
+             PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1)) {
+            writer.writeObject(objectType, data.length, content);
+            writer.finish();
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
+                storage().persist(ingest(input));
+            }
+            return GitObjectId.of(id.toHex());
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
     }
 
     public Optional<LooseObject> readObject(GitObjectId id) {
-        Optional<LooseObject> loose = looseObjectStore.read(id);
-        if (loose.isPresent()) {
-            return loose;
+        try {
+            return storage().readObject(new ObjectId(id.value()), new ResolvedGitObjectRead<>(storage(),
+                    (type, size, base, input) -> new LooseObject(id, ObjectType.valueOf(type.name()),
+                            input.readBytes(Math.toIntExact(size)))));
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
-        return packObjectDirectory.read(id);
     }
 
-    public Optional<LooseObjectPrefix> readObjectPrefix(
-            GitObjectId id,
-            int maxDataBytes) {
-        Optional<LooseObjectPrefix> loose =
-                looseObjectStore.readPrefix(id, maxDataBytes);
-        if (loose.isPresent()) {
-            return loose;
+    public Optional<LooseObjectPrefix> readObjectPrefix(GitObjectId id, int maxDataBytes) {
+        if (maxDataBytes < 0) {
+            throw new IllegalArgumentException("Negative object prefix size");
         }
-        return packObjectDirectory.readPrefix(id, maxDataBytes);
+        try {
+            return storage().readObject(new ObjectId(id.value()), new ResolvedGitObjectRead<>(storage(),
+                    (type, size, base, input) -> new LooseObjectPrefix(id, ObjectType.valueOf(type.name()), size,
+                            input.readBytes((int) Math.min(size, maxDataBytes)))));
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    public IndexedPack ingest(BufferedByteInputV2 input) throws IOException {
+        try (PackIngestor ingestor = new PackIngestor(input, storage().newPack())) {
+            IndexedPack pack = ingestor.ingest();
+            try {
+                new GitPackObjectResolver(pack, storage()).complete();
+                return pack;
+            } catch (IOException | RuntimeException | Error failure) {
+                try {
+                    pack.discard();
+                } catch (Throwable cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        }
+    }
+
+    public List<RefUpdateResult> publishPack(byte[] bytes, List<RefUpdate> updates, boolean atomic,
+                                            GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
+        accessHook.beforeReceive(name());
+        accessHook.beforeWrite(name());
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+            PackId id = storage().persist(ingest(input));
+            return NativeGitReceivePack.complete(name(), this, updates, atomic, accessHook,
+                    valid -> publishReceivedPack(Optional.of(id), valid, atomic));
+        } catch (IOException failure) {
+            throw new GitOperationException("Cannot publish file update pack", failure);
+        }
+    }
+
+    public List<RefUpdateResult> publishReceivedPack(Optional<PackId> pack, List<RefUpdate> updates, boolean atomic) {
+        return publishRefs(updates, atomic);
+    }
+
+    public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
+        List<RefUpdateResult> results = storage().updateRefs(updates, atomic);
+        for (RefUpdateResult result : results) {
+            if (result.status() != RefUpdateResult.Status.APPLIED
+                    || result.update().expectedOld().equals(result.update().newId())) {
+                continue;
+            }
+            for (Consumer<RefUpdateResult> listener : refUpdateListeners) {
+                try {
+                    listener.accept(result);
+                } catch (RuntimeException failure) {
+                    log.error("Repository ref listener failed for {} {}", name(), result.update().ref(), failure);
+                }
+            }
+        }
+        return results;
+    }
+
+    public List<RefUpdateResult> previewRefUpdates(List<RefUpdate> updates, boolean atomic) {
+        Map<String, String> refs = refs();
+        List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        boolean failed = false;
+        for (RefUpdate update : updates) {
+            RefUpdateResult.Status status = Objects.equals(refs.get(update.ref().value()),
+                    update.expectedOld().map(ObjectId::toHex).orElse(null))
+                    ? RefUpdateResult.Status.APPLIED : RefUpdateResult.Status.EXPECTED_OLD_MISMATCH;
+            failed |= status != RefUpdateResult.Status.APPLIED;
+            results.add(new RefUpdateResult(update, status, Optional.empty()));
+        }
+        if (atomic && failed) {
+            for (int index = 0; index < results.size(); index++) {
+                if (results.get(index).status() == RefUpdateResult.Status.APPLIED) {
+                    results.set(index, new RefUpdateResult(updates.get(index),
+                            RefUpdateResult.Status.ATOMIC_ABORTED, Optional.empty()));
+                }
+            }
+        }
+        return List.copyOf(results);
+    }
+
+    public boolean hasCompleteObjectClosure(GitObjectId root) {
+        try {
+            new NativeObjectClosure(this::readObject).objectIdsFor(Set.of(root), Set.of());
+            return true;
+        } catch (GitUploadPackException failure) {
+            if (failure.kind() == GitUploadPackException.Kind.MISSING_OBJECT) {
+                return false;
+            }
+            throw failure;
+        }
     }
 
     @Override
     public void close() {
-    }
-
-    public PackIngestionSession beginPackIngestion(
-            PackIngestionLimits limits) {
-        return new PackIngestor(
-                Objects.requireNonNull(limits, "limits"),
-                this::readObject,
-                packPublicationStore);
-    }
-
-    public List<PublishedPackManifest> publishedPacks() {
-        return packPublicationStore.publishedPacks();
-    }
-
-    public Optional<PublishedPackContent> openPublishedPack(
-            String packId) {
-        return packPublicationStore.openPublishedPack(packId);
-    }
-
-    public List<RefUpdateResult> publishObjectsAndRefs(
-            LooseObjectStore quarantinedObjects,
-            List<LooseRefStore.Update> updates) {
-        return publishObjectsAndRefs(quarantinedObjects, updates, true);
-    }
-
-    public List<ReceivePackStatus> publishPack(
-            byte[] pack,
-            List<LooseRefStore.Update> updates,
-            boolean atomic,
-            GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
-        Objects.requireNonNull(pack, "pack");
-        Objects.requireNonNull(updates, "updates");
-        Objects.requireNonNull(accessHook, "accessHook");
-        accessHook.beforeReceive(name());
-        accessHook.beforeWrite(name());
-        ByteBuf input = Unpooled.wrappedBuffer(pack);
-        try (PackIngestionSession session = beginPackIngestion(
-                new PackIngestionLimits(Math.max(1, pack.length), Integer.MAX_VALUE, Integer.MAX_VALUE))) {
-            PackIngestionResult result = session.accept(input);
-            if (result instanceof PackIngestionResult.NeedInput) {
-                result = session.endOfInput();
-            }
-            if (result instanceof PackIngestionResult.Failed failed) {
-                throw new GitOperationException("Cannot ingest file update pack", failed.failure());
-            }
-            if (!(result instanceof PackIngestionResult.Complete complete)) {
-                throw new GitOperationException("Incomplete file update pack");
-            }
-            return NativeGitReceivePack.complete(
-                    name(), this, complete.quarantine(), updates, atomic, accessHook,
-                    valid -> publishReceivedPack(complete, valid, atomic));
-        } finally {
-            input.release();
-        }
-    }
-
-    public List<RefUpdateResult> publishReceivedPack(
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
-            boolean atomic) {
-        return publishObjectsAndRefs(received.quarantine(), updates, atomic);
-    }
-
-    public List<RefUpdateResult> publishObjectsAndRefs(
-            LooseObjectStore quarantinedObjects,
-            List<LooseRefStore.Update> updates,
-            boolean atomic) {
-        Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
-        Objects.requireNonNull(updates, "updates");
-        List<RefUpdateResult> results;
-        if (!atomic) {
-            results = looseRefStore.updateAllIndependently(
-                    updates,
-                    () -> looseObjectStore.putAll(quarantinedObjects));
-        } else {
-            results = looseRefStore.updateAll(
-                    updates,
-                    () -> looseObjectStore.putAll(quarantinedObjects));
-        }
-        notifyRefUpdates(updates, results, atomic);
-        return results;
-    }
-
-    public List<RefUpdateResult> previewRefUpdates(
-            List<LooseRefStore.Update> updates,
-            boolean atomic) {
-        return looseRefStore.previewUpdates(updates, atomic);
-    }
-
-    public void publishObjects(LooseObjectStore objects) {
-        looseObjectStore.putAll(Objects.requireNonNull(objects, "objects"));
-    }
-
-    private void notifyRefUpdates(
-            List<LooseRefStore.Update> updates,
-            List<RefUpdateResult> results,
-            boolean atomic) {
-        if (atomic && results.contains(RefUpdateResult.STALE)) {
-            return;
-        }
-        for (int index = 0; index < results.size(); index++) {
-            LooseRefStore.Update update = updates.get(index);
-            notifyRefUpdate(new RefUpdate(
-                    update.refName(),
-                    update.expectedOldId(),
-                    update.newId(),
-                    results.get(index)));
-        }
-    }
-
-    private void notifyRefUpdate(RefUpdate update) {
-        if (update.result() == RefUpdateResult.STALE
-                || update.result() == RefUpdateResult.NO_OP) {
-            return;
-        }
-        for (Consumer<RefUpdate> listener : refUpdateListeners) {
-            try {
-                listener.accept(update);
-            } catch (RuntimeException error) {
-                log.error(
-                        "Native repository ref-update listener failed for {} {}",
-                        name,
-                        update.refName(),
-                        error);
-            }
-        }
-    }
-
-    public boolean hasCompleteObjectClosure(
-            GitObjectId root,
-            LooseObjectStore quarantinedObjects) {
-        Objects.requireNonNull(root, "root");
-        Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
-        NativeObjectClosure closure = new NativeObjectClosure(id ->
-                quarantinedObjects.read(id).or(() -> readObject(id)));
         try {
-            closure.objectIdsFor(Set.of(root), Set.of());
-            return true;
-        } catch (GitUploadPackException error) {
-            if (error.kind() == GitUploadPackException.Kind.MISSING_OBJECT) {
-                return false;
-            }
-            throw error;
-        }
-    }
-
-    public NativePackProducer fetch(NativeFetchRequest request) {
-        return fetchResponse(request).packProducer();
-    }
-
-    public NativeFetchResponse fetchResponse(NativeFetchRequest request) {
-        return fetchResponse(request, NativePackfileUriSource.NONE);
-    }
-
-    public NativeFetchResponse fetchResponse(
-            NativeFetchRequest request,
-            NativePackfileUriSource packfileUriSource) {
-        Objects.requireNonNull(request, "request");
-        return new NativeFetchPackBuilder(
-                looseRefStore,
-                this::readObject,
-                defaultHead,
-                Objects.requireNonNull(
-                        packfileUriSource,
-                        "packfileUriSource"))
-                .build(request);
-    }
-
-    public boolean legacyUploadReady(
-            Iterable<GitObjectId> wants,
-            Iterable<GitObjectId> commonHaves) {
-        return new NativeObjectClosure(this::readObject)
-                .allRootsReachAny(wants, commonHaves);
-    }
-
-    public record RefUpdate(
-            String refName,
-            String oldObjectId,
-            String newObjectId,
-            RefUpdateResult result) {
-        public RefUpdate {
-            Objects.requireNonNull(refName, "refName");
-            Objects.requireNonNull(oldObjectId, "oldObjectId");
-            Objects.requireNonNull(newObjectId, "newObjectId");
-            Objects.requireNonNull(result, "result");
+            storage.close();
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
         }
     }
 

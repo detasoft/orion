@@ -1,11 +1,11 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import java.util.Optional;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import java.util.List;
 import java.util.Map;
@@ -56,10 +56,10 @@ public interface NativeGitRepositoryProvider {
                 .prepareFileUpdate(refName, expectedRefRevision, files, message, author);
     }
 
-    default List<ReceivePackStatus> publishPack(
+    default List<RefUpdateResult> publishPack(
             String repositoryName,
             byte[] pack,
-            List<LooseRefStore.Update> updates,
+            List<RefUpdate> updates,
             boolean atomic,
             GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
         return openForWrite(repositoryName)
@@ -69,8 +69,8 @@ public interface NativeGitRepositoryProvider {
 
     default List<RefUpdateResult> publish(
             NativeGitRepository repository,
-            PackIngestionResult.Complete received,
-            List<LooseRefStore.Update> updates,
+            Optional<PackId> received,
+            List<RefUpdate> updates,
             boolean atomic) {
         return repository.publishReceivedPack(received, updates, atomic);
     }

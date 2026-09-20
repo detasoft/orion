@@ -1,6 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
 
 import java.util.List;
 import java.util.Objects;
@@ -11,7 +11,7 @@ import java.util.Objects;
  */
 public record NativeGitFileUpdate(
         byte[] pack,
-        List<LooseRefStore.Update> refUpdates) {
+        List<RefUpdate> refUpdates) {
     public NativeGitFileUpdate {
         pack = Objects.requireNonNull(pack, "pack").clone();
         refUpdates = List.copyOf(refUpdates);

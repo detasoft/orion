@@ -1,9 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.pack.LocalPackObjectDirectory;
-import pro.deta.orion.git.nativestorage.pack.LocalPackPublicationStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -14,8 +12,6 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -90,26 +86,18 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
         return repositories.computeIfAbsent(name, ignored -> {
             Path repositoryDirectory = repositoryDirectory(name);
             RepositoryMetadata metadata = readMetadata(repositoryDirectory);
-            LooseObjectStore objectStore =
-                    new LooseObjectStore(repositoryDirectory.resolve("objects"));
-            return new NativeGitRepository(
-                    metadata.name(),
-                    new LooseRefStore(repositoryDirectory),
-                    objectStore,
-                    metadata.defaultHead(),
-                    new LocalPackPublicationStore(repositoryDirectory),
-                    new LocalPackObjectDirectory(
-                            repositoryDirectory,
-                            objectStore));
+            try {
+                return new NativeGitRepository(metadata.name(), new GitStorageApi(repositoryDirectory),
+                        metadata.defaultHead());
+            } catch (IOException failure) {
+                throw new UncheckedIOException("Cannot open repository " + name, failure);
+            }
         });
     }
 
     private void createRepository(String name) {
         Path repositoryDirectory = repositoryDirectory(name);
-        createDirectories(repositoryDirectory.resolve("objects"));
-        createDirectories(repositoryDirectory.resolve("refs"));
-        createDirectories(repositoryDirectory.resolve("packs"));
-        createDirectories(repositoryDirectory.resolve("tmp").resolve("pack-publication"));
+        createDirectories(repositoryDirectory);
         Properties properties = new Properties();
         properties.setProperty(NAME_PROPERTY, name);
         properties.setProperty(DEFAULT_HEAD_PROPERTY, DEFAULT_HEAD);
@@ -155,12 +143,8 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
     }
 
     private static String repositoryId(String repositoryName) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(repositoryName.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("SHA-256 not available", error);
-        }
+        return HexFormat.of().formatHex(GitHashAlgorithm.SHA256.newDigest()
+                .digest(repositoryName.getBytes(StandardCharsets.UTF_8)));
     }
 
     private static void createDirectories(Path path) {

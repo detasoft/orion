@@ -15,6 +15,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.git</groupId>
+            <artifactId>git-parser</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>schema</artifactId>
         </dependency>

@@ -9,7 +9,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.util.Result;
 
@@ -74,13 +74,13 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                         snapshot.files(),
                         request.message(),
                         author);
-                List<ReceivePackStatus> results = repositoryProvider.publishPack(
+                List<RefUpdateResult> results = repositoryProvider.publishPack(
                         repositoryName,
                         update.pack(),
                         update.refUpdates(),
                         true, GitNativeRepositoryAccessHook.ALLOW_ALL);
                 try {
-                    ReceivePackStatus.requireSuccess(results);
+                    GitOperationException.requireSuccess(results);
                 } catch (GitRepositoryConcurrentUpdateException conflict) {
                     throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", conflict);
                 }
@@ -133,7 +133,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName);
         NativeGitRepository.RefUpdateSubscription subscription = repository.onRefUpdate(update -> {
-            if (configurationRef.equals(update.refName())) {
+            if (configurationRef.equals(update.update().ref().value())) {
                 registered.accept("native repository " + repository.name() + " ref " + configurationRef);
             }
         });

@@ -2,87 +2,68 @@ package pro.deta.orion.git.nativestorage.receive;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 
-/**
- * Applies receive policy to validated objects and conditional ref commands for both local and wire writes.
- * The publisher retains ownership of local or upstream publication and the final old-id comparison.
- */
+import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
+
 public final class NativeGitReceivePack {
-    private static final String ZERO = "0".repeat(40);
+    private NativeGitReceivePack() {}
 
-    private NativeGitReceivePack() {
-    }
-
-    public static List<ReceivePackStatus> complete(
-            String repositoryName,
-            NativeGitRepository repository,
-            LooseObjectStore quarantine,
-            List<LooseRefStore.Update> updates,
-            boolean atomic,
-            GitNativeRepositoryAccessHook accessHook,
-            Function<List<LooseRefStore.Update>, List<RefUpdateResult>> publisher) {
+    public static List<RefUpdateResult> complete(String repositoryName, NativeGitRepository repository,
+            List<RefUpdate> updates, boolean atomic, GitNativeRepositoryAccessHook accessHook,
+            Function<List<RefUpdate>, List<RefUpdateResult>> publisher) {
         Objects.requireNonNull(repositoryName, "repositoryName");
         Objects.requireNonNull(repository, "repository");
-        Objects.requireNonNull(quarantine, "quarantine");
         updates = List.copyOf(updates);
         Objects.requireNonNull(accessHook, "accessHook");
         Objects.requireNonNull(publisher, "publisher");
-        List<ReceivePackStatus> statuses = new ArrayList<>(updates.size());
-        List<LooseRefStore.Update> validUpdates = new ArrayList<>();
-        List<Integer> validIndexes = new ArrayList<>();
-        boolean commandFailure = false;
-        NativeObjectClosure closure = new NativeObjectClosure(id ->
-                quarantine.read(id).or(() -> repository.readObject(id)));
-        for (int index = 0; index < updates.size(); index++) {
-            LooseRefStore.Update update = updates.get(index);
-            if (!ZERO.equals(update.newId())
-                    && !repository.hasCompleteObjectClosure(GitObjectId.of(update.newId()), quarantine)) {
-                statuses.add(new ReceivePackStatus(update.refName(), false, "missing-necessary-objects"));
-                commandFailure = true;
+        List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        List<RefUpdate> valid = new ArrayList<>();
+        NativeObjectClosure closure = new NativeObjectClosure(repository::readObject);
+        for (RefUpdate update : updates) {
+            if (update.newId().isPresent() && !repository.hasCompleteObjectClosure(
+                    GitObjectId.of(update.newId().orElseThrow().toHex()))) {
+                results.add(new RefUpdateResult(update, OBJECT_NOT_FOUND, Optional.of("missing necessary objects")));
                 continue;
             }
-            boolean force = !ZERO.equals(update.expectedOldId()) && !ZERO.equals(update.newId())
-                    && !update.expectedOldId().equals(update.newId())
-                    && !closure.isAncestor(GitObjectId.of(update.expectedOldId()), GitObjectId.of(update.newId()));
+            boolean force = update.expectedOld().isPresent() && update.newId().isPresent()
+                    && !update.expectedOld().equals(update.newId())
+                    && !closure.isAncestor(GitObjectId.of(update.expectedOld().orElseThrow().toHex()),
+                            GitObjectId.of(update.newId().orElseThrow().toHex()));
             try {
-                accessHook.beforeUpdate(repositoryName, update.refName(), force);
-            } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
-                statuses.add(new ReceivePackStatus(update.refName(), false, "ACCESS_DENIED"));
-                commandFailure = true;
-                continue;
+                accessHook.beforeUpdate(repositoryName, update.ref().value(), force);
+                valid.add(update);
+                results.add(new RefUpdateResult(update, APPLIED, Optional.empty()));
+            } catch (GitNativeRepositoryAccessHook.AccessDeniedException failure) {
+                results.add(new RefUpdateResult(update, REJECTED, Optional.of("ACCESS_DENIED")));
             }
-            statuses.add(null);
-            validIndexes.add(index);
-            validUpdates.add(update);
         }
-        if (atomic && commandFailure) {
-            for (int index : validIndexes) {
-                statuses.set(index, new ReceivePackStatus(updates.get(index).refName(), false, "atomic-push-failure"));
+        if (atomic && valid.size() != updates.size()) {
+            for (int index = 0; index < results.size(); index++) {
+                if (results.get(index).status() == APPLIED) {
+                    results.set(index, new RefUpdateResult(updates.get(index), ATOMIC_ABORTED, Optional.empty()));
+                }
             }
-            return List.copyOf(statuses);
+            return List.copyOf(results);
         }
-        List<RefUpdateResult> results = publisher.apply(List.copyOf(validUpdates));
-        if (results.size() != validUpdates.size()) {
+        List<RefUpdateResult> published = publisher.apply(List.copyOf(valid));
+        if (published.size() != valid.size()) {
             throw new IllegalStateException("Ref publication result count does not match commands");
         }
-        boolean atomicRefFailure = atomic && results.contains(RefUpdateResult.STALE);
-        for (int resultIndex = 0; resultIndex < results.size(); resultIndex++) {
-            int commandIndex = validIndexes.get(resultIndex);
-            RefUpdateResult result = results.get(resultIndex);
-            statuses.set(commandIndex, new ReceivePackStatus(
-                    updates.get(commandIndex).refName(),
-                    !atomicRefFailure && result != RefUpdateResult.STALE,
-                    result == RefUpdateResult.STALE ? "stale" : atomicRefFailure ? "atomic-push-failure" : ""));
+        int publishedIndex = 0;
+        for (int index = 0; index < results.size(); index++) {
+            if (results.get(index).status() == APPLIED) {
+                results.set(index, published.get(publishedIndex++));
+            }
         }
-        return List.copyOf(statuses);
+        return List.copyOf(results);
     }
 }

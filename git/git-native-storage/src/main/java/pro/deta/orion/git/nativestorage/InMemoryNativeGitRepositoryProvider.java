@@ -1,7 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -44,13 +43,13 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
         String name = requireName(repositoryName);
         NativeGitRepository repository = new NativeGitRepository(
                 name,
-                new LooseRefStore(),
-                new LooseObjectStore(),
+                new GitStorageApi(),
                 DEFAULT_HEAD);
         NativeGitRepository previous = repositories.putIfAbsent(
                 name,
                 repository);
         if (previous != null) {
+            repository.close();
             return new Result.Failure<>(
                     Result.FailureCode.FILE_ALREADY_EXISTS,
                     "Native repository already exists: " + name);

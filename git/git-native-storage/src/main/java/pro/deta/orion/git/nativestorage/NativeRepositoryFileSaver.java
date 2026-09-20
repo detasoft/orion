@@ -1,27 +1,30 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
-import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
-import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.net.io.BufferedByteInputV2;
+import java.io.ByteArrayInputStream;
+import java.security.MessageDigest;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HexFormat;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeMap;
 
 final class NativeRepositoryFileSaver {
@@ -52,11 +55,11 @@ final class NativeRepositoryFileSaver {
     }
 
     private void publish(NativeGitFileUpdate update) throws GitOperationException {
-        List<ReceivePackStatus> results = repository.publishPack(
+        List<RefUpdateResult> results = repository.publishPack(
                 update.pack(),
                 update.refUpdates(),
                 true, GitNativeRepositoryAccessHook.ALLOW_ALL);
-        ReceivePackStatus.requireSuccess(results);
+        GitOperationException.requireSuccess(results);
     }
 
     NativeGitFileUpdate prepareFiles(
@@ -101,8 +104,7 @@ final class NativeRepositoryFileSaver {
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
         Objects.requireNonNull(files, "files");
-        LooseObjectStore preparedObjects = new LooseObjectStore();
-        Set<GitObjectId> preparedIds = new LinkedHashSet<>();
+        Map<GitObjectId, LooseObject> preparedObjects = new LinkedHashMap<>();
         String branchRefName = branchRefName(branch);
         TreeMap<String, GitObjectId> treeEntries = new TreeMap<>();
         if (parent.isPresent()) {
@@ -111,46 +113,54 @@ final class NativeRepositoryFileSaver {
 
         for (Map.Entry<String, byte[]> entry : files.entrySet()) {
             String path = gitPath(entry.getKey());
-            GitObjectId blobId = preparedObjects.write(ObjectType.BLOB, entry.getValue());
-            preparedIds.add(blobId);
+            GitObjectId blobId = writeObject(preparedObjects, ObjectType.BLOB, entry.getValue());
             treeEntries.put(path, blobId);
         }
 
-        GitObjectId treeId = writeTree("", treeEntries, preparedObjects, preparedIds);
+        GitObjectId treeId = writeTree("", treeEntries, preparedObjects);
         GitObjectId commitId = writeCommit(
                 treeId,
                 parent.orElse(null),
                 message,
                 author,
                 preparedObjects);
-        preparedIds.add(commitId);
         String expectedOldId = parent.map(GitObjectId::value).orElse(NULL_ID);
-        List<LooseRefStore.Update> updates = new java.util.ArrayList<>();
-        updates.add(new LooseRefStore.Update(branchRefName, expectedOldId, commitId.value()));
+        List<RefUpdate> updates = new java.util.ArrayList<>();
+        updates.add(RefUpdate.fromWire(branchRefName, expectedOldId, commitId.value()));
         if (initializeDefaultHead
                 && !repository.refs().containsKey(repository.defaultHead())
                 && !repository.defaultHead().equals(branchRefName)) {
-            updates.add(new LooseRefStore.Update(
+            updates.add(RefUpdate.fromWire(
                     repository.defaultHead(),
                     NULL_ID,
                     commitId.value()));
         }
-        return new NativeGitFileUpdate(buildPack(preparedObjects, preparedIds), updates);
+        return new NativeGitFileUpdate(buildPack(preparedObjects), updates);
     }
 
-    private static byte[] buildPack(
-            LooseObjectStore preparedObjects,
-            Set<GitObjectId> objectIds) throws GitOperationException {
+    private static byte[] buildPack(Map<GitObjectId, LooseObject> objects) throws GitOperationException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        try (NativePackProducer producer = new NoDeltaPackBuilder().producer(preparedObjects, objectIds)) {
-            var output = new OutputStreamBufferedByteOutput(bytes);
-            while (producer.produce(output) == NativePackProducer.Result.MORE) {
-                // Write the complete pack before handing ownership to the prepared update.
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), objects.size())) {
+            for (LooseObject object : objects.values()) {
+                byte[] data = object.data();
+                try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(data))) {
+                    writer.writeObject(GitObjectType.valueOf(object.type().name()), data.length, input);
+                }
             }
+            writer.finish();
             return bytes.toByteArray();
-        } catch (IOException error) {
-            throw new GitOperationException("Cannot build file update pack", error);
+        } catch (IOException failure) {
+            throw new GitOperationException("Cannot build file update pack", failure);
         }
+    }
+
+    private static GitObjectId writeObject(Map<GitObjectId, LooseObject> objects, ObjectType type, byte[] content) {
+        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
+        hash.update((type.name().toLowerCase(Locale.ROOT) + " " + content.length + "\0")
+                .getBytes(StandardCharsets.US_ASCII));
+        GitObjectId id = GitObjectId.of(HexFormat.of().formatHex(hash.digest(content)));
+        objects.put(id, new LooseObject(id, type, content));
+        return id;
     }
 
     private Optional<GitObjectId> resolveBranch(String branch) {
@@ -210,8 +220,7 @@ final class NativeRepositoryFileSaver {
     private GitObjectId writeTree(
             String prefix,
             TreeMap<String, GitObjectId> entries,
-            LooseObjectStore preparedObjects,
-            Set<GitObjectId> preparedIds) {
+            Map<GitObjectId, LooseObject> preparedObjects) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         String previousDirectory = null;
         for (Map.Entry<String, GitObjectId> entry : entries.tailMap(prefix).entrySet()) {
@@ -230,16 +239,14 @@ final class NativeRepositoryFileSaver {
                     GitObjectId treeId = writeTree(
                             prefix + directory + "/",
                             entries,
-                            preparedObjects,
-                            preparedIds);
+                            preparedObjects);
                     writeTreeEntry(output, "40000", directory, treeId);
                 }
                 continue;
             }
             writeTreeEntry(output, "100644", relative, entry.getValue());
         }
-        GitObjectId treeId = preparedObjects.write(ObjectType.TREE, output.toByteArray());
-        preparedIds.add(treeId);
+        GitObjectId treeId = writeObject(preparedObjects, ObjectType.TREE, output.toByteArray());
         return treeId;
     }
 
@@ -248,7 +255,7 @@ final class NativeRepositoryFileSaver {
             GitObjectId parent,
             String message,
             GitCommitAuthor author,
-            LooseObjectStore preparedObjects) {
+            Map<GitObjectId, LooseObject> preparedObjects) {
         GitCommitAuthor commitAuthor = Objects.requireNonNullElse(author, GitCommitAuthor.EMPTY);
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
         StringBuilder data = new StringBuilder()
@@ -263,7 +270,7 @@ final class NativeRepositoryFileSaver {
                 .append('\n')
                 .append(commitMessage(message))
                 .append('\n');
-        return preparedObjects.write(
+        return writeObject(preparedObjects,
                 ObjectType.COMMIT,
                 data.toString().getBytes(StandardCharsets.UTF_8));
     }
