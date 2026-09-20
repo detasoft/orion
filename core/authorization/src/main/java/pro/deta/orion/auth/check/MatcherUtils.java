@@ -12,12 +12,10 @@ import java.util.regex.Pattern;
 @Slf4j
 public class MatcherUtils {
     private final static ConcurrentHashMap<String, Pattern> patterns = new ConcurrentHashMap<>();
-    private static final String WILDCARD_SEGMENT_REGEX = "[A-Za-z0-9_-]*";
 
     public static boolean matchExpressionValue(String pattern, String askingValue) {
-        pattern = pattern.replaceAll("[^a-zA-Z0-9_\\-\\/\\*]", "_");
-        String reg = pattern.replace("*", WILDCARD_SEGMENT_REGEX);
-        Pattern p = patterns.computeIfAbsent(reg, Pattern::compile);
+        String reg = Pattern.quote(pattern).replace("*", "\\E.*\\Q");
+        Pattern p = patterns.computeIfAbsent(reg, value -> Pattern.compile(value, Pattern.DOTALL));
         synchronized (p) {
             return p.matcher(askingValue).matches();
         }

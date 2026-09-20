@@ -521,9 +521,10 @@ An active system proxy with alias `configuration` is available at
 
 Grant repository access to `proxy/system/configuration` and the required branches
 using the ordinary Git ACL rules. Push also requires write permission; force
-updates require force permission. The repository pattern `*` matches one path
-segment, so it does not grant access to this nested name. Application admin
-permission alone does not grant Git access.
+updates require force permission. Repository patterns treat every character literally
+except `*`, which matches zero or more characters, including `/`. Thus `team/*` covers `team/api.v1` and
+`team/sub/api`, while `*` grants access to every repository path, including
+`proxy/system/configuration`. Application admin permission alone does not grant Git access.
 
 Reads refresh from upstream, and a push succeeds only after upstream publication
 succeeds. Aliases remain stable across restart. The `proxy/system/` namespace is

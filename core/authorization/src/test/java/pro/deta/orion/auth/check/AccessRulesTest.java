@@ -36,7 +36,47 @@ public class AccessRulesTest {
         Assertions.assertTrue(matchExpressionValue("or*on", "orion"));
         Assertions.assertTrue(matchExpressionValue("*", "http-read-only-project"));
         Assertions.assertTrue(matchExpressionValue("team/*", "team/service-api"));
-        Assertions.assertFalse(matchExpressionValue("team/*", "team/service/api"));
+        Assertions.assertTrue(matchExpressionValue("team/*", "team/service/api"));
+    }
+
+    @Test
+    void repositoryGrantPreservesLiteralDots() {
+        SecurityContext reader = securityContext(
+                new InternalUserImpl("reader", List.of(repositoryGrant("team/api.v1"))));
+
+        assertThatCode(() -> requireRepositoryRead(reader, "team/api.v1"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireRepositoryRead(reader, "team/api_v1"))
+                .isInstanceOf(OrionSecurityException.class);
+        assertThatThrownBy(() -> requireRepositoryRead(reader, "team/apixv1"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    void repositoryWildcardIncludesNestedPathsWithoutBypassingOtherGrants() {
+        SecurityContext reader = securityContext(
+                new InternalUserImpl("reader", List.of(repositoryGrant("team/*", "main"))));
+
+        assertThatCode(() -> requireRepositoryRead(reader, "team/sub/api.v1"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> requireBranchFetch(reader, "team/sub/api.v1", "main"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireRepositoryRead(reader, "other/team/sub/api.v1"))
+                .isInstanceOf(OrionSecurityException.class);
+        assertThatThrownBy(() -> requireRepositoryWrite(reader, "team/sub/api.v1"))
+                .isInstanceOf(OrionSecurityException.class);
+        assertThatThrownBy(() -> requireBranchFetch(reader, "team/sub/api.v1", "private"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    void wildcardPreservesLiteralPartsAndMatchesZeroOrMoreCharacters() {
+        assertThat(matchExpressionValue("*", "team/sub/api.v1")).isTrue();
+        assertThat(matchExpressionValue("team/*/api.*", "team/sub/nested/api.v1")).isTrue();
+        assertThat(matchExpressionValue("team/api*", "team/api")).isTrue();
+        assertThat(matchExpressionValue("team/*/api.v1", "team/sub/api_v1")).isFalse();
+        assertThat(matchExpressionValue("team/api[1]", "team/api[1]")).isTrue();
+        assertThat(matchExpressionValue("team/api[1]", "team/api1")).isFalse();
     }
 
     @Test
