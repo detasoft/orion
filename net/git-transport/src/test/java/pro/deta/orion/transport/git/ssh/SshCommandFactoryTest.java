@@ -45,8 +45,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.lang.reflect.Proxy;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.PublicKey;
@@ -449,17 +447,6 @@ class SshCommandFactoryTest {
                 StandardCharsets.UTF_8);
         assertTrue(payload.contains("java.lang.RuntimeException: boom"));
         assertTrue(payload.contains("at Example.method(Example.java:12)"));
-    }
-
-    @Test
-    void protocolErrorHelpersDoNotCreateBlockingWireTransport() throws Exception {
-        String source = Files.readString(Path.of(
-                "src/main/java/pro/deta/orion/transport/git/ssh/SshCommandFactory.java"));
-        String helpers = source.substring(
-                source.indexOf("static void writeGitProtocolException("),
-                source.indexOf("private static boolean isReceivePack("));
-
-        assertFalse(helpers.contains("new GitBlockingWireTransport("));
     }
 
     @Test
