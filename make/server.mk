@@ -22,6 +22,7 @@ ORION_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_REPO
 ORION_CHECK_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_CHECK_REPOSITORY)
 ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_CHECK_REPOSITORY)
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
+	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
