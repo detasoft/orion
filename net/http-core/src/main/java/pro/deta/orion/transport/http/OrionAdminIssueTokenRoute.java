@@ -16,6 +16,7 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
     private static final String BASIC_PREFIX = "Basic ";
     private static final String BASIC_REALM = "orion-admin";
     private static final long DEFAULT_TOKEN_EXPIRES_IN_SECONDS = 900;
+    private static final int MAX_BODY_BYTES = 4096;
 
     private final ObjectMapper objectMapper;
     private final OrionAccessControlService accessControlService;
@@ -36,7 +37,11 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
             return basicAuthenticationRequired();
         }
 
-        AdminTokenRequest request = tokenRequest(req);
+        byte[] body = req.getInputStream().readNBytes(MAX_BODY_BYTES + 1);
+        if (body.length > MAX_BODY_BYTES) {
+            return OrionHttpResponse.text(413, "Token request body exceeds 4096 bytes");
+        }
+        AdminTokenRequest request = tokenRequest(body);
         long expiresInSeconds = request.expiresInSecondsOrDefault();
         TokenIssueResult token = accessControlService.authenticateUserAndIssueToken(
                 credentials.username(),
@@ -76,8 +81,7 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
         return new BasicCredentials(username, password);
     }
 
-    private AdminTokenRequest tokenRequest(HttpServletRequest req) throws IOException {
-        byte[] body = req.getInputStream().readAllBytes();
+    private AdminTokenRequest tokenRequest(byte[] body) throws IOException {
         if (body.length == 0) {
             return AdminTokenRequest.DEFAULT;
         }

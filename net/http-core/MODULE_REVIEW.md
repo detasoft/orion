@@ -84,38 +84,3 @@ typed replacement must follow the owning service boundaries.
 errors with incidental messages, and streaming failure behavior is ambiguous after commitment. Repair ease:
 low, because absence and typed failures cross Git service, storage and HTTP boundaries and need pre- and
 post-commit verification.
-
-## 12. Token issuance buffers an unbounded body before authenticating the caller
-
-**Problem.** POST /api/admin/token with any syntactically valid Basic credentials reads the entire request
-body before checking the password. A nonexistent user can therefore cause allocation proportional to an
-arbitrarily large, including chunked, body before JSON validation or authentication rejects the request.
-
-**Sources.** [Public route and authentication order](src/main/java/pro/deta/orion/transport/http/OrionAdminIssueTokenRoute.java#L33),
-[unbounded read](src/main/java/pro/deta/orion/transport/http/OrionAdminIssueTokenRoute.java#L79),
-[servlet installation](src/main/java/pro/deta/orion/transport/http/JettyHTTPServer.java#L128),
-[real token client](../../tests/integration-test/src/integration-test/java/pro/deta/orion/test/TestBearerTokens.java#L33),
-[runtime acceptance tests](../../tests/integration-test/src/integration-test/java/pro/deta/orion/test/RuntimeHttpAdminApiIT.java#L307),
-and [existing bounded command-body read](src/main/java/pro/deta/orion/transport/http/SessionCommandsRoute.java#L63).
-
-**Documented behavior.** The [token plan](../../docs/plans/tasks/14_application-tokens/04_oauth-authentication.md#L13)
-describes Basic-to-Bearer issuance. The request contains one optional TTL; an empty body defaults to 900 seconds.
-No large-body requirement or aggregate token-request limit was found.
-
-**Contract.** Preserve Basic authentication, empty/default and explicit TTL requests, validation and ordinary
-401 responses. Request processing must use a finite body bound; exceeding it should produce 413.
-
-**Minimal repair.** Reuse the command route's readNBytes(limit + 1) pattern with a small fixed token-body limit,
-rejecting overflow before JSON parsing and token issuance. Exercise empty/normal bodies and oversized input
-without Content-Length, checking bounded consumption and absence of token issuance.
-
-**Alternatives and consequences.** Content-Length checks alone miss chunked input. Streaming directly to Jackson
-does not establish an aggregate byte limit. Preliminary authentication adds an unnecessary service interaction
-and leaves authenticated input unbounded. A route-local cap needs no new configuration, service or API;
-only oversized requests change behavior.
-
-**Confidence.** High from the production call order; no load test was run. External proxy limits were not
-established and do not bound Orion's directly exposed connector.
-
-**Priority signals.** Importance: high, because valid credentials are unnecessary and request size controls
-heap consumption. Repair ease: high, because the existing bounded-read mechanism is independently testable.

@@ -182,6 +182,11 @@ The command fails closed when no expected release key fingerprint is supplied.
 
 ## Admin API
 
+`POST /api/admin/token` validates the Basic header syntax, then accepts at most
+4096 bytes of request body. Larger bodies receive HTTP 413 before JSON parsing
+or credential verification, including when Content-Length is absent. An empty
+body uses the default token TTL.
+
 Most `/api/admin/*` routes require a bearer token from an application admin
 user. For local development, issue a token through the SSH helper using the
 client's normal SSH configuration:
