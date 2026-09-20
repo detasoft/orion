@@ -5,6 +5,7 @@ import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
+import pro.deta.orion.command.render.StructuredValueEscaper;
 
 @Slf4j
 @Singleton
@@ -18,7 +19,7 @@ public final class Slf4jCommandAuditSink implements CommandAuditSink {
     }
 
     static String format(CommandAuditRecord record) {
-        return "Orion command audit user=" + record.userId()
+        return StructuredValueEscaper.escape("Orion command audit user=" + record.userId()
                 + " request=" + record.requestId()
                 + " session=" + record.sessionId()
                 + " source=" + record.sourceAddress()
@@ -27,6 +28,6 @@ public final class Slf4jCommandAuditSink implements CommandAuditSink {
                 + " parameters=" + record.parameters()
                 + " result=" + record.resultKind() + "/" + record.resultCode()
                 + " durationNanos=" + record.durationNanos()
-                + " metadata=" + record.auditMetadata();
+                + " metadata=" + record.auditMetadata());
     }
 }

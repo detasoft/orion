@@ -1,35 +1,5 @@
 # Module Review: net/git-transport — SSH administration
 
-## 2. Audit fields can inject control characters into log framing
-
-**Problem.** An authenticated exec command such as `/auth/key rm 'SHA256:bogus<LF>Orion command audit user=root ...'`,
-with an actual quoted newline, reaches audit formatting with that newline intact, even if execution rejects
-the fingerprint. Concatenating the parameter map inserts attacker-controlled physical lines into the message.
-
-**Sources.** [Unescaped formatting](src/main/java/pro/deta/orion/transport/git/command/Slf4jCommandAuditSink.java#L20),
-[production audit wiring](src/main/java/pro/deta/orion/transport/git/command/SshCommandModule.java#L89),
-[quoted characters](../../core/command/src/main/java/pro/deta/orion/command/CommandLineParser.java#L181),
-[audit parameter extraction](../../core/command/src/main/java/pro/deta/orion/command/DefaultCommandDispatcher.java#L55),
-and [redaction-only sink test](src/test/java/pro/deta/orion/transport/git/command/Slf4jCommandAuditSinkTest.java#L13).
-
-**Documented behavior.** [The SSH plan](../../docs/plans/tasks/08_interactive-ssh-shell/TASK.md) requires command
-and credential auditing with sensitive-value redaction; exact serialization is not specified.
-
-**Contract.** Untrusted field values must remain distinguishable from audit record framing. Preserve existing
-redaction and record content; downstream collector behavior is not assumed by this finding.
-
-**Minimal repair.** Escape control characters in untrusted fields, including map keys/values, at the existing
-sink boundary. Reuse existing escaping/serialization facilities. Test LF, CR and other controls alongside
-redaction through observable formatted output.
-
-**Alternatives and consequences.** Parser restrictions remove valid argument data and miss other fields.
-Structured serialization is valid but changes log format more broadly than local escaping. No new audit
-service is needed; sensitive values must be removed before either serialization approach.
-
-**Confidence.** High in raw control characters reaching the message; downstream rendering was not inspected.
-
-**Priority signals.** Importance: medium for audit integrity. Repair ease: high through local formatting.
-
 ## 3. An SSH adapter test asserts production source text instead of behavior
 
 **Problem.** protocolErrorHelpersDoNotCreateBlockingWireTransport reads SshCommandFactory.java, slices by method
