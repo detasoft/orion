@@ -7,6 +7,8 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
@@ -15,16 +17,10 @@ import java.util.Set;
 public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
     private final GitStorageApi storage;
     private final GitObjectRead<R> consumer;
-    private final Set<ObjectId> activeBases;
 
     public ResolvedGitObjectRead(GitStorageApi storage, GitObjectRead<R> consumer) {
-        this(storage, consumer, null);
-    }
-
-    private ResolvedGitObjectRead(GitStorageApi storage, GitObjectRead<R> consumer, Set<ObjectId> activeBases) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.consumer = Objects.requireNonNull(consumer, "consumer");
-        this.activeBases = activeBases;
     }
 
     @Override
@@ -37,26 +33,57 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
             return consumer.read(type, size, Optional.empty(), content);
         }
         ObjectId id = baseId.orElseThrow(() -> new IOException("REF_DELTA has no base ObjectId"));
-        Set<ObjectId> path = activeBases == null ? new HashSet<>() : activeBases;
-        if (!path.add(id)) {
-            throw new IOException("Cyclic delta base: " + id.toHex());
-        }
-        Base base;
-        try {
-            ResolvedGitObjectRead<Base> baseReader = new ResolvedGitObjectRead<>(storage,
-                    (baseType, baseSize, unused, input) -> {
-                if (baseSize > Integer.MAX_VALUE - 8) {
-                    throw new IOException("Delta base is too large for in-memory resolution");
+        return readDelta(content, readBase(id), consumer);
+    }
+
+    private Base readBase(ObjectId id) throws IOException {
+        Set<ObjectId> path = new HashSet<>();
+        Deque<ObjectId> deltas = new ArrayDeque<>();
+        while (true) {
+            if (!path.add(id)) {
+                throw new IOException("Cyclic delta base: " + id.toHex());
+            }
+            Optional<ObjectId> parent = readStored(id, (type, size, baseId, input) -> {
+                if (type == GitObjectType.REF_DELTA) {
+                    return Optional.of(baseId.orElseThrow(() -> new IOException("REF_DELTA has no base ObjectId")));
                 }
-                return new Base(baseType, input.readBytes((int) baseSize));
-            }, path);
-            base = storage.readObject(id, baseReader)
-                    .orElseThrow(() -> new IOException("Missing delta base: " + id.toHex()));
-        } finally {
-            path.remove(id);
+                if (type == GitObjectType.OFS_DELTA) {
+                    throw new IllegalStateException("not yet supported");
+                }
+                return Optional.empty();
+            });
+            if (parent.isEmpty()) {
+                break;
+            }
+            deltas.push(id);
+            id = parent.orElseThrow();
         }
+        Base base = readStored(id, new ContentGitObjectRead<>(ResolvedGitObjectRead::readBytes));
+        while (!deltas.isEmpty()) {
+            Base previous = base;
+            base = readStored(deltas.pop(), new ContentGitObjectRead<>((type, size, unused, input) ->
+                    readDelta(input, previous, ResolvedGitObjectRead::readBytes)));
+        }
+        return base;
+    }
+
+    private <T> T readStored(ObjectId id, GitObjectRead<T> reader) throws IOException {
+        return storage.readObject(id, reader)
+                .orElseThrow(() -> new IOException("Missing delta base: " + id.toHex()));
+    }
+
+    private static Base readBytes(GitObjectType type, long size, Optional<ObjectId> unused,
+                                  BufferedByteInputV2 input) throws IOException {
+        if (size > Integer.MAX_VALUE - 8) {
+            throw new IOException("Delta base is too large for in-memory resolution");
+        }
+        return new Base(type, input.readBytes((int) size));
+    }
+
+    private static <T> T readDelta(BufferedByteInputV2 content, Base base, GitObjectRead<T> consumer)
+            throws IOException {
         DeltaByteSource delta = new DeltaByteSource(content, base.bytes());
-        R value = null;
+        T value = null;
         try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
             value = Objects.requireNonNull(consumer.read(base.type(), delta.size(), Optional.empty(), restored),
                     "reader result");

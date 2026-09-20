@@ -2,6 +2,8 @@ package pro.deta.orion.git.parser.v2.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
@@ -189,6 +191,37 @@ class PackPublicationTest {
             assertThat(storage.readObject(blobId((byte) 2), new ResolvedGitObjectRead<>(storage,
                     (type, size, base, content) -> content.readBytes((int) size))))
                     .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void readsDeepPublishedDeltaChain(boolean memory) throws Exception {
+        GitStorageApi storage = memory ? new GitStorageApi() : new GitStorageApi(directory);
+        List<byte[]> entries = new ArrayList<>();
+        entries.add(blob(new byte[]{0, 0}));
+        for (int value = 1; value <= 1100; value++) {
+            byte[] previous = {(byte) ((value - 1) >>> 8), (byte) (value - 1)};
+            entries.add(delta(objectId(GitObjectType.BLOB, previous),
+                    new byte[]{2, 2, 2, (byte) (value >>> 8), (byte) value}));
+        }
+        try (IndexedPack target = ingest(pack(entries.toArray(byte[][]::new)), IndexedPack.create())) {
+            new GitPackObjectResolver(target, storage).complete();
+            storage.persist(target);
+        }
+        GitStorageApi reopened = memory ? storage : new GitStorageApi(directory);
+        byte[] expected = {(byte) (1100 >>> 8), (byte) 1100};
+        ObjectId object = objectId(GitObjectType.BLOB, expected);
+        try (ExecutorService reader = Executors.newSingleThreadExecutor(
+                task -> new Thread(null, task, "deep-pack-reader", 128 * 1024))) {
+            Future<byte[]> result = reader.submit(() -> reopened.readObject(object,
+                    new ResolvedGitObjectRead<>(reopened, (type, size, base, content) -> {
+                        assertThat(type).isEqualTo(GitObjectType.BLOB);
+                        assertThat(size).isEqualTo(expected.length);
+                        assertThat(base).isEmpty();
+                        return content.readBytes((int) size);
+                    })).orElseThrow());
+            assertThat(result.get(30, TimeUnit.SECONDS)).containsExactly(expected);
         }
     }
 
