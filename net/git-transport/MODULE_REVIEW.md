@@ -1,36 +1,5 @@
 # Module Review: net/git-transport — SSH administration
 
-## 1. Root enrollment briefly removes the connection restriction
-
-**Problem.** Successful enroll-key removes PENDING before setting COMPLETED. A concurrent exec/shell channel
-can observe both absent, pass isRestricted(), and enter normal command routing with the authenticated root
-identity. The enrollment operation runs asynchronously, independently of channel creation.
-
-**Sources.** [Restriction transition](src/main/java/pro/deta/orion/transport/git/auth/RootSshKeyEnrollmentSession.java#L32),
-[command routing and asynchronous enrollment](src/main/java/pro/deta/orion/transport/git/ssh/SshCommandFactory.java#L90),
-[shell routing](src/main/java/pro/deta/orion/transport/git/OrionShell.java#L63),
-[identity installation](src/main/java/pro/deta/orion/transport/git/auth/OrionSshAuthenticator.java#L151), and
-[before/after restriction test](src/test/java/pro/deta/orion/transport/git/ssh/SshCommandFactoryTest.java#L355).
-An ordinary selected command has no later recovery-restriction check.
-
-**Documented behavior.** The production enrollment response requires reconnecting with the enrolled key.
-The existing test explicitly rejects normal commands on the completed recovery connection.
-
-**Contract.** Enrollment-only restriction must remain continuous for the connection, including successful
-completion. Normal command authorization does not replace this separate recovery restriction.
-
-**Minimal repair.** Set COMPLETED before removing PENDING. Test controlled interleaving at attribute removal
-and verify both command and shell selection remain restricted.
-
-**Alternatives and consequences.** One authoritative monotonic state would also work but changes more code.
-Closing the entire connection changes user behavior unnecessarily. Reordering existing writes needs no
-protocol, credential or ACL change.
-
-**Confidence.** High in the intermediate state and independent execution paths; no live race was reproduced.
-
-**Priority signals.** Importance: high, because the recovery authorization boundary can be bypassed.
-Repair ease: high, a local ordering correction with deterministic interleaving coverage.
-
 ## 2. Audit fields can inject control characters into log framing
 
 **Problem.** An authenticated exec command such as `/auth/key rm 'SHA256:bogus<LF>Orion command audit user=root ...'`,

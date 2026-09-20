@@ -34,8 +34,8 @@ public final class RootSshKeyEnrollmentSession {
     }
 
     public static void complete(ServerSession session) {
-        session.removeAttribute(PENDING);
         session.setAttribute(COMPLETED, true);
+        session.removeAttribute(PENDING);
     }
 
     public record PendingEnrollment(String expectedGeneration, List<String> publicKeys) {
