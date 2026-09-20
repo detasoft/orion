@@ -3,9 +3,13 @@ package pro.deta.orion.git.parser.v2.read;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -57,6 +61,30 @@ class ResolvedGitObjectReadTest {
                 .containsExactly(20, 30, 50);
         assertThat(read(GitObjectType.REF_DELTA, Optional.of(deltaId), delta, reader))
                 .containsExactly(20, 30, 50);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void resolvesMixedOffsetAndReferenceBasesFromPublishedIndex(boolean memory) throws Exception {
+        try (GitStorageApi api = memory ? new GitStorageApi() : new GitStorageApi(directory)) {
+            byte[] full = PackTestData.blob(new byte[]{10});
+            byte[] offsetDelta = PackTestData.join(new byte[]{0x64, (byte) full.length},
+                    PackTestData.compressed(new byte[]{1, 1, 1, 20}));
+            ObjectId offsetId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{20});
+            ObjectId referenceId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{30});
+            IndexedPack pack = PackTestData.ingest(PackTestData.pack(full, offsetDelta,
+                    PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api.newPack());
+            new GitPackObjectResolver(pack, api).complete();
+            api.persist(pack);
+            ResolvedGitObjectRead<byte[]> reader = new ResolvedGitObjectRead<>(api, (type, size, base, content) -> {
+                assertThat(type).isEqualTo(GitObjectType.BLOB);
+                assertThat(size).isEqualTo(1);
+                assertThat(base).isEmpty();
+                return content.readBytes((int) size);
+            });
+            assertThat(read(GitObjectType.REF_DELTA, Optional.of(referenceId), new byte[]{1, 1, 1, 40}, reader))
+                    .containsExactly(40);
+        }
     }
 
     @Test
