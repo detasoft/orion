@@ -12,7 +12,11 @@ import java.util.zip.Inflater;
  * Input has no peek or unread operation, so the inflater receives one compressed byte at a time to avoid
  * consuming the following entry. Bulk reads propagate validation failures instead of hiding them after
  * a partial read. Closing releases the inflater only; the input remains borrowed.
+ *
+ * @deprecated Replace with a V2 source when migrating IndexedPack's stored readers, preserving validation
+ * of partially written entries and unread payloads.
  */
+@Deprecated(forRemoval = true)
 final class ZlibBoundaryInputStream extends InputStream {
     private final InputStream input;
     private final long expectedSize;

@@ -9,7 +9,7 @@ import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -56,10 +56,11 @@ class PackCompletionTest {
         byte[] original = pack(delta, otherDelta);
         try (var attempt = new Attempt(original)) {
             PackTestData.store(attempt.storage, GitObjectType.BLOB, base);
-            resolve(attempt, result, otherResult);
 
             PackId received = attempt.pack.id();
             PackId completed = new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
+            assertThat(attempt.pack.find(objectId(result))).isPresent();
+            assertThat(attempt.pack.find(objectId(otherResult))).isPresent();
             byte[] output = Files.readAllBytes(attempt.packPath);
             assertThat(completed).isNotEqualTo(received);
             assertThat(completed).isEqualTo(checksum(output));
@@ -95,7 +96,6 @@ class PackCompletionTest {
         try (var attempt = new Attempt(pack(delta(baseId, new byte[]{3, 1, 1, 9})))) {
             PackTestData.storeDelta(attempt.storage, GitObjectType.BLOB, root,
                     new byte[]{3, 3, 3, 1, 2, 4}, base);
-            resolve(attempt, new byte[]{9});
 
             new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
             assertThat(attempt.pack.find(baseId).orElseThrow().type()).isEqualTo(GitObjectType.BLOB);
@@ -109,19 +109,14 @@ class PackCompletionTest {
     void missingBaseFailsAndClosesTheUnpublishableAttempt() throws Exception {
         ObjectId base = objectId(new byte[]{1, 2, 3});
         try (Attempt attempt = new Attempt(pack(delta(base, new byte[]{3, 1, 1, 9})))) {
-            resolve(attempt, new byte[]{9});
             assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                    .isInstanceOf(IOException.class).hasMessageContaining("Missing external base");
+                    .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
             assertThatThrownBy(attempt.pack::size).isInstanceOf(ClosedChannelException.class);
         }
     }
 
     @Test
-    void rejectsUnresolvedEntriesAndWrongReceivedChecksums() throws Exception {
-        try (var attempt = new Attempt(pack(delta(objectId(new byte[]{1}), new byte[]{1, 1, 1, 2})))) {
-            assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                    .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
-        }
+    void rejectsWrongReceivedChecksums() throws Exception {
         try (var attempt = new Attempt(pack())) {
             attempt.pack.write(attempt.pack.size() - 1, ByteBuffer.wrap(new byte[]{42}));
             assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
@@ -154,17 +149,8 @@ class PackCompletionTest {
         }
     }
 
-    private static void resolve(Attempt attempt, byte[]... contents) throws Exception {
-        assertThat(attempt.pack.entryCount()).isEqualTo(contents.length);
-        long offset = 12;
-        for (byte[] content : contents) {
-            attempt.pack.addObject(offset, objectId(content), GitObjectType.BLOB, content.length);
-            offset = attempt.pack.dataEnd(offset);
-        }
-    }
-
     private static ObjectId objectId(byte[] content) throws Exception {
-        try (var input = new InputStreamBufferedByteInput(new ByteArrayInputStream(compressed(content)))) {
+        try (var input = new BufferedByteInputV2(new ByteArrayInputStream(compressed(content)))) {
             return new HashedGitObjectRead().read(GitObjectType.BLOB, content.length, Optional.empty(), input);
         }
     }

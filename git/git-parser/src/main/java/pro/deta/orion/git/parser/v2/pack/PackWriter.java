@@ -3,16 +3,16 @@ package pro.deta.orion.git.parser.v2.pack;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,7 +22,6 @@ public final class PackWriter implements AutoCloseable {
     private final BufferedByteOutput output;
     private final MessageDigest checksum;
     private final long objectCount;
-    private final ByteBuf buffer;
     private Deflater deflater;
     private byte[] compressed;
     private long writtenObjects;
@@ -37,34 +36,22 @@ public final class PackWriter implements AutoCloseable {
             throw new IllegalArgumentException("Invalid pack object count");
         }
         this.objectCount = objectCount;
-        try {
-            checksum = MessageDigest.getInstance("SHA-1");
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("SHA-1 is required for Git packs", error);
-        }
-        buffer = Unpooled.buffer(8192, 8192);
-        try {
-            byte[] header = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt((int) objectCount).array();
-            write(header, 0, header.length);
-        } catch (IOException | RuntimeException | Error error) {
-            buffer.release();
-            throw error;
-        }
+        checksum = GitHashAlgorithm.SHA1.newDigest();
+        byte[] header = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt((int) objectCount).array();
+        write(header, 0, header.length);
     }
 
     public long writeCompressed(GitObjectType type, long size, Optional<ObjectId> baseId,
-                                BufferedByteInput content) throws IOException {
+                                BufferedByteInputV2 content) throws IOException {
         requireEntry();
         Objects.requireNonNull(content, "content");
         long offset = position;
         try {
             writeHeader(type, size, baseId);
             long start = position;
-            int count;
-            buffer.clear();
-            while ((count = content.readInto(buffer, buffer.writableBytes())) != 0) {
-                write(buffer.array(), buffer.arrayOffset() + buffer.readerIndex(), count);
-                buffer.clear();
+            ByteBuffer buffer;
+            while ((buffer = content.buffer()) != null) {
+                write(buffer);
             }
             if (position == start) {
                 throw new EOFException("Missing compressed object content");
@@ -77,7 +64,7 @@ public final class PackWriter implements AutoCloseable {
         }
     }
 
-    public long writeObject(GitObjectType type, long size, BufferedByteInput content) throws IOException {
+    public long writeObject(GitObjectType type, long size, BufferedByteInputV2 content) throws IOException {
         requireEntry();
         Objects.requireNonNull(content, "content");
         long offset = position;
@@ -90,18 +77,17 @@ public final class PackWriter implements AutoCloseable {
                 deflater.reset();
             }
             long remaining = size;
-            int count;
-            buffer.clear();
-            while ((count = content.readInto(buffer, buffer.writableBytes())) != 0) {
+            ByteBuffer buffer;
+            while ((buffer = content.buffer()) != null) {
+                int count = buffer.remaining();
                 if (count > remaining) {
                     throw new IOException("Object content exceeds its declared size");
                 }
-                deflater.setInput(buffer.array(), buffer.arrayOffset() + buffer.readerIndex(), count);
+                deflater.setInput(buffer);
                 while (!deflater.needsInput()) {
                     deflate();
                 }
                 remaining -= count;
-                buffer.clear();
             }
             if (remaining != 0) {
                 throw new EOFException("Truncated object content");
@@ -143,7 +129,6 @@ public final class PackWriter implements AutoCloseable {
             if (deflater != null) {
                 deflater.end();
             }
-            buffer.release();
         }
     }
 
@@ -182,6 +167,18 @@ public final class PackWriter implements AutoCloseable {
             write(compressed, 0, count);
         } else if (!deflater.needsInput() && !deflater.finished()) {
             throw new IOException("Deflater made no progress");
+        }
+    }
+
+    private void write(ByteBuffer bytes) throws IOException {
+        int length = bytes.remaining();
+        ByteBuf buffer = Unpooled.wrappedBuffer(bytes);
+        try {
+            output.write(buffer);
+            checksum.update(bytes);
+            position += length;
+        } finally {
+            buffer.release();
         }
     }
 

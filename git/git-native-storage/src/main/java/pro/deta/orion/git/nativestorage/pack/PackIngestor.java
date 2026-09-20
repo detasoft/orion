@@ -29,7 +29,11 @@ import java.util.zip.Inflater;
  * self-contained. A pack is thin when a delta base is found in the repository
  * object store instead of inside the pack being ingested; those external base
  * ids are preserved in the publication request.
+ *
+ * @deprecated Remove after receive-pack uses v2 PushCommand and GitStorageApi. Its replacement retains
+ * original entries and appends external bases through v2 GitPackObjectResolver before publication.
  */
+@Deprecated(forRemoval = true)
 public final class PackIngestor implements PackIngestionSession {
     private static final byte[] PACK_MAGIC = {'P', 'A', 'C', 'K'};
     private static final int PACK_VERSION = 2;

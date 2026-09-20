@@ -1,64 +1,49 @@
-package pro.deta.orion.git.parser.v2.util;
+package pro.deta.orion.git.parser.v2.read;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-public final class ZlibInflatedInputStream extends InputStream {
-    private final BufferedByteInput source;
+final class ZlibByteSource implements BufferedByteInputV2.Source {
+    private final BufferedByteInputV2 source;
     private final long expectedSize;
     private final Inflater inflater = new Inflater();
-    private final ByteBuf compressed = Unpooled.buffer(8192, 8192);
-    private final byte[] single = new byte[1];
+    private final ByteBuffer inflated = ByteBuffer.allocate(8192);
     private long inflatedSize;
-    private boolean exhausted;
 
-    public ZlibInflatedInputStream(BufferedByteInput source, long expectedSize) {
-        this.source = source;
+    ZlibByteSource(BufferedByteInputV2 source, long expectedSize) {
+        this.source = Objects.requireNonNull(source, "source");
         this.expectedSize = expectedSize;
     }
 
     @Override
-    public int read() throws IOException {
-        return read(single, 0, 1) == -1 ? -1 : single[0] & 255;
-    }
-
-    @Override
-    public int read(byte[] bytes, int offset, int length) throws IOException {
-        Objects.checkFromIndexSize(offset, length, bytes.length);
-        if (length == 0) {
-            return 0;
-        }
-        while (!exhausted) {
+    public ByteBuffer read() throws IOException {
+        while (true) {
             if (inflater.finished()) {
                 if (inflatedSize != expectedSize) {
                     throw new IOException("Inflated size differs from declared object size");
                 }
-                compressed.clear();
-                if (inflater.getRemaining() != 0 || source.readInto(compressed, 1) != 0) {
+                if (source.buffer() != null) {
                     throw new IOException("Unexpected bytes after the bounded zlib stream");
                 }
-                exhausted = true;
-                return -1;
+                return null;
             }
             if (inflater.needsInput()) {
-                compressed.clear();
-                int count = source.readInto(compressed, compressed.writableBytes());
-                if (count == 0) {
+                ByteBuffer input = source.buffer();
+                if (input == null) {
                     throw new EOFException("Truncated zlib stream");
                 }
-                inflater.setInput(compressed.array(), compressed.arrayOffset(), count);
+                inflater.setInput(input);
             }
+            inflated.clear();
             int count;
             try {
-                count = inflater.inflate(bytes, offset, length);
+                count = inflater.inflate(inflated);
             } catch (DataFormatException error) {
                 throw new IOException("Invalid zlib stream", error);
             }
@@ -67,7 +52,7 @@ public final class ZlibInflatedInputStream extends InputStream {
             }
             inflatedSize += count;
             if (count != 0) {
-                return count;
+                return inflated.flip();
             }
             if (inflater.needsDictionary()) {
                 throw new IOException("Zlib stream requires a dictionary");
@@ -76,12 +61,13 @@ public final class ZlibInflatedInputStream extends InputStream {
                 throw new IOException("Zlib stream made no progress");
             }
         }
-        return -1;
     }
+
+    @Override
+    public void release() {}
 
     @Override
     public void close() {
         inflater.end();
-        compressed.release();
     }
 }

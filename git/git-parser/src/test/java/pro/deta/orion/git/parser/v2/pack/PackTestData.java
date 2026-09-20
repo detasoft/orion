@@ -79,7 +79,7 @@ public final class PackTestData {
         byte[] full = entry(type, base);
         ObjectId id = objectId(type, result);
         try (IndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack())) {
-            target.addObject(12 + full.length, id, type, result.length);
+            new GitPackObjectResolver(target, storage).complete();
             storage.persist(target);
         }
         return id;

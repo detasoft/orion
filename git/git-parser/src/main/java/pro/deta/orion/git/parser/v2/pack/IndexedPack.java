@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.pack.mv.ObjectIdDataType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -266,7 +266,7 @@ public final class IndexedPack implements AutoCloseable {
             }
             GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
                     ? GitObjectType.REF_DELTA : entry.type();
-            try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(
                     new StoredInput(bytes, entry.dataOffset(), end))) {
                 value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
                         "reader result");
@@ -475,12 +475,13 @@ public final class IndexedPack implements AutoCloseable {
                                    GitObjectRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
         R value = null;
-        try (ZlibBoundaryInputStream zlib = new ZlibBoundaryInputStream(new StoredInput(byteStore, entry.dataOffset(), end),
-                entry.inflatedSize())) {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ZlibBoundaryInputStream(
+                new StoredInput(byteStore, entry.dataOffset(), end), entry.inflatedSize()))) {
             value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
-                    new InputStreamBufferedByteInput(zlib)), "reader result");
-            byte[] discard = new byte[8192];
-            while (zlib.read(discard) != -1) {
+                    input), "reader result");
+            ByteBuffer remaining;
+            while ((remaining = input.buffer()) != null) {
+                remaining.position(remaining.limit());
             }
             return value;
         } catch (IOException | RuntimeException | Error failure) {

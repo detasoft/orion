@@ -134,8 +134,6 @@ class PackPublicationTest {
         byte[] firstDelta = delta(firstBase, new byte[]{1, 1, 1, 3});
         byte[] thin = pack(firstDelta, delta(secondBase, new byte[]{1, 1, 1, 4}));
         try (IndexedPack target = ingest(thin, storage.newPack())) {
-            target.addObject(12, blobId((byte) 3), GitObjectType.BLOB, 1);
-            target.addObject(12 + firstDelta.length, blobId((byte) 4), GitObjectType.BLOB, 1);
             PackId received = target.id();
             PackId completed = new GitPackObjectResolver(target, storage).complete();
             assertThat(storage.persist(target)).isEqualTo(completed);

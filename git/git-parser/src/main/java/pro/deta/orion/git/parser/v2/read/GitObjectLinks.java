@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.read;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -16,11 +16,11 @@ public record GitObjectLinks(GitObjectType type, List<ObjectId> targets) {
     }
 
     public static GitObjectLinks read(GitObjectType type, long size, Optional<ObjectId> baseId,
-                                      BufferedByteInput input) throws IOException {
+                                      BufferedByteInputV2 input) throws IOException {
         return new GitObjectLinks(type, readTargets(type, size, input));
     }
 
-    private static List<ObjectId> readTargets(GitObjectType type, long size, BufferedByteInput input)
+    private static List<ObjectId> readTargets(GitObjectType type, long size, BufferedByteInputV2 input)
             throws IOException {
         if (type == GitObjectType.BLOB) {
             return List.of();
@@ -70,7 +70,7 @@ public record GitObjectLinks(GitObjectType type, List<ObjectId> targets) {
         throw new IOException("Missing Git object header terminator");
     }
 
-    private static List<ObjectId> readTree(long remaining, BufferedByteInput input) throws IOException {
+    private static List<ObjectId> readTree(long remaining, BufferedByteInputV2 input) throws IOException {
         List<ObjectId> targets = new ArrayList<>();
         while (remaining > 0) {
             int mode = 0;

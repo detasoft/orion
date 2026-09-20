@@ -3,12 +3,10 @@ package pro.deta.orion.git.parser.v2.read;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,7 +29,7 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
 
     @Override
     protected R readDecompressed(GitObjectType type, long size, Optional<ObjectId> baseId,
-                                 BufferedByteInput content) throws IOException {
+                                 BufferedByteInputV2 content) throws IOException {
         if (type == GitObjectType.OFS_DELTA) {
             throw new IllegalStateException("not yet supported");
         }
@@ -45,7 +43,8 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
         }
         Base base;
         try {
-            var baseReader = new ResolvedGitObjectRead<Base>(storage, (baseType, baseSize, unused, input) -> {
+            ResolvedGitObjectRead<Base> baseReader = new ResolvedGitObjectRead<>(storage,
+                    (baseType, baseSize, unused, input) -> {
                 if (baseSize > Integer.MAX_VALUE - 8) {
                     throw new IOException("Delta base is too large for in-memory resolution");
                 }
@@ -56,14 +55,14 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
         } finally {
             path.remove(id);
         }
-        var restored = new DeltaInput(content, base.bytes());
+        DeltaByteSource delta = new DeltaByteSource(content, base.bytes());
         R value = null;
-        try {
-            value = Objects.requireNonNull(consumer.read(base.type(), restored.size, Optional.empty(),
-                    new InputStreamBufferedByteInput(restored)), "reader result");
-            byte[] discard = new byte[8192];
-            while (restored.read(discard) != -1) {
-                // Validate all delta instructions even if the consumer returns early.
+        try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
+            value = Objects.requireNonNull(consumer.read(base.type(), delta.size(), Optional.empty(), restored),
+                    "reader result");
+            ByteBuffer remaining;
+            while ((remaining = restored.buffer()) != null) {
+                remaining.position(remaining.limit());
             }
             return value;
         } catch (IOException | RuntimeException | Error failure) {
@@ -82,100 +81,4 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
 
     private record Base(GitObjectType type, byte[] bytes) {}
 
-    private static final class DeltaInput extends InputStream {
-        private final BufferedByteInput instructions;
-        private final byte[] base;
-        private final byte[] singleByte = new byte[1];
-        private final long size;
-        private long remaining;
-        private int instructionRemaining;
-        private int copyOffset;
-        private boolean copy;
-
-        private DeltaInput(BufferedByteInput instructions, byte[] base) throws IOException {
-            this.instructions = instructions;
-            this.base = base;
-            if (readSize() != base.length) {
-                throw new IOException("Delta source size does not match base object");
-            }
-            size = readSize();
-            remaining = size;
-        }
-
-        private long readSize() throws IOException {
-            long value = 0;
-            for (int shift = 0; shift < 63; shift += 7) {
-                int next = instructions.readUnsignedByte();
-                value |= (long) (next & 127) << shift;
-                if ((next & 128) == 0) {
-                    return value;
-                }
-            }
-            throw new IOException("Delta size overflows a signed long");
-        }
-
-        @Override
-        public int read() throws IOException {
-            return read(singleByte, 0, 1) == -1 ? -1 : singleByte[0] & 255;
-        }
-
-        @Override
-        public int read(byte[] target, int offset, int length) throws IOException {
-            Objects.checkFromIndexSize(offset, length, target.length);
-            if (length == 0) {
-                return 0;
-            }
-            if (remaining == 0) {
-                try {
-                    instructions.readUnsignedByte();
-                } catch (EOFException end) {
-                    return -1;
-                }
-                throw new IOException("Delta instructions exceed target size");
-            }
-            if (instructionRemaining == 0) {
-                int opcode = instructions.readUnsignedByte();
-                if (opcode == 0) {
-                    throw new IOException("Invalid zero delta opcode");
-                }
-                copy = (opcode & 128) != 0;
-                if (copy) {
-                    long position = 0;
-                    int count = 0;
-                    for (int i = 0; i < 4; i++) {
-                        if ((opcode & (1 << i)) != 0) {
-                            position |= (long) instructions.readUnsignedByte() << (8 * i);
-                        }
-                    }
-                    for (int i = 0; i < 3; i++) {
-                        if ((opcode & (16 << i)) != 0) {
-                            count |= instructions.readUnsignedByte() << (8 * i);
-                        }
-                    }
-                    instructionRemaining = count == 0 ? 0x10000 : count;
-                    if (position + instructionRemaining > base.length) {
-                        throw new IOException("Delta copy exceeds base object size");
-                    }
-                    copyOffset = (int) position;
-                } else {
-                    instructionRemaining = opcode;
-                }
-                if (instructionRemaining > remaining) {
-                    throw new IOException("Delta instruction exceeds target size");
-                }
-            }
-            int count = Math.min(length, instructionRemaining);
-            if (copy) {
-                System.arraycopy(base, copyOffset, target, offset, count);
-                copyOffset += count;
-            } else {
-                for (int i = 0; i < count; i++) {
-                    target[offset + i] = (byte) instructions.readUnsignedByte();
-                }
-            }
-            instructionRemaining -= count;
-            remaining -= count;
-            return count;
-        }
-    }
 }

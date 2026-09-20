@@ -1,17 +1,14 @@
 package pro.deta.orion.git.parser.v2.read;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Random;
@@ -37,9 +34,9 @@ class CompressedGitObjectReadTest {
             return resource;
         });
         try (var source = new BorrowedSource(zlib)) {
-            assertThat(reader.read(GitObjectType.BLOB, content.length, Optional.empty(), source)).isSameAs(resource);
+            assertThat(reader.read(GitObjectType.BLOB, content.length, Optional.empty(), source.input)).isSameAs(resource);
             assertThat(source.closed).isFalse();
-            assertThat(source.available()).isZero();
+            assertThat(source.input.buffer()).isNull();
             assertThat(closed[0]).isFalse();
         }
     }
@@ -56,7 +53,7 @@ class CompressedGitObjectReadTest {
                 throw new IOException("cleanup failure");
             });
             try (var source = new BorrowedSource(bytes)) {
-                assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 4, Optional.empty(), source))
+                assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 4, Optional.empty(), source.input))
                         .isInstanceOf(IOException.class)
                         .satisfies(error -> assertThat(error.getSuppressed()).hasSize(1));
                 assertThat(closed[0]).isTrue();
@@ -70,10 +67,10 @@ class CompressedGitObjectReadTest {
         byte[] zlib = compressed(new byte[]{1, 2, 3});
         var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> Boolean.TRUE);
         try (var source = new BorrowedSource(zlib)) {
-            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 2, Optional.empty(), source)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 2, Optional.empty(), source.input)).isInstanceOf(IOException.class);
         }
         try (var source = new BorrowedSource(Arrays.copyOf(zlib, zlib.length + 1))) {
-            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 3, Optional.empty(), source)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 3, Optional.empty(), source.input)).isInstanceOf(IOException.class);
         }
     }
 
@@ -81,7 +78,7 @@ class CompressedGitObjectReadTest {
     void neverHashesDeltaInstructionsAsObjects() throws Exception {
         for (GitObjectType type : new GitObjectType[]{GitObjectType.OFS_DELTA, GitObjectType.REF_DELTA}) {
             try (var source = new BorrowedSource(compressed(new byte[]{1, 2, 3}))) {
-                assertThatThrownBy(() -> new HashedGitObjectRead().read(type, 3, Optional.empty(), source))
+                assertThatThrownBy(() -> new HashedGitObjectRead().read(type, 3, Optional.empty(), source.input))
                         .isInstanceOf(IOException.class);
             }
         }
@@ -99,8 +96,8 @@ class CompressedGitObjectReadTest {
         });
         try (var first = new BorrowedSource(compressed(new byte[]{42}));
              var second = new BorrowedSource(compressed(new byte[]{43}))) {
-            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 1, Optional.empty(), first)).isSameAs(expected);
-            assertThat(reader.read(GitObjectType.BLOB, 1, Optional.empty(), second)).isEqualTo(43);
+            assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 1, Optional.empty(), first.input)).isSameAs(expected);
+            assertThat(reader.read(GitObjectType.BLOB, 1, Optional.empty(), second.input)).isEqualTo(43);
             assertThat(first.closed).isFalse();
             assertThat(second.closed).isFalse();
         }
@@ -114,7 +111,7 @@ class CompressedGitObjectReadTest {
         hash.update(("blob " + content.length + "\0").getBytes(StandardCharsets.US_ASCII));
         try (var source = new BorrowedSource(compressed(content))) {
             source.chunkSize = 3;
-            assertThat(new HashedGitObjectRead().read(GitObjectType.BLOB, content.length, Optional.empty(), source))
+            assertThat(new HashedGitObjectRead().read(GitObjectType.BLOB, content.length, Optional.empty(), source.input))
                     .isEqualTo(new ObjectId(hash.digest(content)));
         }
     }
@@ -130,7 +127,7 @@ class CompressedGitObjectReadTest {
             }
             try (var source = new BorrowedSource(output.toByteArray())) {
                 var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> Boolean.TRUE);
-                assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 3, Optional.empty(), source))
+                assertThatThrownBy(() -> reader.read(GitObjectType.BLOB, 3, Optional.empty(), source.input))
                         .isInstanceOf(IOException.class).hasMessageContaining("dictionary");
             }
         } finally {
@@ -143,22 +140,13 @@ class CompressedGitObjectReadTest {
         byte[] content = {1, 2, 3};
         try (var source = new BorrowedSource(compressed(content))) {
             var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
-                ByteBuf bytes = input.readCopy(3, ByteBufAllocator.DEFAULT);
-                try {
-                    assertThat(bytes.readUnsignedByte()).isEqualTo((short) 1);
-                    assertThat(bytes.readUnsignedByte()).isEqualTo((short) 2);
-                    assertThat(bytes.readUnsignedByte()).isEqualTo((short) 3);
-                    bytes.clear();
-                    assertThat(input.readBytes(0)).isEmpty();
-                    assertThat(input.readInto(bytes, 0)).isZero();
-                    assertThat(input.readInto(bytes, 3)).isZero();
-                    assertThat(input.readInto(bytes, 3)).isZero();
-                } finally {
-                    bytes.release();
-                }
+                assertThat(input.readBytes(3)).containsExactly(1, 2, 3);
+                assertThat(input.readBytes(0)).isEmpty();
+                assertThat(input.buffer()).isNull();
+                assertThat(input.buffer()).isNull();
                 return Boolean.TRUE;
             });
-            assertThat(reader.read(GitObjectType.BLOB, 3, Optional.empty(), source)).isTrue();
+            assertThat(reader.read(GitObjectType.BLOB, 3, Optional.empty(), source.input)).isTrue();
         }
     }
 
@@ -170,39 +158,39 @@ class CompressedGitObjectReadTest {
         return output.toByteArray();
     }
 
-    private static final class BorrowedSource implements BufferedByteInput, AutoCloseable {
-        private final InputStreamBufferedByteInput input;
+    private static final class BorrowedSource implements BufferedByteInputV2.Source {
+        private final BufferedByteInputV2 input = new BufferedByteInputV2(this);
+        private final ByteBuffer bytes;
+        private final ByteBuffer chunk = ByteBuffer.allocateDirect(8192);
         private boolean closed;
         private int chunkSize = Integer.MAX_VALUE;
 
         private BorrowedSource(byte[] bytes) {
-            input = new InputStreamBufferedByteInput(new ByteArrayInputStream(bytes));
+            this.bytes = ByteBuffer.wrap(bytes);
         }
 
         @Override
-        public int available() {
-            return input.available();
+        public ByteBuffer read() {
+            if (!bytes.hasRemaining()) {
+                return null;
+            }
+            int count = Math.min(chunk.capacity(), Math.min(chunkSize, bytes.remaining()));
+            chunk.clear().put(bytes.slice(bytes.position(), count)).flip();
+            bytes.position(bytes.position() + count);
+            return chunk;
         }
 
         @Override
-        public int readUnsignedByte() throws IOException {
-            return input.readUnsignedByte();
+        public void release() {
+            chunk.clear();
+            while (chunk.hasRemaining()) {
+                chunk.put((byte) -1);
+            }
         }
 
         @Override
-        public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
-            return input.readCopy(length, allocator);
-        }
-
-        @Override
-        public int readInto(ByteBuf target, int maxLength) throws IOException {
-            return input.readInto(target, Math.min(chunkSize, maxLength));
-        }
-
-        @Override
-        public void close() throws IOException {
+        public void close() {
             closed = true;
-            input.close();
         }
     }
 }

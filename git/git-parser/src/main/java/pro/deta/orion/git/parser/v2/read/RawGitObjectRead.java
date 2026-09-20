@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -17,7 +17,7 @@ public final class RawGitObjectRead<R> implements GitObjectRead<R> {
 
     @Override
     public R read(GitObjectType type, long inflatedSize, Optional<ObjectId> baseId,
-            BufferedByteInput rawSource) throws IOException {
+            BufferedByteInputV2 rawSource) throws IOException {
         return Objects.requireNonNull(consumer.read(type, inflatedSize, baseId, rawSource), "reader result");
     }
 }

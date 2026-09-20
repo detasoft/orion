@@ -2,9 +2,11 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import io.netty.buffer.ByteBuf;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -25,8 +27,9 @@ class PackWriterTest implements BufferedByteOutput {
     private int failureAt = Integer.MAX_VALUE;
     private boolean flushed;
 
-    @Test
-    void mixesCopiedAndNewObjectsAndResetsCompressionBetweenEntries() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void mixesCopiedAndNewObjectsAndResetsCompressionBetweenEntries(boolean direct) throws Exception {
         byte[] content = new byte[25000];
         new Random(5).nextBytes(content);
         ByteArrayOutputStream compressed = new ByteArrayOutputStream();
@@ -35,9 +38,9 @@ class PackWriterTest implements BufferedByteOutput {
         }
         byte[] raw = compressed.toByteArray();
         try (PackWriter writer = new PackWriter(this, 3);
-             InputStreamBufferedByteInput source = input(raw);
-             InputStreamBufferedByteInput plain = input(content);
-             InputStreamBufferedByteInput empty = input(new byte[0])) {
+             BufferedByteInputV2 source = input(raw, direct);
+             BufferedByteInputV2 plain = input(content, direct);
+             BufferedByteInputV2 empty = input(new byte[0])) {
             writer.writeCompressed(GitObjectType.BLOB, content.length, Optional.empty(), source);
             writer.writeObject(GitObjectType.BLOB, content.length, plain);
             writer.writeObject(GitObjectType.BLOB, 0, empty);
@@ -70,7 +73,7 @@ class PackWriterTest implements BufferedByteOutput {
     @Test
     void failedEntryCannotBeFollowedByASuccessTrailer() throws Exception {
         try (PackWriter writer = new PackWriter(this, 1);
-             InputStreamBufferedByteInput content = input(new byte[]{1, 2})) {
+             BufferedByteInputV2 content = input(new byte[]{1, 2})) {
             assertThatThrownBy(() -> writer.writeObject(GitObjectType.BLOB, 3, content))
                     .isInstanceOf(IOException.class).hasMessageContaining("Truncated");
             int written = output.size();
@@ -82,7 +85,7 @@ class PackWriterTest implements BufferedByteOutput {
     @Test
     void transportFailurePreventsFurtherWritesAndDoesNotFlush() throws Exception {
         try (PackWriter writer = new PackWriter(this, 1);
-             InputStreamBufferedByteInput content = input(new byte[]{1, 2, 3})) {
+             BufferedByteInputV2 content = input(new byte[]{1, 2, 3})) {
             failureAt = output.size();
             assertThatThrownBy(() -> writer.writeObject(GitObjectType.BLOB, 3, content))
                     .isInstanceOf(IOException.class).hasMessage("transport failure");
@@ -106,8 +109,30 @@ class PackWriterTest implements BufferedByteOutput {
         flushed = true;
     }
 
-    private static InputStreamBufferedByteInput input(byte[] content) {
-        return new InputStreamBufferedByteInput(new ByteArrayInputStream(content));
+    private static BufferedByteInputV2 input(byte[] content) {
+        return new BufferedByteInputV2(new ByteArrayInputStream(content));
+    }
+
+    private static BufferedByteInputV2 input(byte[] content, boolean direct) {
+        if (!direct) {
+            return input(content);
+        }
+        ByteBuffer bytes = ByteBuffer.allocateDirect(content.length + 4).putInt(42).put(content).flip();
+        bytes.position(4);
+        return new BufferedByteInputV2(new BufferedByteInputV2.Source() {
+            private final ByteBuffer buffer = bytes.asReadOnlyBuffer();
+
+            @Override
+            public ByteBuffer read() {
+                return buffer.hasRemaining() ? buffer : null;
+            }
+
+            @Override
+            public void release() {}
+
+            @Override
+            public void close() {}
+        });
     }
 
     private static void readBlob(ByteBuffer pack, byte[] expected) throws Exception {

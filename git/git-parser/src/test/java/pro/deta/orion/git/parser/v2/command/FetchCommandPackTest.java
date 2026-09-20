@@ -19,7 +19,6 @@ import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
@@ -238,7 +237,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     private ObjectId store(GitStorageApi storage, GitObjectType type, byte[] content) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
-             InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(new ByteArrayInputStream(content))) {
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
             writer.writeObject(type, content.length, input);
             writer.finish();
         }
@@ -339,7 +338,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     }
 
     private static ObjectId hash(GitObjectType type, byte[] content) throws IOException {
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
                 new ByteArrayInputStream(compressed(content)))) {
             return new HashedGitObjectRead().read(type, content.length, Optional.empty(), input);
         }

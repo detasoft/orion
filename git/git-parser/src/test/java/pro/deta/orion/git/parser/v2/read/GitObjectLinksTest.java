@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.read;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,7 +47,7 @@ class GitObjectLinksTest {
     }
 
     private static GitObjectLinks read(GitObjectType type, byte[] content) throws IOException {
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(new ByteArrayInputStream(content))) {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
             return GitObjectLinks.read(type, content.length, Optional.empty(), input);
         }
     }

@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -134,7 +134,7 @@ class ResolvedGitObjectReadTest {
         try (var output = new DeflaterOutputStream(compressed)) {
             output.write(payload);
         }
-        try (var source = new InputStreamBufferedByteInput(new ByteArrayInputStream(compressed.toByteArray()))) {
+        try (var source = new BufferedByteInputV2(new ByteArrayInputStream(compressed.toByteArray()))) {
             return reader.read(type, payload.length, baseId, source);
         }
     }
