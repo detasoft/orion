@@ -208,12 +208,16 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         return replicationService;
     }
 
-    public synchronized JournalReadResult readSessionEvents(SessionId sessionId, Optional<EventId> after)
+    public JournalReadResult readSessionEvents(SessionId sessionId, Optional<EventId> after)
             throws JournalStorageException {
-        if (journalStorage == null) {
-            throw new IllegalStateException("Agent session server is not running");
+        FileSystemSessionJournalStorage current;
+        synchronized (this) {
+            current = journalStorage;
+            if (current == null) {
+                throw new IllegalStateException("Agent session server is not running");
+            }
         }
-        return journalStorage.readAfter(sessionId, after);
+        return current.readAfter(sessionId, after);
     }
 
     public synchronized AgentdProvisioningControl provisioningControl(

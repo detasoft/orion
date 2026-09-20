@@ -1,40 +1,5 @@
 # Module Review: agent-session-server
 
-## 1. Journal reads hold the server monitor across blocking storage work
-
-**Problem.** A large or slow history/live read holds AgentSessionServer's monitor throughout storage I/O.
-Unrelated command/owner lookups, connection admission, replication-service lookup and stop admission wait
-behind it, duplicating coordination already owned by journal storage.
-
-**Sources.** [Facade lock](src/main/java/pro/deta/orion/agent/server/AgentSessionServer.java#L211),
-[connection admission](src/main/java/pro/deta/orion/agent/server/AgentSessionServer.java#L166),
-[storage lifecycle gate](src/main/java/pro/deta/orion/agent/server/journal/FileSystemSessionJournalStorage.java#L125),
-[per-session snapshots](src/main/java/pro/deta/orion/agent/server/journal/SessionJournal.java#L189),
-[HTTP consumer](../net/http-core/src/main/java/pro/deta/orion/transport/http/SessionEventsRoute.java#L180),
-[independent commands](../net/http-core/src/main/java/pro/deta/orion/transport/http/SessionCommandsRoute.java#L95),
-and [snapshot concurrency tests](src/test/java/pro/deta/orion/agent/server/journal/JournalConcurrencyTest.java#L108).
-Existing tests cover concurrent append and slow HTTP output, not blocked reads through the facade.
-
-**Documented behavior.** Durable history/live delivery and storage ownership are explicit existing contracts.
-No requirement to serialize unrelated facade operations behind storage reads was found.
-
-**Contract.** Preserve committed snapshots, exact record bytes and close/read coordination. Shutdown must wait
-for admitted storage operations before releasing ownership; a racing operation may use its admitted snapshot
-or receive the existing closed/unavailable failure.
-
-**Minimal repair.** Capture/validate the storage reference inside a short synchronized block and read outside,
-following the existing open() pattern. Reuse storage's lifecycle gate. Verify a blocked storage read permits
-unrelated facade calls, alongside shutdown/snapshot behavior.
-
-**Alternatives and consequences.** Unsynchronized reference access introduces a lifecycle race. Another lock
-or executor duplicates ownership; moving work while retaining the monitor leaves the defect. Storage close
-may still wait for active reads as required. No public API or new coordination owner is necessary.
-
-**Confidence.** High in lock scope and affected callers; operational latency was not measured.
-
-**Priority signals.** Importance: medium-to-high because one session delays unrelated control/API admission.
-Repair ease: high, removing redundant coordination locally.
-
 ## 2. Cursor reads retain full history before discarding its consumed prefix
 
 **Problem.** readAfter(cursor) decodes and accumulates all retained records, then filters the prefix. Even a

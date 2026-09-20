@@ -3,6 +3,7 @@ package pro.deta.orion.agent.server;
 import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
 
 import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.JournalReadResult;
 import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,6 +28,7 @@ import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.provisioning.AgentdLaunchAttempt;
 
 import java.net.URI;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -39,6 +41,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +54,61 @@ class AgentSessionServerTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void blockedJournalReadAllowsFacadeCallsAndShutdownWaitsForTheRead() throws Exception {
+        AgentSessionServer server = new AgentSessionServer(root);
+        SessionId sessionId = new SessionId("session-1");
+        Field leaseMonitor = FileSystemSessionJournalStorage.class.getDeclaredField("ROOT_OWNER_MONITOR");
+        leaseMonitor.setAccessible(true);
+        server.onStart();
+        FutureTask<JournalReadResult> read =
+                new FutureTask<>(() -> server.readSessionEvents(sessionId, Optional.empty()));
+        Thread reader = new Thread(read, "blocked-facade-journal-reader");
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            try {
+                Future<Void> stopped;
+                synchronized (leaseMonitor.get(null)) {
+                    reader.start();
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while (reader.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                        Thread.sleep(1);
+                    }
+                    assertThat(reader.getState()).isEqualTo(Thread.State.BLOCKED);
+                    assertThat(executor.submit(() -> {
+                        assertThat(server.commandService()).isNotNull();
+                        assertThat(server.replicationService()).isNotNull();
+                        assertThat(server.sessionOwner(sessionId)).isEmpty();
+                        TestConnection connection = new TestConnection();
+                        server.open(connection);
+                        assertThat(connection.closed).isFalse();
+                        return server.isRunning();
+                    }).get(5, TimeUnit.SECONDS)).isTrue();
+
+                    stopped = executor.submit(() -> {
+                        server.onStop();
+                        return null;
+                    });
+                    assertThatThrownBy(() -> stopped.get(100, TimeUnit.MILLISECONDS))
+                            .isInstanceOf(TimeoutException.class);
+                    assertThat(read.isDone()).isFalse();
+                }
+                assertThat(read.get(5, TimeUnit.SECONDS).records()).isEmpty();
+                stopped.get(5, TimeUnit.SECONDS);
+            } finally {
+                reader.join(5000);
+            }
+        } finally {
+            server.onStop();
+        }
+        assertThat(server.isRunning()).isFalse();
+        assertThatThrownBy(() -> server.readSessionEvents(sessionId, Optional.empty()))
+                .isInstanceOf(IllegalStateException.class);
+        try (FileSystemSessionJournalStorage reopened = new FileSystemSessionJournalStorage(
+                root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults()))) {
+            assertThat(reopened.readAfter(sessionId, Optional.empty()).records()).isEmpty();
+        }
+    }
 
     @Test
     void replaysCommittedRawEventsAfterAnExclusiveCursorAcrossRestart() throws Exception {
