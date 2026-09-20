@@ -1,37 +1,5 @@
 # Module Review: net/frontend/ui
 
-## 2. Terminal command authorization failures bypass credential cleanup
-
-**Problem.** After opening a terminal, let its token expire or be revoked. A command POST or command-status
-GET returning 401/403 becomes an ordinary input-paused string. App receives no authorization-error event,
-keeps the rejected token in session storage and continues displaying authenticated connection state.
-
-**Sources.** [HTTP status preservation](src/lib/orion-api.js#L39),
-[status failure handling](src/lib/session-commands.js#L36),
-[submission failure handling](src/lib/session-commands.js#L54),
-[command callback versus stream authorization handling](src/components/SessionTerminal.vue#L52),
-[owning App listener](src/App.vue#L537), [command behavior tests](src/lib/session-commands.test.js),
-and [terminal tests](src/components/SessionTerminal.test.js). The expired-credentials component case covers
-only event-stream failure; command tests cover ambiguity and delivery failures without 401/403.
-
-**Documented behavior.** [README](README.md) requires pausing input for failed or uncertain commands. Existing
-[App tests](src/App.test.js#L262) establish rejected-credential cleanup; no command-specific exception is documented.
-
-**Contract.** Explicit credential rejection from either terminal HTTP path must reach the existing credential
-owner. Preserve ordinary failure pauses and never automatically resend commands with uncertain delivery.
-
-**Minimal repair.** Preserve authorization information in the existing failure callback and emit the existing
-authorization-error event for command submission/status 401/403. Cover both request types and ordinary failures.
-
-**Alternatives and consequences.** A new global authentication store/interceptor is unnecessary. Retaining the
-terminal after rejection would require a product decision inconsistent with current stream-auth cleanup.
-This repair changes local error propagation, not the server command or replay contract.
-
-**Confidence.** High in lost status propagation; no evidence was found for intentionally different policies.
-
-**Priority signals.** Importance: medium, because explicit authentication rejection leaves stale credentials
-and misleading state. Repair ease: high through existing callbacks and events.
-
 ## 3. Historical terminal replay lacks the initial PTY dimensions
 
 **Problem.** Open a session started at 120x40, or the native CLI default 160x50, before its first resize event.

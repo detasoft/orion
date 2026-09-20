@@ -51,10 +51,11 @@ async function openSession() {
   const client = createOrionClient({ token: props.token })
   current.commands = createSessionCommands({
     client, sessionId: id, signal: current.abort.signal,
-    onFailure(message) {
+    onFailure(message, status) {
       if (active !== current) return
       commandError.value = message
       terminal.options.disableStdin = true
+      if (status === 401 || status === 403) emit('authorization-error')
     },
   })
   active = current

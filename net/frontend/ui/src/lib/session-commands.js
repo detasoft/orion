@@ -11,12 +11,12 @@ export function createSessionCommands({ client, sessionId, signal, onFailure }) 
     pending.clear()
   }, { once: true })
 
-  function fail(commandId, detail) {
+  function fail(commandId, detail, status) {
     if (signal.aborted || paused) return
     paused = true
     queue.length = 0
     clearTimeout(timer)
-    onFailure(`Command ${commandId}: ${detail}. Input paused; reopen the session to continue.`)
+    onFailure(`Command ${commandId}: ${detail}. Input paused; reopen the session to continue.`, status)
   }
 
   function observe(commandId, status) {
@@ -42,7 +42,7 @@ export function createSessionCommands({ client, sessionId, signal, onFailure }) 
             AbortSignal.any([signal, AbortSignal.timeout(10000)]))
           observe(commandId, status)
         } catch (error) {
-          fail(commandId, `Status unknown: ${error.message}`)
+          fail(commandId, `Status unknown: ${error.message}`, error.status)
         }
       }
     } finally {
@@ -65,7 +65,7 @@ export function createSessionCommands({ client, sessionId, signal, onFailure }) 
           observe(command.commandId, status)
           schedulePoll()
         } catch (error) {
-          fail(command.commandId, `Delivery not confirmed: ${error.message}`)
+          fail(command.commandId, `Delivery not confirmed: ${error.message}`, error.status)
         }
       }
     } finally {

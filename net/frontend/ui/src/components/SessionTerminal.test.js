@@ -43,7 +43,10 @@ beforeEach(() => {
   wrapper = mount(SessionTerminal, { props: { token: 'token' } })
 })
 
-afterEach(() => wrapper.unmount())
+afterEach(() => {
+  wrapper.unmount()
+  vi.useRealTimers()
+})
 
 async function open(id = 'session-1') {
   await wrapper.get('input').setValue(id)
@@ -138,6 +141,51 @@ describe('terminal view lifecycle', () => {
     await flushPromises()
     expect(terminals[0].write).toHaveBeenCalledOnce()
   })
+
+  it.each([
+    ['sendSessionCommand', 401], ['sendSessionCommand', 403],
+    ['sessionCommandStatus', 401], ['sessionCommandStatus', 403],
+    ['sendSessionCommand', 500], ['sessionCommandStatus', 500],
+  ])('propagates authorization failures from %s (%s) without retrying', async (method, status) => {
+    vi.useFakeTimers()
+    client.sendSessionCommand.mockResolvedValue({ phase: 'SENT' })
+    client[method].mockRejectedValue(Object.assign(new Error('Request rejected'), { status }))
+    await open()
+    terminals[0].data('a')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    if (status === 401 || status === 403) {
+      expect(wrapper.emitted('authorization-error')).toHaveLength(1)
+    } else {
+      expect(wrapper.emitted('authorization-error')).toBeUndefined()
+    }
+    expect(wrapper.get('[role="alert"]').text()).toContain('Request rejected')
+    expect(terminals[0].options.disableStdin).toBe(true)
+    terminals[0].data('b')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(client.sendSessionCommand).toHaveBeenCalledOnce()
+    expect(client.sessionCommandStatus).toHaveBeenCalledTimes(method === 'sessionCommandStatus' ? 1 : 0)
+  })
+
+  it.each(['sendSessionCommand', 'sessionCommandStatus'])(
+    'ignores a late authorization rejection from detached %s', async (method) => {
+      vi.useFakeTimers()
+      let reject
+      client.sendSessionCommand.mockResolvedValue({ phase: 'SENT' })
+      client[method].mockImplementationOnce(() => new Promise((resolve, fail) => { reject = fail }))
+      await open()
+      terminals[0].data('a')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(1000)
+      await wrapper.setProps({ token: 'replacement' })
+
+      reject(Object.assign(new Error('Old token rejected'), { status: 403 }))
+      await flushPromises()
+      expect(wrapper.emitted('authorization-error')).toBeUndefined()
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    },
+  )
 
   it('aborts the old session before opening another and cancels on close', async () => {
     await open()
