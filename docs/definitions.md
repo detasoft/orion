@@ -42,9 +42,10 @@ into another workflow: preserve and report the current state first.
 ### Commit authorization
 
 - A mutating request performed through Quick authorizes its one logical commit.
-- Simple presents every staged checkpoint for user review. An explicit commit
-  instruction covering that checkpoint means the review is complete: commit it
-  immediately without requesting the same approval again.
+- Simple obtains user agreement on each checkpoint proposal before implementation
+  and approval of its verified staged result before committing. Approval of the
+  presented result or an explicit commit instruction authorizes that commit;
+  do not request the same approval again.
 - Change prepares and reviews its task commit. An explicit commit instruction in
   the request also authorizes immediate integration after the review and required
   checks succeed. Without it, stop with the reviewed commit and request
@@ -136,14 +137,21 @@ review and commit it without another user prompt.
 
 For each checkpoint:
 
-1. Implement the complete checkpoint while preserving unrelated work.
-2. Run its required pre-commit verification.
-3. Perform the automatic review required by repository rules.
-4. Stage the ready result and present it with verification to the user. Treat an explicit
-   commit instruction covering it as completed user review.
-5. Commit immediately using `<stable task name>: <imperative checkpoint
-   summary>`.
-6. Compact context before starting the next checkpoint.
+1. Explain the problem, concrete scenarios showing why it is worth fixing, the
+   expected result, scope, and preserved behavior. Read-only investigation may
+   establish this proposal. Wait for agreement on this concrete checkpoint
+   before implementation; agreement to the overall task is not a substitute.
+   Do not repeat approval already given for this proposal.
+2. Implement the agreed checkpoint while preserving unrelated work.
+3. Run its required pre-commit verification and automatic review.
+4. Stage only the ready result and present it with verification to the user.
+   Wait for approval of the staged result unless an explicit commit instruction
+   already covers it. Approval to start implementation is not commit approval.
+5. Approval of the presented result authorizes its commit. Commit immediately
+   using `<stable task name>: <imperative checkpoint summary>`.
+6. Compact context and immediately prepare and explain the next checkpoint.
+   Do not ask separately whether to continue or wait for another continuation
+   message. Wait for agreement on the next proposal before implementing it.
 
 Context retained after compaction consists of the original request or review,
 the remaining checkpoint queue, still-applicable user decisions, current
