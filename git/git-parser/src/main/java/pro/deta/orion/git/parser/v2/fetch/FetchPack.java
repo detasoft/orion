@@ -98,6 +98,7 @@ public final class FetchPack {
         boolean relative = plan.capabilities().has(GitCapability.DEEPEN_RELATIVE);
         boolean deepening = plan.depth().isPresent() || plan.deepenSince().isPresent()
                 || !plan.deepenNot().isEmpty();
+        boolean skipCommon = !deepening && plan.shallowCommits().isEmpty();
         Set<ObjectId> excluded = excludedCommits(plan.deepenNot());
         Map<ObjectId, Integer> visited = new LinkedHashMap<>();
         Map<ObjectId, GitObjectLinks> commits = new LinkedHashMap<>();
@@ -109,6 +110,9 @@ public final class FetchPack {
         while (!pending.isEmpty()) {
             Map.Entry<ObjectId, Integer> current = pending.removeFirst();
             ObjectId id = current.getKey();
+            if (skipCommon && common.contains(id)) {
+                continue;
+            }
             int remaining = current.getValue();
             if (relative && remaining == Integer.MAX_VALUE && plan.shallowCommits().contains(id)) {
                 remaining = plan.depth().orElseThrow();
@@ -144,7 +148,14 @@ public final class FetchPack {
         }
         for (Map.Entry<ObjectId, GitObjectLinks> commit : commits.entrySet()) {
             List<ObjectId> targets = commit.getValue().targets();
-            if (!commits.keySet().containsAll(targets.subList(1, targets.size()))) {
+            boolean missingParent = false;
+            for (ObjectId parent : targets.subList(1, targets.size())) {
+                if (!commits.containsKey(parent) && !(skipCommon && common.contains(parent))) {
+                    missingParent = true;
+                    break;
+                }
+            }
+            if (missingParent) {
                 shallow.add(commit.getKey());
             } else if (deepening && plan.shallowCommits().contains(commit.getKey())) {
                 unshallow.add(commit.getKey());
