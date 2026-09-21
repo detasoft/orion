@@ -200,7 +200,7 @@ public class AcmeCertificateService {
         }
         List<String> configuredDomains = validatedDomainsOrEmpty(configuration.domains());
         if (configuredDomains.isEmpty()) {
-            throw new IllegalArgumentException("At least one ACME domain is required");
+            throw new HttpRequestValidationException("At least one ACME domain is required");
         }
         return configuredDomains;
     }
@@ -217,7 +217,7 @@ public class AcmeCertificateService {
         if (configuration.allowRequestedDomains() || requestedDomains.equals(configuredDomains)) {
             return;
         }
-        throw new IllegalArgumentException("Requested ACME domains are not allowed by configuration");
+        throw new HttpRequestValidationException("Requested ACME domains are not allowed by configuration");
     }
 
     private static boolean isTrustAnchor(X509Certificate certificate) {
@@ -240,7 +240,7 @@ public class AcmeCertificateService {
         List<String> result = new ArrayList<>();
         for (String domain : domains) {
             if (domain == null || domain.isBlank()) {
-                throw new IllegalArgumentException("ACME domain is required");
+                throw new HttpRequestValidationException("ACME domain is required");
             }
             result.add(domain);
         }
@@ -250,7 +250,7 @@ public class AcmeCertificateService {
     private static String firstNotBlank(String requested, String configured, String message) {
         String result = firstNonBlank(requested, configured);
         if (result == null) {
-            throw new IllegalArgumentException(message);
+            throw new HttpRequestValidationException(message);
         }
         return result;
     }
@@ -268,7 +268,7 @@ public class AcmeCertificateService {
     private static long secondsOrDefault(Long requested, long configured, String message) {
         long result = requested == null ? configured : requested;
         if (result <= 0) {
-            throw new IllegalArgumentException(message);
+            throw new HttpRequestValidationException(message);
         }
         return result;
     }

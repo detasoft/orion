@@ -15,6 +15,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
@@ -693,10 +694,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public void saveAccessControlConfigurationFile(byte[] content) {
         if (content == null || content.length == 0) {
-            throw new IllegalArgumentException("ACL configuration content is required");
+            throw new AccessControlValidationException("ACL configuration content is required");
         }
         String primaryPath = accessControlStorage.primaryPath();
-        OrionDocument document = parseOrionConfiguration(content, primaryPath);
+        OrionDocument document;
+        try {
+            document = parseOrionConfiguration(content, primaryPath);
+        } catch (IllegalArgumentException failure) {
+            throw new AccessControlValidationException("Invalid ACL configuration file");
+        }
         AccessControlSnapshot snapshot = AccessControlSnapshot.singleFile(
                 primaryPath,
                 serializeOrionConfiguration(document));
@@ -710,9 +716,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 requestAclUpdateAndWait("saveAccessControlConfigurationFile()");
             }
             case Result.Failure<OrionDocument> failure ->
-                    throw new IllegalArgumentException(
-                            "Invalid ACL configuration file: " + failure.message(),
-                            failure.throwable());
+                    throw new AccessControlValidationException("Invalid ACL configuration file");
         }
     }
 
@@ -1468,26 +1472,26 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
         private void validateUserUpdate(AccessControlUserUpdate userUpdate) {
             if (userUpdate == null) {
-                throw new IllegalArgumentException("User update is required");
+                throw new AccessControlValidationException("User update is required");
             }
             if (userUpdate.id() == null || userUpdate.id().isBlank()) {
-                throw new IllegalArgumentException("User id is required");
+                throw new AccessControlValidationException("User id is required");
             }
             for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
                 if (credential.type() == null) {
-                    throw new IllegalArgumentException("Credential type is required");
+                    throw new AccessControlValidationException("Credential type is required");
                 }
                 if (credential.type() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY
                         && (credential.keyId() == null || credential.keyId().isBlank())) {
-                    throw new IllegalArgumentException("JWT signing key id is required");
+                    throw new AccessControlValidationException("JWT signing key id is required");
                 }
                 if (credential.value() == null || credential.value().isBlank()) {
-                    throw new IllegalArgumentException("Credential value is required");
+                    throw new AccessControlValidationException("Credential value is required");
                 }
             }
             for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
                 if (repositoryGrant.repository() == null || repositoryGrant.repository().isBlank()) {
-                    throw new IllegalArgumentException("Repository name is required");
+                    throw new AccessControlValidationException("Repository name is required");
                 }
             }
         }

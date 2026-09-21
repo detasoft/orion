@@ -85,7 +85,11 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
         if (body.length == 0) {
             return AdminTokenRequest.DEFAULT;
         }
-        return objectMapper.readValue(body, AdminTokenRequest.class);
+        AdminTokenRequest request = objectMapper.readValue(body, AdminTokenRequest.class);
+        if (request == null) {
+            throw new HttpRequestValidationException("Token request is required");
+        }
+        return request;
     }
 
     private OrionHttpResponse basicAuthenticationRequired() {
@@ -104,7 +108,7 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
                 return DEFAULT_TOKEN_EXPIRES_IN_SECONDS;
             }
             if (expiresInSeconds <= 0) {
-                throw new IllegalArgumentException("Token expiration must be positive");
+                throw new HttpRequestValidationException("Token expiration must be positive");
             }
             return expiresInSeconds;
         }

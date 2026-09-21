@@ -104,7 +104,12 @@ public class OrionGitRoute implements OrionHttpRoute {
             exchange.sendError(SC_BAD_REQUEST);
             return;
         }
-        String repositoryName = RepositoryName.parse(path.substring(3, boundary)).value();
+        String repositoryName;
+        try {
+            repositoryName = RepositoryName.parse(path.substring(3, boundary)).value();
+        } catch (IllegalArgumentException failure) {
+            throw new HttpRequestValidationException("Invalid repository name");
+        }
         new RepositoryHandler(repositoryName).handle(exchange, path.substring(boundary + 5));
     }
 
@@ -181,8 +186,6 @@ public class OrionGitRoute implements OrionHttpRoute {
             exchange.sendError(SC_UNSUPPORTED_MEDIA_TYPE, METHOD_REJECTION_HEADERS);
         } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
             exchange.sendError(SC_FORBIDDEN);
-        } catch (IllegalArgumentException error) {
-            exchange.sendError(SC_BAD_REQUEST, error.getMessage());
         } catch (IOException error) {
             if (causedByAccessDenied(error)) {
                 exchange.sendError(SC_FORBIDDEN);
@@ -249,13 +252,17 @@ public class OrionGitRoute implements OrionHttpRoute {
             NativeHttpRequest request,
             BufferedByteInputV2 input,
             OutputStreamBufferedByteOutput output) {
-        return GitWireBootstrap.smartHttp(
-                input,
-                output,
-                request.service(),
-                request.repositoryPath(),
-                requestHost(req),
-                req.getHeader(GIT_PROTOCOL_HEADER));
+        try {
+            return GitWireBootstrap.smartHttp(
+                    input,
+                    output,
+                    request.service(),
+                    request.repositoryPath(),
+                    requestHost(req),
+                    req.getHeader(GIT_PROTOCOL_HEADER));
+        } catch (IllegalArgumentException failure) {
+            throw new HttpRequestValidationException("Invalid Git HTTP request");
+        }
     }
 
     private GitBlockingWireSession session(

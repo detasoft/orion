@@ -1,35 +1,29 @@
 # Module Review: net/http-core
 
-## 5. Backend argument failures become client errors and Git error handling ignores commitment
+## 5. Git failure handling ignores response commitment
 
-**Problem.** An authorized Git request opening an uncached repository with corrupt persisted metadata
-can return HTTP 400 containing the backend exception message. Invalid/noncanonical stored names and
-malformed Properties Unicode escapes throw IllegalArgumentException, which is treated as bad client input.
-Git-specific failure handlers also attempt sendError without checking whether streaming has committed.
+**Problem.** Git-specific failure handlers attempt sendError for authorization, encoding and
+missing-repository failures without checking whether protocol streaming has already committed.
+Once output is committed, the handler cannot replace it with an HTTP error status.
 
-**Sources.** [Git catches](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L180),
-[servlet exception mapping](src/main/java/pro/deta/orion/transport/http/OrionHttpRouteServlet.java#L41),
-[repository-service boundary](../git-transport/src/main/java/pro/deta/orion/transport/git/DefaultGitNativeRepositoryService.java#L53),
-[file metadata loading](../../git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/FileNativeGitRepositoryProvider.java),
+**Sources.** [Git catches](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java),
+[servlet exception mapping](src/main/java/pro/deta/orion/transport/http/OrionHttpRouteServlet.java),
 [current streaming tests](src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java),
 and [servlet routing tests](src/test/java/pro/deta/orion/transport/http/OrionHttpRouteServletRoutingTest.java).
 The native route recorder models sendError as a status assignment rather than real response commitment.
-The servlet has a committed-response check for IllegalStateException, but not for every relevant Git error.
+The servlet protects committed responses for unexpected argument/state failures, but the Git handler's
+local error paths do not use that protection.
 
 **Documented behavior and contract.** Existing HTTP behavior distinguishes malformed requests, denied
-access, missing repositories and server failures. Corrupt backend state is not malformed client input.
-Unexpected failures require sanitized diagnostics; committed streams cannot receive a replacement status.
-**Minimal repair.** Handle known client validation at its entry boundary, preserve repository failure
-meaning, and stop mapping unexpected backend argument failures to 400. Respect commitment in the Git
-failure path. Verify corrupt metadata and errors before/after real response commitment.
-**Alternatives and consequences.** Globally mapping all argument failures to 500 would misclassify
-legitimate malformed input; a generic HTTP error framework is unnecessary. The pack handler erases provider
-failure codes too, but inspected current openForRead producers return NOT_FOUND, so a live non-absence
-result becoming 404 is not established by this audit.
-**Confidence.** High on corrupt metadata becoming 400; commitment risk is supported by static control flow,
-without a Jetty reproduction. Existing committed-state-error coverage is not claimed absent.
-**Priority signals.** Importance high for failure classification and incidental message exposure;
-repair ease medium/low because validation ownership crosses service/storage boundaries.
+access, missing repositories and server failures. Committed streams cannot receive a replacement status.
+**Minimal repair.** Respect commitment in the Git failure path and terminate an already started stream
+through its existing mechanism. Verify errors before and after real response commitment.
+**Alternatives and consequences.** Buffering the entire response to defer commitment would undermine
+streaming. A generic HTTP error framework is unnecessary; local commitment checks can preserve streaming.
+**Confidence.** The commitment risk is supported by static control flow, without a Jetty reproduction.
+Existing committed-state-error coverage is not claimed absent.
+**Priority signals.** Importance high because failure handling after streamed output is ambiguous;
+repair ease medium because tests must exercise actual response commitment.
 
 ## 13. Unknown smart HTTP discovery services return 400 instead of 403
 

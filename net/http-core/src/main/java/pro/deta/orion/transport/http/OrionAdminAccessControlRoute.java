@@ -3,6 +3,7 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.AccessControlValidationException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -30,7 +31,11 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
-        accessControlService.saveAccessControlConfigurationFile(req.getInputStream().readAllBytes());
+        try {
+            accessControlService.saveAccessControlConfigurationFile(req.getInputStream().readAllBytes());
+        } catch (AccessControlValidationException failure) {
+            throw new HttpRequestValidationException(failure.getMessage());
+        }
         return OrionHttpResponse.created(Map.of("status", "ok"));
     }
 }

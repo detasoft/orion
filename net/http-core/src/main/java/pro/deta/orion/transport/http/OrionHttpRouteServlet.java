@@ -38,10 +38,10 @@ public class OrionHttpRouteServlet extends HttpServlet {
             route.service(exchange);
         } catch (JsonProcessingException e) {
             resp.sendError(SC_BAD_REQUEST, "Invalid JSON request");
-        } catch (IllegalArgumentException e) {
+        } catch (HttpRequestValidationException e) {
             resp.sendError(SC_BAD_REQUEST, e.getMessage());
-        } catch (IllegalStateException e) {
-            log.error("Unexpected HTTP handler state failure", e);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            log.error("Unexpected HTTP handler failure", e);
             if (resp.isCommitted()) {
                 throw new ServletException("HTTP handler failed after response commitment", e);
             }

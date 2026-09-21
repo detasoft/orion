@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
@@ -28,7 +29,14 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
         AdminUserRequest request = objectMapper.readValue(req.getInputStream(), AdminUserRequest.class);
-        accessControlService.createOrUpdateUser(request.toUserUpdate());
+        if (request == null) {
+            throw new HttpRequestValidationException("User request is required");
+        }
+        try {
+            accessControlService.createOrUpdateUser(request.toUserUpdate());
+        } catch (AccessControlValidationException failure) {
+            throw new HttpRequestValidationException(failure.getMessage());
+        }
         return OrionHttpResponse.created(Map.of("status", "ok"));
     }
 
@@ -46,6 +54,9 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
             List<AccessControlRepositoryGrantUpdate> grants = new ArrayList<>();
             if (repositories != null) {
                 for (RepositoryGrantRequest repository : repositories) {
+                    if (repository == null) {
+                        throw new HttpRequestValidationException("Repository grant is required");
+                    }
                     grants.add(repository.toGrantUpdate());
                 }
             }

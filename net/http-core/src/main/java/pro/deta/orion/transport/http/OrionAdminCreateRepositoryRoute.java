@@ -43,7 +43,15 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         AdminRepositoryRequest request = objectMapper.readValue(
                 req.getInputStream(),
                 AdminRepositoryRequest.class);
-        String repositoryName = RepositoryName.parse(request.name()).value();
+        if (request == null) {
+            throw new HttpRequestValidationException("Repository request is required");
+        }
+        String repositoryName;
+        try {
+            repositoryName = RepositoryName.parse(request.name()).value();
+        } catch (IllegalArgumentException failure) {
+            throw new HttpRequestValidationException("Invalid repository name");
+        }
         Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
         boolean repositoryCreated = true;
         if (created instanceof Result.Failure<NativeGitRepository> failure

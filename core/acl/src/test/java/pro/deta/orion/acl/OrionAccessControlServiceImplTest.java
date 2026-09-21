@@ -11,6 +11,7 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialFailureCode;
@@ -681,6 +682,26 @@ class OrionAccessControlServiceImplTest {
             assertThat(alice.getGrants().getFirst().getInfo())
                     .extracting(AccessControl.GrantExpression::getKey)
                     .contains(AccessControl.GrantKey.READ_WRITE);
+        }
+    }
+
+    @Test
+    void reportsInvalidUserAndAclInputWithoutMutatingStorage() {
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            AccessControlSnapshot original = fixture.storage.snapshot;
+            assertThatThrownBy(() -> fixture.service.createOrUpdateUser(
+                    new AccessControlUserUpdate(" ", "", List.of(), List.of())))
+                    .isInstanceOf(AccessControlValidationException.class);
+            assertThatThrownBy(() -> fixture.service.createOrUpdateUser(new AccessControlUserUpdate(
+                    "alice", "", List.of(), List.of(
+                            new AccessControlRepositoryGrantUpdate("", true, false, false, false, "main")))))
+                    .isInstanceOf(AccessControlValidationException.class);
+            assertThatThrownBy(() -> fixture.service.saveAccessControlConfigurationFile(new byte[0]))
+                    .isInstanceOf(AccessControlValidationException.class);
+            assertThatThrownBy(() -> fixture.service.saveAccessControlConfigurationFile(
+                    "not xml".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AccessControlValidationException.class);
+            assertThat(fixture.storage.snapshot).isSameAs(original);
         }
     }
 

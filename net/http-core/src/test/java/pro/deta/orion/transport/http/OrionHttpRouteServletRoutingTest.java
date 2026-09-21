@@ -8,6 +8,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.AccessControlValidationException;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
@@ -149,12 +152,12 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     @Test
-    void preservesClientValidationErrors() throws Exception {
+    void hidesUnexpectedArgumentFailureBehindServerError() throws Exception {
         ResponseRecorder response = new ResponseRecorder();
-        servlet(failingRoute(new IllegalArgumentException("Missing repository name")))
+        servlet(failingRoute(new IllegalArgumentException("private argument details")))
                 .service(request("GET", "/failure"), response.proxy());
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
-        assertThat(response.errorMessage).isEqualTo("Missing repository name");
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        assertThat(response.errorMessage).isEqualTo("Internal server error");
     }
 
     @Test
@@ -194,6 +197,69 @@ class OrionHttpRouteServletRoutingTest {
         }
     }
 
+    @Test
+    void repositoryValidationIs400ButProviderArgumentFailureIs500() throws Exception {
+        NativeGitRepositoryProvider provider = stub(NativeGitRepositoryProvider.class, (proxy, method, args) -> {
+            throw new IllegalArgumentException("private provider details");
+        });
+        OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider, OBJECT_MAPPER);
+        for (String json : List.of("{\"name\":\"../repo\"}", "null", "{}")) {
+            ResponseRecorder response = new ResponseRecorder();
+            servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(), json), response.proxy());
+            assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+            assertThat(response.errorMessage).doesNotContain("private provider details");
+        }
+        ResponseRecorder response = new ResponseRecorder();
+        servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(),
+                "{\"name\":\"team/repo\"}"), response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        assertThat(response.errorMessage).isEqualTo("Internal server error");
+    }
+
+    @Test
+    void aclRoutesOnlyClassifyDeclaredValidationFailuresAsClientErrors() throws Exception {
+        for (boolean invalidInput : List.of(true, false)) {
+            OrionAccessControlService service = stub(OrionAccessControlService.class, (proxy, method, args) -> {
+                if (invalidInput) {
+                    throw new AccessControlValidationException("Invalid ACL input");
+                }
+                throw new IllegalArgumentException("private persistence details");
+            });
+            for (OrionHttpRoute route : List.of(new OrionAdminAccessControlRoute(service),
+                    new OrionAdminCreateOrUpdateUserRoute(service, OBJECT_MAPPER))) {
+                ResponseRecorder response = new ResponseRecorder();
+                servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
+                        "{\"id\":\"alice\"}"), response.proxy());
+                assertThat(response.status).isEqualTo(invalidInput ? 400 : 500);
+                assertThat(response.errorMessage).isEqualTo(invalidInput ? "Invalid ACL input" : "Internal server error");
+            }
+        }
+    }
+
+    @Test
+    void rejectsInvalidStreamingMetadataAsServerError() throws Exception {
+        OrionHttpRoute route = new AbstractOrionHttpRoute("/failure", GET) {
+            @Override
+            public void handle(OrionHttpExchange exchange) throws IOException {
+                exchange.openResponseBody(OrionHttpResponse.ok(Map.of("private", "details")));
+            }
+        };
+        ResponseRecorder response = new ResponseRecorder();
+        servlet(route).service(request("GET", "/failure"), response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        assertThat(response.errorMessage).isEqualTo("Internal server error");
+        assertThat(response.body.toString()).isEmpty();
+    }
+
+    @Test
+    void declaredValidationFailureStillReturns400() throws Exception {
+        ResponseRecorder response = new ResponseRecorder();
+        servlet(failingRoute(new HttpRequestValidationException("Invalid request parameter")))
+                .service(request("GET", "/failure"), response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+        assertThat(response.errorMessage).isEqualTo("Invalid request parameter");
+    }
+
     private static OrionHttpRoute acmeRoute(OrionDesiredState desired) {
         return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new OrionConfiguration(), desired,
                 AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null)), OBJECT_MAPPER);
@@ -224,10 +290,15 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     private static HttpServletRequest request(String method, String pathInfo, SecurityContext context) {
+        return request(method, pathInfo, context, "");
+    }
+
+    private static HttpServletRequest request(
+            String method, String pathInfo, SecurityContext context, String body) {
         return stub(HttpServletRequest.class, (proxy, invokedMethod, args) -> switch (invokedMethod.getName()) {
             case "getMethod" -> method;
             case "getPathInfo" -> pathInfo;
-            case "getInputStream" -> new ByteArrayServletInputStream(new byte[0]);
+            case "getInputStream" -> new ByteArrayServletInputStream(body.getBytes(StandardCharsets.UTF_8));
             case "getAttribute" -> OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE.equals(args[0]) ? context : null;
             case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
             case "hashCode" -> System.identityHashCode(proxy);
