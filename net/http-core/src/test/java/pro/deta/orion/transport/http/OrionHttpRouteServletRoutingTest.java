@@ -2,10 +2,21 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionDocument;
+import java.util.List;
+import java.util.Optional;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -19,6 +30,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.AUTHENTICATED;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
@@ -126,6 +138,81 @@ class OrionHttpRouteServletRoutingTest {
         assertThat(response.body.toString()).isEmpty();
     }
 
+    @Test
+    void hidesUnexpectedStateFailureBehindServerError() throws Exception {
+        ResponseRecorder response = new ResponseRecorder();
+        servlet(failingRoute(new IllegalStateException("private backend details")))
+                .service(request("GET", "/failure"), response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        assertThat(response.errorMessage).isEqualTo("Internal server error");
+        assertThat(response.body.toString()).doesNotContain("private backend details");
+    }
+
+    @Test
+    void preservesClientValidationErrors() throws Exception {
+        ResponseRecorder response = new ResponseRecorder();
+        servlet(failingRoute(new IllegalArgumentException("Missing repository name")))
+                .service(request("GET", "/failure"), response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+        assertThat(response.errorMessage).isEqualTo("Missing repository name");
+    }
+
+    @Test
+    void doesNotReplaceAlreadyCommittedResponseAfterStateFailure() {
+        ResponseRecorder response = new ResponseRecorder();
+        response.status = HttpServletResponse.SC_OK;
+        response.committed = true;
+        IllegalStateException failure = new IllegalStateException("private backend details");
+        assertThatThrownBy(() -> servlet(failingRoute(failure))
+                .service(request("GET", "/failure"), response.proxy()))
+                .isInstanceOf(ServletException.class).hasCause(failure);
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.errorMessage).isNull();
+    }
+
+    @Test
+    void missingAcmeConfigurationRemainsClientErrorForReadAndIssue() throws Exception {
+        OrionDesiredState desired = new OrionDesiredState();
+        desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.empty());
+        OrionHttpRoute route = acmeRoute(desired);
+        for (String method : List.of("GET", "POST")) {
+            ResponseRecorder response = new ResponseRecorder();
+            servlet(route).service(request(method, OrionAdminPaths.ACME_CERTIFICATE, admin()), response.proxy());
+            assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+            assertThat(response.errorMessage).isEqualTo("HTTPS desired state is not configured");
+        }
+    }
+
+    @Test
+    void unpublishedServerStateIsNotMisreportedAsMissingAcmeConfiguration() throws Exception {
+        OrionHttpRoute route = acmeRoute(new OrionDesiredState());
+        for (String method : List.of("GET", "POST")) {
+            ResponseRecorder response = new ResponseRecorder();
+            servlet(route).service(request(method, OrionAdminPaths.ACME_CERTIFICATE, admin()), response.proxy());
+            assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            assertThat(response.errorMessage).isEqualTo("Internal server error");
+        }
+    }
+
+    private static OrionHttpRoute acmeRoute(OrionDesiredState desired) {
+        return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new OrionConfiguration(), desired,
+                AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null)), OBJECT_MAPPER);
+    }
+
+    private static SecurityContext admin() {
+        return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin",
+                ACLUtil.generateDefaultAccessControl("unused-test-hash").getGrants()));
+    }
+
+    private static OrionHttpRoute failingRoute(RuntimeException failure) {
+        return new AbstractOrionHttpRoute("/failure", GET) {
+            @Override
+            protected OrionHttpResponse doGet(HttpServletRequest request) {
+                throw failure;
+            }
+        };
+    }
+
     private static OrionHttpRouteServlet servlet(OrionHttpRoute... routes) {
         return new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of(routes)),
@@ -133,11 +220,15 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     private static HttpServletRequest request(String method, String pathInfo) {
+        return request(method, pathInfo, null);
+    }
+
+    private static HttpServletRequest request(String method, String pathInfo, SecurityContext context) {
         return stub(HttpServletRequest.class, (proxy, invokedMethod, args) -> switch (invokedMethod.getName()) {
             case "getMethod" -> method;
             case "getPathInfo" -> pathInfo;
             case "getInputStream" -> new ByteArrayServletInputStream(new byte[0]);
-            case "getAttribute" -> null;
+            case "getAttribute" -> OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE.equals(args[0]) ? context : null;
             case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
             case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> proxy == args[0];
@@ -176,6 +267,8 @@ class OrionHttpRouteServletRoutingTest {
 
     private static final class ResponseRecorder {
         private int status;
+        private String errorMessage;
+        private boolean committed;
         private String contentType;
         private final Map<String, String> headers = new LinkedHashMap<>();
         private final StringWriter body = new StringWriter();
@@ -186,7 +279,10 @@ class OrionHttpRouteServletRoutingTest {
                     status = (int) args[0];
                     yield null;
                 }
+                case "isCommitted" -> committed;
                 case "sendError" -> {
+                    assertThat(committed).isFalse();
+                    errorMessage = args.length > 1 ? (String) args[1] : null;
                     status = (int) args[0];
                     yield null;
                 }

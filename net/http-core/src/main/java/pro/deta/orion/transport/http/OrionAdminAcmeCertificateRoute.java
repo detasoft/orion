@@ -3,6 +3,8 @@ package pro.deta.orion.transport.http;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.ServletException;
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 
 import java.io.IOException;
@@ -29,6 +31,15 @@ public class OrionAdminAcmeCertificateRoute extends BaseAdminRoute {
                 OrionHttpRouteDefinition.Method.POST);
         this.certificateService = certificateService;
         this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public void handle(OrionHttpExchange exchange) throws IOException, ServletException {
+        try {
+            super.handle(exchange);
+        } catch (AcmeCertificateService.ConfigurationUnavailableException failure) {
+            exchange.sendError(SC_BAD_REQUEST, failure.getMessage());
+        }
     }
 
     @Override

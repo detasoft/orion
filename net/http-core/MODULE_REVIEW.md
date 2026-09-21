@@ -2,12 +2,14 @@
 
 ## 5. HTTP failure classification loses domain meaning and response commitment
 
-**Problem.** The servlet converts every IllegalStateException into HTTP 400 with its message, including
-unexpected handler state failures. The pack route collapses every provider Result.Failure into absence,
+**Problem.** The servlet still converts every IllegalArgumentException into HTTP 400 with its message,
+including internal contract violations such as buffered metadata passed to openResponseBody.
+The pack route collapses every provider Result.Failure into absence,
 and streaming handlers attempt HTTP error translation without checking whether protocol output is
 already committed.
 
 **Sources.** [Servlet exception mapping](src/main/java/pro/deta/orion/transport/http/OrionHttpRouteServlet.java#L28),
+[streaming metadata contract](src/main/java/pro/deta/orion/transport/http/OrionHttpExchange.java),
 [repository-service failure conversion](../git-transport/src/main/java/pro/deta/orion/transport/git/DefaultGitNativeRepositoryService.java),
 [Git catches](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java),
 [message scan](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java),
@@ -39,7 +41,7 @@ after actual response commitment.
 excluded from this audit; no current claim is made about their persisted-metadata failure paths. The exact
 typed replacement must follow the owning service boundaries.
 
-**Priority signals.** Importance: high, because unexpected handler-state failures can be exposed as client
+**Priority signals.** Importance: high, because internal argument-contract failures can be exposed as client
 errors with incidental messages, and streaming failure behavior is ambiguous after commitment. Repair ease:
 low, because absence and typed failures cross Git service, storage and HTTP boundaries and need pre- and
 post-commit verification.

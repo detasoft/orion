@@ -126,22 +126,22 @@ public class AcmeCertificateService {
                 .document()
                 .system()
                 .https()
-                .orElseThrow(() -> new IllegalStateException("HTTPS desired state is not configured"));
+                .orElseThrow(() -> new ConfigurationUnavailableException("HTTPS desired state is not configured"));
         OrionAcmeConfiguration acme = https.acme()
                 .filter(OrionAcmeConfiguration::enabled)
-                .orElseThrow(() -> new IllegalStateException("ACME desired state is not enabled"));
+                .orElseThrow(() -> new ConfigurationUnavailableException("ACME desired state is not enabled"));
 
         List<String> domains = domainsFrom(effectiveRequest, acme);
         requireRequestedDomainsAllowed(domains, effectiveRequest, acme);
         KeyMaterialScope scope = KeyMaterialScope.cluster(clusterId);
         KeyMaterialDescriptor account = descriptor(
                 acme.accountMaterial().orElseThrow(
-                        () -> new IllegalStateException("ACME account material is not configured")),
+                        () -> new ConfigurationUnavailableException("ACME account material is not configured")),
                 KeyMaterialPurpose.ACME_ACCOUNT,
                 scope);
         KeyMaterialDescriptor identity = descriptor(
                 https.identity().orElseThrow(
-                        () -> new IllegalStateException("ACME TLS identity material is not configured")),
+                        () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
                 KeyMaterialPurpose.TLS_IDENTITY,
                 scope);
         Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
@@ -309,6 +309,12 @@ public class AcmeCertificateService {
     private record CertificateMaterial(
             List<X509Certificate> chain,
             Optional<X509Certificate> issuerTrustAnchor) {
+    }
+
+    static final class ConfigurationUnavailableException extends RuntimeException {
+        private ConfigurationUnavailableException(String message) {
+            super(message);
+        }
     }
 
     static final class IssuanceBusyException extends RuntimeException {
