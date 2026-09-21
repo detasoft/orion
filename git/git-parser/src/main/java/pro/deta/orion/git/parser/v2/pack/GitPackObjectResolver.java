@@ -24,6 +24,17 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.zip.Deflater;
 
+/**
+ * Completes the object index and makes a received pack self-contained before publication.
+ * {@link PackIngestor} first verifies the checksum of the received bytes against the trailer and
+ * assigns their {@link PackId}, before resolving any deltas, whether their bases are present or missing.
+ * Resolving OFS/REF deltas against bases in the same pack adds object IDs, logical types and sizes
+ * to the index; the stored delta instructions and pack bytes remain unchanged, so the PackId is retained.
+ * Adding external bases changes the pack bytes and object count, invalidating the cached PackId.
+ * Completion then calculates and writes a new checksum only if the pack bytes changed.
+ * The caller must complete resolution before persisting the pack: a verified PackId alone does not
+ * establish that the object index is complete or that all delta bases are present.
+ */
 public final class GitPackObjectResolver {
     private final IndexedPack pack;
     private final GitStorageApi storage;
