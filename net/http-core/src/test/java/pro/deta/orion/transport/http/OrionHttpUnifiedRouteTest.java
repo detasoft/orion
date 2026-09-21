@@ -152,18 +152,14 @@ class OrionHttpUnifiedRouteTest {
     void rejectsTheMethodFromTheDefinitionWithTheExactAllowHeader() throws Exception {
         AtomicBoolean invoked = new AtomicBoolean();
         OrionHttpRouteDefinition definition = new OrionHttpRouteDefinition(
-                "/git/**",
+                "/git/project.git/info/refs",
                 AUTHENTICATED,
-                List.of(GET, HEAD, POST),
-                request -> request.getPathInfo().endsWith("/info/refs")
-                        ? List.of(GET, HEAD)
-                        : List.of(POST),
-                Map.of());
+                GET, HEAD);
         UnifiedRoute route = route(definition, exchange -> invoked.set(true));
 
         ResponseRecorder response = service(
                 route,
-                request("POST", "/git/project/info/refs", authenticatedContext()));
+                request("POST", "/git/project.git/info/refs", authenticatedContext()));
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
         assertThat(response.headers).containsEntry("Allow", "GET, HEAD");

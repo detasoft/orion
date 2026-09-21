@@ -55,7 +55,7 @@ class OrionGitRouteNativeTest {
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -91,7 +91,7 @@ class OrionGitRouteNativeTest {
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -115,9 +115,16 @@ class OrionGitRouteNativeTest {
         assertThat(body)
                 .contains("packfile-uris\n")
                 .contains(fixture.packId().toHex()
-                        + " https://git.example/r/team/project/objects/pack/"
+                        + " https://git.example/r/team/project.git/objects/pack/"
                         + fixture.packId().toHex()
                         + ".pack\n");
+        String advertisedUri = body.substring(body.indexOf("https://git.example/r/")).split("\n", 2)[0];
+        ResponseRecorder download = new ResponseRecorder();
+        service(route, request("GET", java.net.URI.create(advertisedUri).getRawPath(), null, null,
+                Map.of(), new byte[0], repositorySecurityContext()), download.proxy());
+        assertThat(download.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(download.contentType).isEqualTo(OrionGitPackfileHandler.PACK_CONTENT_TYPE);
+        assertThat(download.body.toByteArray()).startsWith("PACK".getBytes(StandardCharsets.US_ASCII));
     }
 
     @Test
@@ -126,7 +133,7 @@ class OrionGitRouteNativeTest {
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -158,7 +165,7 @@ class OrionGitRouteNativeTest {
         ObjectId objectId = blobId(data);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -185,9 +192,10 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postRejectsUnsupportedContentEncoding() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider()),
-                autoPackfileUriConfig());
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -208,9 +216,10 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postRejectsMalformedGzipRequestBody() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider()),
-                autoPackfileUriConfig());
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -235,7 +244,7 @@ class OrionGitRouteNativeTest {
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -262,7 +271,7 @@ class OrionGitRouteNativeTest {
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
 
         for (String contentType : List.of(
                 "application/x-git-upload-pack-request; charset=UTF-8",
@@ -292,7 +301,7 @@ class OrionGitRouteNativeTest {
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
-                autoPackfileUriConfig());
+                autoPackfileUriConfig(), provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -316,9 +325,10 @@ class OrionGitRouteNativeTest {
     @Test
     void rejectsEndpointSpecificWrongMethodsWithAccurateAllowHeader()
             throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
-                new DefaultGitNativeRepositoryService(provider()),
-                autoPackfileUriConfig());
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig(), provider);
         ResponseRecorder getRpcResponse = new ResponseRecorder();
         ResponseRecorder postDiscoveryResponse = new ResponseRecorder();
 
@@ -352,6 +362,126 @@ class OrionGitRouteNativeTest {
         assertThat(postDiscoveryResponse.headers)
                 .containsEntry("Allow", "GET, HEAD");
         assertNoCacheHeaders(postDiscoveryResponse);
+    }
+
+    @Test
+    void requiresExplicitRepositoryBoundaryAndExactChildPath() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        for (String path : List.of("/r/team/project/info/refs", "/r/team/project/git-upload-pack")) {
+            ResponseRecorder response = new ResponseRecorder();
+            service(route, request("GET", path, null, "git-upload-pack", Map.of(),
+                    new byte[0], repositorySecurityContext()), response.proxy());
+            assertThat(response.status).as(path).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+            assertThat(response.body()).isEmpty();
+        }
+        for (String operation : List.of("extra/info/refs", "extra/git-upload-pack", "info/refs/extra")) {
+            ResponseRecorder response = new ResponseRecorder();
+            service(route, request("GET", "/r/team/project.git/" + operation, null, "git-upload-pack",
+                    Map.of(), new byte[0], repositorySecurityContext()), response.proxy());
+            assertThat(response.status).as(operation).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
+            assertThat(response.body()).isEmpty();
+        }
+    }
+
+    @Test
+    void repositorySegmentsMayHaveOperationNames() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        String name = "organization/team/info/refs/project";
+        provider.create(name).valueOrFailure("repository");
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        ResponseRecorder response = new ResponseRecorder();
+        service(route, request("GET", "/r/" + name + ".git/info/refs", null, "git-upload-pack",
+                Map.of("Git-Protocol", "version=2"), new byte[0], repositorySecurityContext(name)),
+                response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.body()).startsWith("000eversion 2\n");
+    }
+
+    @Test
+    void rejectsDeniedReadAndWriteBeforeOpeningBodyOrResponseStream() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        provider.create(REPOSITORY_NAME).valueOrFailure("repository");
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        SecurityContext unrelated = repositorySecurityContext("other/repository");
+        for (String operation : List.of("info/refs", "git-upload-pack", "git-receive-pack")) {
+            HttpServletRequest original = request(operation.equals("info/refs") ? "GET" : "POST",
+                    "/r/team/project.git/" + operation, "application/x-git-upload-pack-request",
+                    "git-upload-pack", Map.of(), new byte[0],
+                    operation.equals("git-receive-pack") ? repositorySecurityContext() : unrelated);
+            HttpServletRequest guarded = stub(HttpServletRequest.class, (proxy, method, args) -> {
+                assertThat(method.getName()).isNotEqualTo("getInputStream");
+                return method.invoke(original, args);
+            });
+            ResponseRecorder response = new ResponseRecorder();
+            service(route, guarded, response.proxy());
+            assertThat(response.status).as(operation).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+            assertThat(response.contentType).isNull();
+            assertThat(response.body()).isEmpty();
+        }
+    }
+
+    @Test
+    void receiveDiscoveryRequiresCreateGrantForMissingRepository() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        ResponseRecorder denied = new ResponseRecorder();
+        service(route, request("GET", "/r/team/project.git/info/refs", null, "git-receive-pack",
+                Map.of(), new byte[0], repositoryWriteSecurityContext()), denied.proxy());
+        assertThat(denied.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(provider.exists(REPOSITORY_NAME)).isFalse();
+        AccessControl.Grant grant = new AccessControlDraft.Grant("create", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
+                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING).toAccessControl();
+        SecurityContext creator = SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl("creator", List.of(grant)));
+        ResponseRecorder allowed = new ResponseRecorder();
+        service(route, request("GET", "/r/team/project.git/info/refs", null, "git-receive-pack",
+                Map.of(), new byte[0], creator), allowed.proxy());
+        assertThat(allowed.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(provider.exists(REPOSITORY_NAME)).isTrue();
+    }
+
+    @Test
+    void unknownHttpVerbUsesChildAllowHeader() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        for (String[] endpoint : new String[][]{
+                {"info/refs", "GET, HEAD"}, {"git-upload-pack", "POST"},
+                {"git-receive-pack", "POST"}, {"objects/pack/" + "a".repeat(40) + ".pack", "GET"}}) {
+            ResponseRecorder response = new ResponseRecorder();
+            service(route, request("OPTIONS", "/r/team/project.git/" + endpoint[0], null, null,
+                    Map.of(), new byte[0], repositorySecurityContext()), response.proxy());
+            assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+            assertThat(response.headers).containsEntry("Allow", endpoint[1]);
+        }
+    }
+
+    @Test
+    void usesOneContextRelativePathForRoutingAndRepositoryResolution() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        HttpServletRequest original = request("GET", "/r/team/project.git/info/refs", null, "git-upload-pack",
+                Map.of("Git-Protocol", "version=2"), new byte[0], repositorySecurityContext());
+        HttpServletRequest mounted = stub(HttpServletRequest.class, (proxy, method, args) ->
+                switch (method.getName()) {
+                    case "getPathInfo" -> null;
+                    case "getContextPath" -> "/orion";
+                    case "getRequestURI" -> "/orion/r/team/project.git/info/refs";
+                    default -> method.invoke(original, args);
+                });
+        ResponseRecorder response = new ResponseRecorder();
+        service(route, mounted, response.proxy());
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.body()).startsWith("000eversion 2\n");
     }
 
     private static void assertNoCacheHeaders(ResponseRecorder response) {
@@ -505,10 +635,14 @@ class OrionGitRouteNativeTest {
     }
 
     private static SecurityContext repositorySecurityContext() {
+        return repositorySecurityContext(REPOSITORY_NAME);
+    }
+
+    private static SecurityContext repositorySecurityContext(String name) {
         AccessControl.Grant grant = new AccessControlDraft.Grant(
                 "repository",
                 new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
+                .addKey(AccessControl.GrantKey.REPOSITORY, name)
                 .toAccessControl();
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
@@ -564,6 +698,7 @@ class OrionGitRouteNativeTest {
                             headers.put((String) args[0], (String) args[1]);
                             yield null;
                         }
+                        case "setContentLengthLong" -> null;
                         case "setContentType" -> {
                             contentType = (String) args[0];
                             yield null;

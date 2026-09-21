@@ -530,6 +530,15 @@ An active system proxy with alias `configuration` is available at
 `ssh://<user>@<host>:<ssh-port>/proxy/system/configuration.git`.
 `GET /api/admin/proxies` reports the relative HTTP endpoint for each alias.
 
+HTTP Git URLs require `.git` as the explicit repository boundary, for example
+`/r/organization/team/project.git/info/refs`. The first `.git/` separates the repository name
+from its operation; namespace segments therefore must not end in `.git` in HTTP URLs.
+The `/r/` handler resolves the repository once, then dispatches exact child operations:
+`info/refs`, `git-upload-pack`, `git-receive-pack`, or `objects/pack/<id>.pack`.
+Each operation checks its allowed methods and repository permissions before reading a request body
+or starting a successful response. URLs without the `.git` boundary are rejected; existing HTTP
+remotes must include it. Advertised pack download URLs use the same boundary.
+
 Grant repository access to `proxy/system/configuration` and the required branches
 using the ordinary Git ACL rules. Push also requires `READ_WRITE` permission; force
 updates require force permission. Repository and HTTP route patterns use the same slash-separated syntax.

@@ -21,6 +21,8 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -51,7 +53,7 @@ class OrionGitPackfileRouteTest {
         provider.publicName = false;
         ResponseRecorder response = new ResponseRecorder();
 
-        service(new OrionGitPackfileRoute(provider), request("GET",
+        service(gitRoute(provider), request("GET",
                 "/r/team/project.git/objects/pack/" + pack.packId().toHex() + ".pack",
                 repositorySecurityContext("team/project")), response.proxy());
 
@@ -68,7 +70,7 @@ class OrionGitPackfileRouteTest {
                 .valueOrFailure("repository");
         RecordingProvider provider = new RecordingProvider(backend);
         PublishedPackFixture pack = publishPack(repository);
-        OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
+        OrionGitRoute route = gitRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -82,7 +84,7 @@ class OrionGitPackfileRouteTest {
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
-                .isEqualTo(OrionGitPackfileRoute.PACK_CONTENT_TYPE);
+                .isEqualTo(OrionGitPackfileHandler.PACK_CONTENT_TYPE);
         assertThat(response.headers).containsEntry("Cache-Control", "no-cache");
         assertThat(response.contentLength).isEqualTo(pack.packBytes().length);
         assertThat(response.body.toByteArray()).isEqualTo(pack.packBytes());
@@ -92,7 +94,7 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void rejectsInvalidPackIdentifier() throws Exception {
-        OrionGitPackfileRoute route = new OrionGitPackfileRoute(
+        OrionGitRoute route = gitRoute(
                 new FileNativeGitRepositoryProvider(tempDir));
         ResponseRecorder response = new ResponseRecorder();
 
@@ -112,7 +114,7 @@ class OrionGitPackfileRouteTest {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(tempDir);
         provider.create("team/project").valueOrFailure("repository");
-        OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
+        OrionGitRoute route = gitRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -134,7 +136,7 @@ class OrionGitPackfileRouteTest {
         NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         PublishedPackFixture pack = publishPack(repository);
-        OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
+        OrionGitRoute route = gitRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -153,7 +155,7 @@ class OrionGitPackfileRouteTest {
     void rejectsInvalidRepositoryNamesBeforeProviderRead() throws Exception {
         RecordingProvider provider = new RecordingProvider(
                 new FileNativeGitRepositoryProvider(tempDir));
-        OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
+        OrionGitRoute route = gitRoute(provider);
         String packId = "a".repeat(40);
 
         for (String repositoryPath : List.of(
@@ -174,6 +176,10 @@ class OrionGitPackfileRouteTest {
 
         assertThat(provider.readCalls).isZero();
         assertThat(provider.lastReadName).isNull();
+    }
+
+    private static OrionGitRoute gitRoute(NativeGitRepositoryProvider provider) {
+        return new OrionGitRoute(new DefaultGitNativeRepositoryService(provider), new GitTransportConfig(), provider);
     }
 
     private static PublishedPackFixture publishPack(

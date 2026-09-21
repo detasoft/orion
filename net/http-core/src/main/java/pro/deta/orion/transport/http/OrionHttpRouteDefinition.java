@@ -20,7 +20,6 @@ public record OrionHttpRouteDefinition(
         String urlPattern,
         Authorization authorization,
         List<Method> methods,
-        MethodPolicy methodPolicy,
         Map<String, String> methodRejectionHeaders) {
     public OrionHttpRouteDefinition(
             String urlPattern,
@@ -30,24 +29,14 @@ public record OrionHttpRouteDefinition(
                 urlPattern,
                 authorization,
                 List.of(methods),
-                fixedPolicy(methods),
                 Map.of());
     }
 
     public OrionHttpRouteDefinition {
         Objects.requireNonNull(urlPattern, "urlPattern");
         Objects.requireNonNull(authorization, "authorization");
-        Objects.requireNonNull(methodPolicy, "methodPolicy");
         methods = normalized(methods);
         methodRejectionHeaders = Map.copyOf(methodRejectionHeaders);
-    }
-
-    List<Method> allowedMethods(HttpServletRequest request) {
-        List<Method> allowed = normalized(methodPolicy.allowedMethods(request));
-        if (!methods.containsAll(allowed)) {
-            throw new IllegalStateException("HTTP method policy exceeds route metadata");
-        }
-        return allowed;
     }
 
     public List<String> methodNames() {
@@ -79,11 +68,6 @@ public record OrionHttpRouteDefinition(
             throw new IllegalArgumentException("HTTP route must allow at least one method");
         }
         return List.copyOf(result);
-    }
-
-    private static MethodPolicy fixedPolicy(Method[] methods) {
-        List<Method> fixedMethods = normalized(List.of(methods));
-        return request -> fixedMethods;
     }
 
     public enum Method {
@@ -155,8 +139,4 @@ public record OrionHttpRouteDefinition(
         }
     }
 
-    @FunctionalInterface
-    public interface MethodPolicy {
-        List<Method> allowedMethods(HttpServletRequest request);
-    }
 }

@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
@@ -10,7 +9,6 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -27,52 +25,48 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.GIT;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
-public final class OrionGitPackfileRoute implements OrionHttpRoute {
-    public static final String URL_PATTERN = "/r/**/objects/pack/*.pack";
+final class OrionGitPackfileHandler {
     public static final String PACK_CONTENT_TYPE =
             "application/x-git-packed-objects";
 
     private static final OrionHttpRouteDefinition DEFINITION =
-            new OrionHttpRouteDefinition(URL_PATTERN, GIT, GET);
-    private static final String ROUTE_PREFIX = "/r/";
-    private static final String PACK_PATH = "/objects/pack/";
+            new OrionHttpRouteDefinition("objects/pack/*", GIT, GET);
     private static final String PACK_SUFFIX = ".pack";
 
     private final NativeGitRepositoryProvider repositoryProvider;
 
-    @Inject
-    public OrionGitPackfileRoute(
+    OrionGitPackfileHandler(
             NativeGitRepositoryProvider repositoryProvider) {
         this.repositoryProvider = Objects.requireNonNull(
                 repositoryProvider,
                 "repositoryProvider");
     }
 
-    @Override
-    public OrionHttpRouteDefinition definition() {
-        return DEFINITION;
-    }
-
-    @Override
-    public void handle(
-            OrionHttpExchange exchange) throws IOException {
+    void handle(OrionHttpExchange exchange, String repositoryName, String fileName) throws IOException {
+        if (!exchange.accepts(DEFINITION)) {
+            return;
+        }
         HttpServletRequest req = exchange.request();
-        Optional<RouteMatch> match = match(routePath(req));
-        if (match.isEmpty()) {
+        if (!fileName.endsWith(PACK_SUFFIX)) {
             exchange.sendError(SC_BAD_REQUEST);
             return;
         }
-        if (!canRead(req, match.get().repositoryName())) {
+        String packId = fileName.substring(0, fileName.length() - PACK_SUFFIX.length());
+        if (!isLowercaseSha1(packId)) {
+            exchange.sendError(SC_BAD_REQUEST);
+            return;
+        }
+        if (!canRead(req, repositoryName)) {
             exchange.sendError(SC_FORBIDDEN);
             return;
         }
         Optional<NativeGitRepository> repository =
-                repository(match.get().repositoryName());
+                repository(repositoryName);
         if (repository.isEmpty()) {
             exchange.sendError(SC_NOT_FOUND);
             return;
         }
-        Optional<Long> sent = repository.get().storage().readPack(new PackId(match.get().packId()),
+        Optional<Long> sent = repository.get().storage().readPack(new PackId(packId),
                 (size, input) -> {
                     OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, PACK_CONTENT_TYPE)
                             .withHeader("Cache-Control", "no-cache")
@@ -125,54 +119,6 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
         return SecurityContext.createContext().withRequestId(req.toString());
     }
 
-    private static Optional<RouteMatch> match(String path) {
-        if (path == null || !path.startsWith(ROUTE_PREFIX)) {
-            return Optional.empty();
-        }
-        int packPath = path.lastIndexOf(PACK_PATH);
-        if (packPath <= ROUTE_PREFIX.length()) {
-            return Optional.empty();
-        }
-        String repositoryPath = path.substring(
-                ROUTE_PREFIX.length(),
-                packPath);
-        String fileName = path.substring(packPath + PACK_PATH.length());
-        if (!fileName.endsWith(PACK_SUFFIX)) {
-            return Optional.empty();
-        }
-        String packId = fileName.substring(
-                0,
-                fileName.length() - PACK_SUFFIX.length());
-        if (!isLowercaseSha1(packId)) {
-            return Optional.empty();
-        }
-        try {
-            String repositoryName = RepositoryName.fromGitPath(repositoryPath).value();
-            return Optional.of(new RouteMatch(repositoryName, packId));
-        } catch (IllegalArgumentException error) {
-            return Optional.empty();
-        }
-    }
-
-    private static String routePath(HttpServletRequest req) {
-        String path = req.getPathInfo();
-        if (path != null && !path.isBlank()) {
-            return path;
-        }
-        path = req.getRequestURI();
-        String contextPath = req.getContextPath();
-        if (path != null
-                && contextPath != null
-                && !contextPath.isBlank()
-                && path.startsWith(contextPath)) {
-            path = path.substring(contextPath.length());
-        }
-        if (path != null && !path.isBlank()) {
-            return path;
-        }
-        return "/";
-    }
-
     private static boolean isLowercaseSha1(String value) {
         if (value == null || value.length() != 40) {
             return false;
@@ -185,6 +131,4 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
         }
     }
 
-    private record RouteMatch(String repositoryName, String packId) {
-    }
 }

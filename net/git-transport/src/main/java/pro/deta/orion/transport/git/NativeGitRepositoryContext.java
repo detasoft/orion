@@ -4,7 +4,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
-import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -47,7 +46,12 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
 
     @Override
     public Optional<URI> packUri(PackId id) {
-        return packUriBase.map(base -> URI.create(NativePackfileUriBuilder.packUri(base, name, id.toHex())));
+        return packUriBase.map(base -> {
+            while (base.endsWith("/")) {
+                base = base.substring(0, base.length() - 1);
+            }
+            return URI.create(base + "/" + name + ".git/objects/pack/" + id.toHex() + ".pack");
+        });
     }
 
     @Override
