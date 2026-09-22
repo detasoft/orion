@@ -68,6 +68,7 @@ final class OrionGitServer implements GitServer {
     private static final String MAIN_REF = "refs/heads/main";
 
     private final GitTransportScheme transport;
+    private volatile InternalUserImpl authenticatedUser = matrixUser();
     private Server http;
     private SshServer ssh;
     private OrionExecutor executor;
@@ -262,6 +263,11 @@ final class OrionGitServer implements GitServer {
         return new InternalUserImpl("matrix", List.of(grant));
     }
 
+    @TestOnly
+    void setUser(InternalUserImpl user) {
+        authenticatedUser = Objects.requireNonNull(user, "user");
+    }
+
     private void startAllowAllTransport() throws Exception {
         DefaultGitNativeRepositoryService repositories = new DefaultGitNativeRepositoryService(provider);
         if (transport == HTTP) {
@@ -283,7 +289,7 @@ final class OrionGitServer implements GitServer {
                                 throws IOException, ServletException {
                             request.setAttribute(
                                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
-                                    SecurityContext.createContext().withUserIdentity(matrixUser()));
+                                    SecurityContext.createContext().withUserIdentity(authenticatedUser));
                             super.service(request, response);
                         }
                     };
@@ -304,7 +310,7 @@ final class OrionGitServer implements GitServer {
                 @Override
                 public void sessionCreated(Session session) {
                     session.setAttribute(GitSshTransportService.SSH_AUTHENTICATED_USER,
-                            matrixUser());
+                            authenticatedUser);
                 }
             });
             executor = new OrionExecutor(4, new OrionThreadFactory());

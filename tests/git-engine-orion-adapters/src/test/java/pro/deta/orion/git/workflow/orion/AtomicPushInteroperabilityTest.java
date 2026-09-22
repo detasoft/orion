@@ -36,6 +36,8 @@ class AtomicPushInteroperabilityTest {
     private static final String MAIN = "refs/heads/main";
     private static final String LEFT = "refs/heads/left";
     private static final String RIGHT = "refs/heads/right";
+    private static final String TAG = "refs/tags/atomic";
+    private static final String ZERO = "0".repeat(40);
 
     @TempDir
     Path directory;
@@ -79,6 +81,20 @@ class AtomicPushInteroperabilityTest {
             source.pushRefs("origin", MAIN + ":" + MAIN, LEFT + ":" + LEFT, RIGHT + ":" + RIGHT);
             RepositorySnapshot initial = server.snapshot(remote);
             assertThat(initial.refs()).isEqualTo(Map.of(MAIN, third, LEFT, first, RIGHT, first));
+
+            GitReceivePackResult created = push(client, remote, true,
+                    new GitReceivePackRequest.Command(ZERO, first, "refs/heads/created"),
+                    new GitReceivePackRequest.Command(ZERO, first, TAG));
+            assertThat(created.accepted()).isTrue();
+            RepositorySnapshot withCreatedRefs = server.snapshot(remote);
+            assertThat(withCreatedRefs.refs()).isEqualTo(Map.of(MAIN, third, LEFT, first, RIGHT, first,
+                    "refs/heads/created", first, TAG, first));
+            assertThat(withCreatedRefs.commits()).isEqualTo(initial.commits());
+            GitReceivePackResult deleted = push(client, remote, true,
+                    new GitReceivePackRequest.Command(first, ZERO, "refs/heads/created"),
+                    new GitReceivePackRequest.Command(first, ZERO, TAG));
+            assertThat(deleted.accepted()).isTrue();
+            assertThat(initial.difference(server.snapshot(remote))).isNull();
 
             GitReceivePackResult accepted = push(client, remote, true,
                     new GitReceivePackRequest.Command(first, second, LEFT),

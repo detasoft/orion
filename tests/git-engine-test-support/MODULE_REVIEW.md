@@ -13,6 +13,11 @@ Neither is registered through reflection or resources; neither contributes a run
 [GitInteroperabilityMatrixRunner](src/main/java/pro/deta/orion/git/workflow/GitInteroperabilityMatrixRunner.java),
 Orion adapters and parser/transport tests. Assertions must check operation results, refs, history and file
 content rather than reproducing JGit's exact progress messages, capability ordering and compressed pack bytes.
+Keep the specialized matrices for
+[protocol v2 discovery and fetch](../git-engine-orion-adapters/src/test/java/pro/deta/orion/git/workflow/orion/FetchProtocolInteroperabilityTest.java),
+[branch fetch grants](../git-engine-orion-adapters/src/test/java/pro/deta/orion/git/workflow/orion/BranchFetchInteroperabilityTest.java),
+[atomic ref creation and updates](../git-engine-orion-adapters/src/test/java/pro/deta/orion/git/workflow/orion/AtomicPushInteroperabilityTest.java)
+and [HTTP push without discovery](../git-engine-orion-adapters/src/test/java/pro/deta/orion/git/workflow/orion/PushDiscoveryInteroperabilityTest.java).
 
 **Minimal repair and tests.** Remove the unused helpers while preserving the existing matrix and focused
 parser coverage, including malformed fetch/push rejection and unchanged refs in
