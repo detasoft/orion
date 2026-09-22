@@ -17,7 +17,7 @@ const FIRST_SEGMENT: u64 = 1;
 const MAX_CBOR_DEPTH: usize = 64;
 const MAX_RECORD_FIELDS: usize = 1024;
 const MAX_ENCODED_RECORD_LENGTH: usize = MAX_PAYLOAD_LENGTH + 4096;
-const MAX_DECOMPRESSED_SEGMENT_LENGTH: u64 = 512 * 1024 * 1024;
+pub(crate) const MAX_DECOMPRESSED_SEGMENT_LENGTH: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_JOURNAL_SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
 pub const DEFAULT_JOURNAL_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -729,6 +729,11 @@ fn compress_segment(
 }
 
 fn validate_config(config: &JournalConfig) -> Result<(), JournalError> {
+    if config.segment_max_bytes > MAX_DECOMPRESSED_SEGMENT_LENGTH {
+        return Err(JournalError::Configuration(format!(
+            "journal segment target must not exceed {MAX_DECOMPRESSED_SEGMENT_LENGTH} bytes (512 MiB)",
+        )));
+    }
     if config.segment_max_bytes == 0 || config.journal_max_bytes < config.segment_max_bytes {
         return Err(JournalError::Configuration(
             "journal limits must be positive and max must cover one segment".to_owned(),
@@ -2465,7 +2470,11 @@ mod tests {
 
     #[test]
     fn create_rejects_invalid_journal_limits() {
-        for (segment_max_bytes, journal_max_bytes) in [(0, 1024), (1024, 1023)] {
+        for (segment_max_bytes, journal_max_bytes) in [
+            (0, 1024), (1024, 1023),
+            (MAX_DECOMPRESSED_SEGMENT_LENGTH + 1, u64::MAX),
+            (1024 * 1024 * 1024, u64::MAX), (u64::MAX, u64::MAX),
+        ] {
             let directory = temporary_directory("invalid-create-limits");
             let result = JournalWriter::create(
                 &directory,
@@ -2477,6 +2486,23 @@ mod tests {
             };
 
             assert!(matches!(error, JournalError::Configuration(_)));
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn segment_size_boundaries_allow_complete_records_and_readable_compression() {
+        for target in [1, MAX_DECOMPRESSED_SEGMENT_LENGTH] {
+            let directory = temporary_directory("segment-size-boundary");
+            let mut writer = JournalWriter::create(&directory, journal_config(target, u64::MAX)).unwrap();
+            let record = encode_event(1, JournalEvent::PtyOutput(b"whole-record".to_vec())).unwrap();
+            writer.append_at_for_test(1, JournalEvent::PtyOutput(b"whole-record".to_vec())).unwrap();
+            writer.rotate().unwrap();
+            writer.finish_maintenance().unwrap();
+            assert_eq!(decode_compressed_segment(&directory, 1), record);
+            let scans = scan_segments(&discover_segments(&directory).unwrap()).unwrap();
+            assert_eq!(scans[0].last_event_id, 1);
+            drop(writer);
             fs::remove_dir_all(directory).unwrap();
         }
     }

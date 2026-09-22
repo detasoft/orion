@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
 use crate::protocol;
+use crate::journal::MAX_DECOMPRESSED_SEGMENT_LENGTH;
 
 pub use crate::journal::{DEFAULT_JOURNAL_MAX_BYTES, DEFAULT_JOURNAL_SEGMENT_BYTES};
 
@@ -103,6 +104,11 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             let journal_segment_bytes =
                 journal_segment_bytes.unwrap_or(DEFAULT_JOURNAL_SEGMENT_BYTES);
             let journal_max_bytes = journal_max_bytes.unwrap_or(DEFAULT_JOURNAL_MAX_BYTES);
+            if journal_segment_bytes > MAX_DECOMPRESSED_SEGMENT_LENGTH {
+                return Err(ParseError::new(format!(
+                    "--journal-segment-bytes must not exceed {MAX_DECOMPRESSED_SEGMENT_LENGTH} bytes (512 MiB)",
+                )));
+            }
             if journal_max_bytes < journal_segment_bytes {
                 return Err(ParseError::new(
                     "--journal-max-bytes must be greater than or equal to --journal-segment-bytes",
@@ -451,6 +457,25 @@ mod tests {
                 result.unwrap_err().to_string(),
                 format!("duplicate option: {option}")
             );
+        }
+    }
+
+    #[test]
+    fn accepts_segment_size_boundaries_and_rejects_sizes_above_reader_limit() {
+        for size in ["1", "536870912"] {
+            let Command::Run(options) = parse(session_arguments(&[
+                "--journal-segment-bytes", size,
+            ])).unwrap() else {
+                panic!("expected run command");
+            };
+            assert_eq!(options.journal_segment_bytes, size.parse::<u64>().unwrap());
+        }
+        for size in ["536870913", "1073741824", "18446744073709551615"] {
+            let error = parse(session_arguments(&[
+                "--journal-segment-bytes", size,
+                "--journal-max-bytes", "18446744073709551615",
+            ])).unwrap_err();
+            assert_eq!(error.to_string(), "--journal-segment-bytes must not exceed 536870912 bytes (512 MiB)");
         }
     }
 

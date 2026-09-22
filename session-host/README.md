@@ -105,7 +105,11 @@ decision.
 segment and defaults to 67,108,864 bytes (64 MiB). `--journal-max-bytes` limits
 the physical size of the retained journal and defaults to 1,073,741,824 bytes
 (1 GiB). Both values are positive decimal byte counts, and the journal maximum
-must be at least the segment target.
+must be at least the segment target. The segment target must be between 1 and
+536,870,912 bytes (512 MiB), inclusive, matching the maximum decompressed segment
+size accepted by journal readers. Larger targets are rejected before launch
+and when creating a journal writer; the total journal maximum has no such
+512 MiB cap. Existing oversized segment files are not rewritten.
 
 The host rotates only between complete CBOR items, so one oversized event stays
 whole and may exceed the segment target. Closed segments are compressed without

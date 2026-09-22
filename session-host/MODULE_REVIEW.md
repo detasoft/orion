@@ -38,39 +38,3 @@ frequency are unknown; no stress reproduction was run.
 
 **Priority signals.** Importance: medium, with potentially high impact under sustained blocked input.
 Repair ease: medium to low because resource bounds and termination availability must be designed together.
-
-### 6. Accepted segment targets can create compressed journals that readers reject
-
-**Problem.** `--journal-segment-bytes 1073741824 --journal-max-bytes 2147483648` is accepted. After a segment grows
-beyond 512 MiB and closes, maintenance compresses it, but native full scans and AgentD's compressed reader reject
-decoded data beyond 512 MiB. Ordinary compression can therefore make valid writer output unreadable to replay,
-replication, and retention scanning. Default 64 MiB targets are unaffected.
-
-**Sources.** [CLI validation](src/cli.rs#L104) and [`validate_config`](src/journal.rs#L751) check positivity and
-total-versus-segment size without an upper target bound. [Rotation](src/journal.rs#L393) follows that target,
-and [`compress_segment`](src/journal.rs#L727) compresses the entire file. Native
-[`scan_path`](src/journal.rs#L1097) enforces `MAX_DECOMPRESSED_SEGMENT_LENGTH` for full compressed scans;
-the [AgentD reader](../agentd/src/main/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReader.java#L391)
-enforces the same 512 MiB cap. The [configuration test](src/journal.rs#L2487) covers zero and insufficient total
-size, not this writer/reader mismatch.
-
-**Documented behavior.** [Storage configuration](README.md#L104) documents positive byte counts and
-`maximum >= segment`. The [compression contract](protocol/README.md#L521) requires the same logical records
-after decompression; it does not advertise an accepted configuration that becomes unreadable after rotation.
-
-**Contract.** Accepted writer settings must remain consumable after compression while preserving bounded
-reading, indivisible records, durable acknowledgement, and the active-segment retention boundary.
-
-**Minimal repair.** Reject incompatible segment targets before launch and at the existing writer configuration
-boundary, using the established reader maximum. Document the supported range and test its boundary together
-with whole-record rotation. Individual record limits already lie far below 512 MiB.
-
-**Alternatives and consequences.** Supporting larger segments instead requires deliberately revisiting both
-native and AgentD reader bounds and their resource containment. Validation narrows previously accepted custom
-settings but changes neither defaults nor wire/persisted representations; it does not repair existing oversized
-files, whose handling needs an explicit compatibility decision if such files exist.
-
-**Confidence.** High, a deterministic configuration/reader mismatch. No large-file reproduction was executed.
-
-**Priority signals.** Importance: medium, custom settings can stop journal consumption and retention.
-Repair ease: high to medium for validation; broader large-segment support is a larger cross-module change.
