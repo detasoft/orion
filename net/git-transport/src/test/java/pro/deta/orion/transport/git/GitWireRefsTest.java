@@ -8,7 +8,6 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
-import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -32,7 +31,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
                 List.of("refs/")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "refs/heads/main"), direct(TAG_ID,
@@ -46,7 +45,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(
+        LsRefsResponse response = lsRefs(
                 service,
                 request("demo"),
                 new LsRefsRequest(false, false, false, List.of("refs/", "refs/heads/")));
@@ -61,7 +60,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false,
                 List.of("refs/tags/")));
 
         assertThat(response.refs()).isEmpty();
@@ -74,7 +73,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false,
                 List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD"));
@@ -87,7 +86,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
                 List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD", Optional.of("refs/heads/main"),
@@ -101,13 +100,13 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(
+        LsRefsResponse response = lsRefs(
                 service,
                 request("demo"),
                 new LsRefsRequest(false, true, true, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(
-                new GitLsRefsResponse.UnbornRef("HEAD", "refs/heads/main"));
+                new LsRefsResponse.UnbornRef("HEAD", "refs/heads/main"));
     }
 
     @Test
@@ -118,7 +117,7 @@ class GitWireRefsTest {
         repository.storage().updateHead(new Head.Detached(new CommitId(TAG_ID)));
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
                 List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(TAG_ID, "HEAD"));
@@ -130,10 +129,10 @@ class GitWireRefsTest {
         createRepository(provider, "demo");
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, true,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, true,
                 List.of("HEAD")));
 
-        assertThat(response.refs()).containsExactly(new GitLsRefsResponse.UnbornRef("HEAD", "refs/heads/main"));
+        assertThat(response.refs()).containsExactly(new LsRefsResponse.UnbornRef("HEAD", "refs/heads/main"));
     }
 
     @Test
@@ -147,7 +146,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/nested", NULL_ID, outerTagId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
                 List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(outerTagId.toHex(), "refs/tags/nested",
@@ -168,7 +167,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/large", NULL_ID, tagId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(
+        LsRefsResponse response = lsRefs(
                 service,
                 request("demo"),
                 new LsRefsRequest(true, false, false, List.of("refs/tags/large")));
@@ -186,7 +185,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/malformed", NULL_ID, malformedTagId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
                 List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(malformedTagId.toHex(), "refs/tags/malformed"));
@@ -200,7 +199,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/missing-target", NULL_ID, tagId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
                 List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(tagId.toHex(), "refs/tags/missing-target"));
@@ -223,12 +222,12 @@ class GitWireRefsTest {
         }
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(
+        LsRefsResponse response = lsRefs(
                 service,
                 request("demo"),
                 new LsRefsRequest(true, false, false, List.of("refs/tags/shared-")));
 
-        List<GitLsRefsResponse.DirectRef> expected = new ArrayList<>();
+        List<LsRefsResponse.DirectRef> expected = new ArrayList<>();
         for (int i = 0; i < chainLength; i++) {
             expected.add(direct(tagIds.get(i).toHex(), "refs/tags/shared-%03d".formatted(i), Optional.empty(),
                 Optional.of(commitId.toHex())));
@@ -247,7 +246,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/z-annotated", NULL_ID, annotatedTagId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
+        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false,
                 List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(commitId.toHex(), "refs/tags/a-lightweight"),
@@ -267,7 +266,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/tags/too-deep", NULL_ID, targetId.toHex());
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(
+        LsRefsResponse response = lsRefs(
                 service,
                 request("demo"),
                 new LsRefsRequest(true, false, false, List.of("refs/tags/too-deep")));

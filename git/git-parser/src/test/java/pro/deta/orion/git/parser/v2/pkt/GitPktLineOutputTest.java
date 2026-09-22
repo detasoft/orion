@@ -7,11 +7,38 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitPktLineOutputTest {
+    @Test
+    void splitsAtTheMaximumPacketLengthWithoutChangingTheBorrowedBuffer() throws Exception {
+        int firstPayloadLength = GitPktLine.MAX_PKT_LINE_LENGTH - 5;
+        byte[] payload = new byte[firstPayloadLength + 3];
+        Arrays.fill(payload, 0, firstPayloadLength, (byte) 'a');
+        System.arraycopy(new byte[]{'b', 'c', 'd'}, 0, payload, firstPayloadLength, 3);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        ByteBuf source = Unpooled.wrappedBuffer(payload);
+        try {
+            GitPktLineOutput output = new GitPktLineOutput(new OutputStreamBufferedByteOutput(bytes),
+                    SideBand.DATA, GitPktLine.MAX_PKT_LINE_LENGTH);
+            output.write(source);
+            assertThat(source.readerIndex()).isZero();
+            assertThat(source.writerIndex()).isEqualTo(payload.length);
+            assertThat(source.refCnt()).isEqualTo(1);
+        } finally {
+            source.release();
+        }
+
+        ByteArrayOutputStream expected = new ByteArrayOutputStream();
+        expected.writeBytes("fff0\1".getBytes(StandardCharsets.US_ASCII));
+        expected.write(payload, 0, firstPayloadLength);
+        expected.writeBytes("0008\1bcd".getBytes(StandardCharsets.US_ASCII));
+        assertThat(bytes.toByteArray()).containsExactly(expected.toByteArray());
+    }
+
     @Test
     void splitsReadableBytesWithoutMovingOrReleasingTheBorrowedBuffer() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();

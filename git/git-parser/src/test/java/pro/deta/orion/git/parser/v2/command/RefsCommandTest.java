@@ -25,6 +25,7 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -59,6 +60,39 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 .containsExactly(commit + " HEAD", commit + " refs/heads/ветка");
         assertThat(execute(storage, "ref-prefix absent")).isEmpty();
         assertThat(execute(storage, "ref-prefix ")).hasSize(4);
+    }
+
+    @Test
+    void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
+        GitStorageApi storage = new GitStorageApi(repository);
+        ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+        List<RefUpdate> updates = new ArrayList<>();
+        List<String> expected = new ArrayList<>();
+        for (int index = 0; index < 2_000; index++) {
+            RefId ref = new RefId("refs/heads/branch-%04d".formatted(index));
+            updates.add(new RefUpdate(ref, Optional.empty(), Optional.of(commit)));
+            expected.add(commit + " " + ref.value());
+        }
+        assertThat(storage.updateRefs(updates, true)).hasSize(updates.size())
+                .allSatisfy(result -> assertThat(result.status()).isEqualTo(RefUpdateResult.Status.APPLIED));
+
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        try (BufferedByteInputV2 input = input("0000".getBytes(StandardCharsets.US_ASCII))) {
+            OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(
+                    new BufferedOutputStream(response, 64 * 1024));
+            command(storage).action(new GitProtocolContext(input, output, GitProtocolVersion.V2, GitTransport.SSH));
+        }
+
+        assertThat(response.size()).isGreaterThan(64 * 1024);
+        try (BufferedByteInputV2 input = input(response.toByteArray())) {
+            for (String line : expected) {
+                GitPktLine packet = GitPktLine.readNextFrom(input).orElseThrow();
+                assertThat(packet).isInstanceOf(GitPktLine.Data.class);
+                assertThat(((GitPktLine.Data) packet).text()).isEqualTo(line);
+            }
+            assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
+            assertThat(GitPktLine.readNextFrom(input)).isEmpty();
+        }
     }
 
     @Test

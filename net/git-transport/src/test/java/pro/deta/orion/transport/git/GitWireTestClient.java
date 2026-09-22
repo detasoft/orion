@@ -14,7 +14,6 @@ import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
-import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
@@ -35,6 +34,17 @@ final class GitWireTestClient {
     static final String NULL_ID = "0".repeat(40);
     static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
     static final String TAG_ID = "35de90dbe54c04e6c4b7a36160ac57be632a1b52";
+
+    record LsRefsResponse(List<Ref> refs) {
+        sealed interface Ref permits DirectRef, UnbornRef {
+            String name();
+        }
+
+        record DirectRef(String objectId, String name, Optional<String> symrefTarget,
+                Optional<String> peeledObjectId) implements Ref {}
+
+        record UnbornRef(String name, String symrefTarget) implements Ref {}
+    }
 
     private GitWireTestClient() {}
 
@@ -92,7 +102,7 @@ final class GitWireTestClient {
         return new GitV1Advertisement(capabilities, refs);
     }
 
-    static GitLsRefsResponse lsRefs(DefaultGitNativeRepositoryService service, InitialRequestData data,
+    static LsRefsResponse lsRefs(DefaultGitNativeRepositoryService service, InitialRequestData data,
             LsRefsRequest request) throws IOException {
         List<String> arguments = new ArrayList<>();
         if (request.peel()) {
@@ -107,7 +117,7 @@ final class GitWireTestClient {
         for (String prefix : request.refPrefixes()) {
             arguments.add("ref-prefix " + prefix);
         }
-        List<GitLsRefsResponse.Ref> refs = new ArrayList<>();
+        List<LsRefsResponse.Ref> refs = new ArrayList<>();
         for (String line : executeV2(service, data.repositoryPath(), "ls-refs", arguments)) {
             String[] fields = line.split(" ");
             Optional<String> symref = Optional.empty();
@@ -120,10 +130,10 @@ final class GitWireTestClient {
                 }
             }
             refs.add(fields[0].equals("unborn")
-                    ? new GitLsRefsResponse.UnbornRef(fields[1], symref.orElseThrow())
+                    ? new LsRefsResponse.UnbornRef(fields[1], symref.orElseThrow())
                     : direct(fields[0], fields[1], symref, peeled));
         }
-        return new GitLsRefsResponse(refs);
+        return new LsRefsResponse(refs);
     }
 
     static List<String> executeV2(DefaultGitNativeRepositoryService service, String repository,
@@ -165,13 +175,13 @@ final class GitWireTestClient {
         output.writeBytes(bytes);
     }
 
-    static GitLsRefsResponse.DirectRef direct(String objectId, String name) {
+    static LsRefsResponse.DirectRef direct(String objectId, String name) {
         return direct(objectId, name, Optional.empty(), Optional.empty());
     }
 
-    static GitLsRefsResponse.DirectRef direct(String objectId, String name, Optional<String> symref,
+    static LsRefsResponse.DirectRef direct(String objectId, String name, Optional<String> symref,
             Optional<String> peeled) {
-        return new GitLsRefsResponse.DirectRef(objectId, name, symref, peeled);
+        return new LsRefsResponse.DirectRef(objectId, name, symref, peeled);
     }
 
     static GitWireConfiguration uploadConfiguration(boolean multiAckDetailed, boolean thinPack, boolean sideBand64k,

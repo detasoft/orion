@@ -1,47 +1,5 @@
 # Module Review: `git/git-parser`
 
-## 2. Inactive output APIs retain obsolete serializers and tests
-
-**Problem and evidence.** [GitBlockingWireTransport](src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireTransport.java)
-retains `sendV2UploadPackAdvertisement`, `sendLsRefs`, `sendError`, and `writeSideBand*` methods whose only
-callers are tests. `writeDelimiter` and `writeRaw` have no callers. Active advertisement is owned by
-[GitBlockingWireSession](src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java); refs use
-[RefsCommand](src/main/java/pro/deta/orion/git/parser/v2/command/RefsCommand.java) and `GitProtocolContext.Writer`;
-pack framing uses `GitPktLineOutput`.
-
-The five classes in [wire/serialization](src/main/java/pro/deta/orion/git/parser/wire/serialization)
-serve these inactive APIs. `PacketListSerialization` additionally serves the live legacy advertisement.
-Its `packetIndex`, and `PktLineSerialization.written`, model progress although each object receives one
-synchronous invocation. No resumable caller was found.
-[GitLsRefsResponse](src/main/java/pro/deta/orion/git/parser/wire/advertisement/GitLsRefsResponse.java) remains a production
-DTO only for the inactive serializer; the other uses are decoded values in transport test support.
-
-**Required contract.** Preserve the live legacy advertisement, complete validation before its first
-write, packet boundaries, flushes, bounded output, and borrowed-buffer ownership. No current requirement
-supports the parallel response encoders or resumable operation objects.
-
-**Minimal repair and tests.** Remove the inactive methods and all five serialization files after replacing
-the live advertisement wrapper with a packet loop and flush. Move the test response representation into
-existing test support, or assert decoded values directly, before removing `GitLsRefsResponse`. Preserve
-[GitWireRefsTest](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/GitWireRefsTest.java).
-
-In [GitBlockingWireTransportTest](src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireTransportTest.java):
-
-- Remove `sendsProtocolV2UploadPackAdvertisement`, `rejectsInvalidLsRefsObjectId`, and
-  `rejectsBlankGitErrorMessage` with their inactive APIs. Typed identity validation remains in `GitIdTest`.
-- Preserve the large-response scenario from `writesLargeResponseSynchronouslyToBufferedByteOutput` through
-  active `RefsCommand` or session behavior before removing the old test.
-- Remove tests of the obsolete sideband helpers only while preserving channel, split-limit, framing and
-  buffer-ownership checks through `GitPktLineWriteTest`, `GitPktLineOutputTest`, and active pack tests.
-- Keep legacy advertisement, packet/raw switching, malformed input, and other live transport tests.
-
-**Alternatives and consequences.** Keeping the old encoders maintains two production-shaped protocol
-paths. Deletion changes internal Java APIs; it need not change active wire behavior. The transport itself
-is still required by `GitBlockingClientWire` and must remain.
-
-**Confidence and priority.** High for call-site evidence. Medium importance and medium repair ease:
-serializer removal is local, but useful behavioral tests and the live advertisement must be migrated.
-
 ## 9. An unused error record preserves a retired taxonomy
 
 **Problem and evidence.** [GitWireError](src/main/java/pro/deta/orion/git/parser/wire/error/GitWireError.java)
