@@ -399,6 +399,42 @@ class BootstrapContextTest {
         }
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "false,false,false", "false,true,false", "true,false,false", "true,true,false",
+            "false,false,true", "false,true,true", "true,false,true", "true,true,true"})
+    @org.junit.jupiter.api.condition.EnabledOnOs({
+            org.junit.jupiter.api.condition.OS.LINUX, org.junit.jupiter.api.condition.OS.MAC})
+    void rejectsDirectConfigurationSymlinks(boolean directoryLink, boolean dangling, boolean missingPrimary)
+            throws Exception {
+        OrionConfiguration configuration = configuration();
+        Path root = Files.createDirectory(tempDir.resolve("configuration"));
+        Path outside = tempDir.resolve("outside");
+        if (!dangling) {
+            Files.createDirectory(outside);
+            Files.writeString(outside.resolve("orion.xml"), "configuration");
+        }
+        if (directoryLink) {
+            Files.createSymbolicLink(root.resolve("config"), outside);
+        } else {
+            Files.createDirectory(root.resolve("config"));
+            Files.createSymbolicLink(root.resolve("config/orion.xml"), outside.resolve("orion.xml"));
+        }
+        configuration.getBootstrap().getAccessControl().setLocation(root.toString());
+        configuration.getBootstrap().getAccessControl().setPath("config/orion.xml");
+        if (missingPrimary) {
+            configuration.getBootstrap().getAccessControl().setPaths(List.of("missing.xml", "config/orion.xml"));
+        }
+        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(
+                configuration, Map.of("material.p12", materialBytes(configuration)));
+        assertBootstrapFailure(() -> {
+            try (BootstrapContext ignored = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+                // Successful bootstrap must fail the assertion, while still closing its resources.
+            }
+        });
+    }
+
     @Test
     void rejectsUnsupportedDirectConfigurationBackendBeforeRuntimeConstruction() {
         OrionConfiguration configuration = configuration();

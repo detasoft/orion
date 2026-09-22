@@ -50,7 +50,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                 if (Files.notExists(directory)) {
                     return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
                 }
-                try (FileChannel channel = openReadLock(directory.resolve(".orion-configuration.lock"));
+                try (FileChannel channel = openReadLock(resolvePath(directory, ".orion-configuration.lock"));
                      FileLock ignored = channel.lock(0, Long.MAX_VALUE, true)) {
                     return loadFiles();
                 }
@@ -62,9 +62,10 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     private static FileChannel openReadLock(Path lock) throws IOException {
         try {
-            return FileChannel.open(lock, StandardOpenOption.READ);
+            return FileChannel.open(lock, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
         } catch (NoSuchFileException missing) {
-            return FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            return FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.READ,
+                    StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         }
     }
 
@@ -76,7 +77,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                 if (!Files.exists(file)) {
                     return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
                 }
-                files.put(configuredPath, Files.readAllBytes(file));
+                files.put(configuredPath, readDocument(file));
             }
             return new Result.Success<>(new AccessControlSnapshot(files, Optional.of(version(files))));
         } catch (IOException e) {
@@ -92,8 +93,8 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
             try {
                 Path directory = aclDirectory();
                 Files.createDirectories(directory);
-                try (FileChannel channel = FileChannel.open(directory.resolve(".orion-configuration.lock"),
-                        StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                try (FileChannel channel = FileChannel.open(resolvePath(directory, ".orion-configuration.lock"),
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
                      var ignored = channel.lock()) {
                     if (snapshot.version().isPresent()) {
                         Result<AccessControlSnapshot> loaded = loadFiles();
@@ -110,7 +111,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                     while (pending.hasNext()) {
                         Map.Entry<Path, byte[]> entry = pending.next();
                         try {
-                            if (Arrays.equals(Files.readAllBytes(entry.getKey()), entry.getValue())) {
+                            if (Arrays.equals(readDocument(entry.getKey()), entry.getValue())) {
                                 pending.remove();
                             }
                         } catch (NoSuchFileException missing) {
@@ -127,9 +128,8 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
         }
     }
 
-    private static void replaceDocument(Path file, byte[] content) throws IOException {
-        boolean existing = Files.exists(file, LinkOption.NOFOLLOW_LINKS);
-        Path target = existing ? file.toRealPath() : file;
+    private static void replaceDocument(Path target, byte[] content) throws IOException {
+        boolean existing = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
         Path parent = target.getParent();
         Files.createDirectories(parent);
         if (existing && !Files.isWritable(target)) {
@@ -223,12 +223,29 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     }
 
     private Path aclPath(String configuredPath) {
-        Path aclDirectory = aclDirectory();
+        return resolvePath(aclDirectory(), configuredPath);
+    }
+
+    public static Path resolvePath(Path root, String configuredPath) {
+        Path aclDirectory = root.toAbsolutePath().normalize();
         Path file = aclDirectory.resolve(configuredPath).normalize();
         if (!file.startsWith(aclDirectory)) {
             throw new IllegalArgumentException("ACL file escapes local ACL directory: " + configuredPath);
         }
+        Path current = aclDirectory;
+        for (Path component : aclDirectory.relativize(file)) {
+            current = current.resolve(component);
+            if (Files.isSymbolicLink(current)) {
+                throw new IllegalArgumentException("Symbolic links are not allowed below the local ACL directory");
+            }
+        }
         return file;
+    }
+
+    private static byte[] readDocument(Path file) throws IOException {
+        try (java.io.InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            return input.readAllBytes();
+        }
     }
 
     private Path aclDirectory() {

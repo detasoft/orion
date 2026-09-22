@@ -265,23 +265,55 @@ class LocalAccessControlStorageTest {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({"file,true", "file,false", "directory,true", "directory,false",
+            "lock,true", "lock,false", "inside,true"})
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void rejectsLinkedDocumentsDirectoriesAndLocks(String kind, boolean targetExists) throws Exception {
+        Path directory = Files.createDirectory(root.resolve("acl"));
+        Path outside = kind.equals("inside") ? directory.resolve("inside.xml") : root.resolve("outside");
+        Path link;
+        if (kind.equals("directory")) {
+            link = directory.resolve("config");
+            if (targetExists) {
+                Files.createDirectory(outside);
+                Files.write(outside.resolve("orion.xml"), bytes("untouched"));
+            }
+        } else {
+            Files.createDirectories(directory.resolve("config"));
+            link = directory.resolve(kind.equals("lock") ? ".orion-configuration.lock" : ACL_PATH);
+            if (targetExists) {
+                Files.write(outside, bytes("untouched"));
+            }
+        }
+        Files.createSymbolicLink(link, outside);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(directory));
+        Result<AccessControlSnapshot> loaded = storage.load();
+        assertThat(loaded).isInstanceOf(Result.Failure.class);
+        assertThat(((Result.Failure<?>) loaded).code()).isEqualTo(Result.FailureCode.GENERAL);
+        assertThatThrownBy(() -> storage.save(
+                AccessControlSnapshot.singleFile(ACL_PATH, bytes("replacement")),
+                new AccessControlSaveRequest("save", UserEmail.EMPTY)))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(Files.isSymbolicLink(link)).isTrue();
+        if (targetExists) {
+            Path target = kind.equals("directory") ? outside.resolve("orion.xml") : outside;
+            assertThat(Files.readAllBytes(target)).isEqualTo(bytes("untouched"));
+        } else {
+            assertThat(outside).doesNotExist();
+        }
+    }
+
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
-    void replacesTheDocumentBehindAnExistingSymbolicLink() throws Exception {
-        Path actual = root.resolve("actual.xml");
-        Files.write(actual, bytes("previous"));
-        Files.createDirectories(root.resolve("config"));
-        Files.createSymbolicLink(root.resolve(ACL_PATH), actual);
-        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
-        try (InputStream previous = Files.newInputStream(actual)) {
-            storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("replacement")),
-                    new AccessControlSaveRequest("save", UserEmail.EMPTY));
-            assertThat(previous.readAllBytes()).isEqualTo(bytes("previous"));
-        }
-        assertThat(Files.isSymbolicLink(root.resolve(ACL_PATH))).isTrue();
-        assertThat(Files.readAllBytes(actual)).isEqualTo(bytes("replacement"));
-        assertThat(storage.load().valueOrFailure("replaced").files().get(ACL_PATH))
-                .isEqualTo(bytes("replacement"));
+    void allowsASymbolicLinkForTheTrustedRoot() throws Exception {
+        Path actual = Files.createDirectory(root.resolve("actual"));
+        Path link = Files.createSymbolicLink(root.resolve("root-link"), actual);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(link));
+        storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("ACL")),
+                new AccessControlSaveRequest("save", UserEmail.EMPTY));
+        assertThat(storage.load().valueOrFailure("trusted root").files().get(ACL_PATH)).isEqualTo(bytes("ACL"));
+        assertThat(Files.readAllBytes(actual.resolve(ACL_PATH))).isEqualTo(bytes("ACL"));
     }
 
     @Test

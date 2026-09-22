@@ -4,6 +4,7 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -240,23 +241,24 @@ public final class BootstrapContext implements AutoCloseable {
         }
         Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
         Path root = directFileRoot(configured.getLocation(), baseDirectory, "Configuration location");
-        for (int index = 0; index < resolved.paths().size(); index++) {
-            Path path = root.resolve(resolved.paths().get(index)).normalize();
-            if (!path.startsWith(root)) {
-                throw new IllegalArgumentException(FAILURE_MESSAGE);
-            }
+        List<Path> paths = new ArrayList<>();
+        for (String configuredPath : resolved.paths()) {
+            paths.add(LocalAccessControlStorage.resolvePath(root, configuredPath));
+        }
+        for (int index = 0; index < paths.size(); index++) {
+            Path path = paths.get(index);
             if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
                 if (index == 0 && configured.isCreateDefaultIfMissing()) {
                     return resolvedDirectSource(resolved, root);
                 }
                 throw new IllegalStateException(FAILURE_MESSAGE);
             }
-            if (!Files.isRegularFile(path)) {
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IllegalStateException(FAILURE_MESSAGE);
             }
             byte[] bytes = null;
-            try {
-                bytes = Files.readAllBytes(path);
+            try (java.io.InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+                bytes = input.readAllBytes();
             } catch (IOException failure) {
                 throw new IllegalStateException(FAILURE_MESSAGE);
             } finally {

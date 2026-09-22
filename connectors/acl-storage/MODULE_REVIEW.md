@@ -38,44 +38,39 @@ injection and crash recovery have not been executed.
 **Priority signals.** Importance: high for multi-document credential operations because durable and live ACLs can
 diverge. Repair ease: low because the publication contract and operator-visible layout require a decision.
 
-## 3. Physical Local containment is bypassed through symlinks
+## 3. Local path checks remain vulnerable to concurrent directory replacement
 
-**Problem.** A configured path such as `config/orion.xml` passes the lexical check when `config` is a symlink to
-an outside directory. Load then reads outside content and save can overwrite it. A symlink at the final file has
-the same effect. Normal bootstrap preflight does not close the path: it checks final existence without following
-links, then uses regular-file and read operations that follow links, and it does not anchor later storage I/O.
+**Problem.** An actor able to modify descendants of the configured ACL root can replace a checked directory
+with a symlink before a later filesystem operation. The operation still uses an ordinary path and may follow
+that intermediate link outside the root. Static links, including dangling links and the lock file, are rejected;
+this does not anchor subsequent I/O to the checked directories.
 
-**Sources.** Local storage performs a lexical prefix check in
-[`aclPath`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L65),
-then follows configured links during
-[`load`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L21) and
-[`save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L40).
-Bootstrap's
-[`validateDirectConfiguration`](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java#L129)
-combines `NOFOLLOW_LINKS` existence with following operations. The current
-[`filesystem runtime test`](../../core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java#L55)
-covers ordinary files only.
+**Sources.** [`LocalAccessControlStorage.resolvePath`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
+checks every descendant component before load, save, and opening the lock file. Document and lock opens use
+`NOFOLLOW_LINKS`, which protects the final component, not intermediate directories. Temporary-file creation,
+attribute handling, and publication also use paths.
+[`BootstrapContext.validateDirectConfiguration`](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java)
+uses the same check and opens the final document without following links.
 
 **Documented behavior.** The queued
 [`physical containment`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md)
-task explicitly requires protection against intermediate and final symlinks and containment through use.
+requires containment through use. The accepted limited repair rejects static descendant links and leaves the
+concurrent replacement problem open.
 
-**Contract.** The configured root is trusted, but control of a descendant link must not grant Orion's process
-access to a target outside that root. The attack requires a manipulable link and an outside target readable or
-writable by Orion. The boundary applies during bootstrap preflight and every later storage operation.
+**Contract.** The configured root is trusted and may itself be a link. Descendant links are rejected even when
+their target stays inside the root. File locks coordinate participating readers and writers, but do not stop an
+external actor from renaming directories or replacing the lock file.
 
-**Minimal repair.** Resolve the root once, anchor traversal and I/O to it, and reject descendant symlink
-components and targets with operations that maintain containment through use. Apply the same boundary to the
-bootstrap direct-source read. Preserve safe creation of missing nested directories without introducing a general
-storage framework.
+**Minimal repair.** Anchor traversal, reads, lock acquisition, temporary-file creation, and replacement to open
+directory handles. Preserve nested-directory creation and per-file atomic publication. Resolve platform support
+before selecting a native implementation or changing supported Local filesystem behavior.
 
-**Alternatives and consequences.** A single `toRealPath()` check rejects static escapes but retains a replacement
-race. Trusting links weakens the documented security boundary. Rejecting every descendant link is simpler than
-supporting safe links but removes linked ACL layouts that currently happen to work. Platform support should be
-validated together with atomic replacement.
+**Alternatives and consequences.** Repeated path checks only narrow the race. Requiring trusted, non-mutable
+ancestor directories changes the deployment contract. Java's `SecureDirectoryStream` is provider-dependent;
+the installed macOS Corretto 21 provider returned an ordinary `UnixDirectoryStream` during inspection.
 
-**Confidence.** High for the static symlink bypass. No adversarial replacement race was executed.
+**Confidence.** High for the check/use gap from code inspection. Static file, directory, dangling, and lock-link
+cases are covered by behavior tests. An adversarial concurrent directory-replacement test has not been executed.
 
-**Priority signals.** Importance: high, because descendant links cross the configured filesystem trust boundary
-for both reads and writes. Repair ease: low, because the repair must preserve containment through use across
-bootstrap and storage I/O, account for replacement races, and validate platform behavior.
+**Priority signals.** Importance: high where another actor can mutate descendants while Orion accesses ACLs.
+Repair ease: low because platform-specific operations and directory-creation semantics need an explicit design.
