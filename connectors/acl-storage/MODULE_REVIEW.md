@@ -1,52 +1,42 @@
 # Module Review: `connectors/acl-storage`
 
-## 2. Local save can persist a credential update that reports failure
+## 2. Local save can truncate a document or partially publish a multi-document change
 
-**Problem.** A credential update passes every loaded ACL document to storage even when only one document changed.
-Local storage rewrites every supplied file in configured order. If the changed primary file is writable and a
-later unchanged secondary file is not, the primary update is persisted before the save throws. The service returns
-`PERSISTENCE_FAILED` without reloading, leaving new durable credentials beside the previous live ACL. A direct
-`Files.write` can also truncate the active document before replacement content is fully published.
+**Problem.** Local storage writes changed documents directly to their active paths. An I/O failure during
+`Files.write` can leave a document truncated. If several documents actually change, a later write failure can
+leave earlier replacements persisted while the service returns `PERSISTENCE_FAILED` without activating the
+new snapshot. Path validation and content comparison happen before document writes, but do not protect the
+write phase itself.
 
-**Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L40)
-writes entries sequentially. The service copies the full loaded map in
-[`saveCredentialDraft`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1161),
-saves before strict reload in
-[`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1537),
-and translates the exception to `PERSISTENCE_FAILED` in
-[`addSshCredentials`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L281).
-The split-file service test
-[`atomicallyAddsCanonicalKeysAndPreservesTheOtherAclFile`](../../core/acl/src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java#L153)
-uses an in-memory store and cannot expose filesystem publication failure.
+**Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
+checks the snapshot version under a file lock, omits byte-identical files, then writes changed files sequentially.
+[`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java)
+saves before reloading. `resetRootPassword` in the same service can change more than one document.
+[`LocalSshCredentialPersistenceTest`](src/test/java/pro/deta/orion/acl/storage/LocalSshCredentialPersistenceTest.java)
+covers activation and reopening with an unchanged read-only secondary file; it does not cover write-phase faults.
 
-**Documented behavior.** The integrated SSH credential behavior in `56e16093` requires changing only the owning draft, preserving every
-other file, and activating only after successful persistence. The queued
+**Documented behavior.** The queued
 [`saved snapshot contract`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md)
 requires an explicit Local publication guarantee but leaves multi-file atomicity as a decision.
 
-**Contract.** A normal single-document mutation must not require write access to byte-identical documents, must
-not report failure after publishing that mutation, and must not destroy the previous complete document while
-preparing its replacement. Atomicity across genuinely changed documents, power-loss durability, and external-writer
-CAS are separate guarantees that the present interface does not define.
+**Contract.** Preparing a replacement must preserve the previous complete document. The existing lock and
+version check coordinate participating Orion writers; they do not make publication atomic or constrain an
+external editor that ignores the lock. Atomicity across genuinely changed documents and power-loss durability
+need explicit guarantees.
 
-**Minimal repair.** Validate every supplied path before mutation, omit byte-identical documents, write each changed
-document to a sibling temporary file, and atomically replace the target. Coordinate the replacement with physical
-containment. Cover an unchanged non-writable secondary, preparation failure, durable contents, live activation,
-and restart.
+**Minimal repair.** Prepare each changed document in a sibling temporary file and atomically replace its target,
+coordinating replacement with physical containment. Cover preparation and publication failures, retained old
+contents, and reload. Define the guarantee for operations changing multiple documents separately.
 
-**Alternatives and consequences.** Selecting changed documents only in the service avoids redundant writes but
-does not protect other callers or prevent truncation. Immutable filesystem generations can make genuine
-multi-document operations atomic but change the operator-visible layout. Restricting those operations to native
-Git removes supported Local capability. Per-file atomic replacement must not be described as a transaction for
-[`resetRootPassword`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L751),
-which can modify multiple documents.
+**Alternatives and consequences.** A lock cannot undo a failed write. Per-file atomic replacement prevents
+truncation but is not a multi-document transaction. Immutable generations can make multi-document publication
+atomic but change the operator-visible layout; restricting writes to native Git removes supported Local capability.
 
-**Confidence.** High for the write order and service outcome. Filesystem fault injection and crash recovery were
-not executed during this static review.
+**Confidence.** High for direct writes and sequential publication. Write-phase fault injection and crash recovery
+have not been executed.
 
-**Priority signals.** Importance: high, because a credential mutation can be durable while being reported as
-failed and remaining inactive in memory. Repair ease: low, because safe publication must be coordinated with
-containment, multiple-document semantics, restart behavior, and filesystem-failure tests.
+**Priority signals.** Importance: high because failed writes can damage durable ACL data or leave it inconsistent
+with the live snapshot. Repair ease: low because publication, containment, and multi-document semantics interact.
 
 ## 3. Physical Local containment is bypassed through symlinks
 

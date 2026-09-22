@@ -15,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.nio.file.attribute.FileTime;
 import java.util.Map;
 import java.util.Optional;
 
@@ -112,6 +114,54 @@ class LocalAccessControlStorageTest {
                 .containsOnlyKeys(ROLES_PATH, ACL_PATH)
                 .containsEntry(ROLES_PATH, bytes("updated roles"))
                 .containsEntry(ACL_PATH, bytes("updated ACL"));
+    }
+
+    @Test
+    void preservesUnchangedFilesAndTheirModificationTimes() throws Exception {
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("before"), ROLES_PATH, bytes("roles")),
+                Optional.empty()), request);
+        FileTime originalTime = FileTime.fromMillis(1_000_000);
+        Files.setLastModifiedTime(root.resolve(ROLES_PATH), originalTime);
+        AccessControlSnapshot loaded = storage.load().valueOrFailure("loaded");
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("after"), ROLES_PATH, bytes("roles")),
+                loaded.version()), request);
+        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("after"));
+        assertThat(Files.getLastModifiedTime(root.resolve(ROLES_PATH))).isEqualTo(originalTime);
+        Files.setLastModifiedTime(root.resolve(ACL_PATH), originalTime);
+        storage.save(storage.load().valueOrFailure("updated"), request);
+        assertThat(Files.getLastModifiedTime(root.resolve(ACL_PATH))).isEqualTo(originalTime);
+        assertThat(Files.getLastModifiedTime(root.resolve(ROLES_PATH))).isEqualTo(originalTime);
+    }
+
+    @Test
+    void rejectsAnInvalidLaterPathBeforeWritingAnyDocument() throws Exception {
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("before")), request);
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put(ACL_PATH, bytes("after"));
+        files.put("../escape.xml", bytes("invalid"));
+        assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(files, Optional.empty()), request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("before"));
+    }
+
+    @Test
+    void failsContentComparisonBeforeWritingAnyDocument() throws Exception {
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("before")), request);
+        Files.createDirectories(root.resolve(ROLES_PATH));
+        Map<String, byte[]> files = new LinkedHashMap<>();
+        files.put(ACL_PATH, bytes("after"));
+        files.put(ROLES_PATH, bytes("roles"));
+        assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(files, Optional.empty()), request))
+                .isInstanceOf(RuntimeException.class).hasCauseInstanceOf(java.io.IOException.class);
+        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("before"));
     }
 
     @ParameterizedTest

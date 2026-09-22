@@ -13,9 +13,13 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.NoSuchFileException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.nio.file.Files;
@@ -68,8 +72,23 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                             throw new AccessControlConcurrentUpdateException("Local configuration changed before save", null);
                         }
                     }
+                    Map<Path, byte[]> changed = new LinkedHashMap<>();
                     for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                        Path file = aclPath(entry.getKey());
+                        changed.put(aclPath(entry.getKey()), entry.getValue());
+                    }
+                    Iterator<Map.Entry<Path, byte[]>> pending = changed.entrySet().iterator();
+                    while (pending.hasNext()) {
+                        Map.Entry<Path, byte[]> entry = pending.next();
+                        try {
+                            if (Arrays.equals(Files.readAllBytes(entry.getKey()), entry.getValue())) {
+                                pending.remove();
+                            }
+                        } catch (NoSuchFileException missing) {
+                            // A new document still needs to be written.
+                        }
+                    }
+                    for (Map.Entry<Path, byte[]> entry : changed.entrySet()) {
+                        Path file = entry.getKey();
                         if (file.getParent() != null) {
                             Files.createDirectories(file.getParent());
                         }
