@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git.command;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -40,12 +41,17 @@ import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.RowOutputFormat;
 import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.audit.CommandAuditRecord;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.decision.PendingDecision;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
@@ -66,17 +72,66 @@ class LegacySshCommandCatalogTest {
     private AgentSessionServer agentServer;
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
+    private final DecisionRegistry decisions = new DecisionRegistry(8, (actor, scope) -> true);
     private final CommandNode commandTree = new LegacySshCommandCatalog(
             accessControl,
             new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
             new RepositoryProvider(),
             () -> shutdown.set(true),
-            new ReadOnlyDomainCommandCatalog(new DomainSource()), () -> agentServer)
+            new ReadOnlyDomainCommandCatalog(new DomainSource()),
+            new DecisionCommandCatalog(decisions), () -> agentServer)
             .commandTree();
     private final CommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
             commandTree,
             new pro.deta.orion.command.CommandRowQuery());
+
+    @AfterEach
+    void closeDecisions() {
+        decisions.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"replace", "reject"})
+    void decisionCommandsResolveRequestsInTheSuppliedRegistry(String action) {
+        PendingDecision pending = decisions.register(Optional.of(ConfigurationScope.parse("acme/platform/api")),
+                "SSH host key changed", "Review the new fingerprint",
+                Map.of("replace", "Replace key", "reject", "Reject connection"))
+                .valueOrFailure("register decision");
+        String id = pending.request().id().toString();
+        UserIdentity operator = user(List.of());
+
+        assertThat(dispatch("/decision ls", operator)).isInstanceOfSatisfying(CommandResult.Rows.class,
+                rows -> assertThat(rows.values()).containsExactly(List.of(
+                        CommandValue.text(id), CommandValue.text("acme/platform/api"),
+                        CommandValue.text("SSH host key changed"),
+                        CommandValue.text(pending.request().createdAt().toString()))));
+        assertThat(dispatch("/decision/" + id + " show", operator))
+                .isInstanceOfSatisfying(CommandResult.ObjectValue.class, details ->
+                        assertThat(details.fields()).containsEntry(
+                                "description", CommandValue.text("Review the new fingerprint")));
+        assertThat(dispatch("/decision/" + id + " resolve " + action, operator))
+                .isEqualTo(new CommandResult.Message("Decision recorded"));
+        assertThat(pending.result().toCompletableFuture())
+                .isCompletedWithValue(new Decision(action, PrincipalAddress.parse("system/operator")));
+        assertThat(dispatch("/decision ls", operator)).isInstanceOfSatisfying(CommandResult.Rows.class,
+                rows -> assertThat(rows.values()).isEmpty());
+        assertFailure(dispatch("/decision/" + id + " resolve " + action, operator),
+                CommandFailureCode.MISSING_RESOURCE);
+    }
+
+    @Test
+    void decisionCommandsRejectAnonymousRequestsWithoutResolvingThem() {
+        PendingDecision pending = decisions.register(Optional.empty(), "Confirm operation", "Details",
+                Map.of("accept", "Accept")).valueOrFailure("register decision");
+        String path = "/decision/" + pending.request().id();
+
+        assertFailure(dispatch("/decision ls", SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);
+        assertFailure(dispatch(path + " show", SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);
+        assertFailure(dispatch(path + " resolve accept", SecurityContext.ANONYMOUS),
+                CommandFailureCode.ACCESS_DENIED);
+        assertThat(pending.result().toCompletableFuture()).isNotDone();
+    }
 
     @Test
     void tokenAliasesIssueTokensWithPositiveExpiry() {
@@ -200,7 +255,7 @@ class LegacySshCommandCatalogTest {
     @Test
     void composesReadOnlyDomainTreeAlongsideLegacyAliases() {
         assertThat(commandTree.children().keySet())
-                .containsExactly("auth", "repository", "organization", "session", "proxy", "system");
+                .containsExactly("auth", "decision", "repository", "organization", "session", "proxy", "system");
         assertThat(commandTree.actions().keySet())
                 .containsExactly(
                         "whoami",

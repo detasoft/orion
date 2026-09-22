@@ -43,6 +43,7 @@ public final class LegacySshCommandCatalog {
     private final Runnable shutdownAction;
     private final SshCredentialCommandCatalog sshCredentialCommandCatalog;
     private final ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog;
+    private final DecisionCommandCatalog decisionCommandCatalog;
     private final Provider<AgentSessionServer> agentServer;
 
     @Inject
@@ -53,6 +54,7 @@ public final class LegacySshCommandCatalog {
             NativeGitRepositoryProvider repositoryProvider,
             SshCredentialCommandCatalog sshCredentialCommandCatalog,
             ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            DecisionCommandCatalog decisionCommandCatalog,
             Provider<AgentSessionServer> agentServer) {
         this(
                 accessControlService,
@@ -61,6 +63,7 @@ public final class LegacySshCommandCatalog {
                 () -> orionProvider.getOrionApplicationLifecycle().beginShutdown(),
                 sshCredentialCommandCatalog,
                 readOnlyDomainCommandCatalog,
+                decisionCommandCatalog,
                 agentServer);
     }
 
@@ -70,6 +73,7 @@ public final class LegacySshCommandCatalog {
             NativeGitRepositoryProvider repositoryProvider,
             Runnable shutdownAction,
             ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            DecisionCommandCatalog decisionCommandCatalog,
             Provider<AgentSessionServer> agentServer) {
         this(
                 accessControlService,
@@ -78,6 +82,7 @@ public final class LegacySshCommandCatalog {
                 shutdownAction,
                 new SshCredentialCommandCatalog(accessControlService),
                 readOnlyDomainCommandCatalog,
+                decisionCommandCatalog,
                 agentServer);
     }
 
@@ -88,6 +93,7 @@ public final class LegacySshCommandCatalog {
             Runnable shutdownAction,
             SshCredentialCommandCatalog sshCredentialCommandCatalog,
             ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog,
+            DecisionCommandCatalog decisionCommandCatalog,
             Provider<AgentSessionServer> agentServer) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
         this.runtimeStateMachine = Objects.requireNonNull(runtimeStateMachine, "runtimeStateMachine");
@@ -99,13 +105,15 @@ public final class LegacySshCommandCatalog {
         this.readOnlyDomainCommandCatalog = Objects.requireNonNull(
                 readOnlyDomainCommandCatalog,
                 "readOnlyDomainCommandCatalog");
+        this.decisionCommandCatalog = Objects.requireNonNull(decisionCommandCatalog, "decisionCommandCatalog");
         this.agentServer = Objects.requireNonNull(agentServer, "agentServer");
     }
 
     public CommandNode commandTree() {
         CommandNode readOnly = readOnlyDomainCommandCatalog.commandTree();
         CommandNode.Builder builder = CommandNode.builder()
-                .child("auth", sshCredentialCommandCatalog.commandTree().children().get("auth"));
+                .child("auth", sshCredentialCommandCatalog.commandTree().children().get("auth"))
+                .child("decision", decisionCommandCatalog.commandTree().children().get("decision"));
         for (var child : readOnly.children().entrySet()) {
             builder.child(child.getKey(), child.getValue());
         }
