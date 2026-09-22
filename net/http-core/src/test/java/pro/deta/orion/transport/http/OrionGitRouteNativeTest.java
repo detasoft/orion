@@ -690,6 +690,7 @@ class OrionGitRouteNativeTest {
                             status = (int) args[0];
                             yield null;
                         }
+                        case "isCommitted" -> false;
                         case "sendError" -> {
                             status = (int) args[0];
                             yield null;

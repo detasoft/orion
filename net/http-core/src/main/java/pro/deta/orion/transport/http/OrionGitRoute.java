@@ -183,10 +183,19 @@ public class OrionGitRoute implements OrionHttpRoute {
                 handleNativePost(exchange, request);
             }
         } catch (UnsupportedContentEncodingException error) {
+            if (exchange.servletResponse().isCommitted()) {
+                throw error;
+            }
             exchange.sendError(SC_UNSUPPORTED_MEDIA_TYPE, METHOD_REJECTION_HEADERS);
         } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
+            if (exchange.servletResponse().isCommitted()) {
+                throw error;
+            }
             exchange.sendError(SC_FORBIDDEN);
         } catch (IOException error) {
+            if (exchange.servletResponse().isCommitted()) {
+                throw error;
+            }
             if (causedByAccessDenied(error)) {
                 exchange.sendError(SC_FORBIDDEN);
             } else if (causedByInvalidContentEncoding(error)) {
