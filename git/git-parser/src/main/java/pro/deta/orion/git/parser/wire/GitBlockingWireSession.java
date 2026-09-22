@@ -25,7 +25,9 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -34,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class GitBlockingWireSession {
+    private static final byte[] SERVER_OPTION_PREFIX = "server-option=".getBytes(StandardCharsets.US_ASCII);
     public static final int DEFAULT_INPUT_BUFFER_SIZE = 16 * 1024;
     private final GitNativeRepositoryService repositories;
     private final GitWireConfiguration configuration;
@@ -128,11 +131,10 @@ public final class GitBlockingWireSession {
                 if (packet == GitPktLine.Control.DELIMITER) {
                     break;
                 }
-                GitCapabilityValue value = GitCapabilityValue.parse(text(packet), GitHashAlgorithm.SHA1);
-                if (value.name().equals("server-option") && configuration.protocolV2().serverOption()
-                        && value.value().isPresent()) {
+                if (acceptServerOption(packet)) {
                     continue;
                 }
+                GitCapabilityValue value = GitCapabilityValue.parse(text(packet), GitHashAlgorithm.SHA1);
                 GitCapability capability = value.capability().orElse(null);
                 if ((capability != GitCapability.AGENT && capability != GitCapability.OBJECT_FORMAT)
                         || value.value().isEmpty() || !seen.add(value.name())) {
@@ -151,6 +153,31 @@ public final class GitBlockingWireSession {
                 return;
             }
         }
+    }
+
+    private boolean acceptServerOption(GitPktLine packet) throws IOException {
+        if (!(packet instanceof GitPktLine.Data data)) {
+            return false;
+        }
+        byte[] content = data.content();
+        int prefixSize = SERVER_OPTION_PREFIX.length;
+        if (content.length < prefixSize
+                || !Arrays.equals(content, 0, prefixSize, SERVER_OPTION_PREFIX, 0, prefixSize)) {
+            return false;
+        }
+        if (!configuration.protocolV2().serverOption()) {
+            throw new IOException("server-option was not advertised");
+        }
+        int end = content.length;
+        if (content[end - 1] == '\n') {
+            end--;
+        }
+        for (int index = prefixSize; index < end; index++) {
+            if (content[index] == 0 || content[index] == '\n') {
+                throw new IOException("server-option must not contain NUL or LF");
+            }
+        }
+        return true;
     }
 
     private static String text(GitPktLine packet) throws IOException {

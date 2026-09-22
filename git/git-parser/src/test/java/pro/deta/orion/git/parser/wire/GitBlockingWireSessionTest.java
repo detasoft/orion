@@ -79,6 +79,50 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void acceptsRepeatedServerOptionsForLsRefsAndFetch() throws Exception {
+        ObjectId id = publish();
+        for (String command : List.of("ls-refs", "fetch")) {
+            List<String> lines = new ArrayList<>(List.of("command=" + command,
+                    "server-option=foo bar", "server-option=foo bar", "server-option=",
+                    "server-option=tab\tvalue\r", "server-option=значение", "DELIM"));
+            if (command.equals("fetch")) {
+                lines.addAll(List.of("want " + id, "done"));
+            }
+            lines.add("FLUSH");
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            session(packets(lines.toArray(String[]::new)), response)
+                    .serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.UPLOAD_PACK));
+            List<GitPktLine> result = decode(response.toByteArray());
+            if (command.equals("fetch")) {
+                assertThat(text(result.getFirst())).isEqualTo("packfile\n");
+                assertPack(result.subList(1, result.size()), id);
+            } else {
+                assertThat(text(result.getFirst())).isEqualTo(id + " HEAD\n");
+            }
+        }
+    }
+
+    @Test
+    void rejectsInvalidAndUnadvertisedServerOptions() throws Exception {
+        GitWireConfiguration all = GitWireConfiguration.allSupported();
+        GitWireConfiguration disabled = new GitWireConfiguration(all.uploadPack(), all.receivePack(),
+                new GitWireConfiguration.ProtocolV2(true, true, true, false));
+        for (String option : List.of("server-option", "server-option=a\0b",
+                "server-option=a\nb", "server-option=a\n")) {
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            assertThatThrownBy(() -> session(packets("command=ls-refs", option, "DELIM", "FLUSH"), response)
+                    .serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.UPLOAD_PACK)))
+                    .isInstanceOf(IOException.class);
+            assertThat(response.size()).isZero();
+        }
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        assertThatThrownBy(() -> session(packets("command=ls-refs", "server-option=foo bar", "DELIM", "FLUSH"),
+                response, disabled).serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.UPLOAD_PACK)))
+                .isInstanceOf(IOException.class);
+        assertThat(response.size()).isZero();
+    }
+
+    @Test
     void legacyHttpNegotiationCanFinishInALaterRequest() throws Exception {
         ObjectId id = publish();
         ByteArrayOutputStream response = new ByteArrayOutputStream();
@@ -200,13 +244,18 @@ class GitBlockingWireSessionTest {
     }
 
     private GitBlockingWireSession session(byte[] request, ByteArrayOutputStream response) {
+        return session(request, response, GitWireConfiguration.allSupported());
+    }
+
+    private GitBlockingWireSession session(byte[] request, ByteArrayOutputStream response,
+            GitWireConfiguration configuration) {
         GitBlockingWireTransport wire = new GitBlockingWireTransport(
                 new BufferedByteInputV2(new ByteArrayInputStream(request)), new OutputStreamBufferedByteOutput(response));
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
             return new GitRepositoryContext(storage);
-        }, GitWireConfiguration.allSupported(), wire);
+        }, configuration, wire);
     }
 
     private static InitialRequestData initial(GitProtocolVersion version, InitialRequestService service) {
