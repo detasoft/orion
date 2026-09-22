@@ -19,7 +19,6 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,14 +38,6 @@ class GitBlockingWireTransportTest {
     private static final String PEELED_TAG_ID =
             "3333333333333333333333333333333333333333";
     private final ByteBufAllocator allocator = UnpooledByteBufAllocator.DEFAULT;
-
-    @Test
-    void doesNotKeepReusableOutputBufferOnTransport() {
-        assertThat(GitBlockingWireTransport.class.getDeclaredFields())
-                .filteredOn(field -> !Modifier.isStatic(field.getModifiers()))
-                .filteredOn(field -> ByteBuf.class.equals(field.getType()))
-                .isEmpty();
-    }
 
     @Test
     void switchesBetweenPacketsAndRawBytesWithinTheSameTransportBuffer() throws Exception {

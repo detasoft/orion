@@ -42,25 +42,6 @@ is still required by `GitBlockingClientWire` and must remain.
 **Confidence and priority.** High for call-site evidence. Medium importance and medium repair ease:
 serializer removal is local, but useful behavioral tests and the live advertisement must be migrated.
 
-## 8. A migration-only assertion inspects retired implementation state
-
-**Problem and evidence.**
-[GitBlockingWireTransportTest](src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireTransportTest.java)
-contains `doesNotKeepReusableOutputBufferOnTransport`, which inspects declared fields solely to assert
-that a removed `ByteBuf` member is absent. It does not exercise output behavior.
-
-**Required contract.** Tests of production framing, delivery, backpressure and buffer ownership remain
-necessary. No current contract requires the absence of a particular field type.
-
-**Minimal repair and tests.** Remove this assertion and its unused reflection import separately from
-production API replacement, as repository policy requires. Preserve the live transport tests for
-packet/raw switching, malformed input and output behavior.
-
-**Alternatives and consequences.** Replacing the field check with another structural assertion would
-retain the same coupling. Deletion removes no behavioral coverage and needs no replacement abstraction.
-
-**Confidence and priority.** High; low runtime importance and high repair ease: one isolated test.
-
 ## 9. An unused error record preserves a retired taxonomy
 
 **Problem and evidence.** [GitWireError](src/main/java/pro/deta/orion/git/parser/wire/error/GitWireError.java)
