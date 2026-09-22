@@ -1,7 +1,6 @@
 # Centralize Typed HTTP Route Matching
 
 Status: todo
-Source: finding 3 in [the module review](../../../../net/http-core/MODULE_REVIEW.md)
 Foundation: unified route invocation is integrated in `a380b4d0`.
 Prerequisite: canonical repository names are integrated in `92f4fbe0`; see the
 the canonical repository-name contract embedded below.

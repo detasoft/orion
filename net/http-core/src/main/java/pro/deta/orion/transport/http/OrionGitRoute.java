@@ -136,7 +136,7 @@ public class OrionGitRoute implements OrionHttpRoute {
                     discovery = true;
                     service = serviceParameter(exchange.request());
                     if (service == null) {
-                        exchange.sendError(SC_BAD_REQUEST);
+                        exchange.sendError(SC_FORBIDDEN);
                         return;
                     }
                 }
@@ -286,13 +286,13 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private static InitialRequestService serviceParameter(HttpServletRequest request) {
+        String service = request.getParameter("service");
+        if (service == null || service.isBlank()) {
+            throw new HttpRequestValidationException("Git service is required");
+        }
         try {
-            String service = request.getParameter("service");
-            if (service == null || service.isBlank()) {
-                return null;
-            }
             return InitialRequestService.fromWireName(service);
-        } catch (RuntimeException error) {
+        } catch (IllegalArgumentException error) {
             return null;
         }
     }

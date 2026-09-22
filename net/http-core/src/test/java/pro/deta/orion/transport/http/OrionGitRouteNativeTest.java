@@ -323,6 +323,39 @@ class OrionGitRouteNativeTest {
     }
 
     @Test
+    void rejectsUnknownDiscoveryServiceAsForbidden() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        for (String method : List.of("GET", "HEAD")) {
+            ResponseRecorder response = new ResponseRecorder();
+            service(route, request(method, "/r/team/project.git/info/refs", null, "git-unknown",
+                    Map.of(), new byte[0], repositorySecurityContext()), response.proxy());
+            assertThat(response.status).as(method).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+            assertThat(response.body()).isEmpty();
+        }
+    }
+
+    @Test
+    void rejectsMissingOrBlankDiscoveryServiceAsBadRequest() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
+        for (String method : List.of("GET", "HEAD")) {
+            for (String service : new String[]{null, "", " "}) {
+                ResponseRecorder response = new ResponseRecorder();
+                service(route, request(method, "/r/team/project.git/info/refs", null, service,
+                        Map.of(), new byte[0], repositorySecurityContext()), response.proxy());
+                assertThat(response.status).as("%s service=%s", method, service)
+                        .isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+                assertThat(response.body()).isEmpty();
+            }
+        }
+    }
+
+    @Test
     void rejectsEndpointSpecificWrongMethodsWithAccurateAllowHeader()
             throws Exception {
         FileNativeGitRepositoryProvider provider = provider();
