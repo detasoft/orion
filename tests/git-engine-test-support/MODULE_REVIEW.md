@@ -15,7 +15,7 @@ Orion adapters and parser/transport tests. Assertions must check operation resul
 content rather than reproducing JGit's exact progress messages, capability ordering and compressed pack bytes.
 
 **Minimal repair and tests.** Retain the old helpers until the remaining scenarios are mapped to active
-coverage. Review force push, atomic push and shallow fetch for matrix migration, and malformed requests
+coverage. Review force push and shallow fetch for matrix migration, and malformed requests
 for focused wire coverage. Add missing behavior checks through the existing runners, then remove the unused
 helpers. Keep matrix test classes: several have no direct references or locally declared test methods because
 JUnit executes inherited tests from the matrix runner.
