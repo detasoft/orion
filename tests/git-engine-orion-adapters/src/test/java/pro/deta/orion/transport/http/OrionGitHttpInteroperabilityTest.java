@@ -12,7 +12,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.client.GitClientOptions;
@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,12 +54,15 @@ class OrionGitHttpInteroperabilityTest {
     @TempDir
     Path directory;
 
-    @ParameterizedTest(name = "{0} -> Orion HTTP")
-    @ValueSource(strings = {"git-v1", "git-v2", "jgit-v2", "orion-v1"})
-    void discoversAndFetchesInitialAndUpdatedHistory(String engine) throws Exception {
+    @ParameterizedTest(name = "{0} -> Orion HTTP, local divergence: {1}")
+    @CsvSource({"git-v1,0", "git-v2,0", "jgit-v2,0", "orion-v1,0",
+            "git-v1,160", "git-v2,160", "jgit-v2,160"})
+    void discoversAndFetchesInitialAndUpdatedHistory(String engine, int divergence) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory.resolve("server"));
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         List<String> versions = new CopyOnWriteArrayList<>();
+        AtomicInteger uploadRequests = new AtomicInteger();
+        List<String> history = new ArrayList<>();
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
                 new GitTransportConfig(), provider);
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(route)),
@@ -66,6 +70,9 @@ class OrionGitHttpInteroperabilityTest {
             @Override
             public void service(HttpServletRequest request, HttpServletResponse response)
                     throws IOException, ServletException {
+                if (request.getMethod().equals("POST") && request.getRequestURI().endsWith("/git-upload-pack")) {
+                    uploadRequests.incrementAndGet();
+                }
                 versions.add(request.getHeader("Git-Protocol") == null ? "absent" : request.getHeader("Git-Protocol"));
                 AccessControl.Grant grant = new AccessControlDraft.Grant("repository", new ArrayList<>())
                         .addKey(AccessControl.GrantKey.REPOSITORY, "project").toAccessControl();
@@ -89,15 +96,29 @@ class OrionGitHttpInteroperabilityTest {
             client.getRepository().getConfig().setString("protocol", null, "version", "2");
             server.start();
             URI remote = URI.create("http://127.0.0.1:" + connector.getLocalPort() + "/r/project.git");
-            for (String content : List.of("initial\n", "updated\n")) {
+            if (divergence > 0) {
+                for (int number = 0; number < 64; number++) {
+                    repository.saveFiles("main", Map.of("README.md", ("history " + number).getBytes(
+                            StandardCharsets.UTF_8)), "history " + number, GitCommitAuthor.EMPTY);
+                    history.addFirst(repository.refs().get("refs/heads/main"));
+                }
+            }
+            String localTip = null;
+            List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
+                    : List.of("initial\n", "updated\n");
+            for (String content : updates) {
                 repository.saveFiles("main", Map.of("README.md", content.getBytes(StandardCharsets.UTF_8)),
                         "update", GitCommitAuthor.EMPTY);
                 String commit = repository.refs().get("refs/heads/main");
+                history.addFirst(commit);
+                int requestsBeforeFetch = uploadRequests.get();
                 if (engine.startsWith("git-")) {
                     String version = engine.substring(5);
                     assertThat(git(local, version, "ls-remote", remote.toString()))
                             .contains(commit + "\trefs/heads/main");
-                    git(local, version, "fetch", remote.toString(), "refs/heads/main");
+                    requestsBeforeFetch = uploadRequests.get();
+                    git(local, version, "fetch", remote.toString(),
+                            "refs/heads/main:refs/remotes/origin/main");
                     assertThat(git(local, version, "rev-parse", "FETCH_HEAD").strip()).isEqualTo(commit);
                     assertThat(git(local, version, "show", "FETCH_HEAD:README.md")).isEqualTo(content);
                 } else if (engine.equals("jgit-v2")) {
@@ -107,6 +128,27 @@ class OrionGitHttpInteroperabilityTest {
                     assertThat(git(local, "2", "show", "refs/remotes/origin/main:README.md")).isEqualTo(content);
                 } else {
                     fetchWithOrion(remote, commit, content);
+                }
+                if (divergence > 0) {
+                    int requests = uploadRequests.get() - requestsBeforeFetch;
+                    assertThat(git(local, "2", "rev-list", "refs/remotes/origin/main").lines().toList())
+                            .containsExactlyElementsOf(history);
+                    if (content.equals("initial\n")) {
+                        client.checkout().setCreateBranch(true).setName("main").setStartPoint(commit).call();
+                        for (int number = 0; number < divergence; number++) {
+                            client.commit().setAllowEmpty(true).setMessage("local " + number)
+                                    .setAuthor("Matrix", "matrix@example.test")
+                                    .setCommitter("Matrix", "matrix@example.test").call();
+                        }
+                        localTip = client.getRepository().resolve("HEAD").name();
+                        git(local, "2", "update-ref", "-d", "refs/remotes/origin/main");
+                    } else if (localTip != null) {
+                        assertThat(requests).as("upload-pack HTTP requests during divergent fetch")
+                                .isGreaterThan(engine.endsWith("v2") ? 2 : 1);
+                        assertThat(client.getRepository().resolve("HEAD").name()).isEqualTo(localTip);
+                        assertThat(Files.readString(local.resolve("README.md"))).isEqualTo("initial\n");
+                        git(local, "2", "fsck", "--full");
+                    }
                 }
             }
             assertThat(versions).contains(engine.endsWith("v2") ? "version=2" : "version=1");
@@ -139,7 +181,8 @@ class OrionGitHttpInteroperabilityTest {
     }
 
     private String git(Path local, String version, String... arguments) throws Exception {
-        List<String> command = new ArrayList<>(List.of("git", "-c", "protocol.version=" + version));
+        List<String> command = new ArrayList<>(List.of("git", "-c", "protocol.version=" + version,
+                "-c", "fetch.negotiationAlgorithm=consecutive"));
         command.addAll(List.of(arguments));
         Path output = Files.createTempFile(directory, "git-output-", ".log");
         Path errors = Files.createTempFile(directory, "git-error-", ".log");
