@@ -1,6 +1,7 @@
 package pro.deta.orion.git.workflow.orion;
 
 import pro.deta.orion.git.client.GitClientFailure;
+import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitReceivePackClient;
@@ -18,8 +19,17 @@ import java.util.Set;
 
 final class OrionGitClient implements GitClient {
     private final GitClientOptions options = GitClientOptions.defaults();
-    private final GitUploadPackClient uploadPack = new GitUploadPackClient(new GitTcpClientTransport());
-    private final GitReceivePackClient receivePack = new GitReceivePackClient(new GitTcpClientTransport());
+    private final GitUploadPackClient uploadPack;
+    private final GitReceivePackClient receivePack;
+
+    OrionGitClient() {
+        this(new GitTcpClientTransport());
+    }
+
+    OrionGitClient(GitClientTransport transport) {
+        uploadPack = new GitUploadPackClient(transport);
+        receivePack = new GitReceivePackClient(transport);
+    }
 
     @Override
     public String name() {

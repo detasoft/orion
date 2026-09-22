@@ -147,7 +147,6 @@ public final class GitBlockingWireSession {
                 throw new IOException("Protocol v2 command was not advertised");
             }
             if (protocol.transport() == GitTransport.HTTP) {
-                wire.writeResponseEnd();
                 wire.flush();
                 return;
             }

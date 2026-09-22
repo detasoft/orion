@@ -1,6 +1,7 @@
 package pro.deta.orion.git.workflow;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.MergeCommand.FastForwardMode;
 import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.lib.PersonIdent;
@@ -24,9 +25,15 @@ final class JGitWorkflowClient implements GitClient {
             TimeZone.getTimeZone("UTC"));
 
     private final String name;
+    private final TransportConfigCallback transportConfig;
 
     JGitWorkflowClient(String name) {
+        this(name, transport -> { });
+    }
+
+    JGitWorkflowClient(String name, TransportConfigCallback transportConfig) {
         this.name = Objects.requireNonNull(name, "name");
+        this.transportConfig = transportConfig;
     }
 
     @Override
@@ -60,6 +67,7 @@ final class JGitWorkflowClient implements GitClient {
         try {
             git = Git.cloneRepository()
                     .setURI(remoteUri)
+                    .setTransportConfigCallback(transportConfig)
                     .setDirectory(directory.toFile())
                     .setNoCheckout(true)
                     .call();
@@ -86,11 +94,11 @@ final class JGitWorkflowClient implements GitClient {
     }
 
     private static final class JGitWorkTree implements GitWorkTree {
-        private final GitClient client;
+        private final JGitWorkflowClient client;
         private final Path directory;
         private final Git git;
 
-        private JGitWorkTree(GitClient client, Path directory, Git git) {
+        private JGitWorkTree(JGitWorkflowClient client, Path directory, Git git) {
             this.client = client;
             this.directory = directory;
             this.git = git;
@@ -153,7 +161,8 @@ final class JGitWorkflowClient implements GitClient {
             for (int index = 0; index < refSpecs.length; index++) {
                 specs[index] = new RefSpec(refSpecs[index]);
             }
-            var results = git.push().setRemote(remote).setRefSpecs(specs).call();
+            Iterable<org.eclipse.jgit.transport.PushResult> results = git.push()
+                    .setTransportConfigCallback(client.transportConfig).setRemote(remote).setRefSpecs(specs).call();
             for (var result : results) {
                 for (RemoteRefUpdate update : result.getRemoteUpdates()) {
                     if (update.getStatus() == RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD) {
@@ -187,12 +196,13 @@ final class JGitWorkflowClient implements GitClient {
 
         @Override
         public void fetch(String remote) throws Exception {
-            git.fetch().setRemote(remote).call();
+            git.fetch().setTransportConfigCallback(client.transportConfig).setRemote(remote).call();
         }
 
         @Override
         public void fetch(String remote, String branch) throws Exception {
             git.fetch()
+                    .setTransportConfigCallback(client.transportConfig)
                     .setRemote(remote)
                     .setRefSpecs(new RefSpec("+refs/heads/" + branch
                             + ":refs/remotes/" + remote + "/" + branch))
@@ -202,6 +212,7 @@ final class JGitWorkflowClient implements GitClient {
         @Override
         public void pull(String remote, String branch) throws Exception {
             PullResult result = git.pull()
+                    .setTransportConfigCallback(client.transportConfig)
                     .setRemote(remote)
                     .setRemoteBranchName(branch)
                     .setRebase(false)

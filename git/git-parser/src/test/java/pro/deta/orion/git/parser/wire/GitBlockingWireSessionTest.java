@@ -61,7 +61,7 @@ class GitBlockingWireSessionTest {
         assertThat(text(packets.get(advertisementEnd + 1))).isEqualTo(id + " refs/heads/main\n");
         assertThat(packets.get(advertisementEnd + 2)).isSameAs(GitPktLine.Control.FLUSH);
         assertThat(text(packets.get(advertisementEnd + 3))).isEqualTo("packfile\n");
-        assertPack(packets.subList(advertisementEnd + 4, packets.size()), id, false);
+        assertPack(packets.subList(advertisementEnd + 4, packets.size()), id);
         assertThat(opens).isEqualTo(1);
     }
 
@@ -75,7 +75,7 @@ class GitBlockingWireSessionTest {
         session(request, response).serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.UPLOAD_PACK));
         List<GitPktLine> packets = decode(response.toByteArray());
         assertThat(text(packets.getFirst())).isEqualTo(sidebandAll ? "\u0001packfile\n" : "packfile\n");
-        assertPack(packets.subList(1, packets.size()), id, true);
+        assertPack(packets.subList(1, packets.size()), id);
     }
 
     @Test
@@ -208,12 +208,9 @@ class GitBlockingWireSessionTest {
         return new String(((GitPktLine.Data) packet).content(), StandardCharsets.UTF_8);
     }
 
-    private static void assertPack(List<GitPktLine> packets, ObjectId id, boolean http) throws Exception {
-        int end = packets.size() - (http ? 2 : 1);
+    private static void assertPack(List<GitPktLine> packets, ObjectId id) throws Exception {
+        int end = packets.size() - 1;
         assertThat(packets.get(end)).isSameAs(GitPktLine.Control.FLUSH);
-        if (http) {
-            assertThat(packets.getLast()).isSameAs(GitPktLine.Control.RESPONSE_END);
-        }
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         for (GitPktLine packet : packets.subList(0, end)) {
             GitPktLine.Data data = (GitPktLine.Data) packet;

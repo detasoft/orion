@@ -113,6 +113,9 @@ public record PushRequest(List<RefUpdate> updates, GitCapabilities capabilities)
 
     private static void parseCapabilities(String tokens, GitCapabilities advertised, GitCapabilities result)
             throws IOException {
+        if (tokens.startsWith(" ")) {
+            tokens = tokens.substring(1);
+        }
         if (tokens.isEmpty()) {
             return;
         }

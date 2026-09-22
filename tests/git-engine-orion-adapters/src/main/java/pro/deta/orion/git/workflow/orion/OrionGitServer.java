@@ -1,36 +1,76 @@
 package pro.deta.orion.git.workflow.orion;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.apache.sshd.common.session.Session;
+import org.apache.sshd.common.session.SessionListener;
+import org.apache.sshd.server.SshServer;
+import org.apache.sshd.server.auth.UserAuthNoneFactory;
+import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
+import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.workflow.GitCapability;
+import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
+import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.GitNativeTransportService;
+import pro.deta.orion.transport.git.GitSshTransportService;
+import pro.deta.orion.transport.git.ssh.SshCommandFactory;
+import pro.deta.orion.transport.http.OrionAuthorizationFilter;
+import pro.deta.orion.transport.http.OrionGitRoute;
+import pro.deta.orion.transport.http.OrionHttpResponseWriter;
+import pro.deta.orion.transport.http.OrionHttpRouteRegistry;
+import pro.deta.orion.transport.http.OrionHttpRouteServlet;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import static pro.deta.orion.git.client.GitTransportScheme.GIT;
+import static pro.deta.orion.git.client.GitTransportScheme.HTTP;
+import static pro.deta.orion.git.client.GitTransportScheme.SSH;
+
 final class OrionGitServer implements GitServer {
     private static final String MAIN_REF = "refs/heads/main";
+
+    private final GitTransportScheme transport;
+    private Server http;
+    private SshServer ssh;
+    private OrionExecutor executor;
 
     private final Map<String, NativeGitRepository> repositories = new LinkedHashMap<>();
     private Path root;
@@ -40,9 +80,20 @@ final class OrionGitServer implements GitServer {
     private int boundPort;
     private boolean closed;
 
+    OrionGitServer() {
+        this(GIT);
+    }
+
+    OrionGitServer(GitTransportScheme transport) {
+        this.transport = Objects.requireNonNull(transport, "transport");
+        if (transport != GIT && transport != HTTP && transport != SSH) {
+            throw new IllegalArgumentException("Unsupported matrix server transport: " + transport);
+        }
+    }
+
     @Override
     public String name() {
-        return "orion";
+        return transport == GIT ? "orion" : "orion-" + transport.name().toLowerCase(Locale.ROOT);
     }
 
     @Override
@@ -100,6 +151,7 @@ final class OrionGitServer implements GitServer {
             observation.getRepository().getConfig().save();
             observation.fetch()
                     .setRemote(remote.uri())
+                    .setTransportConfigCallback(GitClients.allowAllSsh())
                     .setRefSpecs(
                             new RefSpec("+refs/heads/*:refs/heads/*"),
                             new RefSpec("+refs/tags/*:refs/tags/*"))
@@ -123,12 +175,12 @@ final class OrionGitServer implements GitServer {
 
     @Override
     public synchronized String diagnostics() {
-        if (service == null) {
+        if (boundPort == 0) {
             return "Orion native Git server; running=false; closed=" + closed
                     + "; storage=uninitialized";
         }
         return "Orion native Git server; endpoint=127.0.0.1:" + boundPort
-                + "; running=" + service.isRunning()
+                + "; running=" + running()
                 + "; closed=" + closed
                 + "; storage=" + storageRoot;
     }
@@ -142,10 +194,24 @@ final class OrionGitServer implements GitServer {
         if (service != null) {
             service.onStop();
         }
-        for (NativeGitRepository repository : repositories.values()) {
-            repository.close();
+        try {
+            if (http != null) {
+                http.stop();
+            }
+            if (ssh != null) {
+                ssh.stop(true);
+            }
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot stop matrix server", failure);
+        } finally {
+            if (executor != null) {
+                executor.shutdownNow();
+            }
+            for (NativeGitRepository repository : repositories.values()) {
+                repository.close();
+            }
+            repositories.clear();
         }
-        repositories.clear();
     }
 
     private void requireOpen(String operation) {
@@ -158,6 +224,15 @@ final class OrionGitServer implements GitServer {
         root = requestedRoot;
         storageRoot = root.resolve(".orion-native-storage");
         provider = new FileNativeGitRepositoryProvider(storageRoot);
+        if (transport != GIT) {
+            try {
+                startAllowAllTransport();
+                return;
+            } catch (Exception failure) {
+                close();
+                throw new IllegalStateException("Cannot start matrix " + transport + " server", failure);
+            }
+        }
         GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
         config.setEnabled(true);
         service = new GitNativeTransportService(
@@ -170,9 +245,79 @@ final class OrionGitServer implements GitServer {
         boundPort = service.boundPort();
     }
 
+    private boolean running() {
+        if (service != null) {
+            return service.isRunning();
+        }
+        return http != null ? http.isRunning() : ssh != null && ssh.isStarted();
+    }
+
+    private static InternalUserImpl matrixUser() {
+        AccessControl.Grant grant =
+                new AccessControlDraft.Grant("matrix", new ArrayList<>())
+                        .addKey(AccessControl.GrantKey.REPOSITORY, "*")
+                        .addKey(AccessControl.GrantKey.READ_WRITE, "true")
+                        .addKey(AccessControl.GrantKey.CREATE, "true")
+                        .addKey(AccessControl.GrantKey.FORCE, "true").toAccessControl();
+        return new InternalUserImpl("matrix", List.of(grant));
+    }
+
+    private void startAllowAllTransport() throws Exception {
+        DefaultGitNativeRepositoryService repositories = new DefaultGitNativeRepositoryService(provider);
+        if (transport == HTTP) {
+            http = new Server();
+            ServerConnector connector = new ServerConnector(http);
+            connector.setHost("127.0.0.1");
+            connector.setPort(0);
+            http.addConnector(connector);
+            OrionGitRoute route = new OrionGitRoute(
+                    repositories, new GitTransportConfig(), provider);
+            OrionHttpRouteServlet servlet =
+                    new OrionHttpRouteServlet(
+                            new OrionHttpRouteRegistry(Set.of(route)),
+                            new OrionHttpResponseWriter(
+                                    new ObjectMapper())) {
+                        @Override
+                        public void service(HttpServletRequest request,
+                                            HttpServletResponse response)
+                                throws IOException, ServletException {
+                            request.setAttribute(
+                                    OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
+                                    SecurityContext.createContext().withUserIdentity(matrixUser()));
+                            super.service(request, response);
+                        }
+                    };
+            ServletContextHandler context =
+                    new ServletContextHandler();
+            context.setContextPath("/");
+            context.addServlet(new ServletHolder(servlet), "/*");
+            http.setHandler(context);
+            http.start();
+            boundPort = connector.getLocalPort();
+        } else {
+            ssh = SshServer.setUpDefaultServer();
+            ssh.setHost("127.0.0.1");
+            ssh.setPort(0);
+            ssh.setKeyPairProvider(new SimpleGeneratorHostKeyProvider());
+            ssh.setUserAuthFactories(List.of(new UserAuthNoneFactory()));
+            ssh.addSessionListener(new SessionListener() {
+                @Override
+                public void sessionCreated(Session session) {
+                    session.setAttribute(GitSshTransportService.SSH_AUTHENTICATED_USER,
+                            matrixUser());
+                }
+            });
+            executor = new OrionExecutor(4, new OrionThreadFactory());
+            ssh.setCommandFactory(new SshCommandFactory(
+                    executor, null, null, repositories, new GitTransportConfig(), null));
+            ssh.start();
+            boundPort = ssh.getPort();
+        }
+    }
+
     private NativeGitRepository repository(GitRemoteRepository remote) {
-        String path = java.net.URI.create(remote.uri()).getPath();
-        String name = path == null || !path.startsWith("/") ? "" : path.substring(1);
+        String path = URI.create(remote.uri()).getPath();
+        String name = path == null || !path.startsWith("/") ? "" : path.substring(transport == HTTP ? 3 : 1);
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
             repository = success(
@@ -186,7 +331,8 @@ final class OrionGitServer implements GitServer {
     private GitRemoteRepository remoteRepository(String repositoryName) {
         return new GitRemoteRepository(
                 storageRoot,
-                "git://127.0.0.1:" + boundPort + "/" + repositoryName);
+                transport.name().toLowerCase(Locale.ROOT) + "://" + (transport == SSH ? "matrix@" : "")
+                        + "127.0.0.1:" + boundPort + (transport == HTTP ? "/r/" : "/") + repositoryName);
     }
 
     private static NativeGitRepository success(Result<NativeGitRepository> result, String operation) {

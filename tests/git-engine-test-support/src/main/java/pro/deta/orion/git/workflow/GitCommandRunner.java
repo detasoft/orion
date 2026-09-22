@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 final class GitCommandRunner {
     private static final Duration TERMINATION_GRACE = Duration.ofSeconds(2);
     private static final List<String> CONFIGURATION = List.of(
+            "-c", "protocol.version=2",
             "-c", "init.defaultBranch=" + GitScenarioContext.DEFAULT_BRANCH,
             "-c", "user.name=" + GitScenarioContext.IDENTITY_NAME,
             "-c", "user.email=" + GitScenarioContext.IDENTITY_EMAIL,
@@ -24,6 +25,9 @@ final class GitCommandRunner {
             "GIT_CONFIG_NOSYSTEM", "1",
             "GIT_CONFIG_GLOBAL", nullConfigurationPath(),
             "GIT_TERMINAL_PROMPT", "0",
+            "GIT_SSH_COMMAND", "ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=no "
+                    + "-o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=5",
+
             "LC_ALL", "C",
             "TZ", "UTC");
 

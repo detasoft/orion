@@ -109,7 +109,7 @@ class PushCommandTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"report-status", "report-status-v2", "report-status side-band-64k",
-            "report-status-v2 side-band-64k"})
+            "report-status-v2 side-band-64k", " report-status", " report-status-v2 side-band-64k"})
     void createsUpdatesAndDeletesRefsWithNegotiatedStatus(String capabilities) throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});

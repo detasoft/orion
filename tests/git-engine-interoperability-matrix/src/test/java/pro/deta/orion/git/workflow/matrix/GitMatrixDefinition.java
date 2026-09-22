@@ -18,7 +18,13 @@ final class GitMatrixDefinition {
             pair("orion", "jgit", OrionGitEngines::client, GitServers::jgit),
             pair("orion", "git", OrionGitEngines::client, GitServers::git),
             pair("jgit", "orion", GitClients::jgit, OrionGitEngines::server),
-            pair("git", "orion", GitClients::git, OrionGitEngines::server));
+            pair("git", "orion", GitClients::git, OrionGitEngines::server),
+            pair("orion", "orion-http", OrionGitEngines::httpClient, OrionGitEngines::httpServer),
+            pair("jgit", "orion-http", GitClients::jgit, OrionGitEngines::httpServer),
+            pair("git", "orion-http", GitClients::git, OrionGitEngines::httpServer),
+            pair("orion", "orion-ssh", OrionGitEngines::sshClient, OrionGitEngines::sshServer),
+            pair("jgit", "orion-ssh", GitClients::jgitAllowAllSsh, OrionGitEngines::sshServer),
+            pair("git", "orion-ssh", GitClients::git, OrionGitEngines::sshServer));
     private static final List<EnginePair> CONTROL_PAIRS = List.of(
             pair("jgit", "jgit", GitClients::jgit, GitServers::jgit),
             pair("jgit", "git", GitClients::jgit, GitServers::git),

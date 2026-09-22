@@ -19,7 +19,9 @@ class GitMatrixDefinitionTest {
             "orion -> jgit",
             "orion -> git",
             "jgit -> orion",
-            "git -> orion");
+            "git -> orion",
+            "orion -> orion-http", "jgit -> orion-http", "git -> orion-http",
+            "orion -> orion-ssh", "jgit -> orion-ssh", "git -> orion-ssh");
     private static final Set<String> CONTROL_PAIRS = Set.of(
             "jgit -> jgit",
             "jgit -> git",
@@ -27,15 +29,15 @@ class GitMatrixDefinitionTest {
             "git -> git");
 
     @Test
-    void definesFiftyUniqueRequiredOrionFacingInvocations() {
+    void definesAllTransportInvocations() {
         List<GitMatrixInvocation> cases = GitMatrixDefinition.requiredCases();
 
-        assertThat(cases).hasSize(50);
+        assertThat(cases).hasSize(110);
         assertThat(cases).extracting(GitMatrixInvocation::displayName).doesNotHaveDuplicates();
         assertThat(cases).extracting(GitMatrixInvocation::pairName)
                 .containsOnlyElementsOf(REQUIRED_PAIRS);
         assertThat(countsByPair(cases).values()).containsOnly(10);
-        assertThat(countsByScenario(cases).values()).containsOnly(5);
+        assertThat(countsByScenario(cases).values()).containsOnly(11);
         assertThat(countsByScenario(cases).keySet())
                 .containsExactlyInAnyOrderElementsOf(scenarioNames());
     }
@@ -54,12 +56,12 @@ class GitMatrixDefinitionTest {
 
     @Test
     void rejectsMissingRequiredCoverageInsteadOfSkippingIt() {
-        List<GitMatrixInvocation> incomplete = GitMatrixDefinition.requiredCases().subList(1, 50);
+        List<GitMatrixInvocation> incomplete = GitMatrixDefinition.requiredCases().subList(1, 110);
 
         assertThatThrownBy(() -> GitMatrixDefinition.requireCompleteCoverage(incomplete))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("expected=50")
-                .hasMessageContaining("actual=49");
+                .hasMessageContaining("expected=110")
+                .hasMessageContaining("actual=109");
     }
 
     @Test

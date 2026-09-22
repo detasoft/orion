@@ -193,7 +193,7 @@ class GitBlockingWireSessionTest {
                     .isEqualTo(
                             "0014acknowledgments\n"
                                     + "0031ACK " + have.toHex() + "\n"
-                                    + "00000002");
+                                    + "0000");
         }
     }
 

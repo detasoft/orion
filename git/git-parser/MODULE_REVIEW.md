@@ -24,27 +24,6 @@ caught exception type.
 **Confidence and priority.** High for current consumers; low importance and medium repair ease because
 error classification and diagnostics must remain stable.
 
-## 10. HTTP v2 responses contain an internal marker rejected by Git
-
-**Problem.** Every HTTP v2 command appends `0002` to the HTTP body. C Git rejects it with
-`remote-curl: unexpected response end packet`, affecting ls-refs and fetch.
-**Sources.** [serveV2](src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java#L149),
-[HTTP caller](../../net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L242),
-[parser assertion](src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java#L215),
-[transport assertion](../../net/git-transport/src/test/java/pro/deta/orion/transport/git/GitBlockingWireSessionTest.java#L196).
-Both tests explicitly expect the unwanted trailing marker.
-**Documented behavior and contract.** Upstream's
-[HTTP response parser](https://github.com/git/git/blob/master/remote-curl.c#L739-L757) rejects incoming 0002.
-The [HTTP helper](https://github.com/git/git/blob/master/remote-curl.c#L1024-L1025) adds it to its internal pipe
-after the HTTP response ends. HTTP-body framing and internal stateless framing are distinct boundaries.
-**Minimal repair.** Remove the HTTP writeResponseEnd call, retain command flush/response completion,
-update the byte assertions and add actual C Git HTTP v2 interoperability coverage.
-**Alternatives and consequences.** Do not remove 0002 support from generic framing: other internal/stateless
-consumers may legitimately use it. This is a local HTTP-boundary correction.
-**Confidence.** High from emitted bytes and the reference rejection branch; no live HTTP reproduction run.
-**Priority signals.** Importance high: ordinary HTTP v2 requests fail. Repair ease high: one unwanted write
-and known assertions, without new state or abstractions.
-
 ## 11. Legacy upload advertisements omit peeled annotated tags
 
 **Problem.** A ref pointing to an annotated tag is advertised only with its tag-object ID, never with

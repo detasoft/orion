@@ -14,6 +14,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.net</groupId>
+            <artifactId>http-core</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>schema</artifactId>
         </dependency>
