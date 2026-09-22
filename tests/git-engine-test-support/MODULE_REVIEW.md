@@ -14,8 +14,7 @@ Neither is registered through reflection or resources; neither contributes a run
 Orion adapters and parser/transport tests. Assertions must check operation results, refs, history and file
 content rather than reproducing JGit's exact progress messages, capability ordering and compressed pack bytes.
 
-**Minimal repair and tests.** Check configured server-side non-fast-forward rejection, then remove the unused
-helpers while preserving the existing matrix and focused
+**Minimal repair and tests.** Remove the unused helpers while preserving the existing matrix and focused
 parser coverage, including malformed fetch/push rejection and unchanged refs in
 [FetchCommandPackTest](../../git/git-parser/src/test/java/pro/deta/orion/git/parser/v2/command/FetchCommandPackTest.java)
 and [PushCommandTest](../../git/git-parser/src/test/java/pro/deta/orion/git/parser/v2/command/PushCommandTest.java).
