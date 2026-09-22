@@ -52,14 +52,21 @@ class NativeGitFileUpdateTest {
         repository.saveFiles("main", files("second"), "second", GitCommitAuthor.EMPTY);
         String current = repository.refs().get("refs/heads/main");
 
-        assertThatThrownBy(() -> repository.saveFilesIfVersion(
-                "main", expected, files("stale"), "stale", GitCommitAuthor.EMPTY))
+        NativeGitFileUpdate update = repository.prepareFileUpdate(
+                "main", expected, files("stale"), "stale", GitCommitAuthor.EMPTY);
+        List<RefUpdateResult> results = repository.publishPack(
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(results).extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
+        assertThatThrownBy(() -> GitOperationException.requireSuccess(results))
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
         assertThat(repository.loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
         assertThat(repository.storage().packIds()).hasSize(3);
+        assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
     }
 
     @Test

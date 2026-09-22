@@ -57,10 +57,6 @@ public class NativeGitRepository implements AutoCloseable {
         return name;
     }
 
-    public String description() {
-        return name;
-    }
-
     public GitRepositoryFileSnapshot loadFiles(
             String branch,
             List<String> paths) throws GitOperationException {
@@ -73,20 +69,6 @@ public class NativeGitRepository implements AutoCloseable {
             String message,
             GitCommitAuthor author) throws GitOperationException {
         new NativeRepositoryFileSaver(this).saveFiles(branch, files, message, author);
-    }
-
-    public void saveFilesIfVersion(
-            String branch,
-            String expectedVersion,
-            Map<String, byte[]> files,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        new NativeRepositoryFileSaver(this).saveFilesIfVersion(
-                branch,
-                expectedVersion,
-                files,
-                message,
-                author);
     }
 
     public NativeGitFileUpdate prepareFileUpdate(

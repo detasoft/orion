@@ -187,12 +187,19 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = repository.refs().get("refs/heads/main");
 
-        assertThatThrownBy(() -> repository.saveFilesIfVersion(
+        NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
                 versionOne,
                 Map.of("orion.xml", "stale".getBytes(StandardCharsets.UTF_8)),
                 "stale",
-                GitCommitAuthor.EMPTY)).isInstanceOf(GitRepositoryConcurrentUpdateException.class);
+                GitCommitAuthor.EMPTY);
+        List<RefUpdateResult> results = repository.publishPack(
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(results).extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
+        assertThatThrownBy(() -> GitOperationException.requireSuccess(results))
+                .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/main")).isEqualTo(versionTwo);
         assertThat(repository.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
@@ -221,12 +228,19 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = first.refs().get("refs/heads/main");
 
-        assertThatThrownBy(() -> second.saveFilesIfVersion(
+        NativeGitFileUpdate update = second.prepareFileUpdate(
                 "main",
                 versionOne,
                 Map.of("orion.xml", "stale".getBytes(StandardCharsets.UTF_8)),
                 "stale",
-                GitCommitAuthor.EMPTY)).isInstanceOf(GitRepositoryConcurrentUpdateException.class);
+                GitCommitAuthor.EMPTY);
+        List<RefUpdateResult> results = second.publishPack(
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(results).extracting(RefUpdateResult::status)
+                .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
+        assertThatThrownBy(() -> GitOperationException.requireSuccess(results))
+                .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(second.refs().get("refs/heads/main")).isEqualTo(versionTwo);
         assertThat(second.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
@@ -249,12 +263,15 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String expectedVersion = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
 
-        repository.saveFilesIfVersion(
+        NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
                 expectedVersion,
                 Map.of("orion.xml", "version two".getBytes(StandardCharsets.UTF_8)),
                 "version two",
                 GitCommitAuthor.EMPTY);
+        assertThat(repository.publishPack(
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
+                .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
 
         GitRepositoryFileSnapshot saved = repository.loadFiles(
                 "main",

@@ -45,12 +45,6 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
-    public String description() {
-        repository();
-        return repositoryName;
-    }
-
-    @Override
     public GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths)
             throws GitOperationException {
         return repository().loadFiles(branch, paths);

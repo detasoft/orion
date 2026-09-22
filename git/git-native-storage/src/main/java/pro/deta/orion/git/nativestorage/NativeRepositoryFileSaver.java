@@ -44,16 +44,6 @@ final class NativeRepositoryFileSaver {
         publish(prepareFiles(branch, files, message, author));
     }
 
-    void saveFilesIfVersion(
-            String branch,
-            String expectedVersion,
-            Map<String, byte[]> files,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        Objects.requireNonNull(expectedVersion, "expectedVersion");
-        publish(prepareFiles(branch, expectedVersion, files, message, author, true));
-    }
-
     private void publish(NativeGitFileUpdate update) throws GitOperationException {
         List<RefUpdateResult> results = repository.publishPack(
                 update.pack(),
