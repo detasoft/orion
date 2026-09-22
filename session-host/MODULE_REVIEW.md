@@ -39,40 +39,6 @@ frequency are unknown; no stress reproduction was run.
 **Priority signals.** Importance: medium, with potentially high impact under sustained blocked input.
 Repair ease: medium to low because resource bounds and termination availability must be designed together.
 
-### 2. Maintenance reconciliation keeps state for branches that cannot occur
-
-**Problem.** Every maintenance command supplies an active segment and requests reconciliation, but
-`run_maintenance` starts with `active_segment = None` and `should_reconcile = false`, repeats both assignments in
-all three branches, then guards reconciliation and unwraps the supposedly optional boundary. These states are
-not observable alternatives: `recv` already supplied a command before the reduction starts.
-
-**Sources.** [`MaintenanceCommand`](src/journal.rs#L72) defines the exhaustive command set;
-[`run_maintenance`](src/journal.rs#L539) contains the redundant flag and optional boundary.
-[Rotation](src/journal.rs#L427) and [acknowledged retention](src/platform/unix.rs#L1526) supply different inputs
-to one reconciliation pass. Existing [retention](src/journal.rs#L2141),
-[retry](src/journal.rs#L2230), and [finish-failure](src/journal.rs#L2265) tests cover the meaningful behavior.
-
-**Documented behavior.** [Journal storage limits](README.md#L102) require asynchronous compression,
-durable-acknowledgement-gated deletion, and preservation of the active segment. No consumer needs a batch that
-contains a command but neither a boundary nor a reconciliation request.
-
-**Contract.** Preserve command coalescing, the last active boundary, the monotonic acknowledgement watermark,
-retry behavior, and finish synchronization. Segment-only and acknowledgement-bearing commands have distinct
-inputs; their separate enum variants are not themselves a defect.
-
-**Minimal repair.** Derive the batch boundary from its first received command and remove the always-true
-reconciliation flag and impossible missing-boundary state. Retain the existing owner and command semantics;
-verify with the maintenance behavior tests.
-
-**Alternatives and consequences.** Combining variants using an optional watermark only relocates their
-distinction and is not required. Leaving the code unchanged is behaviorally safe, but preserves unnecessary
-state and unreachable branches. No wire, persistence, or public contract changes are needed.
-
-**Confidence.** High from the exhaustive match; no behavioral defect or measured performance cost is asserted.
-
-**Priority signals.** Importance: low, local redundant bookkeeping. Repair ease: high, a confined simplification
-with existing behavioral coverage.
-
 ### 6. Accepted segment targets can create compressed journals that readers reject
 
 **Problem.** `--journal-segment-bytes 1073741824 --journal-max-bytes 2147483648` is accepted. After a segment grows

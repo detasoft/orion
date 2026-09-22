@@ -544,62 +544,42 @@ fn run_maintenance(
 ) -> Result<(), JournalError> {
     let mut pending_error = None;
     let mut acknowledged_event_id = None;
-    loop {
-        let first = match receiver.recv() {
-            Ok(command) => command,
-            Err(_) => break,
-        };
-        let mut active_segment = None;
-        let mut should_reconcile = false;
+    while let Ok(mut command) = receiver.recv() {
         let mut finish = false;
-        let mut command = Some(first);
-        while let Some(command_value) = command.take() {
-            match command_value {
-                MaintenanceCommand::Reconcile(segment) => {
-                    active_segment = Some(segment);
-                    should_reconcile = true;
-                }
+        let active_segment = loop {
+            let segment = match command {
+                MaintenanceCommand::Reconcile(segment) => segment,
                 MaintenanceCommand::ApplyRetention {
                     active_segment: segment,
                     acknowledged_event_id: requested,
                 } => {
-                    active_segment = Some(segment);
                     acknowledged_event_id = Some(
                         acknowledged_event_id
                             .map_or(requested, |current: u64| current.max(requested)),
                     );
-                    should_reconcile = true;
+                    segment
                 }
                 MaintenanceCommand::Finish(segment) => {
-                    active_segment = Some(segment);
-                    should_reconcile = true;
                     finish = true;
+                    segment
                 }
+            };
+            match receiver.try_recv() {
+                Ok(next) => command = next,
+                Err(_) => break segment,
             }
-            command = receiver.try_recv().ok();
-        }
+        };
+        let result = reconcile_journal(
+            directory,
+            active_segment,
+            journal_max_bytes,
+            acknowledged_event_id,
+            file_system.as_ref(),
+        );
         if finish {
-            return reconcile_journal(
-                directory,
-                active_segment.expect("finish always provides an active segment"),
-                journal_max_bytes,
-                acknowledged_event_id,
-                file_system.as_ref(),
-            );
+            return result;
         }
-        if should_reconcile {
-            let result = reconcile_journal(
-                directory,
-                active_segment.expect("reconciliation always provides an active segment"),
-                journal_max_bytes,
-                acknowledged_event_id,
-                file_system.as_ref(),
-            );
-            match result {
-                Ok(()) => pending_error = None,
-                Err(error) => pending_error = Some(error),
-            }
-        }
+        pending_error = result.err();
     }
     match pending_error {
         Some(error) => Err(error),
