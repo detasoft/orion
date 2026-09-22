@@ -73,6 +73,14 @@ selected workflow. Run every required check before creating the commit and
 against the content intended for that commit. If content changes afterward,
 rerun the affected check. A failed required check blocks the commit.
 
+If evidence shows that a required check failed because of unrelated parallel
+changes, keep this result unstaged and retry the same check up to three times
+after the initial failure, waiting at least one minute before each retry. Stop
+retrying as soon as it passes. Do not repair or discard the parallel changes.
+If all three retries fail, report the command and remaining failure and wait
+for the parallel work to be corrected before resuming verification. Failures
+caused by the current result must be fixed within its own checkpoint instead.
+
 | Changed content | Required pre-commit verification |
 | --- | --- |
 | Documentation only | No automated check required; inspect the diff. |
