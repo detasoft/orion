@@ -64,6 +64,7 @@ final class GitDaemonServer implements GitServer {
                 "--bare",
                 "--initial-branch=" + GitScenarioContext.DEFAULT_BRANCH,
                 repositoryPath.toString());
+        commands.run(repositoryPath, "config", "receive.denyDeleteCurrent", "false");
         if (daemon == null) {
             root = requestedRoot;
             logFile = root.resolve(".orion-git-daemon.log");

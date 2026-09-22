@@ -44,6 +44,8 @@ public final class GitWorkflowScenarios {
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
                     GitWorkflowScenarios::secondBranchFetchAndCheckout),
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
+            scenario("delete-branch", WRITE, state(Map.of(), Map.of()), GitWorkflowScenarios::deleteBranch),
+            scenario("delete-tags", WRITE, twoCommitState("updated\n"), GitWorkflowScenarios::deleteTags),
             scenario("reject-stale-non-fast-forward", PULL, twoCommitState("winner\n"),
                     GitWorkflowScenarios::rejectStaleNonFastForward),
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
@@ -230,6 +232,49 @@ public final class GitWorkflowScenarios {
             source.updateRef(TAG, "HEAD");
             source.pushRefs("origin", FEATURE + ":" + FEATURE, TAG + ":" + TAG);
             execution.assertTerminal(transferred(context, source));
+        }
+    }
+
+    private static void deleteBranch(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.updateRef(FEATURE, "HEAD");
+            source.addRemote("origin", context.remote());
+            source.pushRefs("origin", MAIN + ":" + MAIN, FEATURE + ":" + FEATURE);
+            RepositorySnapshot before = transferred(context, source);
+
+            source.pushRefs("origin", ":" + FEATURE);
+            equivalent(RepositorySnapshot.of(MAIN, Map.of(MAIN, execution.id("initial")), before.commits()),
+                    context.server().snapshot(context.remote()), "delete feature and preserve main");
+            require(!source.advertisedRefs("origin").containsKey(FEATURE), "deleted branch is still advertised");
+
+            source.pushRefs("origin", ":" + MAIN);
+            execution.assertTerminal(context.server().snapshot(context.remote()));
+        }
+    }
+
+    private static void deleteTags(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.updateRef(TAG, "HEAD");
+            String annotatedRef = "refs/tags/annotated";
+            execution.bind("annotated", source.annotatedTag("annotated", execution.id("initial")));
+            source.addRemote("origin", context.remote());
+            source.pushRefs("origin", MAIN + ":" + MAIN, TAG + ":" + TAG, annotatedRef + ":" + annotatedRef);
+            transferred(context, source);
+
+            execution.bind("second", commit(source, README, "updated\n", "updated"));
+            source.pushRefs("origin", MAIN + ":" + MAIN, ":" + TAG);
+            equivalent(RepositorySnapshot.of(MAIN,
+                    Map.of(MAIN, execution.id("second"), annotatedRef, execution.id("annotated")),
+                    source.snapshot().commits()), context.server().snapshot(context.remote()),
+                    "update main and delete lightweight tag");
+
+            source.pushRefs("origin", ":" + annotatedRef);
+            execution.assertTerminal(context.server().snapshot(context.remote()));
+            Map<String, String> advertised = source.advertisedRefs("origin");
+            require(!advertised.containsKey(TAG) && !advertised.containsKey(annotatedRef)
+                    && !advertised.containsKey(annotatedRef + "^{}"), "deleted tag is still advertised");
         }
     }
 

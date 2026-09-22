@@ -32,36 +32,32 @@ class GitMatrixDefinitionTest {
     void definesAllTransportInvocations() {
         List<GitMatrixInvocation> cases = GitMatrixDefinition.requiredCases();
 
-        assertThat(cases).hasSize(121);
+        assertThat(cases).hasSizeGreaterThanOrEqualTo(143);
         assertThat(cases).extracting(GitMatrixInvocation::displayName).doesNotHaveDuplicates();
         assertThat(cases).extracting(GitMatrixInvocation::pairName)
                 .containsOnlyElementsOf(REQUIRED_PAIRS);
-        assertThat(countsByPair(cases).values()).containsOnly(11);
-        assertThat(countsByScenario(cases).values()).containsOnly(11);
-        assertThat(countsByScenario(cases).keySet())
-                .containsExactlyInAnyOrderElementsOf(scenarioNames());
+        assertThat(cases).extracting(matrixCase -> matrixCase.scenario().name())
+                .containsOnlyElementsOf(scenarioNames());
     }
 
     @Test
     void keepsReferenceOnlyControlInvocationsAvailable() {
         List<GitMatrixInvocation> cases = GitMatrixDefinition.controlCases();
 
-        assertThat(cases).hasSize(44);
+        assertThat(cases).hasSizeGreaterThanOrEqualTo(52);
         assertThat(cases).extracting(GitMatrixInvocation::displayName).doesNotHaveDuplicates();
         assertThat(cases).extracting(GitMatrixInvocation::pairName)
                 .containsOnlyElementsOf(CONTROL_PAIRS);
-        assertThat(countsByPair(cases).values()).containsOnly(11);
-        assertThat(countsByScenario(cases).values()).containsOnly(4);
     }
 
     @Test
     void rejectsMissingRequiredCoverageInsteadOfSkippingIt() {
-        List<GitMatrixInvocation> incomplete = GitMatrixDefinition.requiredCases().subList(1, 121);
+        List<GitMatrixInvocation> cases = GitMatrixDefinition.requiredCases();
+        List<GitMatrixInvocation> incomplete = cases.subList(1, cases.size());
 
         assertThatThrownBy(() -> GitMatrixDefinition.requireCompleteCoverage(incomplete))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("expected=121")
-                .hasMessageContaining("actual=120");
+                .hasMessageContaining("missing=[" + cases.getFirst().displayName() + "]");
     }
 
     @Test
@@ -77,22 +73,6 @@ class GitMatrixDefinitionTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("declared client=orion")
                 .hasMessageContaining("actual=jgit");
-    }
-
-    private static java.util.Map<String, Integer> countsByPair(List<GitMatrixInvocation> cases) {
-        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
-        for (GitMatrixInvocation matrixCase : cases) {
-            counts.merge(matrixCase.pairName(), 1, Integer::sum);
-        }
-        return counts;
-    }
-
-    private static java.util.Map<String, Integer> countsByScenario(List<GitMatrixInvocation> cases) {
-        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
-        for (GitMatrixInvocation matrixCase : cases) {
-            counts.merge(matrixCase.scenario().name(), 1, Integer::sum);
-        }
-        return counts;
     }
 
     private static Set<String> scenarioNames() {

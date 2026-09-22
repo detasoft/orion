@@ -186,11 +186,12 @@ final class OrionGitWorkTree implements GitWorkTree {
         Set<ObjectId> wants = new LinkedHashSet<>();
         for (String refSpec : refSpecs) {
             RefSpec parsed = RefSpec.parse(refSpec);
-            String newId = resolve(parsed.source());
+            boolean delete = parsed.source().isEmpty();
+            String newId = delete ? NULL_ID : resolve(parsed.source());
             String oldId = advertisement.findRef(parsed.destination())
                     .map(GitRemoteAdvertisement.Ref::objectId)
                     .orElse(null);
-            if (!isFastForward(parsed.destination(), oldId, newId)) {
+            if (!delete && !isFastForward(parsed.destination(), oldId, newId)) {
                 return GitOperationResult.nonFastForward(
                         "Orion push rejected a non-fast-forward update for " + parsed.destination());
             }
@@ -198,13 +199,18 @@ final class OrionGitWorkTree implements GitWorkTree {
                     oldId == null ? NULL_ID : oldId,
                     newId,
                     parsed.destination()));
-            wants.add(new ObjectId(newId));
+            if (!delete) {
+                wants.add(new ObjectId(newId));
+            }
         }
-        FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
-                OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
         GitReceivePackRequest request = new GitReceivePackRequest(
                 commands,
                 output -> {
+                    if (wants.isEmpty()) {
+                        return;
+                    }
+                    FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
+                            OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
                     FetchPack pack = FetchPack.prepare(repository.storage(), plan);
                     try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
                         pack.writeTo(writer);
@@ -404,9 +410,9 @@ final class OrionGitWorkTree implements GitWorkTree {
                         "Orion adapter does not support forced refspecs: " + value);
             }
             int separator = value.indexOf(':');
-            if (separator <= 0 || separator != value.lastIndexOf(':') || separator == value.length() - 1) {
+            if (separator < 0 || separator != value.lastIndexOf(':') || separator == value.length() - 1) {
                 throw new UnsupportedOperationException(
-                        "Orion adapter requires an explicit source:destination refspec: " + value);
+                        "Orion adapter requires a source:destination or :destination refspec: " + value);
             }
             return new RefSpec(value.substring(0, separator), value.substring(separator + 1));
         }

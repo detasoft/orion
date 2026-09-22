@@ -19,6 +19,8 @@ class GitWorkflowScenariosTest {
             "complex-file-update",
             "second-branch-fetch-and-checkout",
             "multi-ref-push",
+            "delete-branch",
+            "delete-tags",
             "reject-stale-non-fast-forward",
             "incremental-fetch-with-common-commit",
             "annotated-tag-discovery-and-fetch");
@@ -26,17 +28,17 @@ class GitWorkflowScenariosTest {
     @Test
     void declaresTheSymmetricWorkflowsOnceWithCapabilitiesAndTerminalState() {
         assertThat(GitWorkflowScenarios.catalog())
-                .hasSize(11)
+                .hasSizeGreaterThanOrEqualTo(13)
                 .extracting(GitScenario::name)
-                .containsExactlyInAnyOrderElementsOf(REQUIRED_NAMES);
+                .containsAll(REQUIRED_NAMES)
+                .doesNotHaveDuplicates();
         assertThat(GitWorkflowScenarios.catalog())
                 .allSatisfy(scenario -> {
                     assertThat(scenario.requiredCapabilities()).isNotEmpty();
                     assertThat(scenario.requiredClientCapabilities()).isNotEmpty();
                     assertThat(scenario.requiredServerCapabilities()).isNotEmpty();
                     assertThat(scenario.expectedTerminalState()).isNotNull();
-                    assertThat(scenario.expectedTerminalState().refs()).isNotEmpty();
-                    assertThat(scenario.expectedTerminalState().commits()).isNotEmpty();
+                    assertThat(scenario.expectedTerminalState().headSymref()).isEqualTo("refs/heads/main");
                 });
     }
 

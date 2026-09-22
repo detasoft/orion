@@ -2,6 +2,8 @@ package pro.deta.orion.git.workflow.orion;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.workflow.GitClients;
@@ -193,6 +195,14 @@ class OrionGitClientTest {
                 GitInteroperabilityHarness.run(scenario, OrionGitEngines.client(), GitServers.jgit());
             }
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"delete-branch", "delete-tags"})
+    void runsRefDeletionCatalogScenariosThroughOrion(String name) throws Exception {
+        GitScenario scenario = GitWorkflowScenarios.catalog().stream()
+                .filter(candidate -> candidate.name().equals(name)).findFirst().orElseThrow();
+        GitInteroperabilityHarness.run(scenario, OrionGitEngines.client(), GitServers.jgit());
     }
 
     @Test

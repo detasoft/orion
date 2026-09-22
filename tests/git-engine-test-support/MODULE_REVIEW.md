@@ -8,20 +8,21 @@ searches find no caller outside the class itself. The 40-line
 [BaseOrionTest](src/main/java/pro/deta/orion/git/BaseOrionTest.java) has no subclass or other consumer.
 Neither is registered through reflection or resources; neither contributes a runnable test on its own.
 
-**Required contract.** Live behavioral and interoperability coverage remains required. The current
+**Required contract.** Preserve useful scenarios by migrating them to the current
 [GitWorkflowScenarios](src/main/java/pro/deta/orion/git/workflow/GitWorkflowScenarios.java), harness,
 [GitInteroperabilityMatrixRunner](src/main/java/pro/deta/orion/git/workflow/GitInteroperabilityMatrixRunner.java),
-Orion adapters and parser/transport tests provide the exercised paths. No requirement or current caller
-supports the abandoned transcript helper API.
+Orion adapters and parser/transport tests. Assertions must check operation results, refs, history and file
+content rather than reproducing JGit's exact progress messages, capability ordering and compressed pack bytes.
 
-**Minimal repair and tests.** Delete `Scenarios.java` and `BaseOrionTest.java`. No running test needs
-migration to remove these unused helpers. Keep matrix test classes: several have no direct references or
-locally declared test methods because JUnit executes inherited tests from the matrix runner.
+**Minimal repair and tests.** Retain the old helpers until the remaining scenarios are mapped to active
+coverage. Review force push, atomic push and shallow fetch for matrix migration, and malformed requests
+for focused wire coverage. Add missing behavior checks through the existing runners, then remove the unused
+helpers. Keep matrix test classes: several have no direct references or locally declared test methods because
+JUnit executes inherited tests from the matrix runner.
 
-**Alternatives and consequences.** Reintroducing calls to the old transcripts is not needed for removing
-dead support code. Deletion removes 1123 lines without reducing currently executed coverage. It does not
-claim that every historical transcript scenario has equivalent current coverage; future coverage work
-should exercise the live protocol API.
+**Alternatives and consequences.** Directly reconnecting the old runner would enforce incidental byte
+representations and retain a second test infrastructure. Deleting it immediately would leave useful historical
+scenarios unaccounted for. Migration must establish which cases are already covered and which need new tests.
 
 **Confidence and priority.** High for repository references and JUnit reachability; external test-library
 consumers were not established. Medium maintenance importance and high repair ease.
