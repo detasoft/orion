@@ -390,10 +390,14 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap proxy binding configuration conflicts");
 
-        assertThat(provider.provisionalRepositoryName("configuration")).isEqualTo(repositoryName);
-        assertThatThrownBy(() -> provider.provisionalRepositoryName("material"))
-                .isInstanceOf(IllegalStateException.class);
+        BootstrapSourceConfig material = remoteHttpSource(
+                "git+https://example.test/material.git", "material.p12", "env:MATERIAL_TOKEN");
+        assertThatThrownBy(() -> provider.prepareProvisional("configuration", material))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source binding conflicts");
         assertThat(provider.prepareProvisional("configuration", configuration)).isEqualTo(repositoryName);
+        assertThat(provider.prepareProvisional("material", material))
+                .isEqualTo(BootstrapGitLocation.parse(material).proxyName());
     }
 
     @Test
@@ -533,8 +537,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     void removingAnAdoptedBindingMakesItsCacheUnavailable() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, new AtomicInteger());
-        provider.prepareProvisional("configuration", remoteSource("orion.xml"));
-        String repositoryName = provider.provisionalRepositoryName("configuration");
+        String repositoryName = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
 
         activateAdopted(provider);
         OrionDocument empty = OrionDocument.withAccessControl(new AccessControl());
@@ -603,8 +606,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .hasMessage("Bootstrap source ref is unavailable: configuration");
 
         assertUnavailableCache(provider, BootstrapGitLocation.parse(source).proxyName());
-        assertThatThrownBy(() -> provider.provisionalRepositoryName("configuration"))
-                .isInstanceOf(IllegalStateException.class);
+        BootstrapSourceConfig replacement = remoteSource("orion.xml");
+        replacement.setLocation("git+file:///replacement.git");
+        assertThatThrownBy(() -> provider.resolveProvisional("configuration", replacement, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source ref is unavailable: configuration");
         assertThat(provider.resolveProvisional("configuration", source, true).revision()).isEmpty();
     }
 
@@ -622,8 +628,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .hasMessage("Bootstrap source path is unavailable: configuration");
 
         assertUnavailableCache(provider, name);
-        assertThatThrownBy(() -> provider.provisionalRepositoryName("configuration"))
-                .isInstanceOf(IllegalStateException.class);
+        BootstrapSourceConfig replacement = remoteSource("orion.xml");
+        replacement.setLocation("git+file:///replacement.git");
+        assertThatThrownBy(() -> provider.resolveProvisional("configuration", replacement, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source ref is unavailable: configuration");
         repository.saveFiles("main", Map.of("orion.xml", new byte[]{2}), "repair", GitCommitAuthor.EMPTY);
         assertThat(provider.resolveProvisional("configuration", source, false).revision()).isPresent();
     }
@@ -643,13 +652,14 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source path is unavailable: material");
 
-        assertThatThrownBy(() -> provider.provisionalRepositoryName("material"))
-                .isInstanceOf(IllegalStateException.class);
+        BootstrapSourceConfig material = remoteSource("material.p12");
+        material.setLocation("git+file:///material.git");
+        assertThat(provider.resolveProvisional("material", material, true).repositoryName())
+                .hasValue(BootstrapGitLocation.parse(material).proxyName());
         assertThatThrownBy(() -> provider.resolveProvisional(
                 "configuration", remoteSource("missing.xml"), false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source path is unavailable: configuration");
-        assertThat(provider.provisionalRepositoryName("configuration")).isEqualTo(name);
         assertThat(retained.loadFiles("main", List.of("orion.xml")).version()).isEqualTo(resolved.revision());
         assertThat(provider.resolveProvisional("configuration", configuration, false)).isEqualTo(resolved);
     }

@@ -50,8 +50,6 @@ class BootstrapGitLocationTest {
         assertThat(location.refName()).isEqualTo("refs/heads/configuration");
         assertThat(location.credentialReference()).isEqualTo("env:ORION_GIT_CREDENTIAL");
         assertThat(location.credentialKind()).isEqualTo(GitCredentialKind.TOKEN);
-        assertThat(location.safeDescription()).isEqualTo(
-                "git+https://example.test/team/orion.git");
     }
 
     @Test

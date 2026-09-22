@@ -188,14 +188,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
     }
 
-    public String provisionalRepositoryName(String sourceId) {
-        String repositoryName = provisionalSources.get(requireSourceId(sourceId));
-        if (repositoryName == null) {
-            throw new IllegalStateException("Bootstrap source has not been resolved: " + sourceId);
-        }
-        return repositoryName;
-    }
-
     public SyncObservation syncObservation(GitProxyBinding binding) {
         Objects.requireNonNull(binding, "proxy binding");
         BootstrapGitRuntimeProxy proxy = activeBindings.get(BootstrapGitLocation.persistent(binding).proxyName());

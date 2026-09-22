@@ -24,8 +24,7 @@ record BootstrapGitLocation(
         String credentialReference,
         String credentialUsername,
         Path knownHosts,
-        String proxyName,
-        String safeDescription) {
+        String proxyName) {
     static final String CACHE_PREFIX = "bootstrap/proxy-";
     private static final String PREFIX = "git+";
     private static final Set<String> REMOTE_SCHEMES = Set.of(
@@ -37,7 +36,6 @@ record BootstrapGitLocation(
         Objects.requireNonNull(refName, "refName");
         Objects.requireNonNull(credentialKind, "credentialKind");
         Objects.requireNonNull(proxyName, "proxyName");
-        Objects.requireNonNull(safeDescription, "safeDescription");
     }
 
     boolean isBindingCompatibleWith(BootstrapGitLocation other) {
@@ -97,7 +95,6 @@ record BootstrapGitLocation(
                 config.selectedRef());
         String refName = refName(selectedRef);
         URI remote = transportUri(source, scheme.substring(PREFIX.length()));
-        String safe = safeSource(source);
         Path knownHosts = optionalFileReference(auth.get("knownHosts"), "Remote Git known-hosts file");
         return new BootstrapGitLocation(
                 remote,
@@ -106,15 +103,14 @@ record BootstrapGitLocation(
                 credential,
                 credentialUsername,
                 knownHosts,
-                cacheName(remote, refName),
-                safe);
+                cacheName(remote, refName));
     }
 
     static BootstrapGitLocation persistent(GitProxyBinding binding) {
         return new BootstrapGitLocation(binding.upstream(), binding.ref(), binding.credentialKind(),
                 binding.secret().orElse(null), binding.username().orElse(null),
                 binding.knownHosts().map(Path::of).orElse(null),
-                cacheName(binding.upstream(), binding.ref()), binding.upstream().toASCIIString());
+                cacheName(binding.upstream(), binding.ref()));
     }
 
     private static String cacheName(URI upstream, String ref) {
@@ -177,15 +173,6 @@ record BootstrapGitLocation(
     }
 
     private static URI transportUri(URI source, String scheme) {
-        return withoutQueryAndFragment(source, scheme);
-    }
-
-    private static String safeSource(URI source) {
-        return withoutQueryAndFragment(source, source.getScheme().toLowerCase(Locale.ROOT))
-                .toASCIIString();
-    }
-
-    private static URI withoutQueryAndFragment(URI source, String scheme) {
         String value = source.toASCIIString();
         int end = value.length();
         int query = value.indexOf('?');
@@ -220,19 +207,6 @@ record BootstrapGitLocation(
         } catch (RuntimeException error) {
             throw new IllegalArgumentException("Invalid " + name.toLowerCase(Locale.ROOT));
         }
-    }
-
-    private static String repositoryPath(String value, String name) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be empty");
-        }
-        Path path = Path.of(value).normalize();
-        if (path.isAbsolute()
-                || path.startsWith("..")
-                || path.toString().equals(".")) {
-            throw new IllegalArgumentException(name + " must stay inside the repository");
-        }
-        return path.toString().replace('\\', '/');
     }
 
     private static String refName(String selectedRef) {

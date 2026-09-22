@@ -3,6 +3,7 @@ package pro.deta.orion.git.proxy;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -39,7 +40,12 @@ class BootstrapProxyAdoptionTest {
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
             var provider = provider("external-token");
             String name = provider.prepareProvisional("material", source("HTTPS://GIT.EXAMPLE:443/repo"));
-            provider.prepareProvisional("configuration", source("https://git.example/repo"));
+            String configurationName = provider.prepareProvisional(
+                    "configuration", source("https://git.example/repo"));
+            assertThat(configurationName).isEqualTo(name);
+            NativeGitRepository materialRepository = provider.openForRead(name).valueOrFailure("material");
+            NativeGitRepository configurationRepository = provider.openForRead(configurationName)
+                    .valueOrFailure("configuration");
 
             OrionDocument adopted = provider.adoptProvisional(current.get(), secrets);
 
@@ -56,8 +62,8 @@ class BootstrapProxyAdoptionTest {
                 Arrays.fill(value, '\0');
             }
             assertThat(provider.adoptProvisional(adopted, secrets)).isSameAs(adopted);
-            assertThat(provider.provisionalRepositoryName("configuration")).isEqualTo(name);
-            assertThat(provider.provisionalRepositoryName("material")).isEqualTo(name);
+            assertThat(configurationRepository.refs()).isEmpty();
+            assertThat(materialRepository.refs()).isEmpty();
             assertThat(provider.repositoryNames()).isEmpty();
             assertThat(provider.isPublicRepositoryName(name)).isFalse();
         }
