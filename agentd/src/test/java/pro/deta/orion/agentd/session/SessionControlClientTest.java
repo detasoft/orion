@@ -23,6 +23,8 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +60,64 @@ class SessionControlClientTest {
             assertThat(result).isInstanceOf(ControlResult.Status.class);
             assertThat(((ControlResult.Status) result).status().hostPid()).isEqualTo(4242);
             await(peer);
+        }
+    }
+
+    @Test
+    void keepsOneConnectionWhileAnEarlierEffectIsDelayedAndClosesItOnDetach() throws Exception {
+        try (ServerSocketChannel server = listen("ordered.sock")) {
+            CountDownLatch releaseFirstEffect = new CountDownLatch(1);
+            Future<Void> peer = executor.submit(() -> {
+                try (SocketChannel channel = server.accept()) {
+                    byte[] first = readFrame(channel);
+                    assertThat(sequence(first)).isEqualTo(1);
+                    writeFully(channel, NativeControlCodec.frame(0x8000, 1, new byte[0]));
+                    assertThat(releaseFirstEffect.await(2, TimeUnit.SECONDS)).isTrue();
+                    byte[] second = readFrame(channel);
+                    assertThat(sequence(second)).isEqualTo(2);
+                    writeFully(channel, NativeControlCodec.frame(0x8000, 2, new byte[0]));
+                    assertThat(channel.read(ByteBuffer.allocate(1))).isEqualTo(-1);
+                }
+                return null;
+            });
+            SessionControlClient.Connection connection = new SessionControlClient(Duration.ofSeconds(2))
+                    .open(endpoint("ordered.sock"));
+            try (connection) {
+                assertThat(connection.send(serverResize(1, 100, 30))).isEqualTo(new ControlResult.Received(1));
+                Future<ControlResult> second = executor.submit(() -> connection.send(serverResize(2, 120, 40)));
+                releaseFirstEffect.countDown();
+                assertThat(second.get(3, TimeUnit.SECONDS)).isEqualTo(new ControlResult.Received(2));
+            } finally {
+                releaseFirstEffect.countDown();
+            }
+            await(peer);
+            assertFailure(connection.send(serverResize(3, 80, 24)),
+                    ControlResult.FailureKind.CONNECTION, OptionalLong.of(3));
+            server.configureBlocking(false);
+            assertThat(server.accept()).isNull();
+        }
+    }
+
+    @Test
+    void timesOutAPersistentConnectionWithoutReconnectingOrRetrying() throws Exception {
+        try (ServerSocketChannel server = listen("persistent-timeout.sock")) {
+            Future<Void> peer = executor.submit(() -> {
+                try (SocketChannel channel = server.accept()) {
+                    assertThat(sequence(readFrame(channel))).isEqualTo(1);
+                    assertThat(channel.read(ByteBuffer.allocate(1))).isEqualTo(-1);
+                }
+                return null;
+            });
+            try (SessionControlClient.Connection connection = new SessionControlClient(Duration.ofMillis(200))
+                    .open(endpoint("persistent-timeout.sock"))) {
+                assertFailure(connection.send(serverResize(1, 100, 30)),
+                        ControlResult.FailureKind.AMBIGUOUS_DELIVERY, OptionalLong.of(1));
+                assertFailure(connection.send(serverResize(2, 120, 40)),
+                        ControlResult.FailureKind.CONNECTION, OptionalLong.of(2));
+            }
+            await(peer);
+            server.configureBlocking(false);
+            assertThat(server.accept()).isNull();
         }
     }
 

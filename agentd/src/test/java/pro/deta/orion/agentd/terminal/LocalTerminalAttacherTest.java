@@ -14,6 +14,9 @@ import pro.deta.orion.agentd.session.ControlEndpoint;
 import pro.deta.orion.agentd.session.ControlResult;
 import pro.deta.orion.agentd.session.HostObservation;
 import pro.deta.orion.agentd.session.SessionManifest;
+import pro.deta.orion.agentd.session.SessionManifestReader;
+import pro.deta.orion.agentd.session.HostProbe;
+import pro.deta.orion.agentd.session.SessionControlClient;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -26,6 +29,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
@@ -37,13 +42,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalTerminalAttacherTest {
     @TempDir
     Path sessionDirectory;
+    private final AtomicInteger closedConnections = new AtomicInteger();
 
     @Test
     void replaysAnExitedSessionWithoutRequiringALiveControlEndpoint() throws Exception {
         writeJournal(output(1, "retained"), exit(2, 7));
         RecordingTerminal terminal = new RecordingTerminal(new byte[0], new TerminalSize(80, 24));
         AtomicBoolean probed = new AtomicBoolean();
-        LocalTerminalAttacher attacher = new LocalTerminalAttacher(
+        LocalTerminalAttacher attacher = createAttacher(
                 ignored -> manifest(),
                 (directory, manifest) -> {
                     probed.set(true);
@@ -84,6 +90,7 @@ class LocalTerminalAttacherTest {
         assertThat(result).isZero();
         assertThat(terminal.output.toString()).isEqualTo("ready");
         assertThat(terminal.closed).isTrue();
+        assertThat(closedConnections).hasValue(1);
         assertThat(commands).isNotEmpty().allSatisfy(command -> {
             assertThat(command).isNotInstanceOf(ControlCommand.Terminate.class);
             if (command instanceof ControlCommand.Input value) {
@@ -107,6 +114,29 @@ class LocalTerminalAttacherTest {
     }
 
     @Test
+    void drainsALargePasteInOrderBeforeClosingTheConnection() throws Exception {
+        writeJournal(output(1, "ready"));
+        byte[] pasted = ("a".repeat(4096) + "b".repeat(4096) + "tail").getBytes();
+        RecordingTerminal terminal = new RecordingTerminal(pasted, new TerminalSize(80, 24));
+        List<byte[]> chunks = new ArrayList<>();
+        LocalTerminalAttacher attacher = attacher(terminal, (endpoint, command) -> {
+            assertThat(closedConnections).hasValue(0);
+            chunks.add(((ControlCommand.Input) command).bytes().toByteArray());
+            return new ControlResult.Received(command.operationSequence().orElseThrow());
+        });
+
+        assertThat(attacher.attach(sessionDirectory, new PrintStream(new ByteArrayOutputStream()))).isZero();
+
+        assertThat(chunks).hasSize(3);
+        ByteArrayOutputStream delivered = new ByteArrayOutputStream();
+        for (byte[] chunk : chunks) {
+            delivered.write(chunk);
+        }
+        assertThat(delivered.toByteArray()).containsExactly(pasted);
+        assertThat(closedConnections).hasValue(1);
+    }
+
+    @Test
     void reportsAmbiguousInputOnceAndRestoresTheTerminal() throws Exception {
         writeJournal(output(1, "ready"));
         RecordingTerminal terminal = new RecordingTerminal(new byte[]{'x'}, new TerminalSize(80, 24));
@@ -122,6 +152,7 @@ class LocalTerminalAttacherTest {
 
         assertThat(result).isEqualTo(1);
         assertThat(commands).hasSize(1);
+        assertThat(closedConnections).hasValue(1);
         assertThat(errors.toString()).contains("ambiguous", "lost response");
         assertThat(terminal.closed).isTrue();
     }
@@ -130,7 +161,7 @@ class LocalTerminalAttacherTest {
     void boundsManifestAndControlDiagnosticsWithoutEchoingInput() throws Exception {
         String oversized = "failure-🚀".repeat(200);
         ByteArrayOutputStream errors = new ByteArrayOutputStream();
-        LocalTerminalAttacher manifestFailure = new LocalTerminalAttacher(
+        LocalTerminalAttacher manifestFailure = createAttacher(
                 ignored -> {
                     throw new IOException(oversized);
                 },
@@ -172,7 +203,7 @@ class LocalTerminalAttacherTest {
         writeJournal(records.toByteArray());
         RecordingTerminal terminal = new RecordingTerminal(new byte[0], new TerminalSize(80, 24));
         AtomicBoolean probed = new AtomicBoolean();
-        LocalTerminalAttacher attacher = new LocalTerminalAttacher(
+        LocalTerminalAttacher attacher = createAttacher(
                 ignored -> manifest(),
                 (directory, manifest) -> {
                     probed.set(true);
@@ -196,7 +227,7 @@ class LocalTerminalAttacherTest {
         Files.write(sessionDirectory.resolve("00000001.cbor"), new byte[]{(byte) 0xff});
         AtomicBoolean acquired = new AtomicBoolean();
         ByteArrayOutputStream errors = new ByteArrayOutputStream();
-        LocalTerminalAttacher corrupt = new LocalTerminalAttacher(
+        LocalTerminalAttacher corrupt = createAttacher(
                 ignored -> manifest(),
                 (directory, manifest) -> HostObservation.live(ChildState.LIVE),
                 () -> {
@@ -210,7 +241,7 @@ class LocalTerminalAttacherTest {
         assertThat(acquired).isFalse();
 
         writeJournal(output(1, "ready"));
-        LocalTerminalAttacher unreachable = new LocalTerminalAttacher(
+        LocalTerminalAttacher unreachable = createAttacher(
                 ignored -> manifest(),
                 (directory, manifest) -> HostObservation.unreachable(),
                 () -> {
@@ -226,13 +257,32 @@ class LocalTerminalAttacherTest {
 
     private LocalTerminalAttacher attacher(
             RecordingTerminal terminal,
-            LocalTerminalAttacher.ControlSender controls
+            BiFunction<ControlEndpoint, ControlCommand, ControlResult> controls
     ) {
-        return new LocalTerminalAttacher(
+        return createAttacher(
                 ignored -> manifest(),
                 (directory, manifest) -> HostObservation.live(ChildState.LIVE),
                 () -> terminal,
                 controls);
+    }
+
+    private LocalTerminalAttacher createAttacher(
+            SessionManifestReader manifests,
+            HostProbe hosts,
+            LocalTerminalAttacher.TerminalFactory terminals,
+            BiFunction<ControlEndpoint, ControlCommand, ControlResult> controls
+    ) {
+        return new LocalTerminalAttacher(manifests, hosts, terminals, endpoint -> new SessionControlClient.Connection() {
+            @Override
+            public ControlResult send(ControlCommand command) {
+                return controls.apply(endpoint, command);
+            }
+
+            @Override
+            public void close() {
+                closedConnections.incrementAndGet();
+            }
+        });
     }
 
     private SessionManifest manifest() {

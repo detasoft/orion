@@ -28,19 +28,20 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 final class LocalTerminalAttacher {
     private final SessionManifestReader manifests;
     private final HostProbe hosts;
     private final TerminalFactory terminals;
-    private final ControlSender controls;
+    private final Function<ControlEndpoint, SessionControlClient.Connection> controls;
     private final TerminalJournalFollower journal;
 
     LocalTerminalAttacher(
             SessionManifestReader manifests,
             HostProbe hosts,
             TerminalFactory terminals,
-            ControlSender controls
+            Function<ControlEndpoint, SessionControlClient.Connection> controls
     ) {
         this.manifests = manifests;
         this.hosts = hosts;
@@ -55,7 +56,7 @@ final class LocalTerminalAttacher {
                 new JsonSessionManifestReader(),
                 new ControlHostProbe(client),
                 PosixTerminal::acquire,
-                client::send);
+                client::open);
     }
 
     int attach(Path sessionDirectory, PrintStream errors) {
@@ -284,7 +285,7 @@ final class LocalTerminalAttacher {
     private static final class ManualLane {
         private static final int CAPACITY = 64;
         private final ControlEndpoint endpoint;
-        private final ControlSender controls;
+        private final Function<ControlEndpoint, SessionControlClient.Connection> controls;
         private final AtomicBoolean stopped;
         private final AtomicReference<ControlResult> failure;
         private final ArrayBlockingQueue<ManualAction> actions = new ArrayBlockingQueue<>(CAPACITY);
@@ -295,7 +296,7 @@ final class LocalTerminalAttacher {
 
         private ManualLane(
                 ControlEndpoint endpoint,
-                ControlSender controls,
+                Function<ControlEndpoint, SessionControlClient.Connection> controls,
                 AtomicBoolean stopped,
                 AtomicReference<ControlResult> failure
         ) {
@@ -326,7 +327,7 @@ final class LocalTerminalAttacher {
         }
 
         private void run() {
-            try {
+            try (SessionControlClient.Connection connection = controls.apply(endpoint)) {
                 while (!stopped.get() || !actions.isEmpty()) {
                     ManualAction action = actions.poll(50, TimeUnit.MILLISECONDS);
                     if (action == null) {
@@ -336,7 +337,7 @@ final class LocalTerminalAttacher {
                     if (command == null) {
                         continue;
                     }
-                    ControlResult result = controls.send(endpoint, command);
+                    ControlResult result = connection.send(command);
                     if (!(result instanceof ControlResult.Received received)
                             || received.operationSequence() != command.operationSequence().orElseThrow()) {
                         failure.compareAndSet(null, result);
@@ -346,7 +347,7 @@ final class LocalTerminalAttacher {
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-            } catch (RuntimeException exception) {
+            } catch (IOException | RuntimeException exception) {
                 failure.compareAndSet(null, new ControlResult.Failed(
                         java.util.OptionalLong.empty(),
                         ControlResult.FailureKind.CONNECTION,
@@ -394,10 +395,5 @@ final class LocalTerminalAttacher {
     @FunctionalInterface
     interface TerminalFactory {
         TerminalDevice acquire() throws IOException;
-    }
-
-    @FunctionalInterface
-    interface ControlSender {
-        ControlResult send(ControlEndpoint endpoint, ControlCommand command);
     }
 }

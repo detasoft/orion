@@ -1,43 +1,5 @@
 # Module Review: `agentd`
 
-### 1. The manual terminal lane orders receipts but not input effects
-
-**Problem.** A paste spanning multiple 4096-byte reads becomes separate native connections. The lane advances
-after `RECEIVED`, but the host sends that admission receipt before acquiring its effect mutex. If the first
-handler is descheduled after its receipt, a later handler can write the next input chunk first. Input and resize
-effects can likewise be reordered despite sequential submission by one terminal attachment.
-
-**Sources.** [`LocalTerminalAttacher.readInput`](src/main/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacher.java#L195)
-chunks input; its [`ManualLane.run`](src/main/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacher.java#L328)
-waits only for admission. [`UnixDomainControlTransport.exchange`](src/main/java/pro/deta/orion/agentd/session/UnixDomainControlTransport.java#L19)
-opens a socket per request. Native [`handle_operation`](../session-host/src/platform/unix.rs#L1290)
-sends the receipt before the ordinary-effect lock, whereas
-[`serve_connection`](../session-host/src/platform/unix.rs#L1081) completes each operation before reading another
-frame on the same connection. [`LocalTerminalAttacherTest`](src/test/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacherTest.java#L66)
-checks submission order against a fake sender, not competing native effect execution.
-
-**Documented behavior.** The [terminal interaction contract](../docs/plans/tasks/04_agentd/07_local-terminal/TASK.md#L23)
-requires one bounded manual lane. The [native protocol](../session-host/protocol/README.md#L254) explicitly
-does not promise FIFO across connections; `RECEIVED` is not effect completion.
-
-**Contract.** Forward one terminal input stream in byte order, preserve input/resize lane order, and never retry
-ambiguous manual input. The host's weaker cross-connection contract need not change.
-
-**Minimal repair.** Let the existing manual lane own one persistent native connection, using the host's
-sequential processing on that connection. Retain operation deadlines and bounded pending input; close the
-connection on detach or failure. Cover multiple input chunks and intervening resize against actual native
-processing, including a delayed earlier effect.
-
-**Alternatives and consequences.** Waiting for journal results adds cross-channel coordination and manual
-correlation requirements. Global native FIFO changes an expressly weaker contract for unrelated clients.
-A lane-owned connection needs lifecycle handling but no new wire fields, persistent state, or replay policy.
-
-**Confidence.** High: the scheduling interleaving is supported by both implementations. No runtime reproduction
-was run, so its observed frequency is unknown.
-
-**Priority signals.** Importance: high, because normal pasted input can reach the child in the wrong order.
-Repair ease: medium, requiring connection ownership and behavioral coverage across the Java/native boundary.
-
 ### 2. A stalled control write can suspend heartbeats and reconnect indefinitely
 
 **Problem.** If the peer exhausts the `/agent/control` send window without replenishing it, a heartbeat write

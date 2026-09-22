@@ -196,6 +196,88 @@ class NativeControlLivePeerTest {
         }
     }
 
+    @Test
+    void preservesInputAndResizeOrderWhenTheRealPtyStopsConsumingInput() throws Exception {
+        Path executable = extractSessionHost();
+        Path directory = Files.createDirectory(temporaryDirectory.resolve("ordered"));
+        Path log = temporaryDirectory.resolve("ordered.log");
+        Path ready = temporaryDirectory.resolve("ready");
+        Path release = temporaryDirectory.resolve("release");
+        Process host = new ProcessBuilder(executable.toString(),
+                "--session-id", "ordered", "--start-command-id", "command.start",
+                "--session-dir", directory.toString(), "--cwd", temporaryDirectory.toString(),
+                "--cols", "80", "--rows", "24", "--term", "xterm", "--", "/bin/sh", "-c",
+                "stty raw -echo; touch ready; while [ ! -f release ]; do sleep 0.01; done; cat > /dev/null")
+                .redirectError(log.toFile()).redirectOutput(log.toFile()).start();
+        ControlEndpoint endpoint = new ControlEndpoint(ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                "control.sock", directory.resolve("control.sock"));
+        SessionControlClient client = new SessionControlClient(Duration.ofSeconds(3));
+        try (java.util.concurrent.ExecutorService executor =
+                     java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            awaitStatus(client, endpoint, host, log);
+            Instant deadline = Instant.now().plus(TIMEOUT);
+            while (!Files.exists(ready) && Instant.now().isBefore(deadline)) {
+                Thread.sleep(10);
+            }
+            assertThat(ready).exists();
+            try (SessionControlClient.Connection connection = client.open(endpoint)) {
+                byte[] large = new byte[1024 * 1024];
+                Arrays.fill(large, (byte) 'a');
+                ControlCommand.Input first = new ControlCommand.Input(1, SessionCommandSource.MANUAL,
+                        Optional.empty(), UUID.randomUUID(), ProtocolBytes.copyOf(large));
+                assertReceived(connection.send(first), 1);
+                java.util.concurrent.Future<ControlResult> resize = executor.submit(() -> connection.send(
+                        new ControlCommand.Resize(2, SessionCommandSource.MANUAL, Optional.empty(), 120, 40)));
+                try {
+                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> resize.get(100, TimeUnit.MILLISECONDS))
+                            .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                } finally {
+                    Files.createFile(release);
+                }
+                assertReceived(resize.get(5, TimeUnit.SECONDS), 2);
+                for (int sequence = 3; sequence <= 4; sequence++) {
+                    byte[] chunk = new byte[4096];
+                    Arrays.fill(chunk, (byte) ('a' + sequence));
+                    assertReceived(connection.send(new ControlCommand.Input(sequence, SessionCommandSource.MANUAL,
+                            Optional.empty(), UUID.randomUUID(), ProtocolBytes.copyOf(chunk))), sequence);
+                }
+                ControlResult.Status status = (ControlResult.Status) connection.send(new ControlCommand.Status());
+                assertThat(status.status().columns()).isEqualTo(120);
+                assertThat(status.status().rows()).isEqualTo(40);
+                JournalReadPage page = awaitCommandResults(directory, List.of(1L, 2L, 3L, 4L));
+                assertThat(commandResultSequences(page.records())).containsExactly(1L, 2L, 3L, 4L);
+                List<SessionEventPayload> effects = new ArrayList<>();
+                for (SessionEventRecord record : page.records()) {
+                    SessionEventPayload payload = EVENT_CODEC.decodeKnownPayload(record).orElseThrow();
+                    if (payload instanceof SessionEventPayload.PtyInput
+                            || payload instanceof SessionEventPayload.PtyResize) {
+                        effects.add(payload);
+                    }
+                }
+                assertThat(effects).hasSize(5);
+                assertThat(effects.get(1)).isEqualTo(new SessionEventPayload.PtyInput(
+                        first.inputId().toString(), first.bytes()));
+                assertThat(effects.get(2)).isEqualTo(new SessionEventPayload.PtyResize(120, 40));
+                for (int index = 3; index <= 4; index++) {
+                    byte[] expected = new byte[4096];
+                    Arrays.fill(expected, (byte) ('a' + index));
+                    assertThat(((SessionEventPayload.PtyInput) effects.get(index)).bytes().toByteArray())
+                            .containsExactly(expected);
+                }
+            }
+        } finally {
+            if (!Files.exists(release)) {
+                Files.createFile(release);
+            }
+            client.send(endpoint, new ControlCommand.Terminate(9, SessionCommandSource.MANUAL,
+                    Optional.empty(), AgentMessage.TerminationMode.FORCE));
+            if (!host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                host.destroyForcibly();
+                host.waitFor();
+            }
+        }
+    }
+
     private Process startSessionHost(Path executable, String sessionId, Path sessionDirectory, Path log)
             throws Exception {
         return new ProcessBuilder(

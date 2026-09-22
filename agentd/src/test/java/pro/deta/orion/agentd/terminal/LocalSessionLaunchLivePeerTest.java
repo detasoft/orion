@@ -180,7 +180,7 @@ class LocalSessionLaunchLivePeerTest {
                 new JsonSessionManifestReader(),
                 new ControlHostProbe(client),
                 () -> terminal,
-                client::send);
+                client::open);
     }
 
     private Path extractSessionHost() throws Exception {

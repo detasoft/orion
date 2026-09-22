@@ -15,55 +15,98 @@ import java.util.concurrent.TimeUnit;
 public final class UnixDomainControlTransport implements ControlTransport {
     @Override
     public Exchange exchange(ControlEndpoint endpoint, byte[] request, OperationDeadline deadline) {
-        boolean requestWritten = false;
-        try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX);
-             Selector selector = Selector.open()) {
-            check(deadline);
-            channel.configureBlocking(false);
-            channel.register(selector, SelectionKey.OP_CONNECT);
-            if (!channel.connect(UnixDomainSocketAddress.of(endpoint.address()))) {
-                await(channel, selector, SelectionKey.OP_CONNECT, deadline);
+        try (Connection connection = new Connection(endpoint)) {
+            return connection.exchange(request, deadline);
+        } catch (IOException error) {
+            return new Exchange.Failed(ControlResult.FailureKind.CONNECTION, true, error.getMessage());
+        }
+    }
+
+    static final class Connection implements AutoCloseable {
+        private final ControlEndpoint endpoint;
+        private SocketChannel channel;
+        private Selector selector;
+        private boolean closed;
+
+        Connection(ControlEndpoint endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        Exchange exchange(byte[] request, OperationDeadline deadline) {
+            boolean requestWritten = false;
+            try {
                 check(deadline);
-                if (!channel.finishConnect()) {
-                    throw new IOException("Unix control connection did not finish");
+                if (closed) {
+                    throw new IOException("native control connection is closed");
+                }
+                if (channel == null) {
+                    channel = SocketChannel.open(StandardProtocolFamily.UNIX);
+                    selector = Selector.open();
+                    channel.configureBlocking(false);
+                    channel.register(selector, SelectionKey.OP_CONNECT);
+                    if (!channel.connect(UnixDomainSocketAddress.of(endpoint.address()))) {
+                        await(channel, selector, SelectionKey.OP_CONNECT, deadline);
+                        check(deadline);
+                        if (!channel.finishConnect()) {
+                            throw new IOException("Unix control connection did not finish");
+                        }
+                    }
+                }
+                check(deadline);
+                requestWritten = write(
+                        channel,
+                        ByteBuffer.wrap(request),
+                        deadline,
+                        () -> await(channel, selector, SelectionKey.OP_WRITE, deadline));
+                ByteBuffer header = ByteBuffer.allocate(NativeControlCodec.HEADER_LENGTH);
+                read(
+                        channel,
+                        header,
+                        deadline,
+                        () -> await(channel, selector, SelectionKey.OP_READ, deadline));
+                int payloadLength = ByteBuffer.wrap(header.array()).order(ByteOrder.LITTLE_ENDIAN).getInt(24);
+                if (payloadLength < 0 || payloadLength > NativeControlCodec.MAX_PAYLOAD_LENGTH) {
+                    close();
+                    return new Exchange.Failed(
+                            ControlResult.FailureKind.FRAMING, true, "response payload length is invalid");
+                }
+                ByteBuffer payload = ByteBuffer.allocate(payloadLength);
+                read(
+                        channel,
+                        payload,
+                        deadline,
+                        () -> await(channel, selector, SelectionKey.OP_READ, deadline));
+                check(deadline);
+                byte[] response = new byte[NativeControlCodec.HEADER_LENGTH + payloadLength];
+                System.arraycopy(header.array(), 0, response, 0, header.capacity());
+                System.arraycopy(payload.array(), 0, response, header.capacity(), payload.capacity());
+                return new Exchange.Response(response);
+            } catch (IOException | UnsupportedOperationException error) {
+                try {
+                    close();
+                } catch (IOException closeError) {
+                    error.addSuppressed(closeError);
+                }
+                return new Exchange.Failed(
+                        error instanceof DeadlineExceeded
+                                ? ControlResult.FailureKind.TIMEOUT : ControlResult.FailureKind.CONNECTION,
+                        requestWritten,
+                        error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            try {
+                if (channel != null) {
+                    channel.close();
+                }
+            } finally {
+                if (selector != null) {
+                    selector.close();
                 }
             }
-            check(deadline);
-
-            requestWritten = write(
-                    channel,
-                    ByteBuffer.wrap(request),
-                    deadline,
-                    () -> await(channel, selector, SelectionKey.OP_WRITE, deadline));
-            ByteBuffer header = ByteBuffer.allocate(NativeControlCodec.HEADER_LENGTH);
-            read(
-                    channel,
-                    header,
-                    deadline,
-                    () -> await(channel, selector, SelectionKey.OP_READ, deadline));
-            int payloadLength = ByteBuffer.wrap(header.array()).order(ByteOrder.LITTLE_ENDIAN).getInt(24);
-            if (payloadLength < 0 || payloadLength > NativeControlCodec.MAX_PAYLOAD_LENGTH) {
-                return new Exchange.Failed(
-                        ControlResult.FailureKind.FRAMING, true, "response payload length is invalid");
-            }
-            ByteBuffer payload = ByteBuffer.allocate(payloadLength);
-            read(
-                    channel,
-                    payload,
-                    deadline,
-                    () -> await(channel, selector, SelectionKey.OP_READ, deadline));
-            check(deadline);
-            byte[] response = new byte[NativeControlCodec.HEADER_LENGTH + payloadLength];
-            System.arraycopy(header.array(), 0, response, 0, header.capacity());
-            System.arraycopy(payload.array(), 0, response, header.capacity(), payload.capacity());
-            return new Exchange.Response(response);
-        } catch (DeadlineExceeded error) {
-            return new Exchange.Failed(ControlResult.FailureKind.TIMEOUT, requestWritten, error.getMessage());
-        } catch (IOException | UnsupportedOperationException error) {
-            return new Exchange.Failed(
-                    ControlResult.FailureKind.CONNECTION,
-                    requestWritten,
-                    error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
         }
     }
 
@@ -113,6 +156,9 @@ public final class UnixDomainControlTransport implements ControlTransport {
         SelectionKey key = channel.keyFor(selector);
         key.interestOps(interest);
         while (true) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IOException("native control operation interrupted");
+            }
             long remaining = remaining(deadline);
             long timeoutMillis = TimeUnit.NANOSECONDS.toMillis(remaining);
             if (TimeUnit.MILLISECONDS.toNanos(timeoutMillis) < remaining) {
