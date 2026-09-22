@@ -1,11 +1,15 @@
 package pro.deta.orion.agentd.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +78,27 @@ class ControlConnectionLoopTest {
         assertThat(heartbeats).hasValue(0);
         assertThat(scheduler.getQueue()).isEmpty();
         assertThat(scheduler.isShutdown()).isTrue();
+    }
+
+    @Test
+    void boundsPendingHeartbeatsAndPreservesCompletedSendResults() throws Exception {
+        HeartbeatDeadlineScheduler scheduler = new HeartbeatDeadlineScheduler();
+        try (ControlConnectionLoop loop = new ControlConnectionLoop(
+                () -> { }, () -> { }, System::nanoTime, new Random(1), scheduler)) {
+            assertThat(loop.boundHeartbeat(CompletableFuture.completedFuture(null)).toCompletableFuture())
+                    .isCompletedWithValue(null);
+            IllegalStateException failure = new IllegalStateException("write failed");
+            assertThatThrownBy(() -> loop.boundHeartbeat(CompletableFuture.failedFuture(failure))
+                    .toCompletableFuture().join()).isInstanceOf(CompletionException.class).hasCause(failure);
+            CompletableFuture<Void> sending = new CompletableFuture<>();
+            CompletableFuture<Void> bounded = loop.boundHeartbeat(sending).toCompletableFuture();
+            assertThat(bounded).isNotDone();
+            scheduler.expireHeartbeat();
+            assertThatThrownBy(bounded::join).isInstanceOf(CompletionException.class)
+                    .hasCauseInstanceOf(TimeoutException.class);
+            sending.complete(null);
+            assertThatThrownBy(bounded::join).hasCauseInstanceOf(TimeoutException.class);
+        }
     }
 
     private static void await(CheckedCondition condition) throws Exception {

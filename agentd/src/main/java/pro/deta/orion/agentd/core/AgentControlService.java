@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -82,7 +83,7 @@ public final class AgentControlService implements AgentService {
             SessionRegistry registry
     ) {
         this(transport, codec, handshake, context, agentVersion, machine, capabilities,
-                registry, DEFAULT_HANDSHAKE_TIMEOUT, System::nanoTime);
+                registry, DEFAULT_HANDSHAKE_TIMEOUT, System::nanoTime, ControlConnectionLoop.newScheduler());
     }
 
     AgentControlService(
@@ -97,7 +98,7 @@ public final class AgentControlService implements AgentService {
             Duration timeout
     ) {
         this(transport, codec, handshake, context, agentVersion, machine, capabilities,
-                registry, timeout, System::nanoTime);
+                registry, timeout, System::nanoTime, ControlConnectionLoop.newScheduler());
     }
 
     AgentControlService(
@@ -110,7 +111,8 @@ public final class AgentControlService implements AgentService {
             Map<String, String> capabilities,
             SessionRegistry registry,
             Duration timeout,
-            LongSupplier nanoTime
+            LongSupplier nanoTime,
+            ScheduledExecutorService scheduler
     ) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.codec = Objects.requireNonNull(codec, "codec");
@@ -129,7 +131,7 @@ public final class AgentControlService implements AgentService {
         this.commandDelivery = new EstablishedSessionCommandDelivery(
                 registry, new SessionControlClient(SESSION_CONTROL_TIMEOUT));
         this.controlLoop = new ControlConnectionLoop(
-                this::reconnect, this::sendHeartbeat, nanoTime, RandomGenerator.getDefault());
+                this::reconnect, this::sendHeartbeat, nanoTime, RandomGenerator.getDefault(), scheduler);
         this.registryObservation = registry.observe(this::sessionsReplaced);
     }
 
@@ -603,7 +605,7 @@ public final class AgentControlService implements AgentService {
                 context.agentLabel(), context.instanceId(), Math.max(0, epochMillis.getAsLong()));
         CompletionStage<Void> sending;
         try {
-            sending = transport.sendControlCbor(codec.encode(heartbeat));
+            sending = controlLoop.boundHeartbeat(transport.sendControlCbor(codec.encode(heartbeat)));
         } catch (Exception failure) {
             heartbeatFailed(expected);
             return;

@@ -74,7 +74,10 @@ active until a replacement successfully registers.
 
 The initial connection authenticates with the launch permit. After the server
 accepts it, AgentD keeps the returned reconnect token only in process memory and
-uses it for bounded-backoff reconnects and periodic heartbeats. A rejected
+uses it for bounded-backoff reconnects and periodic heartbeats. Each heartbeat
+write has a 30-second deadline, including time waiting in the control queue.
+If it expires, AgentD reconnects even when session traffic keeps the HTTP/2
+connection active. A rejected
 initial credential fails startup. A rejected or revoked reconnect remains
 offline and retries until AgentD is closed or replaced by a newly launched
 generation. Reconnect keeps the same instance UUID, and a new process requires a

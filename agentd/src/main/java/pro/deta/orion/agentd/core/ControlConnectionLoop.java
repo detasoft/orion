@@ -2,7 +2,10 @@ package pro.deta.orion.agentd.core;
 
 import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -32,15 +35,6 @@ final class ControlConnectionLoop implements AutoCloseable {
             Runnable reconnect,
             Runnable heartbeat,
             LongSupplier nanoTime,
-            RandomGenerator random
-    ) {
-        this(reconnect, heartbeat, nanoTime, random, newScheduler());
-    }
-
-    ControlConnectionLoop(
-            Runnable reconnect,
-            Runnable heartbeat,
-            LongSupplier nanoTime,
             RandomGenerator random,
             ScheduledExecutorService scheduler
     ) {
@@ -49,6 +43,22 @@ final class ControlConnectionLoop implements AutoCloseable {
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.random = Objects.requireNonNull(random, "random");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    }
+
+    CompletionStage<Void> boundHeartbeat(CompletionStage<Void> sending) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        ScheduledFuture<?> deadline = scheduler.schedule(() -> {
+            result.completeExceptionally(new TimeoutException("AgentD heartbeat write timed out"));
+        }, 30, TimeUnit.SECONDS);
+        sending.whenComplete((ignored, failure) -> {
+            if (failure == null) {
+                result.complete(null);
+            } else {
+                result.completeExceptionally(failure);
+            }
+            deadline.cancel(false);
+        });
+        return result;
     }
 
     synchronized void start() {
@@ -180,11 +190,13 @@ final class ControlConnectionLoop implements AutoCloseable {
         }
     }
 
-    private static ScheduledExecutorService newScheduler() {
-        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+    static ScheduledExecutorService newScheduler() {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1, runnable -> {
             Thread thread = new Thread(runnable, "agentd-control-loop");
             thread.setDaemon(true);
             return thread;
         });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
     }
 }

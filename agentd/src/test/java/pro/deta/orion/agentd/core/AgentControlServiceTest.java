@@ -1,6 +1,8 @@
 package pro.deta.orion.agentd.core;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agentd.journal.SessionJournalRelay;
@@ -362,6 +364,54 @@ class AgentControlServiceTest {
         service.close();
     }
 
+    @ParameterizedTest
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void reconnectsOnHeartbeatTimeoutAndIgnoresLateCompletion(
+            boolean disconnectedFirst, boolean lateFailure
+    ) throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 10));
+        transport.replies.add(welcome("connection-2", (byte) 10, 10));
+        transport.replies.add(welcome("connection-3", (byte) 11, 10));
+        CompletableFuture<Void> firstHeartbeat = new CompletableFuture<>();
+        CompletableFuture<Void> secondHeartbeat = new CompletableFuture<>();
+        transport.heartbeats.add(firstHeartbeat);
+        transport.heartbeats.add(secondHeartbeat);
+        HeartbeatDeadlineScheduler scheduler = new HeartbeatDeadlineScheduler();
+        try (AgentControlService service = new AgentControlService(
+                transport, CODEC, new AgentHandshake(), AgentHandshakeTest.context(), "2.4.1",
+                new MachineInfo("runner", "Linux", "aarch64"), Map.of(), new SessionRegistry(),
+                Duration.ofSeconds(1), System::nanoTime, scheduler)) {
+            service.start();
+            await(() -> count(transport.controls, AgentMessage.Heartbeat.class) == 1);
+            if (disconnectedFirst) {
+                transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+            } else {
+                scheduler.expireHeartbeat();
+            }
+            await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
+            await(() -> count(transport.controls, AgentMessage.Heartbeat.class) == 2);
+            if (disconnectedFirst) {
+                scheduler.expireHeartbeat();
+            }
+            if (lateFailure) {
+                firstHeartbeat.completeExceptionally(new IllegalStateException("late failure"));
+            } else {
+                firstHeartbeat.complete(null);
+            }
+            assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                    .isEqualTo(new ConnectionId("connection-2"));
+            assertThat(secondHeartbeat).isNotDone();
+            scheduler.expireHeartbeat();
+            await(() -> count(transport.controls, AgentMessage.Hello.class) == 3);
+            await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-3")));
+            assertThat(messages(transport.controls, AgentMessage.Hello.class).get(2)
+                    .authentication().orElseThrow().credential().toByteArray()).containsOnly(10);
+            secondHeartbeat.complete(null);
+        }
+        assertThat(scheduler.isShutdown()).isTrue();
+    }
+
     @Test
     void reconnectsWhenTheInitialStreamClosesImmediatelyAfterWelcome() throws Exception {
         FakeTransport transport = new FakeTransport();
@@ -719,7 +769,7 @@ class AgentControlServiceTest {
         return new AgentControlService(
                 transport, codec, new AgentHandshake(), context, "2.4.1",
                 new MachineInfo("runner-1", "Linux", "aarch64"), Map.of("pty", "true"),
-                registry, timeout, nanoTime);
+                registry, timeout, nanoTime, ControlConnectionLoop.newScheduler());
     }
 
     private static SessionJournalRelay relay(
@@ -832,6 +882,7 @@ class AgentControlServiceTest {
     private static final class FakeTransport implements AgentTransport {
         private final List<byte[]> controls = new CopyOnWriteArrayList<>();
         private final Queue<AgentMessage> replies = new ConcurrentLinkedQueue<>();
+        private final Queue<CompletableFuture<Void>> heartbeats = new ConcurrentLinkedQueue<>();
         private final AtomicInteger connectCount = new AtomicInteger();
         private final AtomicInteger connectFailures = new AtomicInteger();
         private final AtomicInteger disconnectsAfterReplies = new AtomicInteger();
@@ -881,6 +932,8 @@ class AgentControlServiceTest {
                     } else if (reply != null) {
                         controlReceiver.accept(decoded(reply));
                     }
+                } else if (message instanceof AgentMessage.Heartbeat && !heartbeats.isEmpty()) {
+                    return heartbeats.remove();
                 } else if (heldReport != null) {
                     return heldReport;
                 }
