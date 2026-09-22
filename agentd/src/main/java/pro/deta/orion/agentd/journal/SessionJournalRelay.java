@@ -17,6 +17,7 @@ import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionEventCodec;
+import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agentd.core.AgentService;
@@ -111,8 +112,8 @@ public final class SessionJournalRelay implements AgentService {
             }
         }
         String bounded = new String(bytes, 0, end, StandardCharsets.UTF_8);
-        startFailures.put(id, events.encodeStartFailure(
-                new EventId(1), commandId, bounded, bytes.length - end));
+        startFailures.put(id, events.encode(new EventId(1),
+                new SessionEventPayload.SessionStartFailed(commandId, bounded, bytes.length - end)));
         return true;
     }
 

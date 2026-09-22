@@ -66,8 +66,8 @@ class SessionJournalRelayTest {
             peer.opened();
             peer.sync("failed", null);
             await(() -> peer.records.size() == 1);
-            byte[] expected = EVENTS.encodeStartFailure(
-                    new EventId(1), new CommandId("start-1"), "bad workspace", 0);
+            byte[] expected = EVENTS.encode(new EventId(1), new SessionEventPayload.SessionStartFailed(
+                    new CommandId("start-1"), "bad workspace", 0));
             assertThat(peer.records).containsExactly(expected);
             try (var entries = Files.list(root)) {
                 assertThat(entries.toList()).isEmpty();
@@ -96,7 +96,7 @@ class SessionJournalRelayTest {
         try (SessionJournalRelay relay = relay(peer, registry(), connected())) {
             for (int index = 0; index < 64; index++) {
                 assertThat(relay.registerStartFailure(new SessionId("failed-" + index),
-                        new CommandId("start-" + index), "é".repeat(3000))).isTrue();
+                        new CommandId("start-" + index), "€".repeat(2000))).isTrue();
             }
             assertThat(relay.registerStartFailure(
                     new SessionId("overflow"), new CommandId("overflow"), "failure")).isFalse();
@@ -104,8 +104,8 @@ class SessionJournalRelayTest {
             await(() -> peer.opens.contains(new SessionId("failed-0")));
             peer.sync("failed-0", null);
             await(() -> !peer.records.isEmpty());
-            assertThat(peer.records).contains(EVENTS.encodeStartFailure(
-                    new EventId(1), new CommandId("start-0"), "é".repeat(2048), 1904));
+            assertThat(peer.records).contains(EVENTS.encode(new EventId(1), new SessionEventPayload.SessionStartFailed(
+                    new CommandId("start-0"), "€".repeat(1365), 1905)));
         }
     }
 

@@ -327,10 +327,20 @@ class SessionEventCodecTest {
     void encodesStartFailureUsingTheNativeJournalRecordShape() throws Exception {
         SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
 
-        byte[] encoded = codec.encodeStartFailure(new EventId(1),
-                new CommandId("00000000-0000-0000-0000-000000000001"), "xxx", 0);
+        byte[] encoded = codec.encode(new EventId(1), new SessionEventPayload.SessionStartFailed(
+                new CommandId("00000000-0000-0000-0000-000000000001"), "xxx", 0));
 
         assertThat(encoded).containsExactly(encodeSessionStartFailed(3));
+    }
+
+    @Test
+    void encodesUnsignedStartFailureOmittedCount() throws Exception {
+        SessionEventPayload.SessionStartFailed payload = new SessionEventPayload.SessionStartFailed(
+                new CommandId("start-1"), "x", -1L);
+        byte[] encoded = CODEC.encode(new EventId(1), payload);
+
+        assertThat(encoded).containsExactly(Hex.parse("8301190203836773746172742d3161781bffffffffffffffff"));
+        assertThat(CODEC.decodeKnownPayload(CODEC.decode(encoded))).contains(payload);
     }
 
     @Test
