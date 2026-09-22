@@ -2,6 +2,8 @@ package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -130,6 +132,27 @@ class GitBlockingClientsTest {
                 GitClientFailure.Kind.UNEXPECTED_END_OF_STREAM);
         assertThat(failure(result).phase()).isEqualTo(
                 GitClientFailure.Phase.NEGOTIATION);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "zzzz, MALFORMED_RESPONSE",
+            "0003, MALFORMED_RESPONSE",
+            "fff1, MALFORMED_RESPONSE",
+            "'', UNEXPECTED_END_OF_STREAM",
+            "00, UNEXPECTED_END_OF_STREAM",
+            "0008ab, UNEXPECTED_END_OF_STREAM"
+    })
+    void distinguishesMalformedAdvertisementHeadersFromEofAndClosesTransport(
+            String response, GitClientFailure.Kind expected) {
+        RecordingTransport transport = new RecordingTransport(response.getBytes(StandardCharsets.US_ASCII));
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(REMOTE, GitClientOptions.defaults());
+
+        assertThat(failure(result).kind()).isEqualTo(expected);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.ADVERTISEMENT);
         assertThat(transport.session.closed).isTrue();
     }
 

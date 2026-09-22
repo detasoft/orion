@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.v2.pkt;
 
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
-import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -16,7 +15,6 @@ import java.util.Optional;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.HEX_VALUES;
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
-import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.*;
 
 /**
  * One completely read pkt-line: Data owns its payload, while Control has no payload.
@@ -132,7 +130,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
                     return control;
                 }
             }
-            throw malformed(new GitGeneralException(RESERVED_LENGTH));
+            throw malformed("Pkt-line length 0003 is reserved");
         }
     }
 
@@ -152,7 +150,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
         for (int shift = 24; shift >= 0; shift -= 8) {
             int digit = HEX_VALUES[(header >>> shift) & 0xff];
             if (digit < 0) {
-                throw malformed(new GitGeneralException(INVALID_HEX_HEADER));
+                throw malformed("Pkt-line length contains non-hex byte");
             }
             length = (length << 4) | digit;
         }
@@ -161,7 +159,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
 
     private static GitPktLine valueOf(int length, BufferedByteInputV2 input) throws IOException {
         if (length > MAX_PKT_LINE_LENGTH) {
-            throw malformed(new GitGeneralException(LENGTH_EXCEEDS_LIMIT));
+            throw malformed("Pkt-line length exceeds Git pkt-line limit");
         }
         if (length < PKT_LINE_HEADER_SIZE) {
             return Control.valueOf(length);
@@ -169,7 +167,7 @@ public sealed interface GitPktLine permits GitPktLine.Control, GitPktLine.Data {
         return new Data(input.readBytes(length - PKT_LINE_HEADER_SIZE));
     }
 
-    private static GitPktLineFormatException malformed(GitGeneralException cause) {
-        return new GitPktLineFormatException("Invalid Git pkt-line header: " + cause.getMessage(), cause);
+    private static GitPktLineFormatException malformed(String reason) {
+        return new GitPktLineFormatException("Invalid Git pkt-line header: " + reason);
     }
 }

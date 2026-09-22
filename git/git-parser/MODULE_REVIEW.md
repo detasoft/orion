@@ -1,29 +1,5 @@
 # Module Review: `git/git-parser`
 
-## 9. An unused error record preserves a retired taxonomy
-
-**Problem and evidence.** [GitWireError](src/main/java/pro/deta/orion/git/parser/wire/error/GitWireError.java)
-is never instantiated and its `Phase` enum has no consumer. Only three `Kind` values remain live:
-`RESERVED_LENGTH`, `INVALID_HEX_HEADER`, and `LENGTH_EXCEEDS_LIMIT` in
-[GitPktLine](src/main/java/pro/deta/orion/git/parser/v2/pkt/GitPktLine.java). Each is wrapped in
-`GitGeneralException` and immediately in `GitPktLineFormatException`; no caller inspects the intermediate
-exception or the error record.
-
-**Required contract.** Preserve the format-exception type used by `GitBlockingClientWire`, the distinction
-between malformed cases in diagnostics, and truncated/clean-EOF handling. No current consumer requires
-the retired phases, unused kinds, or intermediate wrapper.
-
-**Minimal repair and tests.** Express the three header errors directly through the existing
-`GitPktLineFormatException` path and remove `GitWireError` and `GitGeneralException`. Preserve malformed,
-reserved, oversized and truncated pkt-line tests; no behavioral test class is obsolete here.
-
-**Alternatives and consequences.** Keeping a smaller enum is possible if a real typed consumer appears;
-none exists now. Exception-cause shape changes, so preserve useful message detail and the externally
-caught exception type.
-
-**Confidence and priority.** High for current consumers; low importance and medium repair ease because
-error classification and diagnostics must remain stable.
-
 ## 11. Legacy upload advertisements omit peeled annotated tags
 
 **Problem.** A ref pointing to an annotated tag is advertised only with its tag-object ID, never with

@@ -1,9 +1,12 @@
 package pro.deta.orion.git.parser.v2.proto;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -96,6 +99,22 @@ class GitProtocolReaderTest {
                     truncated.getBytes(StandardCharsets.US_ASCII)))) {
                 assertThatThrownBy(() -> GitPktLine.readNextFrom(input)).isInstanceOf(EOFException.class);
             }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "zzzz, Pkt-line length contains non-hex byte",
+            "0003, Pkt-line length 0003 is reserved",
+            "fff1, Pkt-line length exceeds Git pkt-line limit"
+    })
+    void rejectsMalformedHeadersWithSpecificDiagnostics(String header, String reason) throws Exception {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(
+                new ByteArrayInputStream(header.getBytes(StandardCharsets.US_ASCII)))) {
+            assertThatThrownBy(() -> reader(input).readGitPktLine())
+                    .isInstanceOf(GitPktLineFormatException.class)
+                    .hasMessageContaining("Invalid Git pkt-line header")
+                    .hasMessageContaining(reason);
         }
     }
 
