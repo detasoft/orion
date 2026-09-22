@@ -115,6 +115,10 @@ final class GitBlockingClientWire {
                             GitClientFailure.Phase.NEGOTIATION,
                             "Unexpected upload-pack negotiation response");
                 }
+                if (line.startsWith("ACK ") && (line.endsWith(" common")
+                        || line.endsWith(" ready") || line.endsWith(" continue"))) {
+                    continue;
+                }
             } finally {
                 payload.release();
             }

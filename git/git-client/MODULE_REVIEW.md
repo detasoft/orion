@@ -28,33 +28,3 @@ support. Skipping unfamiliar refs hides data and does not repair pushing those r
 **Confidence.** High: explicit decoder and model predicates; no runtime reproduction in this audit.
 **Priority signals.** Importance high because one unrelated legal ref blocks the remote operation;
 repair ease medium because both decoding and validation must change together.
-
-## 2. Raw-pack fetch copies intermediate negotiation packets into the pack
-
-**Problem.** A server advertises multi_ack_detailed without sideband. The client requests it and sends a
-common have followed by done. For a legal response `ACK <id> common`, final `ACK <id>`, then raw PACK,
-the client switches to raw copying after the first ACK and includes the final ACK pkt-line in the target.
-A passive target can receive a success result for contaminated bytes; pack ingestion then fails.
-
-**Sources.** [capability selection](src/main/java/pro/deta/orion/git/client/GitBlockingClientWire.java#L66),
-[early raw transition](src/main/java/pro/deta/orion/git/client/GitBlockingClientWire.java#L109),
-[raw copy](src/main/java/pro/deta/orion/git/client/GitBlockingClientWire.java#L127),
-[fetch result](src/main/java/pro/deta/orion/git/client/GitUploadPackClient.java#L63),
-[existing raw test](src/test/java/pro/deta/orion/git/client/GitBlockingClientsTest.java#L76).
-The current raw test exercises only NAK with no detailed-ACK capability; proxy bootstrap's incremental
-fetch supplies a have and ingests returned bytes.
-
-**Documented behavior and contract.** Git's
-[Packfile Negotiation specification](https://github.com/git/git/blob/master/Documentation/gitprotocol-pack.adoc#packfile-negotiation)
-distinguishes intermediate ACK statuses from the terminal response before pack data.
-[get_common_commits](https://github.com/git/git/blob/master/upload-pack.c) emits a common ACK when reading
-a shared have and a final ACK on done. Sending done immediately does not eliminate the earlier ACK.
-**Minimal repair.** Consume intermediate ACK statuses in the existing loop; start raw copying only after
-terminal negotiation. Test multiple common/ready ACKs, a final ACK and exact raw-pack bytes/count,
-while retaining the NAK path.
-**Alternatives and consequences.** Not requesting detailed ACKs without sideband is smaller but reduces
-negotiated functionality. Removing raw support would discard an existing supported transport path.
-No separate negotiation abstraction is needed.
-**Confidence.** High: client transition and reference producer agree; no runtime reproduction performed.
-**Priority signals.** Importance high for correctness of this supported capability combination;
-repair ease high, localized parsing and transition logic.

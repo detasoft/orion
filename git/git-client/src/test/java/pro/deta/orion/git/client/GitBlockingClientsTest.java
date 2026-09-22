@@ -100,6 +100,40 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void consumesDetailedAcknowledgmentsBeforeCopyingTheRawPack() {
+        byte[] packBytes = "PACKraw-payload".getBytes(StandardCharsets.US_ASCII);
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("multi_ack_detailed"),
+                packet("ACK " + OLD_ID + " common\n"),
+                packet("ACK " + NEW_ID + " common\n"),
+                packet("ACK " + NEW_ID + " ready\n"),
+                packet("ACK " + NEW_ID + "\n"), packBytes));
+        ByteArrayOutputStream pack = new ByteArrayOutputStream();
+        GitUploadPackRequest request = new GitUploadPackRequest(List.of(OLD_ID), List.of(NEW_ID),
+                new OutputStreamBufferedByteOutput(pack), ignored -> { });
+        GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+                .fetch(REMOTE, GitClientOptions.defaults(), request);
+        assertThat(success(result).packBytes()).isEqualTo(packBytes.length);
+        assertThat(pack.toByteArray()).isEqualTo(packBytes);
+        assertThat(transport.session.output.ascii()).contains(" multi_ack_detailed\n").doesNotContain("side-band");
+    }
+
+    @Test
+    void failsWhenDetailedAcknowledgmentsEndWithoutATerminalResponse() {
+        RecordingTransport transport = new RecordingTransport(concat(advertisement("multi_ack_detailed"),
+                packet("ACK " + NEW_ID + " common\n")));
+        ByteArrayOutputStream pack = new ByteArrayOutputStream();
+        GitUploadPackRequest request = new GitUploadPackRequest(List.of(OLD_ID), List.of(NEW_ID),
+                new OutputStreamBufferedByteOutput(pack), ignored -> { });
+        GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+                .fetch(REMOTE, GitClientOptions.defaults(), request);
+        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.UNEXPECTED_END_OF_STREAM);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.NEGOTIATION);
+        assertThat(pack.size()).isZero();
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
     void acceptsShallowBoundaryInAdvertisement() {
         RecordingTransport transport = new RecordingTransport(concat(
                 packet("shallow " + NEW_ID + "\n"),
