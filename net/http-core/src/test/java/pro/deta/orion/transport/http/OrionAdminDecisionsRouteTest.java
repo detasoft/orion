@@ -202,7 +202,8 @@ class OrionAdminDecisionsRouteTest {
             connector.setPort(0);
             http.addConnector(connector);
             OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
-                    new OrionHttpRouteRegistry(Set.of(new OrionAdminDecisionsRoute(registry, JSON))),
+                    new OrionHttpRouteRegistry(Set.of(OrionHttpModule.decisionsRoute(
+                            new OrionAdminDecisionsRoute(registry, JSON)))),
                     new OrionHttpResponseWriter(JSON)) {
                 @Override
                 public void service(HttpServletRequest request, HttpServletResponse response)

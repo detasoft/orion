@@ -58,6 +58,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute decisionsRoute(OrionAdminDecisionsRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute routesRoute(OrionAdminRoutesRoute route) {
         return route;
     }
