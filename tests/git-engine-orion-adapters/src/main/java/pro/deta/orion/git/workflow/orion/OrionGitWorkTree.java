@@ -191,7 +191,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             String oldId = advertisement.findRef(parsed.destination())
                     .map(GitRemoteAdvertisement.Ref::objectId)
                     .orElse(null);
-            if (!delete && !isFastForward(parsed.destination(), oldId, newId)) {
+            if (!delete && !parsed.force() && !isFastForward(parsed.destination(), oldId, newId)) {
                 return GitOperationResult.nonFastForward(
                         "Orion push rejected a non-fast-forward update for " + parsed.destination());
             }
@@ -402,19 +402,17 @@ final class OrionGitWorkTree implements GitWorkTree {
         return normalized;
     }
 
-    private record RefSpec(String source, String destination) {
+    private record RefSpec(String source, String destination, boolean force) {
         private static RefSpec parse(String value) {
             Objects.requireNonNull(value, "refSpec");
-            if (value.startsWith("+")) {
-                throw new UnsupportedOperationException(
-                        "Orion adapter does not support forced refspecs: " + value);
-            }
+            boolean force = value.startsWith("+");
+            int sourceStart = force ? 1 : 0;
             int separator = value.indexOf(':');
-            if (separator < 0 || separator != value.lastIndexOf(':') || separator == value.length() - 1) {
+            if (separator < sourceStart || separator != value.lastIndexOf(':') || separator == value.length() - 1) {
                 throw new UnsupportedOperationException(
                         "Orion adapter requires a source:destination or :destination refspec: " + value);
             }
-            return new RefSpec(value.substring(0, separator), value.substring(separator + 1));
+            return new RefSpec(value.substring(sourceStart, separator), value.substring(separator + 1), force);
         }
     }
 }

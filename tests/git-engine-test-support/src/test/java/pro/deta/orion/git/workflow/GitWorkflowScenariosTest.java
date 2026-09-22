@@ -22,6 +22,7 @@ class GitWorkflowScenariosTest {
             "multi-ref-push",
             "delete-branch",
             "delete-tags",
+            "force-push-unrelated-history",
             "reject-stale-non-fast-forward",
             "incremental-fetch-with-common-commit",
             "annotated-tag-discovery-and-fetch",

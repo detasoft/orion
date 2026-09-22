@@ -48,6 +48,8 @@ public final class GitWorkflowScenarios {
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
             scenario("delete-branch", WRITE, state(Map.of(), Map.of()), GitWorkflowScenarios::deleteBranch),
             scenario("delete-tags", WRITE, twoCommitState("updated\n"), GitWorkflowScenarios::deleteTags),
+            scenario("force-push-unrelated-history", WRITE, forcePushState(),
+                    GitWorkflowScenarios::forcePushUnrelatedHistory),
             scenario("reject-stale-non-fast-forward", PULL, twoCommitState("winner\n"),
                     GitWorkflowScenarios::rejectStaleNonFastForward),
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
@@ -292,6 +294,32 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void forcePushUnrelatedHistory(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context);
+                GitWorkTree replacement = context.client().init(context.workTreeDirectory("replacement"))) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.updateRef(FEATURE, "HEAD");
+            source.addRemote("origin", context.remote());
+            source.pushRefs("origin", MAIN + ":" + MAIN, FEATURE + ":" + FEATURE);
+            RepositorySnapshot before = transferred(context, source);
+
+            execution.bind("replacement", commit(replacement, README, "replacement\n", "replacement"));
+            replacement.addRemote("origin", context.remote());
+            GitOperationResult rejection = context.performAgainstRemote(
+                    () -> replacement.pushResult("origin", "main"));
+            require(rejection.status() == GitOperationResult.Status.NON_FAST_FORWARD,
+                    "unrelated push was not classified as non-fast-forward: " + rejection.status());
+            require(rejection.stateUnchanged(), "unrelated push changed the remote repository");
+            equivalent(before, rejection.after(), "remote after rejected unrelated push");
+
+            replacement.pushRefs("origin", "+" + MAIN + ":" + MAIN);
+            execution.assertTerminal(context.server().snapshot(context.remote()));
+            Map<String, String> advertised = replacement.advertisedRefs("origin");
+            require(execution.id("replacement").equals(advertised.get(MAIN)), "forced tip is not advertised");
+            require(execution.id("initial").equals(advertised.get(FEATURE)), "force push changed another branch");
+        }
+    }
+
     private static void rejectStaleNonFastForward(
             GitScenarioContext context,
             Execution execution) throws Exception {
@@ -516,6 +544,12 @@ public final class GitWorkflowScenarios {
         return state(Map.of(MAIN, "second", "refs/tags/lightweight", "second",
                 "refs/tags/annotated", "annotated", "refs/tags/nested", "nested"),
                 twoCommitState("updated\n").commits());
+    }
+
+    private static ExpectedRepositoryState forcePushState() {
+        return state(Map.of(MAIN, "replacement", FEATURE, "initial"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(README, text(INITIAL_CONTENT))),
+                "replacement", expectedCommit(List.of(), Map.of(README, text("replacement\n")))));
     }
 
     private static ExpectedRepositoryState multiRefState() {

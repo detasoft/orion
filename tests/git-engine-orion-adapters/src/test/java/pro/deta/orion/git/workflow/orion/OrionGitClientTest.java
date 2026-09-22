@@ -173,21 +173,6 @@ class OrionGitClientTest {
     }
 
     @Test
-    void rejectsForcedRefspecsExplicitly(@TempDir Path directory) throws Exception {
-        try (GitServer server = GitServers.jgit();
-                GitWorkTree source = OrionGitEngines.client().init(directory.resolve("source"))) {
-            GitRemoteRepository remote = server.createRemoteRepository(directory, "remote.git");
-            commit(source, "README.md", "initial\n", "initial");
-            source.addRemote("origin", remote);
-
-            assertThatThrownBy(() -> source.pushRefs(
-                    "origin", "+refs/heads/main:refs/heads/main"))
-                    .isInstanceOf(UnsupportedOperationException.class)
-                    .hasMessageContaining("forced refspecs");
-        }
-    }
-
-    @Test
     void runsBranchAndRejectedPushCatalogScenariosThroughOrion() throws Exception {
         for (GitScenario scenario : GitWorkflowScenarios.catalog()) {
             if (Set.of("second-branch-fetch-and-checkout", "reject-stale-non-fast-forward")
@@ -198,8 +183,8 @@ class OrionGitClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"delete-branch", "delete-tags"})
-    void runsRefDeletionCatalogScenariosThroughOrion(String name) throws Exception {
+    @ValueSource(strings = {"delete-branch", "delete-tags", "force-push-unrelated-history"})
+    void runsRefUpdateCatalogScenariosThroughOrion(String name) throws Exception {
         GitScenario scenario = GitWorkflowScenarios.catalog().stream()
                 .filter(candidate -> candidate.name().equals(name)).findFirst().orElseThrow();
         GitInteroperabilityHarness.run(scenario, OrionGitEngines.client(), GitServers.jgit());
