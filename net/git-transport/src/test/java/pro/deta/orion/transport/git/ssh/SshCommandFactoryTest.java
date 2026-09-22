@@ -1,5 +1,14 @@
 package pro.deta.orion.transport.git.ssh;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxy;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
 import org.apache.sshd.common.AttributeRepository;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
@@ -39,6 +48,7 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -461,58 +471,127 @@ class SshCommandFactoryTest {
     }
 
     @Test
-    void receivePackProtocolErrorWritesStackTraceToSidebandErrorChannel()
-            throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        RuntimeException error = new RuntimeException("boom");
-        error.setStackTrace(new StackTraceElement[]{
-                new StackTraceElement("Example", "method", "Example.java", 12)
-        });
+    void deniedGitRepositoryOpenReportsOnlyMessageOnStderr() throws Exception {
+        for (String service : List.of("git-upload-pack", "git-receive-pack")) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ByteArrayOutputStream error = new ByteArrayOutputStream();
+            ExitOutcome exit = run(gitFactory(new InMemoryNativeGitRepositoryProvider()), channel(true),
+                    service + " '/demo.git'", output, error);
 
-        SshCommandFactory.writeGitProtocolException(
-                output,
-                "git-receive-pack '/demo.git'",
-                error);
-
-        byte[] packet = output.toByteArray();
-        assertEquals(3, packet[4]);
-        String payload = new String(
-                packet,
-                5,
-                packet.length - 5,
-                StandardCharsets.UTF_8);
-        assertTrue(payload.contains("java.lang.RuntimeException: boom"));
-        assertTrue(payload.contains("at Example.method(Example.java:12)"));
+            assertNotEquals(0, exit.code());
+            assertEquals("", output.toString(StandardCharsets.UTF_8));
+            String message = error.toString(StandardCharsets.UTF_8);
+            assertFalse(message.isBlank());
+            assertEquals(1, message.lines().count());
+            assertFalse(message.contains("Exception"));
+        }
     }
 
     @Test
-    void receivePackProtocolErrorSplitsLargeStackTrace() throws Exception {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        RuntimeException error = new RuntimeException("boom");
-        StackTraceElement[] stackTrace = new StackTraceElement[2_000];
-        for (int index = 0; index < stackTrace.length; index++) {
-            stackTrace[index] = new StackTraceElement(
-                    "ExampleClass" + index,
-                    "method",
-                    "Example.java",
-                    index + 1);
+    void gitFailureKeepsFullStackTraceInServerLogOnly() throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(SshCommandFactory.class);
+        ListAppender<ILoggingEvent> events = new ListAppender<>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            IllegalStateException failure = new IllegalStateException("Repository unavailable");
+            failure.setStackTrace(new StackTraceElement[]{
+                    new StackTraceElement("Example", "method", "Example.java", 12)});
+            NativeGitRepositoryProvider provider = (NativeGitRepositoryProvider) Proxy.newProxyInstance(
+                    NativeGitRepositoryProvider.class.getClassLoader(),
+                    new Class<?>[]{NativeGitRepositoryProvider.class}, (proxy, method, args) -> {
+                        throw failure;
+                    });
+            for (String service : List.of("git-upload-pack", "git-receive-pack")) {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                ByteArrayOutputStream error = new ByteArrayOutputStream();
+                ExitOutcome exit = run(gitFactory(provider), channel(true), service + " '/demo.git'",
+                        output, error);
+                assertNotEquals(0, exit.code());
+                assertEquals("", output.toString(StandardCharsets.UTF_8));
+                assertEquals("Repository unavailable\n", error.toString(StandardCharsets.UTF_8));
+            }
+            assertEquals(2, events.list.size());
+            for (ILoggingEvent event : events.list) {
+                assertSame(failure, ((ThrowableProxy) event.getThrowableProxy()).getThrowable());
+                assertEquals("Example.method(Example.java:12)",
+                        event.getThrowableProxy().getStackTraceElementProxyArray()[0]
+                                .getStackTraceElement().toString());
+            }
+        } finally {
+            logger.detachAppender(events);
+            events.stop();
         }
-        error.setStackTrace(stackTrace);
+    }
 
-        SshCommandFactory.writeGitProtocolException(
-                output,
-                "git-receive-pack '/demo.git'",
-                error);
+    @Test
+    void gitAuthenticationAndExecutorRejectionUseStderr() throws Exception {
+        SshCommandFactory factory = gitFactory(new InMemoryNativeGitRepositoryProvider());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream error = new ByteArrayOutputStream();
+        ExitOutcome unauthenticated = run(factory, channel(false), "git-receive-pack '/demo.git'",
+                output, error);
+        assertEquals(10, unauthenticated.code());
+        assertEquals("", output.toString(StandardCharsets.UTF_8));
+        assertEquals("ACCESS_DENIED\n", error.toString(StandardCharsets.UTF_8));
 
-        byte[] bytes = output.toByteArray();
-        int secondPacketOffset = 0xfff0;
-        assertEquals("fff0", new String(
-                bytes,
-                0,
-                4,
-                StandardCharsets.US_ASCII));
-        assertEquals(3, bytes[4]);
-        assertEquals(3, bytes[secondPacketOffset + 4]);
+        executors.getLast().shutdownNow();
+        error.reset();
+        ExitOutcome rejected = run(factory, channel(true), "git-receive-pack '/demo.git'", output, error);
+        assertEquals(1, rejected.code());
+        assertEquals("", output.toString(StandardCharsets.UTF_8));
+        assertEquals("Service unavailable\n", error.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void gitFailureAfterAdvertisementPreservesProtocolOutput() throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        provider.create("demo").valueOrFailure("repository");
+        TestChannelSession channel = channel(true);
+        AccessControl.Grant grant = new AccessControlDraft.Grant("repository", new java.util.ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, "demo")
+                .addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING).toAccessControl();
+        channel.getSession().setAttribute(SSH_AUTHENTICATED_USER,
+                new InternalUserImpl("operator", List.of(grant)));
+        SshCommandFactory factory = gitFactory(provider);
+        ByteArrayOutputStream successfulOutput = new ByteArrayOutputStream();
+        ByteArrayOutputStream successfulError = new ByteArrayOutputStream();
+        ExitOutcome success = run(factory, channel, "git-receive-pack '/demo.git'",
+                successfulOutput, successfulError,
+                new ByteArrayInputStream("0000".getBytes(StandardCharsets.US_ASCII)));
+        assertEquals(0, success.code());
+        assertTrue(successfulOutput.size() > 0);
+        assertEquals("", successfulError.toString(StandardCharsets.UTF_8));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream error = new ByteArrayOutputStream();
+        InputStream failingInput = new InputStream() {
+            @Override
+            public int read() throws IOException {
+                throw new IOException("Input interrupted");
+            }
+        };
+        ExitOutcome failure = run(factory, channel, "git-receive-pack '/demo.git'",
+                output, error, failingInput);
+        assertNotEquals(0, failure.code());
+        assertArrayEquals(successfulOutput.toByteArray(), output.toByteArray());
+        assertEquals("Input interrupted\n", error.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void gitStderrDeliveryFailureStillCompletesOnce() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ExitOutcome exit = run(gitFactory(new InMemoryNativeGitRepositoryProvider()), channel(true),
+                "git-receive-pack '/demo.git'", output, new FailingOutputStream());
+        assertNotEquals(0, exit.code());
+        assertEquals("", output.toString(StandardCharsets.UTF_8));
+    }
+
+    private SshCommandFactory gitFactory(NativeGitRepositoryProvider provider) {
+        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+        executors.add(executor);
+        return new SshCommandFactory(executor, null, new PlainCommandRenderer(),
+                new DefaultGitNativeRepositoryService(provider), null, null);
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -553,6 +632,16 @@ class SshCommandFactoryTest {
             String commandLine,
             OutputStream output,
             OutputStream error) throws Exception {
+        return run(factory, channel, commandLine, output, error, InputStream.nullInputStream());
+    }
+
+    private static ExitOutcome run(
+            SshCommandFactory factory,
+            TestChannelSession channel,
+            String commandLine,
+            OutputStream output,
+            OutputStream error,
+            InputStream input) throws Exception {
         AtomicReference<ExitOutcome> outcome = new AtomicReference<>();
         CountDownLatch completed = new CountDownLatch(1);
         AtomicInteger calls = new AtomicInteger();
@@ -564,6 +653,7 @@ class SshCommandFactoryTest {
                 completed,
                 calls);
 
+        command.setInputStream(input);
         command.start(channel, null);
         assertTrue(completed.await(2, TimeUnit.SECONDS));
         assertEquals(1, calls.get());

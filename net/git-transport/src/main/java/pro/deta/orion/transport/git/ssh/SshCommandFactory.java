@@ -23,13 +23,10 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.render.RenderedCommand;
-import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -43,10 +40,8 @@ import pro.deta.orion.util.stream.*;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
@@ -256,18 +251,20 @@ public class SshCommandFactory implements CommandFactory {
                         accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
                         serveGitCommand(channelSession, environment, securityContext);
                     } catch (OrionSecurityException e) {
-                        writeProtocolError("ACCESS_DENIED");
+                        log.warn("Git SSH authentication failed", e);
+                        writeError("ACCESS_DENIED");
                         returnCode = 10;
                     } catch (Exception e) {
-                        log.error("Exception: ", e);
+                        log.error("Git SSH command failed", e);
+                        writeError(e.getMessage());
                         returnCode = -1;
                     } finally {
                         exitCallback.onExit(returnCode);
                     }
                 });
             } catch (RejectedExecutionException e) {
-                log.warn("Git SSH command rejected, executor saturated: {}", commandLine);
-                writeProtocolError("Service unavailable");
+                log.warn("Git SSH command rejected, executor saturated: {}", commandLine, e);
+                writeError("Service unavailable");
                 exitCallback.onExit(1);
             }
         }
@@ -291,83 +288,26 @@ public class SshCommandFactory implements CommandFactory {
                             output,
                             commandLine,
                             gitProtocol(environment));
-                    try {
-                        new GitBlockingWireSession(
-                                data -> repositoryService.open(data,
-                                        new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase()),
-                                GitWireConfiguration.allSupported(),
-                                bootstrap.wire())
-                                .serveCommand(bootstrap.data());
-                    } catch (Exception error) {
-                        writeGitProtocolException(
-                                streams.getOutputStream(),
-                                commandLine,
-                                error);
-                        throw error;
-                    }
+                    new GitBlockingWireSession(
+                            data -> repositoryService.open(data,
+                                    new AuthenticatedRepositoryAccessHook(securityContext), packfileUriBase()),
+                            GitWireConfiguration.allSupported(),
+                            bootstrap.wire())
+                            .serveCommand(bootstrap.data());
                 }
             }
         }
 
-        private void writeProtocolError(String message) {
+        private void writeError(String message) {
+            String diagnostic = message == null || message.isBlank() ? "Git command failed" : message;
             try {
-                writeGitProtocolError(outputStream, message);
+                errorStream.write((diagnostic + "\n").getBytes(StandardCharsets.UTF_8));
+                errorStream.flush();
             } catch (IOException error) {
-                log.warn("Failed to write SSH Git protocol error", error);
+                log.warn("Failed to deliver SSH Git error", error);
             }
         }
 
-    }
-
-    static void writeGitProtocolException(
-            OutputStream outputStream,
-            String commandLine,
-            Throwable error) throws IOException {
-        Objects.requireNonNull(outputStream, "outputStream");
-        Objects.requireNonNull(error, "error");
-        if (isReceivePack(commandLine)) {
-            writeSidebandError(outputStream, stackTrace(error));
-            return;
-        }
-        writeGitProtocolError(outputStream, error.getMessage());
-    }
-
-    private static void writeGitProtocolError(
-            OutputStream outputStream,
-            String message) throws IOException {
-        OutputStreamBufferedByteOutput output =
-                new OutputStreamBufferedByteOutput(outputStream);
-        new GitPktLine.Data(("ERR " + message + "\n").getBytes(StandardCharsets.UTF_8)).writeTo(output);
-        output.flush();
-    }
-
-    private static void writeSidebandError(
-            OutputStream outputStream,
-            String message) throws IOException {
-        byte[] payload = message.getBytes(StandardCharsets.UTF_8);
-        OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(outputStream);
-        int maximumPayload = GitPktLine.MAX_PKT_LINE_LENGTH - GitPktLine.PKT_LINE_HEADER_SIZE - 1;
-        int offset = 0;
-        do {
-            int end = Math.min(payload.length, offset + maximumPayload);
-            byte[] content = offset == 0 && end == payload.length
-                    ? payload : Arrays.copyOfRange(payload, offset, end);
-            new GitPktLine.Data(content).writeTo(output, SideBand.ERROR);
-            offset = end;
-        } while (offset < payload.length);
-        output.flush();
-    }
-
-    private static boolean isReceivePack(String commandLine) {
-        return commandLine != null
-                && commandLine.trim().startsWith(
-                        InitialRequestService.RECEIVE_PACK.wireName());
-    }
-
-    private static String stackTrace(Throwable error) {
-        StringWriter writer = new StringWriter();
-        error.printStackTrace(new PrintWriter(writer));
-        return writer.toString();
     }
 
     private SecurityContext securityContextFor(ChannelSession channelSession) {
