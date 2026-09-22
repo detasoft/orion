@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.v2.pack;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -11,6 +12,7 @@ import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,15 +28,16 @@ class GitPackObjectResolverTest {
     Path directory;
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void resolvesForwardReferencesBranchesAndOffsetDeltasWithoutChangingEntryBytes(boolean memory) throws Exception {
+    @CsvSource({"false, 2", "true, 2", "false, 3", "true, 3"})
+    void resolvesForwardReferencesBranchesAndOffsetDeltasWithoutChangingEntryBytes(boolean memory, int version)
+            throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
         ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
         byte[] forward = delta(second, new byte[]{1, 1, 1, 3});
         byte[] offset = join(PackEntryWriter.objectHeader(GitObjectType.OFS_DELTA, 4),
                 new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
-        byte[] source = pack(forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
+        byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
         try (IndexedPack target = ingest(source, memory ? IndexedPack.create() : storage.newPack())) {
             PackId received = target.checksum();
@@ -49,6 +52,25 @@ class GitPackObjectResolverTest {
                     new ResolvedGitObjectRead<>(storage, (type, size, base, input) -> input.readBytes((int) size))))
                     .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void completesThinPackWithExternalBaseAndPersistsIt(int version) throws Exception {
+        GitStorageApi storage = new GitStorageApi(directory);
+        ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
+        byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
+        try (IndexedPack target = ingest(source, storage.newPack())) {
+            PackId received = target.id();
+            PackId completed = new GitPackObjectResolver(target, storage).complete();
+            assertThat(completed).isNotEqualTo(received).isEqualTo(target.checksum());
+            assertThat(target.objectCount()).isEqualTo(2);
+            assertThat(ByteBuffer.wrap(bytes(target)).getInt(4)).isEqualTo(version);
+            storage.persist(target);
+        }
+        assertThat(storage.readObject(objectId(GitObjectType.BLOB, new byte[]{2}),
+                new ResolvedGitObjectRead<>(storage, (type, size, unused, input) -> input.readBytes((int) size))))
+                .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
     }
 
     @Test

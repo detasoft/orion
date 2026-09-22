@@ -31,12 +31,9 @@ public final class PackWriter implements AutoCloseable {
 
     public PackWriter(BufferedByteOutput output, long objectCount) throws IOException {
         this.output = Objects.requireNonNull(output, "output");
-        if (objectCount < 0 || objectCount > 0xffff_ffffL) {
-            throw new IllegalArgumentException("Invalid pack object count");
-        }
         this.objectCount = objectCount;
         checksum = GitHashAlgorithm.SHA1.newDigest();
-        byte[] header = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt((int) objectCount).array();
+        byte[] header = PackHeader.write(objectCount);
         write(header, 0, header.length);
     }
 

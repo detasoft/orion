@@ -181,14 +181,10 @@ public final class GitPackObjectResolver {
             throw new IOException("Pack contains unresolved objects");
         }
         long size = bytes.size();
-        if (size < 32) {
+        if (size < PackHeader.SIZE + 20) {
             throw new IOException("Truncated received pack");
         }
-        ByteBuffer header = ByteBuffer.wrap(readExactly(bytes, 0, 12));
-        if (header.getInt() != 0x5041434b || header.getInt() != 2) {
-            throw new IOException("Invalid received pack header");
-        }
-        long objectCount = Integer.toUnsignedLong(header.getInt());
+        long objectCount = PackHeader.read(readExactly(bytes, 0, PackHeader.SIZE));
         if (objectCount != bytes.entryCount()) {
             throw new IOException("Pack object count does not match its index");
         }

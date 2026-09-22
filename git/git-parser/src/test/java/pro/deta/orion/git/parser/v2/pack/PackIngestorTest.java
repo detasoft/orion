@@ -178,13 +178,20 @@ class PackIngestorTest {
         }
         byte[] magic = PackTestData.pack();
         magic[0] = 'X';
-        byte[] version = PackTestData.pack();
-        version[7] = 3;
+        byte[] version = PackTestData.pack(4);
         byte[] unsignedCount = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(-1).array();
         for (byte[] bytes : new byte[][]{magic, version, unsignedCount}) {
             assertThatThrownBy(() -> PackTestData.ingest(bytes, IndexedPack.create()))
                     .isInstanceOf(IOException.class);
         }
+    }
+
+    @Test
+    void rejectsCorruptVersionThreeChecksum() throws Exception {
+        byte[] corrupt = PackTestData.pack(3, PackTestData.blob(new byte[]{1}));
+        corrupt[corrupt.length - 1] ^= 1;
+        assertThatThrownBy(() -> PackTestData.ingest(corrupt, IndexedPack.create()))
+                .isInstanceOf(IOException.class).hasMessage("Pack checksum mismatch");
     }
 
     private static byte[] pack() throws Exception {

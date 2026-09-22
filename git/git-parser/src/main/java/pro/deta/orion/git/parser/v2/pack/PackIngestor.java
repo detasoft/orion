@@ -40,14 +40,7 @@ public final class PackIngestor implements AutoCloseable {
             throw new IllegalStateException("Pack ingestion has already started or closed");
         }
         started = true;
-        if (readInt() != 0x5041434b) {
-            throw new IOException("Invalid pack magic bytes");
-        }
-        int version = readInt();
-        if (version != 2) {
-            throw new IOException("Unsupported pack version: " + version);
-        }
-        long count = Integer.toUnsignedLong(readInt());
+        long count = PackHeader.read(readBytes(PackHeader.SIZE));
         Inflater inflater = new Inflater();
         try {
             for (long entryNumber = 0; entryNumber < count; entryNumber++) {
@@ -94,7 +87,7 @@ public final class PackIngestor implements AutoCloseable {
                 }
                 distance = ((distance + 1) << 7) | (part & 127);
             }
-            if (distance == 0 || distance > offset - 12) {
+            if (distance == 0 || distance > offset - PackHeader.SIZE) {
                 throw new IOException("Pack delta base must precede the entry and follow the pack header");
             }
             baseOffset = OptionalLong.of(offset - distance);
@@ -153,25 +146,6 @@ public final class PackIngestor implements AutoCloseable {
         if (inflatedSize != size) {
             throw new IOException("Inflated size differs from declared object size");
         }
-    }
-
-    private int readInt() throws IOException {
-        if (position > Long.MAX_VALUE - Integer.BYTES) {
-            throw new IOException("Pack offset overflows a signed long");
-        }
-        if (retained.remaining() < Integer.BYTES) {
-            flush();
-        }
-        int value = input.readInt();
-        retained.putInt(value);
-        position += Integer.BYTES;
-        if (!trailer) {
-            checksum.update(retained.array(), retained.position() - Integer.BYTES, Integer.BYTES);
-        }
-        if (!retained.hasRemaining()) {
-            flush();
-        }
-        return value;
     }
 
     private byte[] readBytes(int length) throws IOException {

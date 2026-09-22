@@ -40,7 +40,11 @@ public final class PackTestData {
     }
 
     public static byte[] pack(byte[]... entries) {
-        byte[] body = join(ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(entries.length).array(),
+        return pack(2, entries);
+    }
+
+    public static byte[] pack(int version, byte[]... entries) {
+        byte[] body = join(ByteBuffer.allocate(12).putInt(0x5041434b).putInt(version).putInt(entries.length).array(),
                 join(entries));
         return join(body, GitHashAlgorithm.SHA1.newDigest().digest(body));
     }
