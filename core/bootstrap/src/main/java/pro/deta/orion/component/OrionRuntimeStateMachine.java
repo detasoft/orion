@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
+import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
 import pro.deta.orion.internal.OrionExecutorStateMachine;
 import pro.deta.orion.lifecycle.state.ActionBinding;
@@ -31,7 +32,8 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
  * publishes reload events. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
  * or public transports start. Failure in either phase must stop startup. Transports are
  * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
- * authentication and durable registries, and the executor stops last.</p>
+ * authentication and durable registries, and the executor stops last. Cancel pending decisions before
+ * stopping children so shutdown does not wait for human input and continuations can still use the executor.</p>
  */
 @Singleton
 public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachineAdapter {
@@ -43,9 +45,10 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
-            @Named("bootstrap-proxies") Runnable bootstrapProxies) {
+            @Named("bootstrap-proxies") Runnable bootstrapProxies,
+            DecisionRegistry decisions) {
         super(rootStateMachine(executor, eventManager, accessControl, agentSessionServer, transports,
-                bootstrapProxies));
+                bootstrapProxies, decisions));
     }
 
     private static AggregateStateMachine rootStateMachine(
@@ -54,7 +57,8 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionAccessControlStateMachine accessControl,
             AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports,
-            Runnable bootstrapProxies) {
+            Runnable bootstrapProxies,
+            DecisionRegistry decisions) {
         List<RuntimeChild> startOrder = List.of(
                 child("executor", executor::start, executor::stop, executor::currentState),
                 child("event-manager", eventManager::start, eventManager::stop, eventManager::currentState),
@@ -71,7 +75,10 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
         ActionBinding<pro.deta.orion.lifecycle.state.Void> start =
                 ActionId.START.bind(ignored -> startChildren(startOrder));
         ActionBinding<pro.deta.orion.lifecycle.state.Void> stop =
-                ActionId.STOP.bind(ignored -> stopChildren(startOrder));
+                ActionId.STOP.bind(ignored -> {
+                    decisions.close();
+                    return stopChildren(startOrder);
+                });
         StateMachineDefinition definition = StateMachineDefinition.define()
                 .name("orion")
                 .childPropagationMode(StateMachineDefinition.ChildPropagationMode.NONE)

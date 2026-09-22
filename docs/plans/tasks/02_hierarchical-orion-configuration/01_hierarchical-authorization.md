@@ -14,5 +14,8 @@ immutable configuration snapshot.
 - Preserve separate system-administrator and bootstrap-recovery authority.
 - Update repository, branch, administration, and future secret actions to use
   the hierarchical resource identity.
+- Replace the permissive `DecisionRegistry` authorization stub in `OrionRuntimeModule`
+  with current scoped access checks for listing, viewing, and resolving pending
+  decisions; cover revoked access and isolation between scopes.
 - Test same-name users, cross-organization isolation, inheritance, overrides,
   disabled users, and repository-local roles.

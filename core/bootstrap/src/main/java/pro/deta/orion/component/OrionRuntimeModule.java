@@ -8,6 +8,7 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
@@ -21,8 +22,20 @@ import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 
+/**
+ * Provides runtime services. Decision authorization is a temporary permissive stub;
+ * task 02/01 must replace it with current hierarchical access checks.
+ */
 @Module
 public class OrionRuntimeModule {
+    private static final int MAX_PENDING_DECISIONS = 1024;
+
+    @Provides
+    @Singleton
+    static DecisionRegistry decisionRegistry() {
+        return new DecisionRegistry(MAX_PENDING_DECISIONS, (actor, scope) -> true);
+    }
+
     @Provides
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(AccessControlStorage storage,

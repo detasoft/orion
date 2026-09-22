@@ -2,6 +2,12 @@ package pro.deta.orion.component;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.decision.PendingDecision;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
@@ -20,6 +26,9 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -27,6 +36,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -42,6 +53,26 @@ class OrionRuntimeModuleTest {
     private Path tempDir;
 
     private final XmlService xmlService = new XmlService();
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"acme", "acme/platform", "acme/platform/api"})
+    void decisionAuthorizationStubAllowsSuppliedPrincipalAtEveryScope(String scopePath) {
+        try (DecisionRegistry registry = OrionRuntimeModule.decisionRegistry()) {
+            PendingDecision pending = registry.register(
+                    Optional.ofNullable(scopePath).map(ConfigurationScope::parse),
+                    "Confirm operation", "", Map.of("replace", "Replace", "reject", "Reject"))
+                    .valueOrFailure("register pending decision");
+            PrincipalAddress actor = PrincipalAddress.parse("other/reviewer");
+            Decision decision = new Decision("replace", actor);
+
+            assertThat(registry.list(actor)).containsExactly(pending.request());
+            assertThat(registry.find(pending.request().id(), actor)).contains(pending.request());
+            assertThat(registry.decide(pending.request().id(), decision)).isEqualTo(Result.of(decision));
+            assertThat(pending.result().toCompletableFuture().join()).isEqualTo(decision);
+            assertThat(registry.list(actor)).isEmpty();
+        }
+    }
 
     @Test
     void runtimeOwnsAgentServerBeforeExternallyVisibleTransports() {
