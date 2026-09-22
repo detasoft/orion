@@ -1,44 +1,5 @@
 # Module Review: `agent-protocol`
 
-### 8. Invalid typed PTY fields escape the protocol error boundary
-
-**Problem.** A complete CBOR record with an empty `ptyInputId` or zero terminal dimension passes opaque record
-decoding, then `decodeKnownPayload` throws `IllegalArgumentException` from a payload constructor. During initial
-terminal inspection this escapes to `main` instead of producing the normal bounded journal-failure result.
-Concrete records are `8301190101826040` (empty input identity) and `830119010282001818` (zero columns, 24 rows).
-
-**Sources.** [`decodePtyInput` and `decodePtyResize`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L238)
-directly invoke [validated payload constructors](src/main/java/pro/deta/orion/agent/protocol/SessionEventPayload.java#L64).
-Neighboring [`decodeHostWarning`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L226)
-already translates constructor validation into `AgentProtocolException(INVALID_FIELD)`.
-[`TerminalJournalFollower.inspect`](../agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalJournalFollower.java#L44)
-catches only the protocol exception. Its
-[initial caller](../agentd/src/main/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacher.java#L73) and
-[terminal entry point](../agentd/src/main/java/pro/deta/orion/agentd/AgentdMain.java#L59) do not contain this unchecked
-failure. [`SessionEventCodecTest`](src/test/java/pro/deta/orion/agent/protocol/SessionEventCodecTest.java#L485)
-covers wrong shapes/types, but misses valid CBOR types with invalid field values.
-
-**Documented behavior.** [Terminal failure handling](../docs/plans/tasks/04_agentd/07_local-terminal/TASK.md#L37)
-requires bounded session-local diagnostics for corrupt journal data. No distinct unchecked failure policy for
-known payload fields was found.
-
-**Contract.** Preserve opaque byte forwarding, current field validity, and constructor validation for direct
-Java callers. Invalid untrusted typed payloads must reach the existing protocol-error handling boundary.
-
-**Minimal repair.** Translate constructor validation in the existing typed decoding path, following neighboring
-decoders. Cover invalid input identities, zero dimensions, and initial terminal preflight behavior without
-adding an error model or weakening validation.
-
-**Alternatives and consequences.** Catching every runtime exception in the terminal only patches one consumer.
-Validating all known payloads during opaque decoding changes forwarding and persistence semantics unnecessarily.
-The local translation needs no wire or storage migration.
-
-**Confidence.** High from the explicit call chain. Native writers normally produce valid values; corrupted data
-or another producer is required, and no runtime reproduction was run.
-
-**Priority signals.** Importance: medium, an actual terminal path bypasses its failure interface.
-Repair ease: high, a local translation plus protocol and consumer regressions.
-
 ### 9. Start failures have two encoding paths with different validation
 
 **Problem.** The typed `encode` branch and public `encodeStartFailure` both serialize `SESSION_START_FAILED`.

@@ -496,6 +496,24 @@ class SessionEventCodecTest {
     }
 
     @Test
+    void reportsInvalidTypedPtyValuesWithoutRejectingOpaqueRecords() throws Exception {
+        for (String hex : List.of(
+                "8301190101826040",     // Empty input identity.
+                "830119010182612040",   // Unsafe input identity.
+                "830119010282001818",   // Zero columns.
+                "830119010282185000")) { // Zero rows.
+            byte[] encoded = Hex.parse(hex);
+            SessionEventRecord record = CODEC.decode(encoded);
+            assertThat(record.encodedRecord().toByteArray()).containsExactly(encoded);
+            assertThatExceptionOfType(AgentProtocolException.class)
+                    .isThrownBy(() -> CODEC.decodeKnownPayload(record))
+                    .withCauseInstanceOf(IllegalArgumentException.class)
+                    .extracting(AgentProtocolException::reason)
+                    .isEqualTo(AgentProtocolException.Reason.INVALID_FIELD);
+        }
+    }
+
+    @Test
     void labelsInvalidPtyInputIdentity() throws Exception {
         SessionEventRecord invalidInput = CODEC.decode(Hex.parse("8301190101820140"));
 

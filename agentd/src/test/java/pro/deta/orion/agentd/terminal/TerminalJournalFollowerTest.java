@@ -205,6 +205,21 @@ class TerminalJournalFollowerTest {
     }
 
     @Test
+    void reportsInvalidTypedPtyValuesDuringInitialInspection() throws Exception {
+        for (String hex : new String[]{"8301190101826040", "830119010282001818", "830119010282185000"}) {
+            Files.write(sessionDirectory.resolve("00000001.cbor"), java.util.HexFormat.of().parseHex(hex));
+            TerminalJournalFollower follower = new TerminalJournalFollower();
+            for (TerminalJournalFollower.Inspection inspection : new TerminalJournalFollower.Inspection[]{
+                    follower.inspect(sessionDirectory), follower.inspectUntilTail(sessionDirectory)}) {
+                assertThat(inspection).isInstanceOf(TerminalJournalFollower.Inspection.Failed.class);
+                String detail = ((TerminalJournalFollower.Inspection.Failed) inspection).detail();
+                assertThat(detail).startsWith("journal failure: ").doesNotContain("IllegalArgumentException");
+                assertBoundedUtf8(detail);
+            }
+        }
+    }
+
+    @Test
     void boundsJournalIssueDetailsAsUtf8() throws Exception {
         String component = "failure-🚀".repeat(8);
         Path parent = sessionDirectory;

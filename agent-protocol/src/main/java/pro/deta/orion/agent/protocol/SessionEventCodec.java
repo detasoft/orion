@@ -238,17 +238,25 @@ public final class SessionEventCodec {
     private SessionEventPayload.PtyInput decodePtyInput(List<CborReader.Value> fields)
             throws AgentProtocolException {
         requireFields(fields, 2, "PTY_INPUT");
-        return new SessionEventPayload.PtyInput(
-                text(fields.get(0), "PTY_INPUT ptyInputId"),
-                ProtocolBytes.copyOf(bytes(fields.get(1), "PTY_INPUT bytes")));
+        String inputId = text(fields.get(0), "PTY_INPUT ptyInputId");
+        ProtocolBytes input = ProtocolBytes.copyOf(bytes(fields.get(1), "PTY_INPUT bytes"));
+        try {
+            return new SessionEventPayload.PtyInput(inputId, input);
+        } catch (IllegalArgumentException exception) {
+            throw new AgentProtocolException(INVALID_FIELD, exception.getMessage(), exception);
+        }
     }
 
     private SessionEventPayload.PtyResize decodePtyResize(List<CborReader.Value> fields)
             throws AgentProtocolException {
         requireFields(fields, 2, "PTY_RESIZE");
-        return new SessionEventPayload.PtyResize(
-                unsignedShort(fields.get(0), "PTY_RESIZE columns"),
-                unsignedShort(fields.get(1), "PTY_RESIZE rows"));
+        int columns = unsignedShort(fields.get(0), "PTY_RESIZE columns");
+        int rows = unsignedShort(fields.get(1), "PTY_RESIZE rows");
+        try {
+            return new SessionEventPayload.PtyResize(columns, rows);
+        } catch (IllegalArgumentException exception) {
+            throw new AgentProtocolException(INVALID_FIELD, exception.getMessage(), exception);
+        }
     }
 
     private SessionEventPayload.ProcessExited decodeProcessExited(List<CborReader.Value> fields)
