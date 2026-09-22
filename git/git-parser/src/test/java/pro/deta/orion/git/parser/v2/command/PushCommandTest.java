@@ -205,8 +205,10 @@ class PushCommandTest {
     }
 
     @Test
-    void rejectsMalformedRequestsBeforeReadingPackOrChangingRefs() throws Exception {
+    void rejectsMalformedRequestsWithoutChangingExistingRefs() throws Exception {
         GitStorageApi storage = new GitStorageApi(directory);
+        ObjectId existing = store(storage, GitObjectType.BLOB, new byte[]{2});
+        storage.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(existing))), false);
         String id = objectId(GitObjectType.BLOB, new byte[]{1}).toHex();
         String create = ZERO + " " + id + " " + REF;
         List<byte[]> requests = List.of(
@@ -221,6 +223,7 @@ class PushCommandTest {
                 request(new byte[0], create + "\n\0report-status"),
                 request(new byte[0], create, ZERO + " " + id + " refs/tags/other\0report-status"),
                 request(new byte[0], create, create),
+                request(new byte[0], existing + " " + ZERO + " " + REF, "invalid update"),
                 request(new byte[0], "shallow " + "g".repeat(40), create),
                 request(new byte[0], create, "shallow " + id),
                 request(new byte[0], ZERO + " " + ZERO + " " + REF),
@@ -232,14 +235,15 @@ class PushCommandTest {
                 "000".getBytes(StandardCharsets.US_ASCII));
         for (byte[] request : requests) {
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(request))) {
-                assertThatThrownBy(() -> PushRequest.parse(
-                        context(input, new ByteArrayOutputStream()).reader(), advertised()))
+                assertThatThrownBy(() -> new PushCommand(storage, advertised())
+                        .action(context(input, new ByteArrayOutputStream())))
                         .isInstanceOf(IOException.class);
             }
+            assertThat(storage.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, existing);
+            assertThat(storage.exists(new ObjectId(id))).isFalse();
         }
-        assertThat(storage.snapshotRefs().refs()).isEmpty();
         assertThat(directory.resolve("incoming")).isEmptyDirectory();
-        assertThat(directory.resolve("packs")).isEmptyDirectory();
+        assertThat(storage.exists(existing)).isTrue();
     }
 
     @Test

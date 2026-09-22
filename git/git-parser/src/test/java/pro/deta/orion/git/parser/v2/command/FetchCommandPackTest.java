@@ -5,11 +5,13 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
@@ -33,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -377,6 +380,38 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                 } else {
                     assertThatThrownBy(() -> command.action(protocol)).isInstanceOf(IOException.class);
                 }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(GitProtocolVersion.class)
+    void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
+        try (GitStorageApi storage = new GitStorageApi()) {
+            ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
+            ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            RefId main = new RefId("refs/heads/main");
+            storage.updateRefs(List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
+            for (boolean missingObject : List.of(false, true)) {
+                String wanted = missingObject ? "11".repeat(20) : tip.toHex();
+                ByteArrayOutputStream request = new ByteArrayOutputStream();
+                OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
+                new GitPktLine.Data(("want " + wanted + "\n").getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                if (!missingObject) {
+                    new GitPktLine.Data("deepen 0\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                }
+                GitPktLine.Control.FLUSH.writeTo(wire);
+                ByteArrayOutputStream response = new ByteArrayOutputStream();
+                try (BufferedByteInputV2 input = input(request.toByteArray())) {
+                    GitProtocolContext protocol = new GitProtocolContext(input,
+                            new OutputStreamBufferedByteOutput(response), version, GitTransport.HTTP);
+                    assertThatThrownBy(() -> new FetchCommand(storage, capabilities(GitCapability.SHALLOW))
+                            .action(protocol)).isInstanceOf(IOException.class)
+                            .hasMessageContaining(missingObject ? wanted : "Depth must be positive");
+                }
+                assertThat(response.toByteArray()).isEmpty();
+                assertThat(storage.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
+                assertThat(storage.exists(tip)).isTrue();
             }
         }
     }
