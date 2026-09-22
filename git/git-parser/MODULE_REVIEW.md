@@ -42,64 +42,24 @@ is still required by `GitBlockingClientWire` and must remain.
 **Confidence and priority.** High for call-site evidence. Medium importance and medium repair ease:
 serializer removal is local, but useful behavioral tests and the live advertisement must be migrated.
 
-## 6. Empty v2 migration shells have no consumers
+## 8. A migration-only assertion inspects retired implementation state
 
-**Problem and evidence.** [GitServerSession](src/main/java/pro/deta/orion/git/parser/v2/GitServerSession.java)
-and [GitWireBootstrap](src/main/java/pro/deta/orion/git/parser/v2/GitWireBootstrap.java) are empty classes
-with preliminary method lists. No production, test, reflection, registration, or resource consumer of
-these v2 types was found. Implemented flows use `wire.GitWireBootstrap` and `GitBlockingWireSession`.
+**Problem and evidence.**
+[GitBlockingWireTransportTest](src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireTransportTest.java)
+contains `doesNotKeepReusableOutputBufferOnTransport`, which inspects declared fields solely to assert
+that a removed `ByteBuf` member is absent. It does not exercise output behavior.
 
-**Required contract.** Session orchestration and bootstrap parsing remain implemented in the live wire
-classes. The empty declarations provide no runtime behavior or current extension point.
+**Required contract.** Tests of production framing, delivery, backpressure and buffer ownership remain
+necessary. No current contract requires the absence of a particular field type.
 
-**Minimal repair and tests.** Delete the two empty files. No tests need removal or migration; keep the
-implemented wire classes and their tests. Do not confuse the two packages' identically named bootstraps.
+**Minimal repair and tests.** Remove this assertion and its unused reflection import separately from
+production API replacement, as repository policy requires. Preserve the live transport tests for
+packet/raw switching, malformed input and output behavior.
 
-**Alternatives and consequences.** Filling these shells would duplicate existing ownership. Deletion
-removes unused internal names only; no protocol, persistence, or lifecycle change is required.
+**Alternatives and consequences.** Replacing the field check with another structural assertion would
+retain the same coupling. Deletion removes no behavioral coverage and needs no replacement abstraction.
 
-**Confidence and priority.** High; low importance and high repair ease.
-
-## 7. A production raw-reader wrapper is used only by one test
-
-**Problem and evidence.** [RawGitObjectRead](src/main/java/pro/deta/orion/git/parser/v2/read/RawGitObjectRead.java)
-only forwards to `GitObjectRead` and rejects a null result. Its sole construction is in
-[IndexedPackTest](src/test/java/pro/deta/orion/git/parser/v2/pack/IndexedPackTest.java).
-`IndexedPack` already enforces non-null reader results; production passes raw callbacks directly.
-
-**Required contract.** Reading compressed bytes without decompression, and rejecting null callback
-results, remain required. No separate wrapper type is needed to express either guarantee.
-
-**Minimal repair and tests.** Pass the existing test lambda directly and delete the wrapper. Keep
-`readsAcceptedWritesWithoutChangingTheNextAppendOffset` and the rest of `IndexedPackTest`; their content,
-raw-byte and append-offset checks remain meaningful.
-
-**Alternatives and consequences.** Retaining the wrapper in test scope would still add needless
-indirection. Deletion changes an unused Java type, with no wire or storage-format effect.
-
-**Confidence and priority.** High; low importance and high repair ease.
-
-## 8. Orphaned test fixtures retain their own tests and a migration-only assertion
-
-**Problem and evidence.** In [wire test support](src/test/java/pro/deta/orion/git/parser/wire),
-`SubmittedByteBufOutput` and `CountingByteBufAllocator` have no callers. `QueueBufferedByteOutput` is used
-only by `QueueBufferedByteOutputTest`; its two tests exercise waiting/timeout behavior of this otherwise
-unused fixture. `GitBlockingWireTransportTest.doesNotKeepReusableOutputBufferOnTransport` inspects fields
-solely to assert that a removed `ByteBuf` member is absent.
-
-**Required contract.** No current production output depends on these fixtures. Tests of production
-framing, delivery, backpressure and ownership remain necessary; the orphaned fixture does not verify them.
-
-**Minimal repair and tests.** Delete `SubmittedByteBufOutput.java`, `CountingByteBufAllocator.java`,
-`QueueBufferedByteOutput.java` and `QueueBufferedByteOutputTest.java`. Remove the migration-negative field
-assertion separately from production API replacement, as repository policy requires. Preserve
-`RecordingBufferedByteOutput`, `FetchTestSupport`, and `PackTestData`, which have current consumers.
-
-**Alternatives and consequences.** Reusing an orphan solely to justify retaining its tests adds no
-required behavior. These deletions remove no test of a real implementation and require no replacement
-framework or source-text assertions.
-
-**Confidence and priority.** High; low runtime importance, high maintenance value and high repair ease.
+**Confidence and priority.** High; low runtime importance and high repair ease: one isolated test.
 
 ## 9. An unused error record preserves a retired taxonomy
 

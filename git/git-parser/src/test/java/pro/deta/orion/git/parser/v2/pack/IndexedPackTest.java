@@ -9,7 +9,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
-import pro.deta.orion.git.parser.v2.read.RawGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.ByteArrayOutputStream;
@@ -47,8 +46,8 @@ class IndexedPackTest {
             long end = pack.size();
             assertThat(pack.readObject(12, new ContentGitObjectRead<byte[]>(
                     (type, size, base, input) -> input.readBytes((int) size)))).containsExactly(content);
-            assertThat(pack.readObject(12, new RawGitObjectRead<byte[]>(
-                    (type, size, base, input) -> input.readBytes(compressed.length)))).containsExactly(compressed);
+            assertThat(pack.<byte[]>readObject(12,
+                    (type, size, base, input) -> input.readBytes(compressed.length))).containsExactly(compressed);
             pack.append(ByteBuffer.wrap(new byte[]{42}));
             assertThat(pack.size()).isEqualTo(end + 1);
             ByteBuffer last = ByteBuffer.allocate(1);
