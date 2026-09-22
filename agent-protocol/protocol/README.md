@@ -167,9 +167,18 @@ closure does not mean that the host or its owned processes have exited. Native
 ordering and append-failure semantics are specified in the
 [session-host protocol](../../session-host/protocol/README.md).
 
-Once a native journal exists, exactly one start outcome is durable before the
-host leaves its start phase. `SESSION_START_FAILED` diagnostics are strict
-UTF-8 capped at 1 MiB; truncation retains at most the first 64 KiB and last
+Once a native journal exists, the host attempts one durable start outcome
+before leaving its start phase: `PROCESS_STARTED` after exec or
+`SESSION_START_FAILED` for an earlier failure. A failed append can leave no
+durable outcome. If recording `PROCESS_STARTED` fails, the host logs the error
+and publishes the live session; it does not record `SESSION_START_FAILED`
+after exec. Missing durable history does not prove that no process was launched.
+Failures before journal creation have no native outcome record. The
+[session-host protocol](../../session-host/protocol/README.md) defines these
+start-outcome and append-failure semantics.
+
+`SESSION_START_FAILED` diagnostics are strict UTF-8 capped at 1 MiB;
+truncation retains at most the first 64 KiB and last
 960 KiB and reports the removed byte count separately. Typed Java decoding of
 the lifecycle records may be added independently because the transport already
 preserves their exact encoded bytes.
