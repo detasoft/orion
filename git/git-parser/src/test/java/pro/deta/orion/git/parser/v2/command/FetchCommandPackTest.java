@@ -346,6 +346,41 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({"HTTP,'',true", "HTTP,00,false", "SSH,'',false"})
+    void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
+            throws Exception {
+        try (GitStorageApi storage = new GitStorageApi()) {
+            ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
+            ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+            ByteArrayOutputStream request = new ByteArrayOutputStream();
+            OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
+            new GitPktLine.Data(("want " + tip.toHex() + " shallow\n")
+                    .getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+            new GitPktLine.Data("deepen 1\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+            GitPktLine.Control.FLUSH.writeTo(wire);
+            request.write(suffix.getBytes(StandardCharsets.US_ASCII));
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            try (BufferedByteInputV2 input = input(request.toByteArray())) {
+                GitProtocolContext protocol = new GitProtocolContext(input,
+                        new OutputStreamBufferedByteOutput(response), GitProtocolVersion.V1, transport);
+                FetchCommand command = new FetchCommand(storage, capabilities(GitCapability.SHALLOW));
+                if (accepted) {
+                    command.action(protocol);
+                    try (BufferedByteInputV2 reply = input(response.toByteArray())) {
+                        assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(reply).orElseThrow()).text())
+                                .isEqualTo("shallow " + tip.toHex());
+                        assertThat(GitPktLine.readNextFrom(reply)).contains(GitPktLine.Control.FLUSH);
+                        assertThat(GitPktLine.readNextFrom(reply)).isEmpty();
+                    }
+                } else {
+                    assertThatThrownBy(() -> command.action(protocol)).isInstanceOf(IOException.class);
+                }
+            }
+        }
+    }
+
     private byte[] execute(GitStorageApi storage, GitProtocolVersion version,
                            GitCapabilities advertised, String... lines) throws IOException {
         ByteArrayOutputStream request = new ByteArrayOutputStream();

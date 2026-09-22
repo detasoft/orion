@@ -57,6 +57,10 @@ public class FetchCommand implements GitCommand {
             writer.writeShallowInfo(history.shallowCommits(), history.unshallowCommits(), SideBand.NONE);
             writer.flush();
         }
+        if (request.mode() != FetchRequest.Mode.PROTOCOL_V2
+                && protocolContext.transport() == GitTransport.HTTP && protocolContext.input().buffer() == null) {
+            return;
+        }
         NegotiationContext context = negotiate(iterator, reader, writer);
         Optional<FetchPlan> response = prepareResponse(context);
         if (response.isEmpty()) {
