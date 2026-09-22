@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -13,10 +14,12 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -295,6 +298,35 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         request.wants().add(new ObjectId(MAIN_ID));
         assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(IOException.class)
                 .hasMessageContaining("not an advertised object");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,main", "true,main", "false,tag", "false,HEAD"})
+    void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
+        NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
+        repository.saveFiles("main", Map.of("a", new byte[]{1}), "initial", GitCommitAuthor.EMPTY);
+        if (!ref.equals("main")) {
+            String tip = repository.refs().get("refs/heads/main");
+            if (ref.equals("tag")) {
+                repository.updateRef("refs/tags/release", NULL_ID, tip);
+            } else {
+                repository.storage().updateHead(new Head.Detached(new CommitId(tip)));
+            }
+            repository.updateRef("refs/heads/main", tip, NULL_ID);
+        }
+        ObjectId blob = repository.writeObject(GitObjectType.BLOB, new byte[]{1});
+        FetchRequest request = new FetchRequest();
+        request.setMode(v2 ? FetchRequest.Mode.PROTOCOL_V2 : FetchRequest.Mode.SINGLE_ACK);
+        request.wants().add(blob);
+        GitRepositoryContext context = service.open(request("demo"), this);
+        String expected = ref.equals("main") ? "fetch demo [main]" : "fetch demo []";
+        calls.clear();
+        context.checkFetchAccess(request);
+        assertThat(calls).containsExactly(expected);
+        rejectFetch = true;
+        calls.clear();
+        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+        assertThat(calls).containsExactly(expected);
     }
 
     private static IndexedPack ingest(NativeGitRepository repository, byte[] bytes) throws IOException {

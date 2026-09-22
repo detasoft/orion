@@ -285,6 +285,8 @@ public final class GitBlockingWireSession {
         capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_SINCE));
         capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_NOT));
         capabilities.add(GitCapabilityValue.value(GitCapability.DEEPEN_RELATIVE));
+        capabilities.add(GitCapabilityValue.value(GitCapability.FILTER));
+        capabilities.add(GitCapabilityValue.value(GitCapability.ALLOW_REACHABLE_SHA1_IN_WANT));
         capabilities.add(GitCapabilityValue.value(GitCapability.NO_PROGRESS));
         capabilities.add(GitCapabilityValue.value(GitCapability.INCLUDE_TAG));
         if (uploadPack.agent()) {

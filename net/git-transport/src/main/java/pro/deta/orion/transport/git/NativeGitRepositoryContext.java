@@ -69,16 +69,15 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
                 wants.add(id);
             }
         }
+        GitObjectGraph graph = new GitObjectGraph(storage());
+        Set<ObjectId> unresolvedLegacyWants = new LinkedHashSet<>();
         if (request.mode() != FetchRequest.Mode.PROTOCOL_V2) {
-            for (ObjectId want : wants) {
-                if (!snapshot.refs().containsValue(want)
-                        && !(snapshot.head() instanceof Head.Detached head
-                        && head.target().toHex().equals(want.toHex()))) {
-                    throw new IOException("Want is not an advertised object: " + want.toHex());
-                }
+            unresolvedLegacyWants.addAll(wants);
+            unresolvedLegacyWants.removeAll(snapshot.refs().values());
+            if (snapshot.head() instanceof Head.Detached head) {
+                unresolvedLegacyWants.remove(new ObjectId(head.target().toHex()));
             }
         }
-        GitObjectGraph graph = new GitObjectGraph(storage());
         Map<ObjectId, List<String>> branches = new LinkedHashMap<>();
         for (ObjectId want : wants) {
             branches.put(graph.peel(want).orElse(want), new ArrayList<>());
@@ -86,16 +85,29 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
         List<RefId> refs = new ArrayList<>(snapshot.refs().keySet());
         refs.sort((left, right) -> left.value().compareTo(right.value()));
         for (RefId ref : refs) {
-            if (!ref.value().startsWith("refs/heads/")) {
+            boolean branch = ref.value().startsWith("refs/heads/");
+            if (!branch && unresolvedLegacyWants.isEmpty()) {
                 continue;
             }
             Set<ObjectId> reachable = graph.reachableObjects(
                     Set.of(snapshot.refs().get(ref)), true);
+            unresolvedLegacyWants.removeAll(reachable);
+            if (!branch) {
+                continue;
+            }
             for (Map.Entry<ObjectId, List<String>> entry : branches.entrySet()) {
                 if (reachable.contains(entry.getKey())) {
                     entry.getValue().add(ref.value().substring("refs/heads/".length()));
                 }
             }
+        }
+        if (!unresolvedLegacyWants.isEmpty() && snapshot.head() instanceof Head.Detached head) {
+            unresolvedLegacyWants.removeAll(graph.reachableObjects(
+                    Set.of(new ObjectId(head.target().toHex())), true));
+        }
+        if (!unresolvedLegacyWants.isEmpty()) {
+            throw new IOException("Want is not an advertised object or reachable from advertised refs: "
+                    + unresolvedLegacyWants.iterator().next().toHex());
         }
         for (List<String> names : branches.values()) {
             accessHook.beforeFetch(name, List.copyOf(names));
