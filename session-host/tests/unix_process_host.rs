@@ -513,6 +513,28 @@ fn requested_landlock_policy_falls_back_when_landlock_is_unavailable() {
 }
 
 #[test]
+fn journals_initial_pty_dimensions_before_output_without_a_resize_command() {
+    for (cols, rows) in [(120, 40), (160, 50)] {
+        let directory = temporary_directory("initial-pty-size");
+        let mut host = HostGuard::spawn(directory,
+            &["/bin/sh", "-c", "stty size; printf first-output"], "xterm-test", cols, rows);
+        assert!(host.wait().success());
+        let events = journal_reader::read(host.directory(), 0).unwrap().events;
+        let sizes: Vec<_> = events.iter()
+            .filter(|event| event.event_type == event_type::PTY_RESIZE).collect();
+        assert_eq!(sizes.len(), 1);
+        assert_eq!(sizes[0].payload, protocol::pty_resize_payload(u32::from(cols), u32::from(rows)));
+        let started = events.iter().find(|event| event.event_type == event_type::PROCESS_STARTED).unwrap();
+        let output = events.iter().find(|event| event.event_type == event_type::PTY_OUTPUT).unwrap();
+        assert!(started.event_id < sizes[0].event_id);
+        assert!(sizes[0].event_id < output.event_id);
+        assert!(contains(&terminal_output(&events), format!("{rows} {cols}").as_bytes()));
+        assert!(contains(&terminal_output(&events), b"first-output"));
+        assert!(!events.iter().any(|event| event.event_type == event_type::COMMAND_RESULT));
+    }
+}
+
+#[test]
 fn hosts_a_real_tty_and_preserves_raw_output() {
     let directory = temporary_directory("raw-output");
     let mut host = HostGuard::spawn(
@@ -714,7 +736,7 @@ fn orders_controls_and_rejects_duplicate_sequences_after_reconnect() {
     let resize_event = result
         .events
         .iter()
-        .find(|event| event.event_type == event_type::PTY_RESIZE)
+        .find(|event| event.event_type == event_type::PTY_RESIZE && event.payload == resize)
         .unwrap();
     assert_eq!(resize_event.payload, resize);
     assert!(resize_event.event_id < inputs[0].event_id);
@@ -1682,7 +1704,8 @@ fn pty_closure_releases_blocked_input_and_serializes_a_queued_resize() {
     let resize_result = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
         && u64_at(&event.payload[2..10]) == 2).unwrap();
     let envelope_length = u32_at(&resize_result.payload[10..14]) as usize;
-    if let Some(resize) = events.iter().find(|event| event.event_type == event_type::PTY_RESIZE) {
+    if let Some(resize) = events.iter().find(|event| event.event_type == event_type::PTY_RESIZE
+        && event.payload == protocol::pty_resize_payload(90, 30)) {
         let closed = events.iter().find(|event| event.event_type == event_type::PTY_CLOSED).unwrap();
         assert!(resize.event_id < closed.event_id);
         assert_eq!(resize_result.payload[14 + envelope_length], 1);

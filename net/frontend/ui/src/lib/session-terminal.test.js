@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { encode } from 'cbor2'
+import { Terminal } from '@xterm/xterm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { followSessionTerminal } from './session-terminal.js'
 
@@ -37,6 +38,27 @@ function setup(responses) {
 afterEach(() => vi.useRealTimers())
 
 describe('session terminal replay', () => {
+  it('applies initial dimensions before wrapping output and positioning the cursor', async () => {
+    const terminal = new Terminal({ allowProposedApi: true })
+    const output = Uint8Array.from(Buffer.from(`${'x'.repeat(120)}Y\x1b[40;120HZ`))
+    const client = { sessionEvents: vi.fn().mockResolvedValueOnce(stream(
+      encode([1, 0x200, [123]]),
+      encode([2, 0x102, [120, 40]]),
+      encode([3, 0x100, output]),
+      encode([4, 0x201, [0]]),
+    )) }
+    try {
+      await followSessionTerminal({ client, sessionId: 'initial-size', terminal,
+        signal: new AbortController().signal, onStatus: vi.fn() })
+      expect([terminal.cols, terminal.rows]).toEqual([120, 40])
+      expect(terminal.buffer.active.getLine(0).translateToString(true)).toBe('x'.repeat(120))
+      expect(terminal.buffer.active.getLine(1).translateToString(true)).toBe('Y')
+      expect(terminal.buffer.active.getLine(39).getCell(119).getChars()).toBe('Z')
+    } finally {
+      terminal.dispose()
+    }
+  })
+
   it('accepts future payload fields and indefinite strings in unknown records', async () => {
     const futureResize = Uint8Array.from(Buffer.from(
       '840619010283185018186a7061796c6f61642d7631697265636f72642d7631', 'hex'))

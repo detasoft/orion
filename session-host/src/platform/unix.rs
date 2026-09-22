@@ -193,7 +193,13 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         Err(error) => return Err(pending.failed(error)),
     };
     let child_pid = initialized.child_pid;
-    let journal = pending.started(initialized.child_pid_u64);
+    let mut journal = pending.started(initialized.child_pid_u64);
+    if let Err(error) = journal.append_durable(JournalEvent::PtyResize {
+        cols: u32::from(options.cols),
+        rows: u32::from(options.rows),
+    }) {
+        eprintln!("session-host: failed to record initial PTY_RESIZE: {error}");
+    }
 
     let state = Arc::new(Mutex::new(SharedState {
         journal,
