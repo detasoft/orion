@@ -19,6 +19,7 @@ import org.eclipse.jgit.transport.UploadPack;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -28,6 +29,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.security.KeyPairGenerator;
+import java.util.Base64;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,9 +44,10 @@ class GitSshClientTransportTest {
         Path knownHosts = temporaryDirectory.resolve("known_hosts");
         Files.writeString(knownHosts, "");
         try (TestSshServer server = TestSshServer.start(
-                temporaryDirectory, repository.path());
-             GitSshClientTransport transport = GitSshClientTransport.strictKnownHosts(
-                     knownHosts, GitSshSessionAuthenticator.password("password"))) {
+                temporaryDirectory, repository.path())) {
+            GitClientTransport transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
+                    knownHosts, false);
             GitClientResult<GitRemoteAdvertisement> result =
                     new GitUploadPackClient(transport).discover(
                             server.repositoryUri(), GitClientOptions.defaults());
@@ -61,14 +65,14 @@ class GitSshClientTransportTest {
         try (TestSshServer server = TestSshServer.start(
                 temporaryDirectory, repository.path())) {
             Files.writeString(knownHosts, server.knownHostEntry());
-            try (GitSshClientTransport transport = GitSshClientTransport.strictKnownHosts(
-                    knownHosts, GitSshSessionAuthenticator.password("password"))) {
-                GitClientResult<GitRemoteAdvertisement> result =
-                        new GitUploadPackClient(transport).discover(
-                                server.repositoryUri(), GitClientOptions.defaults());
+            GitClientTransport transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
+                    knownHosts, false);
+            GitClientResult<GitRemoteAdvertisement> result =
+                    new GitUploadPackClient(transport).discover(
+                            server.repositoryUri(), GitClientOptions.defaults());
 
-                assertThat(result).isInstanceOf(GitClientResult.Success.class);
-            }
+            assertThat(result).isInstanceOf(GitClientResult.Success.class);
         }
     }
 
@@ -84,9 +88,10 @@ class GitSshClientTransportTest {
             Files.writeString(knownHosts, original.knownHostEntry());
         }
         try (TestSshServer changed = TestSshServer.start(
-                temporaryDirectory.resolve("changed-key"), repository.path(), port);
-             GitSshClientTransport transport = GitSshClientTransport.strictKnownHosts(
-                     knownHosts, GitSshSessionAuthenticator.password("password"))) {
+                temporaryDirectory.resolve("changed-key"), repository.path(), port)) {
+            GitClientTransport transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
+                    knownHosts, false);
             GitClientResult<GitRemoteAdvertisement> result =
                     new GitUploadPackClient(transport).discover(
                             changed.repositoryUri(), GitClientOptions.defaults());
@@ -94,6 +99,44 @@ class GitSshClientTransportTest {
             assertThat(result).isInstanceOf(GitClientResult.Failed.class);
             assertThat(failure(result).kind()).isEqualTo(
                     GitClientFailure.Kind.VERIFICATION_FAILED);
+        }
+    }
+
+    @Test
+    void authenticatesWithPrivateKeyThroughCommonTransport(@TempDir Path directory) throws Exception {
+        TestRepository repository = createRepository(directory);
+        var generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        var key = generator.generateKeyPair();
+        String pem = "-----BEGIN PRIVATE KEY-----\n"
+                + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())
+                + "\n-----END PRIVATE KEY-----\n";
+        Path knownHosts = directory.resolve("known_hosts");
+        try (TestSshServer server = TestSshServer.start(directory, repository.path());
+             GitCredentials credentials = new GitCredentials(
+                     GitCredentialKind.PRIVATE_KEY, "", pem.toCharArray())) {
+            server.server.setPasswordAuthenticator((user, password, session) -> false);
+            server.server.setPublickeyAuthenticator((user, supplied, session) ->
+                    "git".equals(user) && key.getPublic().equals(supplied));
+            Files.writeString(knownHosts, server.knownHostEntry());
+            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, knownHosts, false);
+
+            assertThat(new GitUploadPackClient(transport).discover(server.repositoryUri(), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientResult.Success.class);
+        }
+    }
+
+    @Test
+    void rejectsTokenBeforeConnecting() throws Exception {
+        try (SshClient client = SshClient.setUpDefaultClient();
+             GitCredentials credentials = new GitCredentials(
+                     GitCredentialKind.TOKEN, "", "token".toCharArray())) {
+            GitClientTransport transport = new GitSshClientTransport(client, credentials);
+            assertThatThrownBy(() -> transport.open(GitClientService.UPLOAD_PACK,
+                    URI.create("ssh://git@example.invalid/repository.git"), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientTransportException.class)
+                    .extracting(error -> ((GitClientTransportException) error).kind())
+                    .isEqualTo(GitClientFailure.Kind.PROTOCOL_UNSUPPORTED);
         }
     }
 
@@ -115,7 +158,7 @@ class GitSshClientTransportTest {
             client.setServerKeyVerifier((session, address, key) -> true);
             client.start();
             GitSshClientTransport transport = new GitSshClientTransport(
-                    client, GitSshSessionAuthenticator.password("password"));
+                    client, new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()));
             Duration timeout = Duration.ofMillis(50);
             GitClientOptions options = new GitClientOptions(
                     timeout, timeout, timeout, Duration.ofSeconds(1), 1);
@@ -138,7 +181,7 @@ class GitSshClientTransportTest {
             client.setServerKeyVerifier((session, address, key) -> true);
             client.start();
             GitSshClientTransport transport = new GitSshClientTransport(
-                    client, GitSshSessionAuthenticator.password("password"));
+                    client, new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()));
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
 
             GitClientResult<GitUploadPackResult> fetch =
@@ -180,7 +223,7 @@ class GitSshClientTransportTest {
     void rejectsPasswordEmbeddedInUri() throws Exception {
         try (SshClient client = SshClient.setUpDefaultClient()) {
             GitSshClientTransport transport = new GitSshClientTransport(
-                    client, GitSshSessionAuthenticator.defaultIdentities());
+                    client, GitCredentials.none());
 
             assertThatThrownBy(() -> transport.open(
                     GitClientService.UPLOAD_PACK,
@@ -195,7 +238,7 @@ class GitSshClientTransportTest {
     void rejectsUrisWithoutUserBeforeConnecting() throws Exception {
         try (SshClient client = SshClient.setUpDefaultClient()) {
             GitSshClientTransport transport = new GitSshClientTransport(
-                    client, GitSshSessionAuthenticator.defaultIdentities());
+                    client, GitCredentials.none());
 
             assertThatThrownBy(() -> transport.open(
                     GitClientService.UPLOAD_PACK,

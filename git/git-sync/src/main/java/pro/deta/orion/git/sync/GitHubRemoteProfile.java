@@ -3,17 +3,16 @@ package pro.deta.orion.git.sync;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
-import pro.deta.orion.git.client.GitHttpRequestConfigurer;
+import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.git.client.GitReceivePackClient;
-import pro.deta.orion.git.client.GitSmartHttpClientTransport;
+import pro.deta.orion.git.client.GitRemoteClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.RemoteProvider;
 import pro.deta.orion.schema.orion.RepositoryAddress;
 import pro.deta.orion.schema.orion.RepositoryRemote;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -29,10 +28,7 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
         this(
                 repository,
                 credentials,
-                configurer -> new GitSmartHttpClientTransport(
-                        null,
-                        configurer,
-                        false));
+                credential -> new GitRemoteClientTransport(null, credential, null, false));
     }
 
     GitHubRemoteProfile(
@@ -47,19 +43,26 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
     @Override
     public GitRemoteConnection open(RepositoryRemote remote) {
         RepositoryRemote checked = requireGitHubRemote(remote);
-        Secret secret = new Secret(credentials.resolve(repository, checked.credential()));
+        char[] characters = credentials.resolve(repository, checked.credential());
+        GitCredentials credential;
         try {
-            GitHttpRequestConfigurer configurer = request ->
-                    request.header("Authorization", authorization(secret));
-            GitClientTransport transport = transports.create(configurer);
+            if (characters.length == 0) {
+                throw new IllegalArgumentException("GitHub token must not be empty");
+            }
+            credential = new GitCredentials(GitCredentialKind.PASSWORD, USERNAME, characters);
+        } finally {
+            Arrays.fill(characters, '\0');
+        }
+        try {
+            GitClientTransport transport = transports.create(credential);
             return new GitRemoteConnection(
                     checked.uri(),
                     GitClientOptions.defaults(),
                     new GitUploadPackClient(transport),
                     new GitReceivePackClient(transport),
-                    secret::close);
+                    credential::close);
         } catch (RuntimeException error) {
-            secret.close();
+            credential.close();
             throw error;
         }
     }
@@ -76,51 +79,8 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
         return checked;
     }
 
-    private static String authorization(Secret secret) {
-        char[] token = secret.copy();
-        byte[] plain = null;
-        try {
-            plain = (USERNAME + ":" + new String(token))
-                    .getBytes(StandardCharsets.UTF_8);
-            return "Basic " + Base64.getEncoder().encodeToString(plain);
-        } finally {
-            Arrays.fill(token, '\0');
-            if (plain != null) {
-                Arrays.fill(plain, (byte) 0);
-            }
-        }
-    }
-
     @FunctionalInterface
     interface TransportFactory {
-        GitClientTransport create(GitHttpRequestConfigurer configurer);
-    }
-
-    private static final class Secret implements AutoCloseable {
-        private char[] value;
-
-        private Secret(char[] value) {
-            char[] checked = Objects.requireNonNull(value, "credential");
-            if (checked.length == 0) {
-                throw new IllegalArgumentException("Git credential must not be empty");
-            }
-            this.value = checked.clone();
-            Arrays.fill(checked, '\0');
-        }
-
-        private synchronized char[] copy() {
-            if (value == null) {
-                throw new IllegalStateException("Git credential is no longer available");
-            }
-            return value.clone();
-        }
-
-        @Override
-        public synchronized void close() {
-            if (value != null) {
-                Arrays.fill(value, '\0');
-                value = null;
-            }
-        }
+        GitClientTransport create(GitCredentials credentials);
     }
 }

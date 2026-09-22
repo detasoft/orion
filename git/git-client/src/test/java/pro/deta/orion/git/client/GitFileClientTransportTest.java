@@ -55,11 +55,8 @@ class GitFileClientTransportTest {
     @Test
     void remoteTransportDispatchesFileUris() throws Exception {
         Path bare = createRepository("dispatch");
-        GitClientTransport unsupported = (service, uri, options) -> {
-            throw new AssertionError("wrong transport");
-        };
         GitRemoteClientTransport transport = new GitRemoteClientTransport(
-                new GitFileClientTransport(), unsupported, unsupported, unsupported);
+                null, GitCredentials.none(), null, false);
 
         GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
                 .discover(bare.toUri(), GitClientOptions.defaults());

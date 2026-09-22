@@ -19,7 +19,7 @@ class GitProxyXmlTest {
     @Test
     void roundTripsCanonicalSystemBindingAndPreservesItDuringAclUpdates() throws Exception {
         OrionDocument document = read(document(proxy("configuration", "HTTPS://GIT.EXAMPLE:443/a/../repo",
-                "main", "HTTP_BEARER", "<secret>bootstrap-token</secret>")));
+                "main", "TOKEN", "<secret>bootstrap-token</secret>")));
         String serialized = write(document);
 
         assertThat(serialized).contains("https://git.example/repo", "refs/heads/main", "bootstrap-token");
@@ -36,9 +36,9 @@ class GitProxyXmlTest {
     @Test
     void acceptsDifferentRefsAndOwnsTheProxyCollection() throws Exception {
         String main = proxy("configuration", "https://git.example/repo", "main",
-                "HTTP_BASIC", "<secret>bootstrap-token</secret><username>operator</username>");
+                "PASSWORD", "<secret>bootstrap-token</secret><username>operator</username>");
         String material = proxy("material", "https://git.example/repo", "material",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>");
+                "TOKEN", "<secret>bootstrap-token</secret>");
         OrionDocument first = read(document(material + main));
         assertThat(write(first)).isEqualTo(write(read(document(main + material))));
         assertThat(read(write(first))).isEqualTo(first);
@@ -64,13 +64,13 @@ class GitProxyXmlTest {
     @ParameterizedTest
     @ValueSource(strings = {"HTTPS://git.example:443/repo", "https://git.example/repo"})
     void keepsEncodedPathsAndNonDefaultPortsDistinct(String upstream) throws Exception {
-        String first = proxy("configuration", upstream, "main", "HTTP_BEARER",
+        String first = proxy("configuration", upstream, "main", "TOKEN",
                 "<secret>bootstrap-token</secret>");
-        String port = proxy("port", "https://git.example:8443/repo", "main", "HTTP_BEARER",
+        String port = proxy("port", "https://git.example:8443/repo", "main", "TOKEN",
                 "<secret>bootstrap-token</secret>");
-        String encoded = proxy("encoded", "https://git.example/a%2Fb", "main", "HTTP_BEARER",
+        String encoded = proxy("encoded", "https://git.example/a%2Fb", "main", "TOKEN",
                 "<secret>bootstrap-token</secret>");
-        String path = proxy("path", "https://git.example/a/b", "main", "HTTP_BEARER",
+        String path = proxy("path", "https://git.example/a/b", "main", "TOKEN",
                 "<secret>bootstrap-token</secret>");
         assertThat(read(document(first + port + encoded + path)).system().proxies()).hasSize(4);
     }
@@ -78,9 +78,9 @@ class GitProxyXmlTest {
     @Test
     void rejectsDifferentAliasesForTheSameCanonicalUpstreamAndRef() {
         String first = proxy("configuration", "https://git.example:443/repo", "main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>");
+                "TOKEN", "<secret>bootstrap-token</secret>");
         String second = proxy("material", "HTTPS://GIT.EXAMPLE/repo", "refs/heads/main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>");
+                "TOKEN", "<secret>bootstrap-token</secret>");
         assertThatThrownBy(() -> read(document(first + second)))
                 .isInstanceOf(IOException.class).hasMessageContaining("duplicate proxy upstream/ref");
     }
@@ -88,9 +88,9 @@ class GitProxyXmlTest {
     @Test
     void rejectsAnAliasCollisionAcrossDifferentUpstreams() {
         String first = proxy("configuration", "https://git.example/repo", "main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>");
+                "TOKEN", "<secret>bootstrap-token</secret>");
         String second = proxy("configuration", "https://git.example/other", "main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>");
+                "TOKEN", "<secret>bootstrap-token</secret>");
         assertThatThrownBy(() -> read(document(first + second)))
                 .isInstanceOf(IOException.class).hasMessageContaining("duplicate proxy id");
     }
@@ -98,7 +98,7 @@ class GitProxyXmlTest {
     @Test
     void requiresTheReferencedSecretInTheSystemOwner() {
         String binding = proxy("configuration", "https://git.example/repo", "main",
-                "HTTP_BEARER", "<secret>missing</secret>");
+                "TOKEN", "<secret>missing</secret>");
         assertThatThrownBy(() -> read(document(binding)))
                 .isInstanceOf(IOException.class).hasMessageContaining("proxy secret is unavailable");
     }
@@ -109,7 +109,7 @@ class GitProxyXmlTest {
             "ftp://git.example/repo", "https:/repo", "https://git.example/private-token invalid"})
     void rejectsUnsafeUpstreamWithoutPrintingIt(String uri) {
         assertThatThrownBy(() -> read(document(proxy("configuration", uri, "main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>"))))
+                "TOKEN", "<secret>bootstrap-token</secret>"))))
                 .isInstanceOf(IOException.class).hasMessageNotContaining("private-token");
     }
 
@@ -117,24 +117,36 @@ class GitProxyXmlTest {
     @ValueSource(strings = {"HEAD", "refs/heads/../main", "refs/heads/.hidden", "refs/heads/main.lock"})
     void rejectsInvalidRefs(String ref) {
         assertThatThrownBy(() -> read(document(proxy("configuration", "https://git.example/repo", ref,
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>"))))
+                "TOKEN", "<secret>bootstrap-token</secret>"))))
                 .isInstanceOf(IOException.class).hasMessageContaining("proxy ref");
     }
 
     @Test
     void preservesSshTrustFileAndSystemSecretReference() throws Exception {
-        String binding = proxy("material", "ssh://git@git.example:22/repo", "main", "SSH_PRIVATE_KEY",
+        String binding = proxy("material", "ssh://git@git.example:22/repo", "main", "PRIVATE_KEY",
                 "<secret>bootstrap-token</secret><knownHosts>file:///etc/orion/known_hosts</knownHosts>");
         String serialized = write(read(document(binding)));
-        assertThat(serialized).contains("ssh://git@git.example/repo", "SSH_PRIVATE_KEY", "known_hosts");
+        assertThat(serialized).contains("ssh://git@git.example/repo", "PRIVATE_KEY", "known_hosts");
         assertThat(read(serialized)).isEqualTo(read(document(binding)));
+    }
+
+    @Test
+    void sharesPasswordKindBetweenHttpAndSshWhileKeepingTheirUsernamesSeparate() throws Exception {
+        String http = proxy("configuration", "https://git.example/repo", "main", "PASSWORD",
+                "<secret>bootstrap-token</secret><username>operator</username>");
+        String ssh = proxy("material", "ssh://git@git.example/repo", "main", "PASSWORD",
+                "<secret>bootstrap-token</secret>");
+        OrionDocument document = read(document(http + ssh));
+        assertThat(document.system().proxies()).extracting(GitProxyBinding::credentialKind)
+                .containsExactly(GitCredentialKind.PASSWORD, GitCredentialKind.PASSWORD);
+        assertThat(read(write(document))).isEqualTo(document);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"https://git.example/known_hosts", "relative/known_hosts",
             "file://remote/known_hosts", "jar:file:/tmp/trust.zip!/known_hosts"})
     void requiresALocalFileUriForSshTrust(String knownHosts) {
-        String binding = proxy("material", "ssh://git@git.example/repo", "main", "SSH_PRIVATE_KEY",
+        String binding = proxy("material", "ssh://git@git.example/repo", "main", "PRIVATE_KEY",
                 "<secret>bootstrap-token</secret><knownHosts>" + knownHosts + "</knownHosts>");
         assertThatThrownBy(() -> read(document(binding)))
                 .isInstanceOf(IOException.class).hasMessageContaining("known-hosts file");
@@ -143,7 +155,7 @@ class GitProxyXmlTest {
     @Test
     void rejectsAuthThatDoesNotMatchTheTransport() {
         assertThatThrownBy(() -> read(document(proxy("configuration", "https://git.example/repo", "main",
-                "SSH_PASSWORD", "<secret>bootstrap-token</secret>"))))
+                "PRIVATE_KEY", "<secret>bootstrap-token</secret>"))))
                 .isInstanceOf(IOException.class).hasMessageContaining("credential kind");
     }
 
@@ -153,14 +165,14 @@ class GitProxyXmlTest {
             "<secret>bootstrap-token</secret><username>operator</username><knownHosts>file:/tmp/hosts</knownHosts>"})
     void rejectsIncompleteOrInconsistentBasicAuth(String auth) {
         assertThatThrownBy(() -> read(document(proxy("configuration", "https://git.example/repo", "main",
-                "HTTP_BASIC", auth)))).isInstanceOf(IOException.class);
+                "PASSWORD", auth)))).isInstanceOf(IOException.class);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "UpperCase", "bootstrap/proxy-internal", "../configuration"})
     void requiresACanonicalPublicAlias(String alias) {
         assertThatThrownBy(() -> read(document(proxy(alias, "https://git.example/repo", "main",
-                "HTTP_BEARER", "<secret>bootstrap-token</secret>"))))
+                "TOKEN", "<secret>bootstrap-token</secret>"))))
                 .isInstanceOf(IOException.class).hasMessageContaining("alias");
     }
 

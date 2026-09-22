@@ -80,7 +80,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                 repositoriesRoot, "git", hostKey, userKey.getPublic(), TestPorts.nextBatch().ssh())) {
             Path knownHosts = tempDir.resolve("known_hosts");
             Files.writeString(knownHosts, gitServer.knownHostsLine() + "\n");
-            var authentication = Map.of("credentialKind", "ssh-private-key",
+            var authentication = Map.of("credentialKind", "private-key",
                     "credential", privateKey.toRealPath().toUri().toString(),
                     "knownHosts", knownHosts.toRealPath().toUri().toString());
             for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getAccessControl(),

@@ -1,8 +1,10 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,8 +18,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -49,20 +54,19 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                             .name("orion-git-http-timeout-", 0).factory());
 
     private final HttpClient client;
-    private final GitHttpRequestConfigurer requestConfigurer;
+    private final GitCredentials credentials;
     private final boolean allowPlainHttp;
 
     public GitSmartHttpClientTransport() {
-        this(null, GitHttpRequestConfigurer.none(), false);
+        this(null, GitCredentials.none(), false);
     }
 
     public GitSmartHttpClientTransport(
             HttpClient client,
-            GitHttpRequestConfigurer requestConfigurer,
+            GitCredentials credentials,
             boolean allowPlainHttp) {
         this.client = client;
-        this.requestConfigurer = Objects.requireNonNull(
-                requestConfigurer, "requestConfigurer");
+        this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.allowPlainHttp = allowPlainHttp;
     }
 
@@ -74,6 +78,15 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         Objects.requireNonNull(service, "service");
         Objects.requireNonNull(options, "options");
         URI repositoryUri = validate(remoteUri);
+        credentials.requireKind(GitCredentialKind.NONE, GitCredentialKind.PASSWORD,
+                GitCredentialKind.TOKEN);
+        String username = credentials.username();
+        if (credentials.kind() == GitCredentialKind.PASSWORD
+                && (username.isBlank() || username.indexOf(':') >= 0
+                || username.indexOf('\n') >= 0 || username.indexOf('\r') >= 0)) {
+            throw failure(GitClientFailure.Kind.AUTHENTICATION_FAILED, false,
+                    "Invalid Basic authentication username", null);
+        }
         requireConnectTimeout(options);
         HttpClient httpClient = client == null ? defaultClient(
                 options.connectTimeout()) : client;
@@ -114,6 +127,48 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         }
     }
 
+    private void configureAuthentication(HttpRequest.Builder request) throws GitClientTransportException {
+        char[] secret = credentials.copyCharacters();
+        try {
+            switch (credentials.kind()) {
+                case NONE -> { }
+                case TOKEN -> request.header("Authorization", "Bearer " + new String(secret));
+                case PASSWORD -> {
+                    String username = credentials.username();
+                    char[] combined = new char[username.length() + secret.length + 1];
+                    try {
+                        username.getChars(0, username.length(), combined, 0);
+                        combined[username.length()] = ':';
+                        System.arraycopy(secret, 0, combined, username.length() + 1, secret.length);
+                        request.header("Authorization", basicAuthorization(StandardCharsets.UTF_8.encode(
+                                CharBuffer.wrap(combined))));
+                    } finally {
+                        Arrays.fill(combined, '\0');
+                    }
+                }
+                default -> throw new IllegalStateException("Unsupported HTTP credential kind");
+            }
+        } catch (IllegalArgumentException error) {
+            throw failure(GitClientFailure.Kind.AUTHENTICATION_FAILED, false, "Invalid HTTP credentials", null);
+        } finally {
+            Arrays.fill(secret, '\0');
+        }
+    }
+
+    @TestOnly
+    static String basicAuthorization(ByteBuffer utf8) {
+        ByteBuffer encoded = null;
+        try {
+            encoded = Base64.getEncoder().encode(utf8);
+            return "Basic " + new String(encoded.array(), StandardCharsets.US_ASCII);
+        } finally {
+            Arrays.fill(utf8.array(), (byte) 0);
+            if (encoded != null) {
+                Arrays.fill(encoded.array(), (byte) 0);
+            }
+        }
+    }
+
     private byte[] discover(
             HttpClient httpClient,
             GitClientService service,
@@ -126,7 +181,7 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                 .header("Accept", advertisementType(service))
                 .header("Git-Protocol", "version=1")
                 .GET();
-        requestConfigurer.configure(builder);
+        configureAuthentication(builder);
         HttpResponse<Flow.Publisher<List<ByteBuffer>>> response = awaitResponse(
                 httpClient.sendAsync(
                         builder.build(), HttpResponse.BodyHandlers.ofPublisher()),
@@ -156,7 +211,7 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                 .header("Content-Type", requestType(service))
                 .header("Git-Protocol", "version=1")
                 .POST(HttpRequest.BodyPublishers.ofInputStream(() -> requestInput));
-        requestConfigurer.configure(builder);
+        configureAuthentication(builder);
         return GitTimedTransportSession.wrap(new SmartHttpSession(
                 advertisement,
                 requestInput,
@@ -169,10 +224,8 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
 
     private URI validate(URI remoteUri) throws GitClientTransportException {
         Objects.requireNonNull(remoteUri, "remoteUri");
-        String scheme = remoteUri.getScheme();
-        boolean https = "https".equalsIgnoreCase(scheme);
-        boolean http = "http".equalsIgnoreCase(scheme);
-        if (!https && !(http && allowPlainHttp)) {
+        GitTransportScheme scheme = GitTransportScheme.from(remoteUri);
+        if (scheme != GitTransportScheme.HTTPS && !(scheme == GitTransportScheme.HTTP && allowPlainHttp)) {
             throw failure(
                     GitClientFailure.Kind.PROTOCOL_UNSUPPORTED,
                     false,

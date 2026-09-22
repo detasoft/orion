@@ -12,6 +12,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -327,7 +328,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (!aliases.add(alias)) {
                 throw new IllegalArgumentException("Bootstrap proxy alias is already occupied");
             }
-            Optional<String> secret = location.credentialKind() == GitProxyBinding.CredentialKind.NONE
+            Optional<String> secret = location.credentialKind() == GitCredentialKind.NONE
                     ? Optional.empty() : Optional.of(alias.value() + "-credential");
             if (secret.isPresent() && !secretIds.add(secret.orElseThrow())) {
                 throw new IllegalArgumentException("Bootstrap proxy secret identity is already occupied");

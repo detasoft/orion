@@ -254,7 +254,7 @@ class OrionAdminProxyMutationTest {
             if (upstream != null) {
                 command.put("upstream", upstream);
                 command.put("ref", "main");
-                command.put("credentialKind", "HTTP_BEARER");
+                command.put("credentialKind", "TOKEN");
             }
             if (credential != null) command.put("credential", credential);
             return command;

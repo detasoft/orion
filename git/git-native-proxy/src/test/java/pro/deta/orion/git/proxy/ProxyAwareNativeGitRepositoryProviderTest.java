@@ -21,6 +21,7 @@ import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -725,7 +726,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         source.setRef("refs/heads/main");
         source.setPath(path);
         source.setAuth(Map.of(
-                "credentialKind", "http-bearer",
+                "credentialKind", "token",
                 "credential", credentialReference));
         return source;
     }
@@ -739,7 +740,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     private static OrionDocument proxyDocument(String alias, String upstream) {
         var binding = new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitProxyBinding.CredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
+                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
                 List.of(), List.of(binding)), List.of());
     }

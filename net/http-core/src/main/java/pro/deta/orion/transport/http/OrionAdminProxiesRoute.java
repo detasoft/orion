@@ -17,6 +17,7 @@ import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
 import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -152,9 +153,9 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         }
         URI upstream = request.upstream() == null ? existing.upstream() : URI.create(request.upstream());
         String ref = request.ref() == null ? existing.ref() : request.ref();
-        GitProxyBinding.CredentialKind kind = request.credentialKind() == null
-                ? (existing == null ? GitProxyBinding.CredentialKind.NONE : existing.credentialKind())
-                : GitProxyBinding.CredentialKind.valueOf(request.credentialKind());
+        GitCredentialKind kind = request.credentialKind() == null
+                ? (existing == null ? GitCredentialKind.NONE : existing.credentialKind())
+                : GitCredentialKind.valueOf(request.credentialKind());
         Optional<String> secret = existing == null ? Optional.empty() : existing.secret();
         boolean newSecret = secret.isEmpty();
         if (replace && secret.isPresent()) {
@@ -162,7 +163,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 if (!binding.alias().equals(alias) && binding.secret().equals(secret)) newSecret = true;
             }
         }
-        if (kind == GitProxyBinding.CredentialKind.NONE) {
+        if (kind == GitCredentialKind.NONE) {
             if (request.credential() != null) throw new Rejected("credential-not-supported");
             secret = Optional.empty();
         } else if (newSecret) {
@@ -171,7 +172,9 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         }
         Optional<String> username = request.username() == null
                 ? (existing == null ? Optional.empty() : existing.username()) : Optional.of(request.username());
-        if (kind != GitProxyBinding.CredentialKind.HTTP_BASIC) username = Optional.empty();
+        if (kind != GitCredentialKind.PASSWORD || "ssh".equalsIgnoreCase(upstream.getScheme())) {
+            username = Optional.empty();
+        }
         Optional<URI> knownHosts = request.knownHosts() == null
                 ? (existing == null ? Optional.empty() : existing.knownHosts())
                 : request.knownHosts().isEmpty() ? Optional.empty() : Optional.of(URI.create(request.knownHosts()));

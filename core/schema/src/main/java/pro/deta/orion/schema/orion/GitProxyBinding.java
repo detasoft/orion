@@ -12,7 +12,7 @@ public record GitProxyBinding(
         RemoteAlias alias,
         URI upstream,
         String ref,
-        CredentialKind credentialKind,
+        GitCredentialKind credentialKind,
         Optional<String> secret,
         Optional<String> username,
         Optional<URI> knownHosts) {
@@ -32,10 +32,10 @@ public record GitProxyBinding(
         username = Objects.requireNonNull(username, "proxy username");
         knownHosts = Objects.requireNonNull(knownHosts, "proxy known-hosts file");
         credentialKind.requireTransport(upstream.getScheme());
-        if ((credentialKind == CredentialKind.NONE) != secret.isEmpty()) {
+        if ((credentialKind == GitCredentialKind.NONE) != secret.isEmpty()) {
             throw new IllegalArgumentException("Proxy secret does not match credential kind");
         }
-        if (credentialKind == CredentialKind.HTTP_BASIC) {
+        if (credentialKind == GitCredentialKind.PASSWORD && !"ssh".equals(upstream.getScheme())) {
             if (username.isEmpty() || username.orElseThrow().isBlank()
                     || username.orElseThrow().indexOf(':') >= 0
                     || username.orElseThrow().indexOf('\n') >= 0
@@ -116,21 +116,5 @@ public record GitProxyBinding(
             }
         }
         return ref;
-    }
-
-    public enum CredentialKind {
-        NONE, HTTP_BEARER, HTTP_BASIC, SSH_PASSWORD, SSH_PRIVATE_KEY;
-
-        public void requireTransport(String scheme) {
-            boolean matches = switch (scheme) {
-                case "file" -> this == NONE;
-                case "http", "https" -> this == HTTP_BEARER || this == HTTP_BASIC;
-                case "ssh" -> this == SSH_PASSWORD || this == SSH_PRIVATE_KEY;
-                default -> false;
-            };
-            if (!matches) {
-                throw new IllegalArgumentException("Remote Git credential kind does not match transport");
-            }
-        }
     }
 }

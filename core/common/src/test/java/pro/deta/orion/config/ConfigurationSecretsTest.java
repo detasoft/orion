@@ -21,6 +21,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -152,7 +153,7 @@ class ConfigurationSecretsTest {
     void preservesProxyIdentityWhenCreatingAndRotatingSystemSecrets() {
         current.set(secrets.createSystem(current.get(), "bootstrap-token", "old-token".toCharArray()));
         GitProxyBinding proxy = new GitProxyBinding(new RemoteAlias("configuration"),
-                URI.create("https://git.example/config"), "main", GitProxyBinding.CredentialKind.HTTP_BEARER,
+                URI.create("https://git.example/config"), "main", GitCredentialKind.TOKEN,
                 Optional.of("bootstrap-token"), Optional.empty(), Optional.empty());
         OrionDocument before = current.get();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(before.system().accessControl(),

@@ -1,8 +1,8 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -20,7 +20,7 @@ import java.util.Set;
 record BootstrapGitLocation(
         URI remoteUri,
         String refName,
-        CredentialKind credentialKind,
+        GitCredentialKind credentialKind,
         String credentialReference,
         String credentialUsername,
         Path knownHosts,
@@ -83,14 +83,14 @@ record BootstrapGitLocation(
         }
         Map<String, String> auth = Objects.requireNonNull(config.getAuth(), "auth");
         boolean fileTransport = "git+file".equals(scheme);
-        CredentialKind credentialKind = parseCredentialKind(
+        GitCredentialKind credentialKind = parseCredentialKind(
                 auth.get("credentialKind"),
                 fileTransport);
         credentialKind.requireTransport(scheme.substring(PREFIX.length()));
-        String credential = credentialKind == CredentialKind.NONE
+        String credential = credentialKind == GitCredentialKind.NONE
                 ? absentCredential(auth.get("credential"))
                 : externalReference(auth.get("credential"), "Remote Git credential");
-        String credentialUsername = credentialUsername(auth, credentialKind);
+        String credentialUsername = credentialUsername(auth, credentialKind, scheme);
         String selectedRef = firstNonBlank(
                 parameters.get("ref"),
                 parameters.get("branch"),
@@ -125,15 +125,15 @@ record BootstrapGitLocation(
         return GitProxyBinding.canonicalUpstream(remote).toASCIIString();
     }
 
-    private static CredentialKind parseCredentialKind(String value, boolean fileTransport) {
+    private static GitCredentialKind parseCredentialKind(String value, boolean fileTransport) {
         if (value == null || value.isBlank()) {
             if (fileTransport) {
-                return CredentialKind.NONE;
+                return GitCredentialKind.NONE;
             }
             throw new IllegalArgumentException("Remote Git credential kind must be configured");
         }
         try {
-            return CredentialKind.valueOf(value.replace('-', '_').toUpperCase(Locale.ROOT));
+            return GitCredentialKind.valueOf(value.replace('-', '_').toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException error) {
             throw new IllegalArgumentException("Unsupported remote Git credential kind");
         }
@@ -148,9 +148,10 @@ record BootstrapGitLocation(
 
     private static String credentialUsername(
             Map<String, String> auth,
-            CredentialKind credentialKind) {
+            GitCredentialKind credentialKind,
+            String scheme) {
         String username = auth.get("credentialUsername");
-        if (credentialKind == CredentialKind.HTTP_BASIC) {
+        if (credentialKind == GitCredentialKind.PASSWORD && !"git+ssh".equals(scheme)) {
             if (username == null || username.isBlank()) {
                 throw new IllegalArgumentException("Remote Git basic credential username must be configured");
             }

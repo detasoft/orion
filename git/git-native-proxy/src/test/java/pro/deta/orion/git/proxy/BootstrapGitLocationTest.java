@@ -2,7 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.net.URI;
 import java.util.Map;
@@ -40,7 +40,7 @@ class BootstrapGitLocationTest {
         BootstrapSourceConfig config = config(
                 "git+https://example.test/team/orion.git?ref=configuration",
                 Map.of(
-                        "credentialKind", "http-bearer",
+                        "credentialKind", "token",
                         "credential", "env:ORION_GIT_CREDENTIAL"));
 
         BootstrapGitLocation location = BootstrapGitLocation.parse(config);
@@ -49,7 +49,7 @@ class BootstrapGitLocationTest {
                 URI.create("https://example.test/team/orion.git"));
         assertThat(location.refName()).isEqualTo("refs/heads/configuration");
         assertThat(location.credentialReference()).isEqualTo("env:ORION_GIT_CREDENTIAL");
-        assertThat(location.credentialKind()).isEqualTo(CredentialKind.HTTP_BEARER);
+        assertThat(location.credentialKind()).isEqualTo(GitCredentialKind.TOKEN);
         assertThat(location.safeDescription()).isEqualTo(
                 "git+https://example.test/team/orion.git");
     }
@@ -70,7 +70,7 @@ class BootstrapGitLocationTest {
                 "git+file:///srv/git/config.git",
                 fileAuth()));
 
-        assertThat(location.credentialKind()).isEqualTo(CredentialKind.NONE);
+        assertThat(location.credentialKind()).isEqualTo(GitCredentialKind.NONE);
         assertThat(location.credentialReference()).isNull();
     }
 
@@ -118,10 +118,10 @@ class BootstrapGitLocationTest {
                 validAuth()));
         BootstrapGitLocation sshUser = BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
-                auth("ssh-password", "env:SSH_PASSWORD")));
+                auth("password", "env:SSH_PASSWORD")));
         BootstrapGitLocation anotherSshUser = BootstrapGitLocation.parse(config(
                 "git+ssh://deploy@example.test/repo.git",
-                auth("ssh-password", "env:SSH_PASSWORD")));
+                auth("password", "env:SSH_PASSWORD")));
         BootstrapGitLocation nonDefaultPort = BootstrapGitLocation.parse(config(
                 "git+https://example.test:8443/repo.git",
                 validAuth()));
@@ -157,33 +157,33 @@ class BootstrapGitLocationTest {
     void parsesSupportedNetworkCredentialKinds() {
         assertThat(BootstrapGitLocation.parse(config(
                 "git+http://example.test/repo.git",
-                auth("http-basic", "env:HTTP_PASSWORD", "credentialUsername", "orion")))
+                auth("password", "env:HTTP_PASSWORD", "credentialUsername", "orion")))
                 .credentialUsername()).isEqualTo("orion");
         assertThat(BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
-                auth("ssh-password", "env:SSH_PASSWORD"))).credentialKind())
-                .isEqualTo(CredentialKind.SSH_PASSWORD);
+                auth("password", "env:SSH_PASSWORD"))).credentialKind())
+                .isEqualTo(GitCredentialKind.PASSWORD);
         assertThat(BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
-                auth("ssh-private-key", "file:/run/secrets/git-key"))).credentialKind())
-                .isEqualTo(CredentialKind.SSH_PRIVATE_KEY);
+                auth("private-key", "file:/run/secrets/git-key"))).credentialKind())
+                .isEqualTo(GitCredentialKind.PRIVATE_KEY);
     }
 
     @Test
     void rejectsCredentialKindsThatDoNotMatchTransport() {
         assertThatThrownBy(() -> BootstrapGitLocation.parse(config(
                 "git+https://example.test/repo.git",
-                auth("ssh-password", "env:SSH_PASSWORD"))))
+                auth("private-key", "env:SSH_KEY"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Remote Git credential kind does not match transport");
         assertThatThrownBy(() -> BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
-                auth("http-bearer", "env:HTTP_TOKEN"))))
+                auth("token", "env:HTTP_TOKEN"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Remote Git credential kind does not match transport");
         assertThatThrownBy(() -> BootstrapGitLocation.parse(config(
                 "git+file:///srv/git/config.git",
-                auth("http-bearer", "env:HTTP_TOKEN"))))
+                auth("token", "env:HTTP_TOKEN"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Remote Git credential kind does not match transport");
     }
@@ -239,7 +239,7 @@ class BootstrapGitLocationTest {
         assertThatThrownBy(() -> BootstrapGitLocation.parse(config(
                 "git+https://example.test/repo.git",
                 Map.of(
-                        "credentialKind", "http-bearer",
+                        "credentialKind", "token",
                         "credential", "plain-secret"))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Remote Git credential must use env: or file:");
@@ -257,7 +257,7 @@ class BootstrapGitLocationTest {
     }
 
     private static Map<String, String> validAuth() {
-        return auth("http-bearer", "env:GIT_TOKEN");
+        return auth("token", "env:GIT_TOKEN");
     }
 
     private static Map<String, String> fileAuth() {

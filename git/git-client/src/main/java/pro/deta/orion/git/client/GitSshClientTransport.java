@@ -1,6 +1,10 @@
 package pro.deta.orion.git.client;
 
 import org.apache.sshd.client.SshClient;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.future.ConnectFuture;
 import org.apache.sshd.client.future.OpenFuture;
@@ -11,32 +15,40 @@ import org.apache.sshd.client.session.ClientSession;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 
+import java.io.CharArrayReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.nio.file.Path;
 import java.security.PublicKey;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.RSAPublicKeySpec;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Blocking Git transport over an externally configured Apache MINA SSH client.
- * The caller owns the client lifecycle and its server host-key verification policy.
+ * Blocking Git transport over Apache MINA SSH. Injected clients remain caller-owned;
+ * strict known-host clients are created per exchange and closed with their transport session.
  */
-public final class GitSshClientTransport implements GitClientTransport, AutoCloseable {
+public final class GitSshClientTransport implements GitClientTransport {
     private static final int DEFAULT_PORT = 22;
 
     private final SshClient client;
-    private final GitSshSessionAuthenticator authenticator;
+    private final GitCredentials credentials;
     private final Path knownHosts;
 
     public GitSshClientTransport(
             SshClient client,
-            GitSshSessionAuthenticator authenticator) {
-        this(Objects.requireNonNull(client, "client"), authenticator, null);
+            GitCredentials credentials) {
+        this(Objects.requireNonNull(client, "client"), credentials, null);
     }
 
     /**
@@ -44,17 +56,17 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
      */
     public static GitSshClientTransport strictKnownHosts(
             Path knownHosts,
-            GitSshSessionAuthenticator authenticator) {
+            GitCredentials credentials) {
         Objects.requireNonNull(knownHosts, "knownHosts");
-        return new GitSshClientTransport(null, authenticator, knownHosts);
+        return new GitSshClientTransport(null, credentials, knownHosts);
     }
 
     private GitSshClientTransport(
             SshClient client,
-            GitSshSessionAuthenticator authenticator,
+            GitCredentials credentials,
             Path knownHosts) {
         this.client = client;
-        this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
+        this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.knownHosts = knownHosts;
     }
 
@@ -66,6 +78,8 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
         Objects.requireNonNull(service, "service");
         Objects.requireNonNull(options, "options");
         Remote remote = validate(remoteUri);
+        credentials.requireKind(GitCredentialKind.NONE, GitCredentialKind.PASSWORD,
+                GitCredentialKind.PRIVATE_KEY);
         Attempt attempt = newAttempt();
         ClientSession session = null;
         ClientChannel channel = null;
@@ -75,8 +89,8 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
             await(connect, options.connectTimeout());
             session = connect.verify().getSession();
             try {
-                authenticator.authenticate(session, options.connectTimeout());
-            } catch (GitSshAuthenticationTimeoutException error) {
+                authenticate(session, options.connectTimeout());
+            } catch (AuthenticationTimeoutException error) {
                 throw new SshTimeoutException(error);
             } catch (IOException error) {
                 if (attempt.verifier().wasRejected()) {
@@ -131,6 +145,50 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
         }
     }
 
+    private void authenticate(ClientSession session, Duration timeout) throws IOException {
+        char[] secret = credentials.copyCharacters();
+        try {
+            switch (credentials.kind()) {
+                case NONE -> { }
+                case PASSWORD -> session.addPasswordIdentity(new String(secret));
+                case PRIVATE_KEY -> session.addPublicKeyIdentity(parseKeyPair(secret));
+                default -> throw new IllegalStateException("Unsupported SSH credential kind");
+            }
+        } finally {
+            Arrays.fill(secret, '\0');
+        }
+        var authentication = session.auth();
+        if (!authentication.await(timeout)) {
+            authentication.cancel();
+            throw new AuthenticationTimeoutException();
+        }
+        authentication.verify();
+    }
+
+    private static KeyPair parseKeyPair(char[] secret) throws IOException {
+        try (PEMParser parser = new PEMParser(new CharArrayReader(secret))) {
+            Object parsed = parser.readObject();
+            JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+            if (parsed instanceof PEMKeyPair keyPair) {
+                return converter.getKeyPair(keyPair);
+            }
+            if (parsed instanceof PrivateKeyInfo keyInfo) {
+                PrivateKey privateKey = converter.getPrivateKey(keyInfo);
+                if (privateKey instanceof RSAPrivateCrtKey rsa) {
+                    RSAPublicKeySpec publicSpec = new RSAPublicKeySpec(
+                            rsa.getModulus(), rsa.getPublicExponent());
+                    return new KeyPair(KeyFactory.getInstance("RSA").generatePublic(publicSpec), privateKey);
+                }
+            }
+        } catch (Exception error) {
+            throw new IOException("Invalid SSH private key");
+        }
+        throw new IOException("Unsupported SSH private key");
+    }
+
+    private static final class AuthenticationTimeoutException extends IOException {
+    }
+
     private Attempt newAttempt() {
         if (knownHosts == null) {
             return new Attempt(client, TrackingVerifier.none(), null);
@@ -168,7 +226,7 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
     private static Remote validate(URI remoteUri)
             throws GitClientTransportException {
         Objects.requireNonNull(remoteUri, "remoteUri");
-        if (!"ssh".equalsIgnoreCase(remoteUri.getScheme())) {
+        if (GitTransportScheme.from(remoteUri) != GitTransportScheme.SSH) {
             throw unsupported("Git SSH transport requires an ssh URI");
         }
         if (remoteUri.getHost() == null || remoteUri.getHost().isBlank()) {
@@ -228,10 +286,6 @@ public final class GitSshClientTransport implements GitClientTransport, AutoClos
             SshClient client,
             TrackingVerifier verifier,
             SshClient ownedClient) {
-    }
-
-    @Override
-    public void close() {
     }
 
     private static final class TrackingVerifier implements ServerKeyVerifier {

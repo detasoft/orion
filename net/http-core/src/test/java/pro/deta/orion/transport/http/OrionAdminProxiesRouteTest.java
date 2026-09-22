@@ -13,6 +13,7 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -42,7 +43,7 @@ class OrionAdminProxiesRouteTest {
     void returnsOnlySafeSystemAliasFieldsThroughTheAuthorizedServletWithoutOpeningUpstreams() throws Exception {
         var binding = new GitProxyBinding(new RemoteAlias("configuration"),
                 URI.create("ssh://private-user@git.example:2222/config.git"), "main",
-                GitProxyBinding.CredentialKind.SSH_PRIVATE_KEY, Optional.of("private-key-id"),
+                GitCredentialKind.PRIVATE_KEY, Optional.of("private-key-id"),
                 Optional.empty(), Optional.of(URI.create("file:///private/known_hosts")));
         desired.publish(document(List.of(binding)), Optional.of("configuration-revision"));
 
@@ -67,7 +68,7 @@ class OrionAdminProxiesRouteTest {
         assertThat(mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString())
                 .get("aliases").isEmpty()).isTrue();
         var binding = new GitProxyBinding(new RemoteAlias("archive"), URI.create("file:///upstream.git"), "main",
-                GitProxyBinding.CredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
+                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
         desired.publish(document(List.of(binding)), Optional.of("new-revision"));
 
         JsonNode body = mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString());

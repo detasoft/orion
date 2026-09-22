@@ -12,6 +12,12 @@ const saving = ref(false)
 const message = ref('')
 const editor = ref(null)
 const busy = computed(() => loading.value || saving.value)
+const needsHttpUsername = computed(() => {
+  const draft = editor.value
+  if (draft?.credentialKind !== 'PASSWORD') return false
+  const upstream = draft.upstream || aliases.value.find(alias => alias.alias === draft.alias)?.upstream || ''
+  return /^https?:/i.test(upstream)
+})
 let attempt = 0
 
 const statusLabels = {
@@ -53,7 +59,7 @@ function openEditor(action, alias) {
   message.value = ''
   editor.value = {
     action, alias: alias?.alias ?? '', upstream: '', ref: alias?.ref ?? 'main',
-    credentialKind: action === 'create' ? 'HTTP_BEARER' : '',
+    credentialKind: action === 'create' ? 'TOKEN' : '',
     username: '', knownHosts: '', credential: '',
   }
 }
@@ -117,7 +123,7 @@ function submit() {
   if (draft.knownHosts) command.knownHosts = draft.knownHosts
   if (draft.action !== 'update') {
     if (draft.credentialKind) command.credentialKind = draft.credentialKind
-    if (draft.credentialKind === 'HTTP_BASIC') command.username = draft.username
+    if (needsHttpUsername.value) command.username = draft.username
     if (draft.credentialKind !== 'NONE') command.credential = draft.credential
   }
   draft.credential = ''
@@ -168,18 +174,17 @@ onBeforeUnmount(() => { attempt += 1; closeEditor() })
           <label>Authentication
             <select v-model="editor.credentialKind" name="credentialKind">
               <option v-if="editor.action !== 'create'" value="">Keep current method</option>
-              <option value="HTTP_BEARER">HTTP bearer token</option>
-              <option value="HTTP_BASIC">HTTP username and password</option>
-              <option value="SSH_PRIVATE_KEY">SSH private key</option>
-              <option value="SSH_PASSWORD">SSH password</option>
+              <option value="TOKEN">HTTP bearer token</option>
+              <option value="PASSWORD">Password (HTTP Basic or SSH)</option>
+              <option value="PRIVATE_KEY">SSH private key</option>
               <option v-if="editor.action === 'create'" value="NONE">None (local file upstream)</option>
             </select>
           </label>
-          <label v-if="editor.credentialKind === 'HTTP_BASIC'">HTTP username
+          <label v-if="needsHttpUsername">HTTP username
             <input v-model="editor.username" name="username" required autocomplete="off" />
           </label>
           <label v-if="editor.credentialKind !== 'NONE'">New credential
-            <textarea v-if="editor.credentialKind === 'SSH_PRIVATE_KEY'" v-model="editor.credential"
+            <textarea v-if="editor.credentialKind === 'PRIVATE_KEY'" v-model="editor.credential"
               name="credential" required autocomplete="off" spellcheck="false" rows="4" />
             <input v-else v-model="editor.credential" name="credential" type="password"
               required autocomplete="new-password" />

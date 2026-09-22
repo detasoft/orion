@@ -7,7 +7,6 @@ import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientResult;
-import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
@@ -16,15 +15,12 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,19 +31,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BootstrapGitTransportFactoryTest {
     @Test
-    void clearsBasicAuthenticationBytesAfterEncodingTheRemainingBuffer() {
-        byte[] bytes = "skipuser:password".getBytes(StandardCharsets.UTF_8);
-        ByteBuffer credentials = ByteBuffer.wrap(bytes);
-        credentials.position(4);
-
-        assertThat(BootstrapGitTransportFactory.basicAuthorization(credentials))
-                .isEqualTo("Basic dXNlcjpwYXNzd29yZA==");
-        assertThat(bytes).containsOnly((byte) 0);
-    }
-
-    @Test
     void sendsUtf8BasicCredentialsWithoutChangingTheirContent() throws Exception {
-        assertHttpAuthorization("http-basic", Map.of("credentialUsername", "user"), "päss🔑",
+        assertHttpAuthorization("password", Map.of("credentialUsername", "user"), "päss🔑",
                 "Basic " + Base64.getEncoder().encodeToString("user:päss🔑".getBytes(StandardCharsets.UTF_8)));
     }
 
@@ -73,7 +58,7 @@ class BootstrapGitTransportFactoryTest {
         try {
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/repository.git");
             BootstrapGitLocation location = httpLocation(
-                    uri, "http-basic", Map.of("credentialUsername", "orion"));
+                    uri, "password", Map.of("credentialUsername", "orion"));
             BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
                     new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", "password")));
             AtomicReference<GitClientTransport> retained = new AtomicReference<>();
@@ -105,7 +90,7 @@ class BootstrapGitTransportFactoryTest {
     @Test
     void sendsBearerCredentialOnSmartHttpDiscovery() throws Exception {
         assertHttpAuthorization(
-                "http-bearer",
+                "token",
                 Map.of(),
                 "token-value",
                 "Bearer token-value");
@@ -114,41 +99,10 @@ class BootstrapGitTransportFactoryTest {
     @Test
     void sendsBasicCredentialOnSmartHttpDiscovery() throws Exception {
         assertHttpAuthorization(
-                "http-basic",
+                "password",
                 Map.of("credentialUsername", "orion"),
                 "password-value",
                 "Basic b3Jpb246cGFzc3dvcmQtdmFsdWU=");
-    }
-
-    @Test
-    void createsPasswordAndPrivateKeySshTransports(@TempDir Path temporaryDirectory)
-            throws Exception {
-        Path secureDirectory = temporaryDirectory.toRealPath();
-        Path knownHosts = secureDirectory.resolve("known_hosts");
-        Files.writeString(knownHosts, "");
-        if (Files.getFileStore(secureDirectory).supportsFileAttributeView("posix")) {
-            Files.setPosixFilePermissions(
-                    secureDirectory,
-                    PosixFilePermissions.fromString("rwx------"));
-            Files.setPosixFilePermissions(
-                    knownHosts,
-                    PosixFilePermissions.fromString("rw-r--r--"));
-        }
-        Map<String, String> environment = Map.of(
-                "SSH_PASSWORD", "password-value",
-                "SSH_PRIVATE_KEY", privateKey());
-        BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
-                new BootstrapSecretResolver(environment));
-
-        Class<?> passwordTransport = factory.withTransport(
-                sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
-                (selected, transport) -> transport.getClass());
-        Class<?> privateKeyTransport = factory.withTransport(
-                sshLocation("ssh-private-key", "env:SSH_PRIVATE_KEY", knownHosts),
-                (selected, transport) -> transport.getClass());
-
-        assertThat(passwordTransport).isEqualTo(GitSshClientTransport.class);
-        assertThat(privateKeyTransport).isEqualTo(GitSshClientTransport.class);
     }
 
     @Test
@@ -161,7 +115,7 @@ class BootstrapGitTransportFactoryTest {
                 new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")));
 
         assertThatThrownBy(() -> factory.withTransport(
-                sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
+                sshLocation("password", "env:SSH_PASSWORD", knownHosts),
                 (selected, transport) -> transport.getClass()))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
@@ -183,7 +137,7 @@ class BootstrapGitTransportFactoryTest {
                 new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")));
 
         assertThatThrownBy(() -> factory.withTransport(
-                sshLocation("ssh-password", "env:SSH_PASSWORD", knownHosts),
+                sshLocation("password", "env:SSH_PASSWORD", knownHosts),
                 (selected, transport) -> transport.getClass()))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
@@ -259,12 +213,4 @@ class BootstrapGitTransportFactoryTest {
         return BootstrapGitLocation.parse(config);
     }
 
-    private static String privateKey() throws Exception {
-        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-        generator.initialize(2048);
-        byte[] encoded = generator.generateKeyPair().getPrivate().getEncoded();
-        return "-----BEGIN PRIVATE KEY-----\n"
-                + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(encoded)
-                + "\n-----END PRIVATE KEY-----\n";
-    }
 }

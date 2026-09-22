@@ -20,6 +20,7 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -70,7 +71,7 @@ class PersistentProxyActivationTest {
             OrionDocument changed = fixture.secrets.createSystem(fixture.current.get(), "basic", "password".toCharArray());
             GitProxyBinding previous = changed.system().proxies().getFirst();
             GitProxyBinding basic = new GitProxyBinding(previous.alias(), previous.upstream(), previous.ref(),
-                    GitProxyBinding.CredentialKind.HTTP_BASIC, Optional.of("basic"), Optional.of("user"),
+                    GitCredentialKind.PASSWORD, Optional.of("basic"), Optional.of("user"),
                     Optional.empty());
             fixture.current.set(withProxies(changed, List.of(basic)));
 
@@ -242,7 +243,7 @@ class PersistentProxyActivationTest {
             source.setLocation("git+http://127.0.0.1:" + server.getAddress().getPort() + "/repository.git");
             source.setRef("main");
             source.setPath("orion.xml");
-            source.setAuth(Map.of("credentialKind", "http-bearer", "credential", "env:TOKEN"));
+            source.setAuth(Map.of("credentialKind", "token", "credential", "env:TOKEN"));
             return source;
         }
 

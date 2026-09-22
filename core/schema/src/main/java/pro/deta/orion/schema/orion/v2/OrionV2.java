@@ -67,7 +67,7 @@ public class OrionV2 {
         @XmlElement(required = true)
         private String ref;
         @XmlElement(required = true)
-        private pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind credentialKind;
+        private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
         private String secret;
         private String username;
         private String knownHosts;

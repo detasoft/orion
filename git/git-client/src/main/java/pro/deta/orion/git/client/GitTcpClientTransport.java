@@ -60,7 +60,7 @@ public final class GitTcpClientTransport implements GitClientTransport {
     private static Remote validate(URI remoteUri)
             throws GitClientTransportException {
         Objects.requireNonNull(remoteUri, "remoteUri");
-        if (!"git".equalsIgnoreCase(remoteUri.getScheme())) {
+        if (GitTransportScheme.from(remoteUri) != GitTransportScheme.GIT) {
             throw unsupported("Native Git TCP transport requires a git URI");
         }
         if (remoteUri.getHost() == null || remoteUri.getHost().isBlank()) {

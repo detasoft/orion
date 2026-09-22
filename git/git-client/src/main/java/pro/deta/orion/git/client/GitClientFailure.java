@@ -29,8 +29,6 @@ public record GitClientFailure(
         SIDE_BAND_ERROR,
         UNEXPECTED_END_OF_STREAM,
         PACK_SIZE_LIMIT_EXCEEDED,
-        REMOTE_REF_REJECTED,
-        REMOTE_UNPACK_FAILED,
         TIMEOUT,
         CANCELLED
     }

@@ -15,6 +15,19 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>schema</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.connectors</groupId>
+            <artifactId>bc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>common-runtime</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-parser</artifactId>
         </dependency>

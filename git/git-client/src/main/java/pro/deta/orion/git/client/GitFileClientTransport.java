@@ -44,7 +44,7 @@ public final class GitFileClientTransport implements GitClientTransport {
     private static Path validate(URI remoteUri) throws GitClientTransportException {
         Objects.requireNonNull(remoteUri, "remoteUri");
         try {
-            if (!"file".equalsIgnoreCase(remoteUri.getScheme())
+            if (GitTransportScheme.from(remoteUri) != GitTransportScheme.FILE
                     || remoteUri.getRawAuthority() != null
                     || remoteUri.getRawQuery() != null
                     || remoteUri.getRawFragment() != null) {

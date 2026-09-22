@@ -38,7 +38,7 @@ class GitClientsJGitDaemonTest {
             GitClientOptions options = GitClientOptions.defaults();
 
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
-            GitClientTransport transport = new GitTcpClientTransport();
+            GitClientTransport transport = new GitRemoteClientTransport(null, GitCredentials.none(), null, false);
             GitClientResult<GitUploadPackResult> fetch =
                     new GitUploadPackClient(transport).fetch(
                             repositoryUri,

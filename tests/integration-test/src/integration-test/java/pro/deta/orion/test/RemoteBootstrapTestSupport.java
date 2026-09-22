@@ -55,7 +55,7 @@ final class RemoteBootstrapTestSupport {
             credential = TestBearerTokens.issueRootToken(
                     upstream.accessControlService(), upstream.httpUrl("/api/admin/token"), 600);
             location = "git+" + upstream.httpUrl("/r/bootstrap-inputs.git");
-            authentication = Map.of("credentialKind", "http-bearer", "credential", credentialReference);
+            authentication = Map.of("credentialKind", "token", "credential", credentialReference);
         } else {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
@@ -73,7 +73,7 @@ final class RemoteBootstrapTestSupport {
             }
             Files.writeString(knownHosts, hosts);
             location = "git+ssh://root@localhost:" + port + "/bootstrap-inputs.git";
-            authentication = Map.of("credentialKind", "ssh-private-key", "credential", credentialReference,
+            authentication = Map.of("credentialKind", "private-key", "credential", credentialReference,
                     "knownHosts", knownHosts.toUri().toString());
         }
         Files.writeString(credentialFile, credential);

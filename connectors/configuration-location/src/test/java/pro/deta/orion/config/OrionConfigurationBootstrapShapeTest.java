@@ -55,7 +55,7 @@ class OrionConfigurationBootstrapShapeTest {
                     path: acl/orion.xml
                     createDefaultIfMissing: false
                     auth:
-                      credentialKind: http-bearer
+                      credentialKind: token
                       credential: env:ORION_CONFIG_TOKEN
                   keyMaterial:
                     location: git+ssh://material.example/orion.git
@@ -63,7 +63,7 @@ class OrionConfigurationBootstrapShapeTest {
                     path: stores/material.p12
                     password: env:ORION_KEY_MATERIAL_PASSWORD
                     auth:
-                      credentialKind: ssh-private-key
+                      credentialKind: private-key
                       credential: file:/run/secrets/orion-material-key
                     clusterId: orion-cluster
                     serverSigning:

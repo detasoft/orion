@@ -14,7 +14,6 @@ final class BootstrapGitProxyException extends IllegalStateException {
     BootstrapGitProxyException(String stage, GitClientFailure failure) {
         this(stage, switch (failure.kind()) {
             case AUTHENTICATION_FAILED -> SyncStatus.AUTHENTICATION_FAILED;
-            case REMOTE_REF_REJECTED -> SyncStatus.CONFLICT;
             default -> SyncStatus.UNAVAILABLE;
         });
     }

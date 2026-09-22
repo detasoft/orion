@@ -16,6 +16,7 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -131,7 +132,7 @@ class BootstrapProxyAdoptionTest {
 
     private static GitProxyBinding binding(String alias, String upstream, String secret) {
         return new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitProxyBinding.CredentialKind.HTTP_BEARER, Optional.of(secret), Optional.empty(), Optional.empty());
+                GitCredentialKind.TOKEN, Optional.of(secret), Optional.empty(), Optional.empty());
     }
 
     private static BootstrapSourceConfig source(String upstream) {
@@ -139,7 +140,7 @@ class BootstrapProxyAdoptionTest {
         source.setLocation("git+" + upstream);
         source.setPath("orion.xml");
         source.setRef("main");
-        source.setAuth(Map.of("credentialKind", "http-bearer", "credential", "env:TOKEN"));
+        source.setAuth(Map.of("credentialKind", "token", "credential", "env:TOKEN"));
         return source;
     }
 

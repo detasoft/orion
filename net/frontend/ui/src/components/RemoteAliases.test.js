@@ -46,7 +46,7 @@ describe('Remote aliases', () => {
     await flushPromises()
     expect(mutateRemoteAlias).toHaveBeenCalledWith({ action: 'create', scope: 'system',
       revision: 'read-revision', alias: 'backup', upstream: 'https://git.example/config.git',
-      ref: 'main', credentialKind: 'HTTP_BEARER', credential: 'private-credential' })
+      ref: 'main', credentialKind: 'TOKEN', credential: 'private-credential' })
     expect(wrapper.text()).toContain('Saved. Authentication failed')
     expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.html()).not.toContain('private-credential')
@@ -172,9 +172,9 @@ describe('Remote aliases', () => {
   })
 
   it.each([
-    ['HTTP_BASIC', 'http://git.example/repo.git', 'http-user', 'password'],
-    ['SSH_PRIVATE_KEY', 'ssh://git@git.example/repo.git', '', 'private-key\nsecond-line'],
-    ['SSH_PASSWORD', 'ssh://git@git.example/repo.git', '', 'password'],
+    ['PASSWORD', 'http://git.example/repo.git', 'http-user', 'password'],
+    ['PRIVATE_KEY', 'ssh://git@git.example/repo.git', '', 'private-key\nsecond-line'],
+    ['PASSWORD', 'ssh://git@git.example/repo.git', '', 'password'],
     ['NONE', 'file:///srv/git/repo.git', '', ''],
   ])('creates %s bindings using only the selected authentication fields', async (kind, upstream, username, secret) => {
     const wrapper = await ready()
@@ -202,13 +202,47 @@ describe('Remote aliases', () => {
     await button(wrapper, 'Add alias').trigger('click')
     await wrapper.get('[name="alias"]').setValue('backup')
     await wrapper.get('[name="upstream"]').setValue('https://git.example/repo.git')
-    await wrapper.get('[name="credentialKind"]').setValue('HTTP_BASIC')
+    await wrapper.get('[name="credentialKind"]').setValue('PASSWORD')
     await wrapper.get('[name="username"]').setValue('old-http-user')
-    await wrapper.get('[name="credentialKind"]').setValue('HTTP_BEARER')
+    await wrapper.get('[name="credentialKind"]').setValue('TOKEN')
     await wrapper.get('[name="credential"]').setValue('bearer-token')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mutateRemoteAlias.mock.lastCall[0]).not.toHaveProperty('username')
+    wrapper.unmount()
+  })
+
+  it('omits the HTTP username after switching a password binding to SSH', async () => {
+    const wrapper = await ready()
+    mutateRemoteAlias.mockResolvedValue({ status: 'saved', alias, revision: 'next' })
+    await button(wrapper, 'Add alias').trigger('click')
+    await wrapper.get('[name="alias"]').setValue('backup')
+    await wrapper.get('[name="upstream"]').setValue('https://git.example/repo.git')
+    await wrapper.get('[name="credentialKind"]').setValue('PASSWORD')
+    await wrapper.get('[name="username"]').setValue('old-http-user')
+    await wrapper.get('[name="upstream"]').setValue('ssh://git@git.example/repo.git')
+    expect(wrapper.find('[name="username"]').exists()).toBe(false)
+    await wrapper.get('[name="credential"]').setValue('password')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mutateRemoteAlias.mock.lastCall[0]).toMatchObject({ credentialKind: 'PASSWORD', credential: 'password' })
+    expect(mutateRemoteAlias.mock.lastCall[0]).not.toHaveProperty('username')
+    wrapper.unmount()
+  })
+
+  it('uses the existing upstream when replacing HTTP password credentials', async () => {
+    const wrapper = await ready()
+    mutateRemoteAlias.mockResolvedValue({ status: 'saved', alias, revision: 'next' })
+    await button(wrapper, 'Replace credential').trigger('click')
+    await wrapper.get('[name="credentialKind"]').setValue('PASSWORD')
+    await wrapper.get('[name="username"]').setValue('replacement-user')
+    await wrapper.get('[name="credential"]').setValue('replacement-password')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mutateRemoteAlias.mock.lastCall[0]).toMatchObject({
+      credentialKind: 'PASSWORD', username: 'replacement-user', credential: 'replacement-password',
+    })
+    expect(mutateRemoteAlias.mock.lastCall[0]).not.toHaveProperty('upstream')
     wrapper.unmount()
   })
 

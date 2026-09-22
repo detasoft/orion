@@ -200,7 +200,7 @@
     <xs:sequence>
       <xs:element name="upstream" type="xs:string"/>
       <xs:element name="ref" type="xs:string"/>
-      <xs:element name="credentialKind" type="credentialKind"/>
+      <xs:element name="credentialKind" type="gitCredentialKind"/>
       <xs:element name="secret" type="xs:string" minOccurs="0"/>
       <xs:element name="username" type="xs:string" minOccurs="0"/>
       <xs:element name="knownHosts" type="xs:string" minOccurs="0"/>
@@ -485,13 +485,12 @@
     </xs:restriction>
   </xs:simpleType>
 
-  <xs:simpleType name="credentialKind">
+  <xs:simpleType name="gitCredentialKind">
     <xs:restriction base="xs:string">
       <xs:enumeration value="NONE"/>
-      <xs:enumeration value="HTTP_BEARER"/>
-      <xs:enumeration value="HTTP_BASIC"/>
-      <xs:enumeration value="SSH_PASSWORD"/>
-      <xs:enumeration value="SSH_PRIVATE_KEY"/>
+      <xs:enumeration value="PASSWORD"/>
+      <xs:enumeration value="TOKEN"/>
+      <xs:enumeration value="PRIVATE_KEY"/>
     </xs:restriction>
   </xs:simpleType>
 

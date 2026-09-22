@@ -10,6 +10,7 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -18,11 +19,13 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +39,17 @@ class GitSmartHttpClientTransportTest {
             "1111111111111111111111111111111111111111";
     private static final String NEW_ID =
             "2222222222222222222222222222222222222222";
+
+    @Test
+    void clearsBasicAuthenticationBytesAfterEncodingTheRemainingBuffer() {
+        byte[] bytes = "skipuser:password".getBytes(StandardCharsets.UTF_8);
+        ByteBuffer credentials = ByteBuffer.wrap(bytes);
+        credentials.position(4);
+
+        assertThat(GitSmartHttpClientTransport.basicAuthorization(credentials))
+                .isEqualTo("Basic dXNlcjpwYXNzd29yZA==");
+        assertThat(bytes).containsOnly((byte) 0);
+    }
 
     @Test
     void fetchesAndPushesAgainstCanonicalGitHttpBackend(
@@ -83,9 +97,12 @@ class GitSmartHttpClientTransportTest {
 
     @Test
     void preservesRequestAndResponseStreamingThroughSmartHttp() throws Exception {
+        List<String> authorizations = new CopyOnWriteArrayList<>();
         AtomicReference<byte[]> uploadRequest = new AtomicReference<>();
         AtomicReference<byte[]> receiveRequest = new AtomicReference<>();
         try (TestHttpServer server = TestHttpServer.start(exchange -> {
+            authorizations.add(exchange.getRequestMethod() + " "
+                    + exchange.getRequestHeaders().getFirst("Authorization"));
             String service = service(exchange);
             if ("GET".equals(exchange.getRequestMethod())) {
                 byte[] advertisement = advertisement(service);
@@ -110,7 +127,8 @@ class GitSmartHttpClientTransportTest {
                                 packet("ok refs/heads/main\n"), flush()));
             }
         })) {
-            GitSmartHttpClientTransport transport = transport(true);
+            GitClientTransport transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.TOKEN, "", "secret".toCharArray()), null, true);
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
             GitClientResult<GitUploadPackResult> fetch =
                     new GitUploadPackClient(transport).fetch(
@@ -142,6 +160,8 @@ class GitSmartHttpClientTransportTest {
             assertThat(success(push).accepted()).isTrue();
             assertThat(receiveRequest.get()).endsWith(
                     "PACKpush".getBytes(StandardCharsets.US_ASCII));
+            assertThat(authorizations).containsExactly(
+                    "GET Bearer secret", "POST Bearer secret", "GET Bearer secret", "POST Bearer secret");
         }
     }
 
@@ -184,7 +204,7 @@ class GitSmartHttpClientTransportTest {
                     HttpClient.newBuilder()
                             .connectTimeout(GitClientOptions.defaults().connectTimeout())
                             .build(),
-                    request -> request.header("Authorization", "Bearer secret"),
+                    new GitCredentials(GitCredentialKind.TOKEN, "", "secret".toCharArray()),
                     true);
 
             GitClientResult<GitRemoteAdvertisement> result =
@@ -293,7 +313,7 @@ class GitSmartHttpClientTransportTest {
     @Test
     void rejectsInjectedClientWithoutConnectTimeout() {
         GitSmartHttpClientTransport transport = new GitSmartHttpClientTransport(
-                HttpClient.newHttpClient(), GitHttpRequestConfigurer.none(), true);
+                HttpClient.newHttpClient(), GitCredentials.none(), true);
 
         GitClientResult<GitRemoteAdvertisement> result =
                 new GitUploadPackClient(transport).discover(
@@ -317,7 +337,7 @@ class GitSmartHttpClientTransportTest {
                         .connectTimeout(GitClientOptions.defaults().connectTimeout())
                         .followRedirects(HttpClient.Redirect.NEVER)
                         .build(),
-                GitHttpRequestConfigurer.none(),
+                GitCredentials.none(),
                 allowHttp);
     }
 

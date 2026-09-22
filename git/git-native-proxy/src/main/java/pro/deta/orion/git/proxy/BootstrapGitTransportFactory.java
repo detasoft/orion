@@ -1,35 +1,18 @@
 package pro.deta.orion.git.proxy;
 
-import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
-import org.bouncycastle.openssl.PEMKeyPair;
-import org.bouncycastle.openssl.PEMParser;
-import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
-import pro.deta.orion.git.client.GitFileClientTransport;
-import pro.deta.orion.git.client.GitHttpRequestConfigurer;
-import pro.deta.orion.git.client.GitSmartHttpClientTransport;
-import pro.deta.orion.git.client.GitSshClientTransport;
-import pro.deta.orion.git.client.GitSshSessionAuthenticator;
-import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
+import pro.deta.orion.git.client.GitCredentials;
+import pro.deta.orion.git.client.GitRemoteClientTransport;
+import pro.deta.orion.git.client.GitTransportScheme;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.OrionDocument;
 
-import java.io.CharArrayReader;
 import java.io.IOException;
 import java.net.http.HttpClient;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.PrivateKey;
-import java.security.interfaces.RSAPrivateCrtKey;
-import java.security.spec.RSAPublicKeySpec;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -42,7 +25,7 @@ final class BootstrapGitTransportFactory {
     BootstrapGitTransportFactory(BootstrapSecretResolver secretResolver) {
         Objects.requireNonNull(secretResolver, "secretResolver");
         connection = location -> {
-            if (location.credentialKind() == CredentialKind.NONE) {
+            if (location.credentialKind() == GitCredentialKind.NONE) {
                 return new Connection(location, new char[0]);
             }
             try (BootstrapSecret secret = secretResolver.resolve(
@@ -83,15 +66,23 @@ final class BootstrapGitTransportFactory {
         BootstrapGitLocation location = selected.location();
         char[] characters = selected.credential();
         try {
-            return switch (location.credentialKind()) {
-                case HTTP_BEARER, HTTP_BASIC -> withHttpTransport(location, characters, operation);
-                case SSH_PASSWORD, SSH_PRIVATE_KEY -> {
-                    try (GitSshClientTransport transport = sshTransport(location, characters)) {
-                        yield operation.run(location, transport);
-                    }
+            GitTransportScheme scheme = GitTransportScheme.from(location.remoteUri());
+            if (scheme == GitTransportScheme.SSH) {
+                if (location.knownHosts() == null) {
+                    throw new BootstrapGitProxyException("SSH host-key configuration");
                 }
-                case NONE -> operation.run(location, new GitFileClientTransport());
-            };
+                requireProtectedKnownHosts(location.knownHosts());
+            }
+            boolean http = scheme == GitTransportScheme.HTTP || scheme == GitTransportScheme.HTTPS;
+            try (GitCredentials credentials = new GitCredentials(
+                    location.credentialKind(),
+                    Objects.requireNonNullElse(location.credentialUsername(), ""), characters);
+                 HttpClient client = http ? HttpClient.newBuilder()
+                         .connectTimeout(OPTIONS.connectTimeout())
+                         .followRedirects(HttpClient.Redirect.NEVER).build() : null) {
+                return operation.run(location, new GitRemoteClientTransport(
+                        client, credentials, location.knownHosts(), scheme == GitTransportScheme.HTTP));
+            }
         } finally {
             Arrays.fill(characters, '\0');
         }
@@ -100,111 +91,11 @@ final class BootstrapGitTransportFactory {
     private record Connection(BootstrapGitLocation location, char[] credential) {
     }
 
-    private static <T> T withHttpTransport(
-            BootstrapGitLocation location,
-            char[] credential,
-            TransportOperation<T> operation) throws Exception {
-        GitHttpRequestConfigurer authentication = request -> request.header(
-                "Authorization",
-                authorization(location, credential));
-        try (HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(OPTIONS.connectTimeout())
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build()) {
-            return operation.run(location, new GitSmartHttpClientTransport(
-                    client,
-                    authentication,
-                    "http".equals(location.remoteUri().getScheme())));
-        }
-    }
-
-    private static String authorization(
-            BootstrapGitLocation location,
-            char[] credential) {
-        if (location.credentialKind() == CredentialKind.HTTP_BEARER) {
-            return "Bearer " + new String(credential);
-        }
-        char[] combined = new char[
-                location.credentialUsername().length() + credential.length + 1];
-        try {
-            location.credentialUsername().getChars(
-                    0,
-                    location.credentialUsername().length(),
-                    combined,
-                    0);
-            combined[location.credentialUsername().length()] = ':';
-            System.arraycopy(
-                    credential,
-                    0,
-                    combined,
-                    location.credentialUsername().length() + 1,
-                    credential.length);
-            return basicAuthorization(StandardCharsets.UTF_8.encode(CharBuffer.wrap(combined)));
-        } finally {
-            Arrays.fill(combined, '\0');
-        }
-    }
-
-    @TestOnly
-    static String basicAuthorization(ByteBuffer utf8) {
-        ByteBuffer encoded = null;
-        try {
-            encoded = Base64.getEncoder().encode(utf8);
-            return "Basic " + new String(encoded.array(), StandardCharsets.US_ASCII);
-        } finally {
-            Arrays.fill(utf8.array(), (byte) 0);
-            if (encoded != null) {
-                Arrays.fill(encoded.array(), (byte) 0);
-            }
-        }
-    }
-
-    private static GitSshClientTransport sshTransport(
-            BootstrapGitLocation location,
-            char[] credential) {
-        if (location.knownHosts() == null) {
-            throw new BootstrapGitProxyException("SSH host-key configuration");
-        }
-        requireProtectedKnownHosts(location.knownHosts());
-        GitSshSessionAuthenticator authenticator = switch (location.credentialKind()) {
-            case SSH_PASSWORD -> GitSshSessionAuthenticator.password(new String(credential));
-            case SSH_PRIVATE_KEY -> GitSshSessionAuthenticator.publicKey(parseKeyPair(credential));
-            default -> throw new BootstrapGitProxyException("transport selection");
-        };
-        return GitSshClientTransport.strictKnownHosts(location.knownHosts(), authenticator);
-    }
-
     private static void requireProtectedKnownHosts(Path knownHosts) {
         try {
             BootstrapSecretResolver.requireIntegrityProtectedFile(knownHosts, "SSH known-hosts");
         } catch (IOException | RuntimeException error) {
             throw new BootstrapGitProxyException("SSH host-key configuration");
-        }
-    }
-
-    private static KeyPair parseKeyPair(char[] credential) {
-        try (PEMParser parser = new PEMParser(new CharArrayReader(credential))) {
-            Object parsed = parser.readObject();
-            JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
-            if (parsed instanceof PEMKeyPair keyPair) {
-                return converter.getKeyPair(keyPair);
-            }
-            if (parsed instanceof PrivateKeyInfo privateKeyInfo) {
-                PrivateKey privateKey = converter.getPrivateKey(privateKeyInfo);
-                if (privateKey instanceof RSAPrivateCrtKey rsa) {
-                    RSAPublicKeySpec publicSpec = new RSAPublicKeySpec(
-                            rsa.getModulus(),
-                            rsa.getPublicExponent());
-                    return new KeyPair(
-                            KeyFactory.getInstance("RSA").generatePublic(publicSpec),
-                            privateKey);
-                }
-            }
-            throw new BootstrapGitProxyException("SSH private-key validation");
-        } catch (BootstrapGitProxyException error) {
-            throw error;
-        } catch (Exception error) {
-            throw new BootstrapGitProxyException("SSH private-key validation");
         }
     }
 

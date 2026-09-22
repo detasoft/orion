@@ -9,7 +9,7 @@ import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.client.GitClientTransportSession;
-import pro.deta.orion.git.client.GitHttpRequestConfigurer;
+import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -23,6 +23,7 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -38,9 +39,6 @@ import pro.deta.orion.schema.orion.RepositoryPolicy;
 import pro.deta.orion.schema.orion.TeamId;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -85,7 +83,7 @@ class GitHubRemoteProfileTest {
 
     @Test
     void configuresGitHubHttpsWithAUsernameAndToken() {
-        AtomicReference<GitHttpRequestConfigurer> captured = new AtomicReference<>();
+        AtomicReference<GitCredentials> captured = new AtomicReference<>();
         GitHubRemoteProfile profile = new GitHubRemoteProfile(
                 REPOSITORY,
                 secrets,
@@ -100,19 +98,12 @@ class GitHubRemoteProfileTest {
             assertThat(connection.uri())
                     .isEqualTo(URI.create("https://github.com/acme/project.git"));
             assertThat(resolutions).hasValue(1);
-            HttpRequest.Builder request = HttpRequest.newBuilder(connection.uri());
-            captured.get().configure(request);
-
-            String authorization = request.build().headers()
-                    .firstValue("Authorization")
-                    .orElseThrow();
-            assertThat(authorization).startsWith("Basic ");
-            assertThat(decodeBasic(authorization))
-                    .isEqualTo("x-access-token:fine-grained-token");
+            assertThat(captured.get().kind()).isEqualTo(GitCredentialKind.PASSWORD);
+            assertThat(captured.get().username()).isEqualTo("x-access-token");
+            assertThat(captured.get().copyCharacters()).isEqualTo("fine-grained-token".toCharArray());
         }
 
-        assertThatThrownBy(() -> captured.get().configure(
-                HttpRequest.newBuilder(URI.create("https://github.com"))))
+        assertThatThrownBy(() -> captured.get().copyCharacters())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageNotContaining("fine-grained-token");
     }
@@ -139,26 +130,20 @@ class GitHubRemoteProfileTest {
 
     @Test
     void usesRotatedCredentialsForTheNextConnection() {
-        AtomicReference<GitHttpRequestConfigurer> captured = new AtomicReference<>();
+        AtomicReference<GitCredentials> captured = new AtomicReference<>();
         GitHubRemoteProfile profile = new GitHubRemoteProfile(REPOSITORY, secrets, configurer -> {
             captured.set(configurer);
             return new UnusedTransport();
         });
         RepositoryRemote remote = remote(RemoteProvider.GITHUB, "https://github.com/acme/project.git");
         try (GitRemoteConnection first = profile.open(remote)) {
-            HttpRequest.Builder request = HttpRequest.newBuilder(first.uri());
-            captured.get().configure(request);
-            assertThat(decodeBasic(request.build().headers().firstValue("Authorization").orElseThrow()))
-                    .isEqualTo("x-access-token:fine-grained-token");
+            assertThat(captured.get().copyCharacters()).isEqualTo("fine-grained-token".toCharArray());
         }
 
         current.set(secrets.replace(current.get(), ConfigurationScope.repository(REPOSITORY),
                 "github-token", "rotated-token".toCharArray()));
         try (GitRemoteConnection second = profile.open(remote)) {
-            HttpRequest.Builder request = HttpRequest.newBuilder(second.uri());
-            captured.get().configure(request);
-            assertThat(decodeBasic(request.build().headers().firstValue("Authorization").orElseThrow()))
-                    .isEqualTo("x-access-token:rotated-token");
+            assertThat(captured.get().copyCharacters()).isEqualTo("rotated-token".toCharArray());
         }
         assertThat(resolutions).hasValue(2);
     }
@@ -192,12 +177,6 @@ class GitHubRemoteProfileTest {
                         RemoteTrigger.MANUAL_RETRY),
                 List.of(RemoteRefMapping.allBranches()),
                 RemoteUpdatePolicy.fastForwardOnly());
-    }
-
-    private static String decodeBasic(String authorization) {
-        byte[] encoded = authorization.substring("Basic ".length())
-                .getBytes(StandardCharsets.US_ASCII);
-        return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
     }
 
     private static final class UnusedTransport implements GitClientTransport {
