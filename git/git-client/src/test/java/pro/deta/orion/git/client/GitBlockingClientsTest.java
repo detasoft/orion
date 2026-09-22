@@ -260,6 +260,57 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void discoversAsciiAndUnicodeRefsWithPeeledTags() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                packet(OLD_ID + " refs/heads/main\0report-status\n"),
+                packet(NEW_ID + " refs/heads/ветка-🚀\n"),
+                packet(OLD_ID + " refs/tags/версия\n"),
+                packet(NEW_ID + " refs/tags/версия^{}\n"), flush()));
+        GitRemoteAdvertisement advertisement = success(new GitUploadPackClient(transport)
+                .discover(REMOTE, GitClientOptions.defaults()));
+        assertThat(advertisement.findRef("refs/heads/main").orElseThrow().objectId()).isEqualTo(OLD_ID);
+        assertThat(advertisement.findRef("refs/heads/ветка-🚀").orElseThrow().objectId()).isEqualTo(NEW_ID);
+        assertThat(advertisement.findRef("refs/tags/версия").orElseThrow().peeledObjectId()).contains(NEW_ID);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    void pushesUnicodeRefAndReadsItsStatus(boolean sideBand) {
+        String ref = "refs/heads/ветка-🚀";
+        byte[] report = concat(packet("unpack ok\n"), packet("ok " + ref + "\n"), flush());
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("report-status" + (sideBand ? " side-band-64k" : "")),
+                sideBand ? concat(sideBandPacket(1, report), flush()) : report));
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, ref)), output -> { }, false);
+        GitReceivePackResult result = success(new GitReceivePackClient(transport)
+                .push(REMOTE, GitClientOptions.defaults(), request));
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.refs()).containsExactly(new GitReceivePackResult.RefStatus(ref, true, ""));
+        assertThat(new String(transport.session.output.bytes(), StandardCharsets.UTF_8))
+                .contains(OLD_ID + " " + NEW_ID + " " + ref + "\0report-status");
+    }
+
+    @Test
+    void rejectsInvalidUtf8AndControlBytesInAdvertisedNames() {
+        for (byte[] suffix : List.of(new byte[] {(byte) 0xc3, 0x28}, new byte[] {0x7f}, new byte[] {0x01})) {
+            RecordingTransport transport = new RecordingTransport(concat(
+                    packet(concat((OLD_ID + " refs/heads/").getBytes(StandardCharsets.UTF_8), suffix)), flush()));
+            GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
+                    .discover(REMOTE, GitClientOptions.defaults());
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+        }
+    }
+
+    @Test
+    void rejectsForbiddenCharactersAndUnpairedSurrogatesInUnicodeRefs() {
+        for (String suffix : List.of(" bad", "\n", "\u007f", "..bad", "~", "\ud800", "\udc00")) {
+            assertThatThrownBy(() -> new GitReceivePackRequest.Command(
+                    OLD_ID, NEW_ID, "refs/heads/ветка" + suffix)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void requestsAtomicReceivePackWhenRequired() {
         byte[] response = concat(
                 advertisement("report-status atomic"),

@@ -51,7 +51,10 @@ public final class GitWorkflowScenarios {
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
                     GitWorkflowScenarios::incrementalFetchWithCommonCommit),
             scenario("annotated-tag-discovery-and-fetch", CLONE, annotatedTagState(),
-                    GitWorkflowScenarios::annotatedTagDiscoveryAndFetch));
+                    GitWorkflowScenarios::annotatedTagDiscoveryAndFetch),
+            scenario("unicode-refs-discovery-fetch-and-push", FETCH,
+                    state(Map.of(MAIN, "initial", "refs/heads/ветка", "second", "refs/tags/версия", "tag"),
+                            twoCommitState("updated\n").commits()), GitWorkflowScenarios::unicodeRefs));
     private static final GitScenario MISSING_REPOSITORY_FIRST_PUSH = scenario(
             "orion-missing-repository-first-push",
             WRITE,
@@ -376,6 +379,40 @@ public final class GitWorkflowScenarios {
                     "fetched nested tag target differs");
             require(git.run(target, "show", "FETCH_HEAD:" + README).output().equals(INITIAL_CONTENT),
                     "fetched tag lost file content");
+        }
+    }
+
+    private static void unicodeRefs(GitScenarioContext context, Execution execution) throws Exception {
+        String branch = "refs/heads/ветка";
+        String tag = "refs/tags/версия";
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            execution.bind("second", commit(source, README, "updated\n", "second"));
+            source.updateRef(branch, "HEAD");
+            source.updateRef(MAIN, execution.id("initial"));
+            execution.bind("tag", source.annotatedTag("версия", execution.id("second")));
+            source.pushRefs("origin", branch + ":" + branch, tag + ":" + tag);
+            Map<String, String> refs = source.advertisedRefs("origin");
+            require(execution.id("initial").equals(refs.get(MAIN)), "ASCII main ref lost");
+            require(execution.id("second").equals(refs.get(branch)), "Unicode branch lost");
+            require(execution.id("tag").equals(refs.get(tag)), "Unicode tag lost");
+            require(execution.id("second").equals(refs.get(tag + "^{}")), "Unicode tag peel lost");
+            execution.assertTerminal(transferred(context, source));
+            try (GitWorkTree clone = context.client().clone(context.remote(), context.workTreeDirectory("clone"))) {
+                clone.fetch("origin", "main");
+                require(clone.head().equals(execution.id("initial")), "Unicode refs interfered with main fetch");
+                clone.fetch("origin", "ветка");
+                clone.checkout("ветка", "refs/remotes/origin/ветка");
+                require(clone.head().equals(execution.id("second")), "Unicode branch fetch lost its tip");
+            }
+            GitCommandRunner git = new GitCommandRunner("git", Duration.ofSeconds(30));
+            Path target = context.workTreeDirectory("tag-fetch");
+            git.run(null, "init", target.toString());
+            git.run(target, "fetch", "--no-tags", context.remote().uri(), tag);
+            require(git.run(target, "rev-parse", "FETCH_HEAD^{}").trimmed().equals(execution.id("second")),
+                    "Unicode tag fetch lost its target");
         }
     }
 

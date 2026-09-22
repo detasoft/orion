@@ -34,10 +34,12 @@ final class GitClientValidation {
                 || checked.contains("@{")) {
             throw new IllegalArgumentException(name + " must be a full Git ref name");
         }
-        for (int index = 0; index < checked.length(); index++) {
-            char character = checked.charAt(index);
+        for (int index = 0; index < checked.length();) {
+            int character = checked.codePointAt(index);
+            index += Character.charCount(character);
             if (character <= 0x20
-                    || character >= 0x7f
+                    || character == 0x7f
+                    || character >= Character.MIN_SURROGATE && character <= Character.MAX_SURROGATE
                     || "~^:?*[\\".indexOf(character) >= 0) {
                 throw new IllegalArgumentException(name + " must be a full Git ref name");
             }

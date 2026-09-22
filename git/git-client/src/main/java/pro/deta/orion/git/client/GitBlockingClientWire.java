@@ -1,6 +1,7 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
@@ -13,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -43,8 +45,8 @@ final class GitBlockingClientWire {
                     break;
                 }
                 requireData(packet, GitClientFailure.Phase.ADVERTISEMENT);
-                String line = ascii(payload,
-                        GitClientFailure.Phase.ADVERTISEMENT);
+                String line = text(payload,
+                        GitClientFailure.Phase.ADVERTISEMENT, StandardCharsets.UTF_8);
                 if (lines.isEmpty() && "version 1".equals(stripLf(line))) {
                     continue;
                 }
@@ -106,8 +108,8 @@ final class GitBlockingClientWire {
             }
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
-                String line = stripLf(ascii(
-                        payload, GitClientFailure.Phase.NEGOTIATION));
+                String line = stripLf(text(
+                        payload, GitClientFailure.Phase.NEGOTIATION, StandardCharsets.US_ASCII));
                 rejectServerError(line, GitClientFailure.Phase.NEGOTIATION);
                 if (!"NAK".equals(line) && !line.startsWith("ACK ")) {
                     throw protocolFailure(
@@ -351,8 +353,8 @@ final class GitBlockingClientWire {
                     return List.copyOf(lines);
                 }
                 requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
-                lines.add(stripLf(ascii(
-                        payload, GitClientFailure.Phase.REPORT_STATUS)));
+                lines.add(stripLf(text(
+                        payload, GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
             } finally {
                 payload.release();
             }
@@ -549,20 +551,24 @@ final class GitBlockingClientWire {
         }
     }
 
-    private static String ascii(ByteBuf payload, GitClientFailure.Phase phase)
+    private static String text(ByteBuf payload, GitClientFailure.Phase phase, Charset charset)
             throws GitClientProtocolException {
+        if (!ByteBufUtil.isText(payload, charset)) {
+            throw protocolFailure(GitClientFailure.Kind.MALFORMED_RESPONSE, phase,
+                    "Git response contains invalid text bytes");
+        }
         for (int index = payload.readerIndex();
                 index < payload.writerIndex(); index++) {
             int value = payload.getUnsignedByte(index);
             if (value != 0 && value != '\n'
-                    && (value < 0x20 || value >= 0x7f)) {
+                    && (value < 0x20 || value == 0x7f)) {
                 throw protocolFailure(
                         GitClientFailure.Kind.MALFORMED_RESPONSE,
                         phase,
                         "Git response contains invalid text bytes");
             }
         }
-        return payload.toString(StandardCharsets.US_ASCII);
+        return payload.toString(charset);
     }
 
     private static void requireCapability(

@@ -23,7 +23,8 @@ class GitWorkflowScenariosTest {
             "delete-tags",
             "reject-stale-non-fast-forward",
             "incremental-fetch-with-common-commit",
-            "annotated-tag-discovery-and-fetch");
+            "annotated-tag-discovery-and-fetch",
+            "unicode-refs-discovery-fetch-and-push");
 
     @Test
     void declaresTheSymmetricWorkflowsOnceWithCapabilitiesAndTerminalState() {
