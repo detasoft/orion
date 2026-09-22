@@ -3,6 +3,7 @@ package pro.deta.orion.git.workflow;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -153,6 +154,25 @@ final class GitCliWorkflowClient implements GitClient {
         @Override
         public void updateRef(String refName, String target) throws Exception {
             client.commands.run(directory, "update-ref", refName, target);
+        }
+
+        @Override
+        public String annotatedTag(String name, String target) throws Exception {
+            client.commands.run(directory, COMMIT_ENVIRONMENT, "tag", "-a", "-m", name, name, target);
+            return client.commands.run(directory, "rev-parse", "refs/tags/" + name).trimmed();
+        }
+
+        @Override
+        public Map<String, String> advertisedRefs(String remote) throws Exception {
+            String output = client.commands.run(directory, "-c", "protocol.version=1", "ls-remote", remote).output();
+            Map<String, String> refs = new LinkedHashMap<>();
+            for (String line : output.split("\\R")) {
+                String[] fields = line.split("\\t", 2);
+                if (fields.length == 2) {
+                    refs.put(fields[1], fields[0]);
+                }
+            }
+            return refs;
         }
 
         @Override

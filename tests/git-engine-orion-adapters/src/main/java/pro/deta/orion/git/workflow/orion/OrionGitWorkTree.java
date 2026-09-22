@@ -11,6 +11,7 @@ import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -32,12 +33,14 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -222,6 +225,31 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (result.status() != RefUpdateResult.Status.APPLIED) {
             throw new IllegalStateException("Orion local ref update was stale: " + refName);
         }
+    }
+
+    @Override
+    public String annotatedTag(String name, String target) throws Exception {
+        ObjectId targetId = new ObjectId(target);
+        String type = repository.readObject(targetId).orElseThrow().type().name().toLowerCase(Locale.ROOT);
+        byte[] content = ("object " + target + "\ntype " + type + "\ntag " + name
+                + "\ntagger Parity <parity@example.test> 0 +0000\n\n" + name + "\n")
+                .getBytes(StandardCharsets.UTF_8);
+        ObjectId tag = repository.writeObject(GitObjectType.TAG, content);
+        updateRef("refs/tags/" + name, tag.toHex());
+        return tag.toHex();
+    }
+
+    @Override
+    public Map<String, String> advertisedRefs(String remoteName) {
+        GitRemoteRepository remote = remote(remoteName);
+        GitRemoteAdvertisement advertisement = OrionGitClient.requireSuccess(
+                client.uploadPack().discover(client.uri(remote), client.options()), "upload-pack discovery");
+        Map<String, String> refs = new LinkedHashMap<>();
+        for (GitRemoteAdvertisement.Ref ref : advertisement.refs()) {
+            refs.put(ref.name(), ref.objectId());
+            ref.peeledObjectId().ifPresent(id -> refs.put(ref.name() + "^{}", id));
+        }
+        return refs;
     }
 
     @Override

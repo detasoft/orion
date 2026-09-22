@@ -3,11 +3,15 @@ package pro.deta.orion.git.parser.v2.read;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -74,6 +78,47 @@ public final class GitObjectGraph {
             pending.addAll(links.targets().subList(1, links.targets().size()));
         }
         return false;
+    }
+
+    public Optional<ObjectId> peel(ObjectId id) throws IOException {
+        Set<ObjectId> visited = new HashSet<>();
+        ObjectId current = id;
+        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage,
+                (type, size, base, input) -> tagTarget(type, size, input));
+        while (visited.size() <= 256 && visited.add(current)) {
+            ObjectId object = current;
+            GitObjectLinks links = storage.readObject(object, (type, size, base, input) -> switch (type) {
+                case TAG, REF_DELTA, OFS_DELTA -> reader.read(type, size, base, input);
+                default -> new GitObjectLinks(type, List.of());
+            }).orElse(null);
+            if (links == null) {
+                return Optional.empty();
+            }
+            if (links.type() != GitObjectType.TAG) {
+                return current.equals(id) ? Optional.empty() : Optional.of(current);
+            }
+            if (links.targets().isEmpty()) {
+                return Optional.empty();
+            }
+            current = links.targets().getFirst();
+        }
+        return Optional.empty();
+    }
+
+    private static GitObjectLinks tagTarget(GitObjectType type, long size, BufferedByteInputV2 input)
+            throws IOException {
+        if (type != GitObjectType.TAG || size < 48) {
+            return new GitObjectLinks(type, List.of());
+        }
+        String line = new String(input.readBytes(48), StandardCharsets.US_ASCII);
+        if (!line.startsWith("object ") || line.charAt(47) != '\n') {
+            return new GitObjectLinks(type, List.of());
+        }
+        try {
+            return new GitObjectLinks(type, List.of(new ObjectId(line.substring(7, 47))));
+        } catch (IllegalArgumentException malformed) {
+            return new GitObjectLinks(type, List.of());
+        }
     }
 
     private Optional<GitObjectLinks> links(ObjectId id) throws IOException {

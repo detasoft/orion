@@ -78,13 +78,13 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
                 }
             }
         }
+        GitObjectGraph graph = new GitObjectGraph(storage());
         Map<ObjectId, List<String>> branches = new LinkedHashMap<>();
         for (ObjectId want : wants) {
-            branches.put(want, new ArrayList<>());
+            branches.put(graph.peel(want).orElse(want), new ArrayList<>());
         }
         List<RefId> refs = new ArrayList<>(snapshot.refs().keySet());
         refs.sort((left, right) -> left.value().compareTo(right.value()));
-        GitObjectGraph graph = new GitObjectGraph(storage());
         for (RefId ref : refs) {
             if (!ref.value().startsWith("refs/heads/")) {
                 continue;

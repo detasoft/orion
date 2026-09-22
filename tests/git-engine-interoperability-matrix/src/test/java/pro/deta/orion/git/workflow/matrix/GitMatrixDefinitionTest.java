@@ -32,36 +32,36 @@ class GitMatrixDefinitionTest {
     void definesAllTransportInvocations() {
         List<GitMatrixInvocation> cases = GitMatrixDefinition.requiredCases();
 
-        assertThat(cases).hasSize(110);
+        assertThat(cases).hasSize(121);
         assertThat(cases).extracting(GitMatrixInvocation::displayName).doesNotHaveDuplicates();
         assertThat(cases).extracting(GitMatrixInvocation::pairName)
                 .containsOnlyElementsOf(REQUIRED_PAIRS);
-        assertThat(countsByPair(cases).values()).containsOnly(10);
+        assertThat(countsByPair(cases).values()).containsOnly(11);
         assertThat(countsByScenario(cases).values()).containsOnly(11);
         assertThat(countsByScenario(cases).keySet())
                 .containsExactlyInAnyOrderElementsOf(scenarioNames());
     }
 
     @Test
-    void keepsFortyReferenceOnlyControlInvocationsAvailable() {
+    void keepsReferenceOnlyControlInvocationsAvailable() {
         List<GitMatrixInvocation> cases = GitMatrixDefinition.controlCases();
 
-        assertThat(cases).hasSize(40);
+        assertThat(cases).hasSize(44);
         assertThat(cases).extracting(GitMatrixInvocation::displayName).doesNotHaveDuplicates();
         assertThat(cases).extracting(GitMatrixInvocation::pairName)
                 .containsOnlyElementsOf(CONTROL_PAIRS);
-        assertThat(countsByPair(cases).values()).containsOnly(10);
+        assertThat(countsByPair(cases).values()).containsOnly(11);
         assertThat(countsByScenario(cases).values()).containsOnly(4);
     }
 
     @Test
     void rejectsMissingRequiredCoverageInsteadOfSkippingIt() {
-        List<GitMatrixInvocation> incomplete = GitMatrixDefinition.requiredCases().subList(1, 110);
+        List<GitMatrixInvocation> incomplete = GitMatrixDefinition.requiredCases().subList(1, 121);
 
         assertThatThrownBy(() -> GitMatrixDefinition.requireCompleteCoverage(incomplete))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("expected=110")
-                .hasMessageContaining("actual=109");
+                .hasMessageContaining("expected=121")
+                .hasMessageContaining("actual=120");
     }
 
     @Test

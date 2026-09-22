@@ -110,6 +110,44 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void legacyAdvertisementsPeelAnnotatedTagsOnlyForUploadPack() throws Exception {
+        ObjectId target = publish();
+        ObjectId inner = PackTestData.store(storage, GitObjectType.TAG,
+                ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
+        ObjectId outer = PackTestData.store(storage, GitObjectType.TAG,
+                ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
+        storage.updateRefs(List.of(
+                new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
+                new RefUpdate(new RefId("refs/tags/lightweight"), Optional.empty(), Optional.of(target)),
+                new RefUpdate(new RefId("refs/tags/nested"), Optional.empty(), Optional.of(outer))), true);
+        for (GitProtocolVersion version : List.of(GitProtocolVersion.V0, GitProtocolVersion.V1)) {
+            for (InitialRequestService service : InitialRequestService.values()) {
+                ByteArrayOutputStream response = new ByteArrayOutputStream();
+                session(new byte[0], response).advertise(initial(version, service));
+                List<GitPktLine> packets = decode(response.toByteArray());
+                int first = version == GitProtocolVersion.V1 ? 1 : 0;
+                assertThat(text(packets.get(first))).startsWith(target + " HEAD\0");
+                List<String> refs = new ArrayList<>();
+                for (GitPktLine packet : packets.subList(first + 1, packets.size() - 1)) {
+                    refs.add(text(packet));
+                }
+                List<String> expected = new ArrayList<>(List.of(target + " refs/heads/main\n",
+                        inner + " refs/tags/annotated\n"));
+                if (service == InitialRequestService.UPLOAD_PACK) {
+                    expected.add(target + " refs/tags/annotated^{}\n");
+                }
+                expected.add(target + " refs/tags/lightweight\n");
+                expected.add(outer + " refs/tags/nested\n");
+                if (service == InitialRequestService.UPLOAD_PACK) {
+                    expected.add(target + " refs/tags/nested^{}\n");
+                }
+                assertThat(refs).containsExactlyElementsOf(expected);
+                assertThat(packets.getLast()).isSameAs(GitPktLine.Control.FLUSH);
+            }
+        }
+    }
+
+    @Test
     void pushesPackThenDeletesItsRefWithoutReceivingAnotherPack() throws Exception {
         byte[] content = new byte[]{1, 2, 3};
         ObjectId id = PackTestData.objectId(GitObjectType.BLOB, content);

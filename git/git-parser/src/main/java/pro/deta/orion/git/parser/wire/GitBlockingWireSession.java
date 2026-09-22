@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
+import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -91,8 +92,7 @@ public final class GitBlockingWireSession {
             if (version == GitProtocolVersion.V1) {
                 wire.writeTextLine("version 1");
             }
-            wire.sendAdvertisement(legacyAdvertisement(repository, capabilities,
-                    request.service() == InitialRequestService.UPLOAD_PACK && configuration.uploadPack().symref()));
+            wire.sendAdvertisement(legacyAdvertisement(repository, capabilities, request.service()));
         }
         wire.flush();
     }
@@ -202,8 +202,8 @@ public final class GitBlockingWireSession {
         return values;
     }
 
-    private static GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
-            GitCapabilities capabilities, boolean advertiseSymref) throws IOException {
+    private GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
+            GitCapabilities capabilities, InitialRequestService service) throws IOException {
         RefsSnapshot snapshot = repository.storage().snapshotRefs();
         List<GitAdvertisedRef> refs = new ArrayList<>();
         ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
@@ -212,13 +212,24 @@ public final class GitBlockingWireSession {
         if (head != null) {
             refs.add(GitAdvertisedRef.direct(head.toHex(), "HEAD"));
         }
-        if (advertiseSymref && snapshot.head() instanceof Head.Symbolic symbolic) {
+        if (service == InitialRequestService.UPLOAD_PACK && configuration.uploadPack().symref()
+                && snapshot.head() instanceof Head.Symbolic symbolic) {
             capabilities.add(GitCapabilityValue.value(GitCapability.SYMREF, "HEAD:" + symbolic.target().value()));
         }
         List<RefId> names = new ArrayList<>(snapshot.refs().keySet());
         names.sort(Comparator.comparing(RefId::value));
         for (RefId name : names) {
             refs.add(GitAdvertisedRef.direct(snapshot.refs().get(name).toHex(), name.value()));
+        }
+        if (service == InitialRequestService.UPLOAD_PACK) {
+            GitObjectGraph graph = new GitObjectGraph(repository.storage());
+            for (int index = 0; index < refs.size(); index++) {
+                GitAdvertisedRef ref = refs.get(index);
+                Optional<ObjectId> peeled = graph.peel(new ObjectId(ref.objectId()));
+                if (peeled.isPresent()) {
+                    refs.set(index, ref.withPeeledObjectId(peeled.orElseThrow().toHex()));
+                }
+            }
         }
         if (refs.isEmpty()) {
             refs.add(GitAdvertisedRef.direct("0".repeat(40), "capabilities^{}"));

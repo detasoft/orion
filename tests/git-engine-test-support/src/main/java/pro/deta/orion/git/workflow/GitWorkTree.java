@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Objects;
 
 public interface GitWorkTree extends AutoCloseable {
@@ -27,6 +28,10 @@ public interface GitWorkTree extends AutoCloseable {
     void pushRefs(String remote, String... refSpecs) throws Exception;
 
     void updateRef(String refName, String target) throws Exception;
+
+    String annotatedTag(String name, String target) throws Exception;
+
+    Map<String, String> advertisedRefs(String remote) throws Exception;
 
     void fetch(String remote) throws Exception;
 

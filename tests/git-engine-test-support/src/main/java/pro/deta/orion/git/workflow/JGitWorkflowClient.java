@@ -1,19 +1,25 @@
 package pro.deta.orion.git.workflow;
 
 import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.MergeCommand.FastForwardMode;
 import org.eclipse.jgit.api.PullResult;
-import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.transport.FetchConnection;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
+import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.URIish;
 
 import java.nio.file.Path;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.TimeZone;
 
@@ -191,6 +197,40 @@ final class JGitWorkflowClient implements GitClient {
                     && result != RefUpdate.Result.FORCED
                     && result != RefUpdate.Result.NO_CHANGE) {
                 throw new IllegalStateException("JGit ref update failed for " + refName + ": " + result);
+            }
+        }
+
+        @Override
+        public String annotatedTag(String name, String target) throws Exception {
+            try (RevWalk walk = new RevWalk(git.getRepository())) {
+                return git.tag().setName(name).setAnnotated(true).setMessage(name).setTagger(PARITY_IDENTITY)
+                        .setObjectId(walk.parseAny(ObjectId.fromString(target))).call().getObjectId().name();
+            }
+        }
+
+        @Override
+        public Map<String, String> advertisedRefs(String remote) throws Exception {
+            StoredConfig config = git.getRepository().getConfig();
+            String previous = config.getString("protocol", null, "version");
+            config.setString("protocol", null, "version", "1");
+            try (Transport transport = Transport.open(git.getRepository(), remote)) {
+                client.transportConfig.configure(transport);
+                try (FetchConnection connection = transport.openFetch()) {
+                    Map<String, String> refs = new LinkedHashMap<>();
+                    for (Ref ref : connection.getRefs()) {
+                        refs.put(ref.getName(), ref.getObjectId().name());
+                        if (ref.getPeeledObjectId() != null) {
+                            refs.put(ref.getName() + "^{}", ref.getPeeledObjectId().name());
+                        }
+                    }
+                    return refs;
+                }
+            } finally {
+                if (previous == null) {
+                    config.unset("protocol", null, "version");
+                } else {
+                    config.setString("protocol", null, "version", previous);
+                }
             }
         }
 

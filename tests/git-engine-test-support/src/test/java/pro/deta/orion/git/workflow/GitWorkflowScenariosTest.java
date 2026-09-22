@@ -20,12 +20,13 @@ class GitWorkflowScenariosTest {
             "second-branch-fetch-and-checkout",
             "multi-ref-push",
             "reject-stale-non-fast-forward",
-            "incremental-fetch-with-common-commit");
+            "incremental-fetch-with-common-commit",
+            "annotated-tag-discovery-and-fetch");
 
     @Test
-    void declaresTheTenSymmetricWorkflowsOnceWithCapabilitiesAndTerminalState() {
+    void declaresTheSymmetricWorkflowsOnceWithCapabilitiesAndTerminalState() {
         assertThat(GitWorkflowScenarios.catalog())
-                .hasSize(10)
+                .hasSize(11)
                 .extracting(GitScenario::name)
                 .containsExactlyInAnyOrderElementsOf(REQUIRED_NAMES);
         assertThat(GitWorkflowScenarios.catalog())

@@ -47,6 +47,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     private boolean rejectReceive;
     private boolean rejectUpdates;
     private boolean rejectUnresolvedFetch;
+    private boolean rejectFetch;
     private boolean rejectPublication;
     private int lookups;
     private int publishCalls;
@@ -252,6 +253,40 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         assertThat(calls).contains("fetch demo []");
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
+        NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
+        repository.saveFiles("main", Map.of("a", new byte[]{1}), "initial", GitCommitAuthor.EMPTY);
+        String target = repository.refs().get("refs/heads/main");
+        ObjectId inner = repository.writeObject(GitObjectType.TAG,
+                ("object " + target + "\ntype commit\ntag inner\n\nmessage\n")
+                        .getBytes(StandardCharsets.US_ASCII));
+        ObjectId outer = repository.writeObject(GitObjectType.TAG,
+                ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n")
+                        .getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef("refs/tags/inner", NULL_ID, inner.toHex());
+        repository.updateRef("refs/tags/nested", NULL_ID, outer.toHex());
+        FetchRequest request = new FetchRequest();
+        request.setMode(v2 ? FetchRequest.Mode.PROTOCOL_V2 : FetchRequest.Mode.SINGLE_ACK);
+        GitRepositoryContext context = service.open(request("demo"), this);
+        for (ObjectId tag : List.of(inner, outer)) {
+            request.wants().clear();
+            request.wants().add(tag);
+            calls.clear();
+            context.checkFetchAccess(request);
+            assertThat(calls).containsExactly("fetch demo [main]");
+            rejectFetch = true;
+            assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+            rejectFetch = false;
+        }
+        repository.updateRef("refs/heads/main", target, NULL_ID);
+        rejectUnresolvedFetch = true;
+        calls.clear();
+        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+        assertThat(calls).containsExactly("fetch demo []");
+    }
+
     @Test
     void rejectsUnadvertisedLegacyWant() throws Exception {
         createRepository(backend, "demo");
@@ -333,7 +368,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Override
     public void beforeFetch(String name, List<String> branches) {
         calls.add("fetch " + name + " " + branches);
-        if (rejectUnresolvedFetch && branches.isEmpty()) {
+        if (rejectFetch || rejectUnresolvedFetch && branches.isEmpty()) {
             throw new AccessDeniedException("unresolved want", null);
         }
     }

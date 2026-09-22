@@ -1,8 +1,10 @@
 package pro.deta.orion.git.workflow;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,7 +47,9 @@ public final class GitWorkflowScenarios {
             scenario("reject-stale-non-fast-forward", PULL, twoCommitState("winner\n"),
                     GitWorkflowScenarios::rejectStaleNonFastForward),
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
-                    GitWorkflowScenarios::incrementalFetchWithCommonCommit));
+                    GitWorkflowScenarios::incrementalFetchWithCommonCommit),
+            scenario("annotated-tag-discovery-and-fetch", CLONE, annotatedTagState(),
+                    GitWorkflowScenarios::annotatedTagDiscoveryAndFetch));
     private static final GitScenario MISSING_REPOSITORY_FIRST_PUSH = scenario(
             "orion-missing-repository-first-push",
             WRITE,
@@ -292,6 +296,44 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void annotatedTagDiscoveryAndFetch(GitScenarioContext context, Execution execution)
+            throws Exception {
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            execution.bind("annotated", source.annotatedTag("annotated", execution.id("initial")));
+            execution.bind("nested", source.annotatedTag("nested", execution.id("annotated")));
+            execution.bind("second", commit(source, README, "updated\n", "second"));
+            source.updateRef("refs/tags/lightweight", execution.id("second"));
+            source.addRemote("origin", context.remote());
+            source.pushRefs("origin", MAIN + ":" + MAIN,
+                    "refs/tags/annotated:refs/tags/annotated", "refs/tags/nested:refs/tags/nested",
+                    "refs/tags/lightweight:refs/tags/lightweight");
+            Map<String, String> refs = source.advertisedRefs("origin");
+            require(execution.id("annotated").equals(refs.get("refs/tags/annotated")), "annotated tag ID missing");
+            require(execution.id("nested").equals(refs.get("refs/tags/nested")), "nested tag ID missing");
+            require(execution.id("initial").equals(refs.get("refs/tags/annotated^{}")), "peeled tag ID missing");
+            require(execution.id("initial").equals(refs.get("refs/tags/nested^{}")), "nested tag not fully peeled");
+            require(execution.id("second").equals(refs.get("refs/tags/lightweight")), "lightweight tag missing");
+            require(!refs.containsKey("refs/tags/lightweight^{}"), "lightweight tag must not have a peeled record");
+            RepositorySnapshot remote = transferred(context, source);
+            execution.assertTerminal(remote);
+            try (GitWorkTree clone = context.client().clone(context.remote(), context.workTreeDirectory("clone"))) {
+                RepositorySnapshot actual = clone.snapshot();
+                require(execution.id("second").equals(actual.refs().get(MAIN)), "clone main ref differs");
+                require(remote.commits().equals(actual.commits()), "clone commit history differs");
+            }
+            GitCommandRunner git = new GitCommandRunner("git", Duration.ofSeconds(30));
+            Path target = context.workTreeDirectory("tag-fetch");
+            git.run(null, "init", target.toString());
+            git.run(target, "-c", "protocol.version=1", "fetch", "--no-tags", context.remote().uri(),
+                    "refs/tags/nested");
+            require(git.run(target, "rev-parse", "FETCH_HEAD^{}").trimmed().equals(execution.id("initial")),
+                    "fetched nested tag target differs");
+            require(git.run(target, "show", "FETCH_HEAD:" + README).output().equals(INITIAL_CONTENT),
+                    "fetched tag lost file content");
+        }
+    }
+
     private static GitWorkTree source(GitScenarioContext context) throws Exception {
         return context.client().init(context.workTreeDirectory("source"));
     }
@@ -375,6 +417,12 @@ public final class GitWorkflowScenarios {
                 "feature", expectedCommit(List.of("initial"), Map.of(
                         README, text(INITIAL_CONTENT),
                         FEATURE_FILE, text("feature\n")))));
+    }
+
+    private static ExpectedRepositoryState annotatedTagState() {
+        return state(Map.of(MAIN, "second", "refs/tags/lightweight", "second",
+                "refs/tags/annotated", "annotated", "refs/tags/nested", "nested"),
+                twoCommitState("updated\n").commits());
     }
 
     private static ExpectedRepositoryState multiRefState() {
