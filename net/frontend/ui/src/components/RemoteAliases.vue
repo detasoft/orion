@@ -184,7 +184,8 @@ onBeforeUnmount(() => { attempt += 1; closeEditor() })
             <input v-model="editor.username" name="username" required autocomplete="off" />
           </label>
           <label v-if="editor.credentialKind !== 'NONE'">New credential
-            <textarea v-if="editor.credentialKind === 'PRIVATE_KEY'" v-model="editor.credential"
+            <textarea v-if="!editor.credentialKind || editor.credentialKind === 'PRIVATE_KEY'"
+              v-model="editor.credential"
               name="credential" required autocomplete="off" spellcheck="false" rows="4" />
             <input v-else v-model="editor.credential" name="credential" type="password"
               required autocomplete="new-password" />

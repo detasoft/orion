@@ -21,8 +21,8 @@ const alias = {
 }
 
 describe('Remote aliases', () => {
-  async function ready() {
-    remoteAliases.mockResolvedValue({ aliases: [alias], revision: 'read-revision' })
+  async function ready(selectedAlias = alias) {
+    remoteAliases.mockResolvedValue({ aliases: [selectedAlias], revision: 'read-revision' })
     const wrapper = mount(RemoteAliases, { props: { token: 'admin-token' } })
     await flushPromises()
     return wrapper
@@ -51,6 +51,27 @@ describe('Remote aliases', () => {
     expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.html()).not.toContain('private-credential')
     await button(wrapper, 'Add alias').trigger('click')
+    expect(wrapper.get('[name="credential"]').element.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['ssh', '-----BEGIN OPENSSH PRIVATE KEY-----\nfirst-line\nsecond-line\n-----END OPENSSH PRIVATE KEY-----\n'],
+    ['https', 'replacement-password'],
+    ['https', 'replacement-token'],
+  ])('preserves replacement credentials with the existing %s authentication method', async (transport, secret) => {
+    const selectedAlias = { ...alias, transport, upstream: `${transport}://git.example/config.git` }
+    const wrapper = await ready(selectedAlias)
+    mutateRemoteAlias.mockResolvedValue({ status: 'saved', alias: selectedAlias, revision: 'next' })
+    await button(wrapper, 'Replace credential').trigger('click')
+    expect(wrapper.get('[name="credentialKind"]').element.value).toBe('')
+    await wrapper.get('[name="credential"]').setValue(secret)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mutateRemoteAlias).toHaveBeenCalledWith({ action: 'replace-credential', scope: 'system',
+      revision: 'read-revision', alias: alias.alias, ref: alias.ref, credential: secret })
+    expect(wrapper.find('form').exists()).toBe(false)
+    await button(wrapper, 'Replace credential').trigger('click')
     expect(wrapper.get('[name="credential"]').element.value).toBe('')
     wrapper.unmount()
   })
