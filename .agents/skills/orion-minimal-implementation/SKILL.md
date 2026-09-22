@@ -170,8 +170,12 @@ path. Tests and hypothetical consumers do not justify a second path.
 Follow the selected workflow and the
 [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
 Add or update meaningful tests whenever behavior changes. Never create tests
-that read source code, build files, or configuration files and assert their
-text or structure. Exercise observable behavior and contracts through supported
+that read source code, build files (including `pom.xml`), or configuration files
+and assert their text or structure. Do not use reflection or bytecode inspection
+to assert incidental implementation structure, such as the presence or absence
+of internal fields, methods, types, or modifiers, or to lock in a completed
+refactoring. Reflection is appropriate when reflective behavior itself is a
+required contract. Exercise observable behavior and contracts through supported
 interfaces; verify build behavior by running the relevant build tool or lifecycle.
 
 Do not run a new test while failure is mechanically guaranteed because its

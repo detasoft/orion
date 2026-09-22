@@ -46,7 +46,8 @@ speculative future needs, and unsupported redesign.
 
 Apply the test-quality rules from `orion-minimal-implementation` explicitly.
 Report tests that inspect source code, build files, or configuration files as
-text instead of exercising observable behavior through supported interfaces.
+text, or use reflection or bytecode inspection to assert incidental internal
+structure instead of exercising observable behavior through supported interfaces.
 
 For each finding, record:
 
