@@ -266,6 +266,55 @@ class LocalAccessControlStorageTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void preparesEveryDocumentBeforePublishingAny(boolean firstExists) throws Exception {
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("roles"));
+        Path first = root.resolve(ACL_PATH);
+        Path second = root.resolve(ROLES_PATH);
+        if (firstExists) {
+            Files.write(first, bytes("old ACL"));
+        }
+        Files.write(second, bytes("old roles"));
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(second.getParent());
+        Map<String, byte[]> changed = new LinkedHashMap<>();
+        changed.put(ACL_PATH, bytes("new ACL"));
+        changed.put(ROLES_PATH, bytes("new roles"));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        try {
+            Files.setPosixFilePermissions(second.getParent(), PosixFilePermissions.fromString("r-xr-xr-x"));
+            assumeFalse(Files.isWritable(second.getParent()), "requires permissions to deny directory writes");
+            assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(changed, Optional.empty()),
+                    new AccessControlSaveRequest("save both", UserEmail.EMPTY)))
+                    .isInstanceOf(RuntimeException.class).hasCauseInstanceOf(java.io.IOException.class);
+            if (firstExists) {
+                assertThat(Files.readAllBytes(first)).isEqualTo(bytes("old ACL"));
+            } else {
+                assertThat(first).doesNotExist();
+            }
+            assertThat(Files.readAllBytes(second)).isEqualTo(bytes("old roles"));
+            try (java.util.stream.Stream<Path> children = Files.list(first.getParent())) {
+                assertThat(children.toList()).containsExactlyElementsOf(firstExists ? List.of(first) : List.of());
+            }
+            try (java.util.stream.Stream<Path> children = Files.list(second.getParent())) {
+                assertThat(children.toList()).containsExactly(second);
+            }
+        } finally {
+            Files.setPosixFilePermissions(second.getParent(), permissions);
+        }
+        storage.save(new AccessControlSnapshot(changed, Optional.empty()),
+                new AccessControlSaveRequest("retry both", UserEmail.EMPTY));
+        assertThat(Files.readAllBytes(first)).isEqualTo(bytes("new ACL"));
+        assertThat(Files.readAllBytes(second)).isEqualTo(bytes("new roles"));
+        for (Path file : List.of(first, second)) {
+            try (java.util.stream.Stream<Path> children = Files.list(file.getParent())) {
+                assertThat(children.toList()).containsExactly(file);
+            }
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"file,true", "file,false", "directory,true", "directory,false",
             "lock,true", "lock,false", "inside,true"})
     @EnabledOnOs({OS.LINUX, OS.MAC})

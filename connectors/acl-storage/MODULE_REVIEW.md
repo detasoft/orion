@@ -7,11 +7,14 @@ replacements persisted while the service returns `PERSISTENCE_FAILED` without ac
 Each changed document is replaced atomically, but the sequence of replacements is not a transaction.
 
 **Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
-checks the snapshot version under a file lock, omits byte-identical files, then replaces changed files sequentially.
+checks the snapshot version under a file lock, omits byte-identical files, prepares all changed documents in
+temporary files, then replaces active files sequentially. Preparation failures leave active documents unchanged;
+failure during the replacement phase can still partially publish the snapshot.
 [`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java)
 saves before reloading. `resetRootPassword` in the same service can change more than one document.
 [`LocalAccessControlStorageTest`](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java)
-covers complete per-file replacement, access attributes, and preparation failure, not multi-file rollback.
+covers complete per-file replacement, access attributes, failure preparing a later document, temporary-file
+cleanup, and successful retry, not multi-file rollback.
 
 **Documented behavior.** The queued
 [`saved snapshot contract`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md)
@@ -27,8 +30,8 @@ need explicit guarantees.
 an explicit partial-publication result with reconciliation of the live snapshot. Cover failure after the first
 replacement, live state, and restart under the chosen contract.
 
-**Alternatives and consequences.** Preparing every temporary file before publishing reduces preparation-related
-partial updates but cannot prevent a later rename failure. Immutable generations can make multi-document
+**Alternatives and consequences.** Preparing every temporary file before publishing cannot prevent a later
+rename failure. Immutable generations can make multi-document
 publication atomic but change the operator-visible layout. Restricting writes to native Git removes supported
 Local capability. Best-effort rollback can itself fail and must not be described as atomic.
 

@@ -118,8 +118,23 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                             // A new document still needs to be written.
                         }
                     }
-                    for (Map.Entry<Path, byte[]> entry : changed.entrySet()) {
-                        replaceDocument(entry.getKey(), entry.getValue());
+                    Map<Path, Path> prepared = new LinkedHashMap<>();
+                    try {
+                        for (Map.Entry<Path, byte[]> entry : changed.entrySet()) {
+                            prepared.put(entry.getKey(), prepareDocument(entry.getKey(), entry.getValue()));
+                        }
+                        Iterator<Map.Entry<Path, Path>> replacements = prepared.entrySet().iterator();
+                        while (replacements.hasNext()) {
+                            Map.Entry<Path, Path> entry = replacements.next();
+                            Files.move(entry.getValue(), entry.getKey(),
+                                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                            replacements.remove();
+                        }
+                    } catch (IOException | RuntimeException failure) {
+                        for (Path temporary : prepared.values()) {
+                            deleteTemporary(temporary, failure);
+                        }
+                        throw failure;
                     }
                 }
             } catch (IOException e) {
@@ -128,7 +143,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
         }
     }
 
-    private static void replaceDocument(Path target, byte[] content) throws IOException {
+    private static Path prepareDocument(Path target, byte[] content) throws IOException {
         boolean existing = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
         Path parent = target.getParent();
         Files.createDirectories(parent);
@@ -160,14 +175,18 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                 copyAccessAttributes(target, temporary);
             }
             Files.write(temporary, content);
-            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            return temporary;
         } catch (IOException | RuntimeException failure) {
-            try {
-                Files.deleteIfExists(temporary);
-            } catch (IOException cleanup) {
-                failure.addSuppressed(cleanup);
-            }
+            deleteTemporary(temporary, failure);
             throw failure;
+        }
+    }
+
+    private static void deleteTemporary(Path temporary, Exception failure) {
+        try {
+            Files.deleteIfExists(temporary);
+        } catch (IOException | RuntimeException cleanup) {
+            failure.addSuppressed(cleanup);
         }
     }
 
