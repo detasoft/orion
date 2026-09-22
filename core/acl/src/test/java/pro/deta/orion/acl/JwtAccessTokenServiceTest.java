@@ -95,6 +95,15 @@ class JwtAccessTokenServiceTest {
     }
 
     @Test
+    void issuesAndVerifiesTokenAtMaximumLifetime() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 3_600);
+        assertThat(token.expiresAtEpochSecond()).isEqualTo(CLOCK.instant().getEpochSecond() + 3_600);
+        assertThat(service.verify(token.value())).isInstanceOf(JwtAccessTokenService.VerificationResult.Success.class);
+    }
+
+    @Test
     void rejectsTokenWithoutAccessPurpose() throws Exception {
         TestIdentity identity = TestIdentity.single("server-signing-v1");
         JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);

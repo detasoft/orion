@@ -14,6 +14,8 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import java.util.List;
 
 public interface OrionAccessControlService {
+    long MAX_TOKEN_EXPIRES_IN_SECONDS = 3_600;
+
     void addKeyToUser(String username, String publicKey);
 
     void addSshKeysToUser(String username, List<String> publicKeys);

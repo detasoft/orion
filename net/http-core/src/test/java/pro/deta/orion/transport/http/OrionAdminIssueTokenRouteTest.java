@@ -2,20 +2,65 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.TokenIssueResult;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminIssueTokenRouteTest {
+    @ParameterizedTest
+    @ValueSource(longs = {3601, Long.MAX_VALUE})
+    void excessiveTtlReturnsBadRequestBeforeAuthentication(long requestedTtl) throws Exception {
+        AtomicLong ttl = new AtomicLong(-1);
+        AtomicInteger status = new AtomicInteger();
+        AtomicReference<String> message = new AtomicReference<>();
+        HttpServletResponse response = (HttpServletResponse) Proxy.newProxyInstance(
+                HttpServletResponse.class.getClassLoader(), new Class<?>[]{HttpServletResponse.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "sendError" -> {
+                            status.set((Integer) args[0]);
+                            message.set((String) args[1]);
+                        }
+                        case "setStatus" -> status.set((Integer) args[0]);
+                        case "setHeader" -> { }
+                        default -> throw new UnsupportedOperationException(method.getName());
+                    }
+                    return null;
+                });
+        ObjectMapper mapper = new ObjectMapper();
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route(ttl, false))), new OrionHttpResponseWriter(mapper));
+        String body = "{\"expiresInSeconds\":" + requestedTtl + "}";
+        servlet.service(request(new CountingBody(body, body.length())), response);
+        assertThat(status.get()).isEqualTo(400);
+        assertThat(message.get()).isEqualTo("Token expiration exceeds 3600 seconds");
+        assertThat(ttl.get()).isEqualTo(-1);
+    }
+
+    @Test
+    void acceptsTheMaximumTtl() throws Exception {
+        AtomicLong ttl = new AtomicLong(-1);
+        String body = "{\"expiresInSeconds\":3600}";
+        OrionHttpResponse response = route(ttl, true).doPost(request(new CountingBody(body, body.length())));
+        assertThat(response.status()).isEqualTo(200);
+        assertThat(ttl.get()).isEqualTo(3600);
+    }
+
     @Test
     void tokenResponseSerializesTokenWithoutExposingItInDiagnostics() throws Exception {
         OrionAdminIssueTokenRoute.AdminTokenResponse response =
@@ -96,6 +141,8 @@ class OrionAdminIssueTokenRouteTest {
         return (HttpServletRequest) Proxy.newProxyInstance(
                 HttpServletRequest.class.getClassLoader(), new Class<?>[]{HttpServletRequest.class},
                 (proxy, method, args) -> switch (method.getName()) {
+                    case "getMethod" -> "POST";
+                    case "getPathInfo" -> OrionAdminPaths.TOKEN;
                     case "getHeader" -> "Authorization".equals(args[0]) ? authorization : null;
                     case "getInputStream" -> body;
                     case "getContentLength" -> -1;

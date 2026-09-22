@@ -110,6 +110,10 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
             if (expiresInSeconds <= 0) {
                 throw new HttpRequestValidationException("Token expiration must be positive");
             }
+            if (expiresInSeconds > OrionAccessControlService.MAX_TOKEN_EXPIRES_IN_SECONDS) {
+                throw new HttpRequestValidationException("Token expiration exceeds "
+                        + OrionAccessControlService.MAX_TOKEN_EXPIRES_IN_SECONDS + " seconds");
+            }
             return expiresInSeconds;
         }
     }

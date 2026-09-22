@@ -10,13 +10,14 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static pro.deta.orion.OrionAccessControlService.MAX_TOKEN_EXPIRES_IN_SECONDS;
+
 final class JwtAccessTokenService {
     private static final String HEADER_ALGORITHM = "RS256";
     private static final String JWT_TYPE = "JWT";
     private static final String ISSUER = "orion";
     private static final String AUDIENCE = "orion";
     private static final String ACCESS_PURPOSE = "orion-access";
-    private static final long MAX_EXPIRES_IN_SECONDS = 3_600;
     private static final String AUTHENTICATION_GENERATION_CLAIM = "orion_auth_generation";
     private static final int MAX_AUTHENTICATION_GENERATION_LENGTH = 128;
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
@@ -53,9 +54,9 @@ final class JwtAccessTokenService {
         if (expiresInSeconds <= 0) {
             throw new IllegalArgumentException("Token expiration must be positive");
         }
-        if (expiresInSeconds > MAX_EXPIRES_IN_SECONDS) {
+        if (expiresInSeconds > MAX_TOKEN_EXPIRES_IN_SECONDS) {
             throw new IllegalArgumentException(
-                    "Token expiration exceeds " + MAX_EXPIRES_IN_SECONDS + " seconds");
+                    "Token expiration exceeds " + MAX_TOKEN_EXPIRES_IN_SECONDS + " seconds");
         }
         if (authenticationGeneration != null
                 && (authenticationGeneration.isBlank()
@@ -163,9 +164,9 @@ final class JwtAccessTokenService {
         if (expiresAt == null) {
             return VerificationResult.failure("JWT expiration is required");
         }
-        if (expiresAt < issuedAt || expiresAt - issuedAt > MAX_EXPIRES_IN_SECONDS) {
+        if (expiresAt < issuedAt || expiresAt - issuedAt > MAX_TOKEN_EXPIRES_IN_SECONDS) {
             return VerificationResult.failure(
-                    "JWT lifetime exceeds " + MAX_EXPIRES_IN_SECONDS + " seconds");
+                    "JWT lifetime exceeds " + MAX_TOKEN_EXPIRES_IN_SECONDS + " seconds");
         }
         if (expiresAt <= notBefore) {
             return VerificationResult.failure("JWT time range is invalid");
