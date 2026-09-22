@@ -437,12 +437,6 @@ final class GitBlockingClientWire {
 
     private static GitRemoteAdvertisement parseAdvertisement(List<String> lines)
             throws GitClientProtocolException {
-        if (lines.isEmpty()) {
-            throw protocolFailure(
-                    GitClientFailure.Kind.MALFORMED_RESPONSE,
-                    GitClientFailure.Phase.ADVERTISEMENT,
-                    "Remote Git advertisement is empty");
-        }
         Set<String> capabilities = new LinkedHashSet<>();
         Map<String, RefBuilder> refs = new LinkedHashMap<>();
         boolean capabilitiesRead = false;

@@ -29,6 +29,8 @@ public final class GitWorkflowScenarios {
             GitCapability.INITIALIZE, GitCapability.COMMIT, GitCapability.PUSH,
             GitCapability.CLONE, GitCapability.FETCH);
     private static final List<GitScenario> CATALOG = List.of(
+            scenario("empty-repository-discovery", Set.of(GitCapability.INITIALIZE, GitCapability.FETCH),
+                    state(Map.of(), Map.of()), GitWorkflowScenarios::emptyRepositoryDiscovery),
             scenario("initial-push-and-clone", CLONE,
                     initialState(), GitWorkflowScenarios::initialPushAndClone),
             scenario("clone-multiple-commit-history", CLONE, threeCommitState("third\n"),
@@ -73,6 +75,14 @@ public final class GitWorkflowScenarios {
 
     public static GitScenario missingRepositoryFirstPush() {
         return MISSING_REPOSITORY_FIRST_PUSH;
+    }
+
+    private static void emptyRepositoryDiscovery(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.addRemote("origin", context.remote());
+            require(source.advertisedRefs("origin").isEmpty(), "empty repository advertises refs");
+            execution.assertTerminal(context.server().snapshot(context.remote()));
+        }
     }
 
     private static void initialPushAndClone(GitScenarioContext context, Execution execution) throws Exception {
@@ -253,6 +263,7 @@ public final class GitWorkflowScenarios {
 
             source.pushRefs("origin", ":" + MAIN);
             execution.assertTerminal(context.server().snapshot(context.remote()));
+            require(source.advertisedRefs("origin").isEmpty(), "empty repository still advertises refs");
         }
     }
 

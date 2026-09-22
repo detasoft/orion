@@ -222,6 +222,35 @@ class GitBlockingClientsTest {
                         REMOTE, GitClientOptions.defaults());
 
         assertThat(success(result).refs()).isEmpty();
+        assertThat(success(result).capabilities()).containsExactly("side-band-64k");
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    void discoversEmptyAdvertisementTerminatedByFlush(boolean versionOne) {
+        byte[] version = versionOne ? packet("version 1\n") : new byte[0];
+        RecordingTransport transport = new RecordingTransport(concat(version, flush()));
+
+        GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
+                .discover(REMOTE, GitClientOptions.defaults());
+
+        assertThat(success(result).refs()).isEmpty();
+        assertThat(success(result).capabilities()).isEmpty();
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"''", "00"})
+    void rejectsVersionOneAdvertisementWithoutFlush(String incompleteFlush) {
+        RecordingTransport transport = new RecordingTransport(concat(
+                packet("version 1\n"), incompleteFlush.getBytes(StandardCharsets.US_ASCII)));
+
+        GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
+                .discover(REMOTE, GitClientOptions.defaults());
+
+        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.UNEXPECTED_END_OF_STREAM);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.ADVERTISEMENT);
         assertThat(transport.session.closed).isTrue();
     }
 
