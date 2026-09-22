@@ -11,14 +11,25 @@ import pro.deta.orion.util.Result;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.LinkOption;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.TreeMap;
@@ -34,7 +45,26 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     @Override
     public Result<AccessControlSnapshot> load() {
         synchronized (LocalAccessControlStorage.class) {
-            return loadFiles();
+            try {
+                Path directory = aclDirectory();
+                if (Files.notExists(directory)) {
+                    return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                }
+                try (FileChannel channel = openReadLock(directory.resolve(".orion-configuration.lock"));
+                     FileLock ignored = channel.lock(0, Long.MAX_VALUE, true)) {
+                    return loadFiles();
+                }
+            } catch (IOException | IllegalArgumentException failure) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL, failure.getMessage(), failure);
+            }
+        }
+    }
+
+    private static FileChannel openReadLock(Path lock) throws IOException {
+        try {
+            return FileChannel.open(lock, StandardOpenOption.READ);
+        } catch (NoSuchFileException missing) {
+            return FileChannel.open(lock, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
         }
     }
 
@@ -66,7 +96,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                         StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                      var ignored = channel.lock()) {
                     if (snapshot.version().isPresent()) {
-                        Result<AccessControlSnapshot> loaded = load();
+                        Result<AccessControlSnapshot> loaded = loadFiles();
                         if (!(loaded instanceof Result.Success<AccessControlSnapshot> success)
                                 || !snapshot.version().equals(success.value().version())) {
                             throw new AccessControlConcurrentUpdateException("Local configuration changed before save", null);
@@ -88,15 +118,80 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                         }
                     }
                     for (Map.Entry<Path, byte[]> entry : changed.entrySet()) {
-                        Path file = entry.getKey();
-                        if (file.getParent() != null) {
-                            Files.createDirectories(file.getParent());
-                        }
-                        Files.write(file, entry.getValue());
+                        replaceDocument(entry.getKey(), entry.getValue());
                     }
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Cannot save local ACL snapshot", e);
+            }
+        }
+    }
+
+    private static void replaceDocument(Path file, byte[] content) throws IOException {
+        boolean existing = Files.exists(file, LinkOption.NOFOLLOW_LINKS);
+        Path target = existing ? file.toRealPath() : file;
+        Path parent = target.getParent();
+        Files.createDirectories(parent);
+        if (existing && !Files.isWritable(target)) {
+            throw new AccessDeniedException(target.toString());
+        }
+        FileAttribute<?>[] attributes = new FileAttribute<?>[0];
+        AclFileAttributeView acl = existing ? Files.getFileAttributeView(target, AclFileAttributeView.class) : null;
+        if (acl != null) {
+            List<AclEntry> entries = acl.getAcl();
+            attributes = new FileAttribute<?>[]{new FileAttribute<List<AclEntry>>() {
+                @Override
+                public String name() {
+                    return "acl:acl";
+                }
+
+                @Override
+                public List<AclEntry> value() {
+                    return entries;
+                }
+            }};
+        } else if (!existing && Files.getFileAttributeView(parent, PosixFileAttributeView.class) != null) {
+            attributes = new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rw-rw-rw-"))};
+        }
+        Path temporary = Files.createTempFile(parent, ".orion-acl-", ".tmp", attributes);
+        try {
+            if (existing) {
+                copyAccessAttributes(target, temporary);
+            }
+            Files.write(temporary, content);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException | RuntimeException failure) {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
+    }
+
+    private static void copyAccessAttributes(Path source, Path target) throws IOException {
+        PosixFileAttributeView posix = Files.getFileAttributeView(source, PosixFileAttributeView.class);
+        if (posix != null) {
+            PosixFileAttributes original = posix.readAttributes();
+            PosixFileAttributeView replacement = Files.getFileAttributeView(target, PosixFileAttributeView.class);
+            PosixFileAttributes created = replacement.readAttributes();
+            if (!original.owner().equals(created.owner())) {
+                replacement.setOwner(original.owner());
+            }
+            if (!original.group().equals(created.group())) {
+                replacement.setGroup(original.group());
+            }
+            replacement.setPermissions(original.permissions());
+        } else {
+            AclFileAttributeView acl = Files.getFileAttributeView(source, AclFileAttributeView.class);
+            if (acl != null) {
+                AclFileAttributeView replacement = Files.getFileAttributeView(target, AclFileAttributeView.class);
+                if (!acl.getOwner().equals(replacement.getOwner())) {
+                    replacement.setOwner(acl.getOwner());
+                }
+                replacement.setAcl(acl.getAcl());
             }
         }
     }

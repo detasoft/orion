@@ -1,42 +1,42 @@
 # Module Review: `connectors/acl-storage`
 
-## 2. Local save can truncate a document or partially publish a multi-document change
+## 2. Local save can partially publish a multi-document change
 
-**Problem.** Local storage writes changed documents directly to their active paths. An I/O failure during
-`Files.write` can leave a document truncated. If several documents actually change, a later write failure can
-leave earlier replacements persisted while the service returns `PERSISTENCE_FAILED` without activating the
-new snapshot. Path validation and content comparison happen before document writes, but do not protect the
-write phase itself.
+**Problem.** If several ACL documents actually change, a failure replacing a later document can leave earlier
+replacements persisted while the service returns `PERSISTENCE_FAILED` without activating the new snapshot.
+Each changed document is replaced atomically, but the sequence of replacements is not a transaction.
 
 **Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
-checks the snapshot version under a file lock, omits byte-identical files, then writes changed files sequentially.
+checks the snapshot version under a file lock, omits byte-identical files, then replaces changed files sequentially.
 [`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java)
 saves before reloading. `resetRootPassword` in the same service can change more than one document.
-[`LocalSshCredentialPersistenceTest`](src/test/java/pro/deta/orion/acl/storage/LocalSshCredentialPersistenceTest.java)
-covers activation and reopening with an unchanged read-only secondary file; it does not cover write-phase faults.
+[`LocalAccessControlStorageTest`](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java)
+covers complete per-file replacement, access attributes, and preparation failure, not multi-file rollback.
 
 **Documented behavior.** The queued
 [`saved snapshot contract`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md)
 requires an explicit Local publication guarantee but leaves multi-file atomicity as a decision.
 
-**Contract.** Preparing a replacement must preserve the previous complete document. The existing lock and
-version check coordinate participating Orion writers; they do not make publication atomic or constrain an
-external editor that ignores the lock. Atomicity across genuinely changed documents and power-loss durability
+**Contract.** Local readers and writers hold the same file lock across the complete operation; the version check
+rejects stale saves. Per-file atomic replacement preserves complete documents. These mechanisms prevent a
+participating reader from observing an in-progress save, but do not make multi-document publication atomic or
+constrain an external editor that ignores the lock. Multi-document failure semantics and power-loss durability
 need explicit guarantees.
 
-**Minimal repair.** Prepare each changed document in a sibling temporary file and atomically replace its target,
-coordinating replacement with physical containment. Cover preparation and publication failures, retained old
-contents, and reload. Define the guarantee for operations changing multiple documents separately.
+**Minimal repair.** Decide whether genuinely multi-document mutations require all-or-nothing publication or
+an explicit partial-publication result with reconciliation of the live snapshot. Cover failure after the first
+replacement, live state, and restart under the chosen contract.
 
-**Alternatives and consequences.** A lock cannot undo a failed write. Per-file atomic replacement prevents
-truncation but is not a multi-document transaction. Immutable generations can make multi-document publication
-atomic but change the operator-visible layout; restricting writes to native Git removes supported Local capability.
+**Alternatives and consequences.** Preparing every temporary file before publishing reduces preparation-related
+partial updates but cannot prevent a later rename failure. Immutable generations can make multi-document
+publication atomic but change the operator-visible layout. Restricting writes to native Git removes supported
+Local capability. Best-effort rollback can itself fail and must not be described as atomic.
 
-**Confidence.** High for direct writes and sequential publication. Write-phase fault injection and crash recovery
-have not been executed.
+**Confidence.** High for sequential publication and the service outcome. Multi-document publication fault
+injection and crash recovery have not been executed.
 
-**Priority signals.** Importance: high because failed writes can damage durable ACL data or leave it inconsistent
-with the live snapshot. Repair ease: low because publication, containment, and multi-document semantics interact.
+**Priority signals.** Importance: high for multi-document credential operations because durable and live ACLs can
+diverge. Repair ease: low because the publication contract and operator-visible layout require a decision.
 
 ## 3. Physical Local containment is bypassed through symlinks
 
@@ -47,7 +47,7 @@ links, then uses regular-file and read operations that follow links, and it does
 
 **Sources.** Local storage performs a lexical prefix check in
 [`aclPath`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L65),
-then follows the resolved path during
+then follows configured links during
 [`load`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L21) and
 [`save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L40).
 Bootstrap's
