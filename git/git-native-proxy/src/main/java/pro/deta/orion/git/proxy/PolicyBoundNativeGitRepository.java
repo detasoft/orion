@@ -1,6 +1,7 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
@@ -53,7 +54,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     @Override
     public void saveFiles(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         NativeGitFileUpdate update = repository().prepareProxyFileUpdate(branch, files, message, author);
@@ -64,7 +65,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     @Override
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(branch, files, message, author);
@@ -74,7 +75,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
             String expectedRefRevision,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(
@@ -84,7 +85,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     @Override
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(branch, files, message, author);
@@ -94,7 +95,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
             String expectedRefRevision,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(

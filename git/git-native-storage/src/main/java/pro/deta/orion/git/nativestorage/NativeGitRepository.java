@@ -65,7 +65,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     public void saveFiles(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         new NativeRepositoryFileSaver(this).saveFiles(branch, files, message, author);
@@ -73,7 +73,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(branch, files, message, author);
@@ -82,7 +82,7 @@ public class NativeGitRepository implements AutoCloseable {
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
             String expectedRefRevision,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(
@@ -91,7 +91,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(
@@ -105,7 +105,7 @@ public class NativeGitRepository implements AutoCloseable {
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
             String expectedRefRevision,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(

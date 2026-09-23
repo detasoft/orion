@@ -14,6 +14,7 @@ import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -115,9 +116,11 @@ class NativeBootstrapGitPackReplayTest {
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                     "proxy", new GitStorageApi(), "refs/heads/main");
-        repository.saveFiles("main", Map.of("config.txt", new byte[]{1}), "local", GitCommitAuthor.EMPTY);
+        repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), "local",
+                GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");
-        var unrelated = repository.prepareFileUpdate("other", Map.of("other.txt", new byte[]{2}),
+        var unrelated = repository.prepareFileUpdate("other",
+                Map.of("other.txt", GitFile.regular(new byte[]{2})),
                 "unrelated", GitCommitAuthor.EMPTY);
         Optional<PackId> received = ingest(repository, unrelated.pack());
         Path bare = directory.resolve("missing-objects.git");

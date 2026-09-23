@@ -5,6 +5,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
@@ -440,7 +441,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     public void saveFiles(
             String repositoryName,
             String refName,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         String canonicalName = repositoryName(repositoryName);

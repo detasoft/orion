@@ -2,6 +2,7 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -44,7 +45,8 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        NativeGitFileUpdate prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
+        NativeGitFileUpdate prepared = repository.prepareFileUpdate("main",
+                Map.of("config.txt", GitFile.regular(new byte[]{1})),
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
@@ -232,7 +234,7 @@ class GitBlockingWireSessionTest {
                 provider.create("project").valueOrFailure("repository");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "payload".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("payload".getBytes(StandardCharsets.US_ASCII))),
                 "initial",
                 GitCommitAuthor.EMPTY);
         String mainId = repository.refs().get("refs/heads/main");
@@ -432,13 +434,13 @@ class GitBlockingWireSessionTest {
                 provider.create("project").valueOrFailure("repository");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "base".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))),
                 "base",
                 GitCommitAuthor.EMPTY);
         String have = repository.refs().get("refs/heads/main");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "next".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))),
                 "next",
                 GitCommitAuthor.EMPTY);
         String want = repository.refs().get("refs/heads/main");
@@ -466,8 +468,10 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("first", new byte[]{1}), "first", GitCommitAuthor.EMPTY);
-        repository.saveFiles("second", Map.of("second", new byte[]{2}), "second", GitCommitAuthor.EMPTY);
+        repository.saveFiles("main", Map.of("first", GitFile.regular(new byte[]{1})), "first",
+                GitCommitAuthor.EMPTY);
+        repository.saveFiles("second", Map.of("second", GitFile.regular(new byte[]{2})), "second",
+                GitCommitAuthor.EMPTY);
         ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
         try (QueueByteSource input = new QueueByteSource(
@@ -498,13 +502,13 @@ class GitBlockingWireSessionTest {
                 provider.create("project").valueOrFailure("repository");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "base".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))),
                 "base",
                 GitCommitAuthor.EMPTY);
         String have = repository.refs().get("refs/heads/main");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "next".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))),
                 "next",
                 GitCommitAuthor.EMPTY);
         String want = repository.refs().get("refs/heads/main");
@@ -640,12 +644,12 @@ class GitBlockingWireSessionTest {
                 provider.create("project").valueOrFailure("repository");
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "root".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("root".getBytes(StandardCharsets.US_ASCII))),
                 "root",
                 GitCommitAuthor.EMPTY);
         repository.saveFiles(
                 "main",
-                Map.of("README.md", "tip".getBytes(StandardCharsets.US_ASCII)),
+                Map.of("README.md", GitFile.regular("tip".getBytes(StandardCharsets.US_ASCII))),
                 "tip",
                 GitCommitAuthor.EMPTY);
         String tip = repository.refs().get("refs/heads/main");

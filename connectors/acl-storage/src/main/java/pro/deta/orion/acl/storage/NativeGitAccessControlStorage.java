@@ -1,6 +1,7 @@
 package pro.deta.orion.acl.storage;
 
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
@@ -13,7 +14,9 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.util.Result;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -49,7 +52,11 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(configurationRef, paths);
-            return new Result.Success<>(new AccessControlSnapshot(snapshot.files(), snapshot.version()));
+            Map<String, byte[]> files = new LinkedHashMap<>();
+            for (Map.Entry<String, GitFile> entry : snapshot.files().entrySet()) {
+                files.put(entry.getKey(), entry.getValue().content());
+            }
+            return new Result.Success<>(new AccessControlSnapshot(files, snapshot.version()));
         } catch (GitRepositoryFileNotFoundException error) {
             if (primaryPathIsMissing(repository)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
@@ -66,12 +73,16 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         Objects.requireNonNull(request, "request");
         try {
             GitCommitAuthor author = author(request);
+            Map<String, GitFile> files = new LinkedHashMap<>();
+            for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
+                files.put(entry.getKey(), GitFile.regular(entry.getValue()));
+            }
             if (snapshot.version().isPresent()) {
                 NativeGitFileUpdate update = repositoryProvider.prepareFileUpdate(
                         repositoryName,
                         configurationRef,
                         snapshot.version().orElseThrow(),
-                        snapshot.files(),
+                        files,
                         request.message(),
                         author);
                 List<RefUpdateResult> results = repositoryProvider.publishPack(
@@ -88,7 +99,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                 repositoryProvider.saveFiles(
                         repositoryName,
                         configurationRef,
-                        snapshot.files(),
+                        files,
                         request.message(),
                         author);
             }

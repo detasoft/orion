@@ -23,6 +23,7 @@ import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -98,8 +99,9 @@ class OrionGitHttpInteroperabilityTest {
             URI remote = URI.create("http://127.0.0.1:" + connector.getLocalPort() + "/r/project.git");
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
-                    repository.saveFiles("main", Map.of("README.md", ("history " + number).getBytes(
-                            StandardCharsets.UTF_8)), "history " + number, GitCommitAuthor.EMPTY);
+                    repository.saveFiles("main",
+                            Map.of("README.md", GitFile.regular(("history " + number).getBytes(
+                                    StandardCharsets.UTF_8))), "history " + number, GitCommitAuthor.EMPTY);
                     history.addFirst(repository.refs().get("refs/heads/main"));
                 }
             }
@@ -107,7 +109,8 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                repository.saveFiles("main", Map.of("README.md", content.getBytes(StandardCharsets.UTF_8)),
+                repository.saveFiles("main",
+                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))),
                         "update", GitCommitAuthor.EMPTY);
                 String commit = repository.refs().get("refs/heads/main");
                 history.addFirst(commit);
@@ -174,7 +177,8 @@ class OrionGitHttpInteroperabilityTest {
                  IndexedPack pack = received.ingest(input)) {
                 received.storage().persist(pack);
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
-                assertThat(new String(received.loadFiles("main", List.of("README.md")).files().get("README.md"),
+                assertThat(new String(received.loadFiles("main",
+                        List.of("README.md")).files().get("README.md").content(),
                         StandardCharsets.UTF_8)).isEqualTo(content);
             }
         }

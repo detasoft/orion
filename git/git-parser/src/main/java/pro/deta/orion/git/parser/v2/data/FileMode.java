@@ -16,4 +16,13 @@ public enum FileMode {
     public int code() {
         return code;
     }
+
+    public static FileMode fromCode(int code) {
+        for (FileMode mode : values()) {
+            if (mode.code == code) {
+                return mode;
+            }
+        }
+        throw new IllegalArgumentException("Unsupported Git file mode: " + Integer.toOctalString(code));
+    }
 }

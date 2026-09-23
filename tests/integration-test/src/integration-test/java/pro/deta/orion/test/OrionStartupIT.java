@@ -312,7 +312,7 @@ class OrionStartupIT {
                     .valueOrFailure("ACL repository should exist")
                     .loadFiles(Constants.R_HEADS + BRANCH, List.of(ACL_FILE))
                     .files()
-                    .get(ACL_FILE);
+                    .get(ACL_FILE).content();
         } catch (GitOperationException failure) {
             throw new IOException("Cannot read ACL repository", failure);
         }

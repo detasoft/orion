@@ -420,7 +420,7 @@ class RuntimeHttpGitRouteIT {
                 .isPresent();
         var snapshot = repository.loadFiles(BRANCH, List.of(fileName));
         assertThat(snapshot.version()).contains(commitId.name());
-        assertThat(new String(snapshot.files().get(fileName), StandardCharsets.UTF_8))
+        assertThat(new String(snapshot.files().get(fileName).content(), StandardCharsets.UTF_8))
                 .isEqualTo(expectedContent);
     }
 

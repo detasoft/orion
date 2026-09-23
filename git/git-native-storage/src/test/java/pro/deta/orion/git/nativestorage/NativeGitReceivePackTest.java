@@ -185,7 +185,7 @@ class NativeGitReceivePackTest {
         return repository.prepareFileUpdate(MAIN, files(value), value, GitCommitAuthor.EMPTY);
     }
 
-    private static Map<String, byte[]> files(String value) {
-        return Map.of("config.txt", value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    private static Map<String, GitFile> files(String value) {
+        return Map.of("config.txt", GitFile.regular(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
 }

@@ -2,6 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -28,13 +29,13 @@ class BootstrapGitRuntimeProxyTest {
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository.saveFiles(
                 location.refName(),
-                Map.of("orion.xml", "first".getBytes()),
+                Map.of("orion.xml", GitFile.regular("first".getBytes())),
                 "first",
                 GitCommitAuthor.EMPTY);
         String oldId = repository.refs().get(location.refName());
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 location.refName(),
-                Map.of("orion.xml", "second".getBytes()),
+                Map.of("orion.xml", GitFile.regular("second".getBytes())),
                 "second",
                 GitCommitAuthor.EMPTY);
         AtomicInteger refreshes = new AtomicInteger();

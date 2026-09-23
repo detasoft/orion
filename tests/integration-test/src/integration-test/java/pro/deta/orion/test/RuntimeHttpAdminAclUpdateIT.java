@@ -159,6 +159,6 @@ class RuntimeHttpAdminAclUpdateIT {
                         orion.configuration().getBootstrap().getAccessControl().selectedRef(),
                         List.of(ACL_FILE))
                 .files()
-                .get(ACL_FILE);
+                .get(ACL_FILE).content();
     }
 }

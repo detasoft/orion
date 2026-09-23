@@ -1,6 +1,7 @@
 package pro.deta.orion;
 
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
@@ -53,7 +54,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         }
         try {
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, List.of(path));
-            byte[] bytes = snapshot.files().get(path);
+            byte[] bytes = snapshot.files().get(path).content();
             String version = materialVersion(bytes);
             observation = new Observation(version, refRevision);
             return Optional.of(new KeyMaterialSnapshot(bytes, version));
@@ -78,7 +79,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
                     repositoryName,
                     refName,
                     observation.refRevision(),
-                    Map.of(path, bytes),
+                    Map.of(path, GitFile.regular(bytes)),
                     SAVE_MESSAGE,
                     GitCommitAuthor.EMPTY);
             List<RefUpdateResult> results = repositoryProvider.publishPack(

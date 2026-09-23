@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -79,7 +80,7 @@ class PackIngestionOutputTest {
     private static NativeGitFileUpdate prepared() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository(
                 "source", new GitStorageApi(), "refs/heads/main")) {
-            return repository.prepareFileUpdate("main", Map.of("file", new byte[]{1, 2, 3}),
+            return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})),
                     "initial", GitCommitAuthor.EMPTY);
         }
     }

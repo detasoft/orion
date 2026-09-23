@@ -1,6 +1,7 @@
 package pro.deta.orion.git.proxy;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitClientFailure;
@@ -9,9 +10,11 @@ import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackId;
@@ -47,7 +50,9 @@ class NativeBootstrapGitPusherTest {
         fetcher.fetch(location, new GitFileClientTransport(), repository);
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 location.refName(),
-                Map.of("orion.xml", "from proxy".getBytes()),
+                Map.of("orion.xml", GitFile.regular("from proxy".getBytes()),
+                        "run.sh", new GitFile(FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes()),
+                        "link", new GitFile(FileMode.SYMLINK, "run.sh".getBytes())),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
@@ -68,6 +73,14 @@ class NativeBootstrapGitPusherTest {
         try (Git bareGit = Git.open(upstream.bare().toFile())) {
             assertThat(repository.refs().get(location.refName()))
                     .isEqualTo(bareGit.getRepository().resolve(location.refName()).name());
+            var treeId = bareGit.getRepository().resolve(location.refName() + "^{tree}");
+            try (TreeWalk script = TreeWalk.forPath(bareGit.getRepository(), "run.sh", treeId);
+                 TreeWalk link = TreeWalk.forPath(bareGit.getRepository(), "link", treeId)) {
+                assertThat(script.getRawMode(0)).isEqualTo(FileMode.EXECUTABLE_FILE.code());
+                assertThat(link.getRawMode(0)).isEqualTo(FileMode.SYMLINK.code());
+                assertThat(bareGit.getRepository().open(link.getObjectId(0)).getBytes())
+                        .isEqualTo("run.sh".getBytes());
+            }
         }
         assertThat(cloneContent(upstream.bare(), "success-checkout")).isEqualTo("from proxy");
         upstream.git().close();
@@ -82,7 +95,7 @@ class NativeBootstrapGitPusherTest {
         String localOldId = repository.refs().get(location.refName());
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 location.refName(),
-                Map.of("orion.xml", "proxy change".getBytes()),
+                Map.of("orion.xml", GitFile.regular("proxy change".getBytes())),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
         Optional<PackId> received = ingest(repository, update);
@@ -117,7 +130,7 @@ class NativeBootstrapGitPusherTest {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
         NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
-                Map.of("orion.xml", new byte[]{1}), "update", GitCommitAuthor.EMPTY);
+                Map.of("orion.xml", GitFile.regular(new byte[]{1})), "update", GitCommitAuthor.EMPTY);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
                 (selected, transport, target) -> { },

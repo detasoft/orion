@@ -36,7 +36,7 @@ public interface NativeGitRepositoryProvider {
     default void saveFiles(
             String repositoryName,
             String refName,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         openForWrite(repositoryName)
@@ -48,7 +48,7 @@ public interface NativeGitRepositoryProvider {
             String repositoryName,
             String refName,
             String expectedRefRevision,
-            Map<String, byte[]> files,
+            Map<String, GitFile> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return openForWrite(repositoryName)

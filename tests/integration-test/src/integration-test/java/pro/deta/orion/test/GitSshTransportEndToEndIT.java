@@ -36,6 +36,7 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
@@ -1419,7 +1420,7 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("ACL repository should be created")
                 .saveFiles(
                         "refs/heads/" + BRANCH,
-                        Map.of("orion.xml", output.toByteArray()),
+                        Map.of("orion.xml", GitFile.regular(output.toByteArray())),
                         "seed e2e access control",
                         new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }
@@ -1493,7 +1494,7 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("Project repository should be created")
                 .saveFiles(
                         "refs/heads/" + BRANCH,
-                        Map.of("README.md", content.getBytes(StandardCharsets.UTF_8)),
+                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))),
                         "seed " + repositoryName,
                         new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }

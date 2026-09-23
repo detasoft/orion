@@ -11,6 +11,7 @@ import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitTcpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -71,7 +72,7 @@ class SmartHttpGitRemoteGatewayTest {
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
                 local.saveFiles(
                         "main",
-                        Map.of("orion.txt", "outbound\n".getBytes()),
+                        Map.of("orion.txt", GitFile.regular("outbound\n".getBytes())),
                         "Orion outbound",
                         new GitCommitAuthor("Orion", "orion@example.invalid"));
                 String desired = local.refs().get("refs/heads/main");

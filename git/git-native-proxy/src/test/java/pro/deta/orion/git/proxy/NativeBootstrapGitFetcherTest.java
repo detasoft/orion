@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -35,7 +36,7 @@ class NativeBootstrapGitFetcherTest {
         try {
             fetcher.fetch(location, new GitFileClientTransport(), repository);
             assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
-                    .containsEntry("orion.xml", "first".getBytes());
+                    .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
 
             Files.writeString(upstream.worktree().resolve("orion.xml"), "second");
             upstream.git().add().addFilepattern("orion.xml").call();
@@ -44,7 +45,7 @@ class NativeBootstrapGitFetcherTest {
 
             fetcher.fetch(location, new GitFileClientTransport(), repository);
             assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
-                    .containsEntry("orion.xml", "second".getBytes());
+                    .containsEntry("orion.xml", GitFile.regular("second".getBytes()));
         } finally {
             upstream.git().close();
         }
@@ -92,7 +93,7 @@ class NativeBootstrapGitFetcherTest {
 
             assertThat(repository.refs()).containsEntry(location.refName(), firstId);
             assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
-                    .containsEntry("orion.xml", "first".getBytes());
+                    .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
         } finally {
             upstream.git().close();
         }
@@ -118,8 +119,10 @@ class NativeBootstrapGitFetcherTest {
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
-        repository.saveFiles("refs/heads/main", Map.of("orion.xml", new byte[]{1}), "local", GitCommitAuthor.EMPTY);
-        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", new byte[]{2}), "remote", GitCommitAuthor.EMPTY);
+        repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})),
+                "local", GitCommitAuthor.EMPTY);
+        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})),
+                "remote", GitCommitAuthor.EMPTY);
         Map<String, String> before = repository.refs();
 
         assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(repository,

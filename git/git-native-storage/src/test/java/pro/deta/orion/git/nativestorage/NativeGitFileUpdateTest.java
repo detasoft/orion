@@ -90,7 +90,7 @@ class NativeGitFileUpdateTest {
                 try (var tree = TreeWalk.forPath(target, "config.txt", commit.getTree())) {
                     assertThat(tree).isNotNull();
                     assertThat(target.open(tree.getObjectId(0)).getBytes())
-                            .isEqualTo(files("prepared").get("config.txt"));
+                            .isEqualTo(files("prepared").get("config.txt").content());
                 }
             }
         }
@@ -124,7 +124,7 @@ class NativeGitFileUpdateTest {
         }
     }
 
-    private static Map<String, byte[]> files(String content) {
-        return Map.of("config.txt", content.getBytes(StandardCharsets.UTF_8));
+    private static Map<String, GitFile> files(String content) {
+        return Map.of("config.txt", GitFile.regular(content.getBytes(StandardCharsets.UTF_8)));
     }
 }

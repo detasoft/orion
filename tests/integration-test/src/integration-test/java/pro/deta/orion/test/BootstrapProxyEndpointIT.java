@@ -22,6 +22,7 @@ import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -91,8 +92,9 @@ class BootstrapProxyEndpointIT {
             var xml = new ByteArrayOutputStream();
             OrionXml.write(document.replaceAccessControl(aclDraft.toAccessControl()), xml);
             repository.saveFiles(REF, Map.of(
-                    "orion.xml", xml.toByteArray(),
-                    "material.p12", materialBytes(target, environment)), "seed inputs", GitCommitAuthor.EMPTY);
+                    "orion.xml", GitFile.regular(xml.toByteArray()),
+                    "material.p12", GitFile.regular(materialBytes(target, environment))),
+                    "seed inputs", GitCommitAuthor.EMPTY);
             for (int launch = 0; launch < 2; launch++) {
                 try (var bootstrap = BootstrapContext.open(target, environment)) {
                     var component = runtimeComponent(target, bootstrap);
@@ -110,7 +112,8 @@ class BootstrapProxyEndpointIT {
                             }
                             acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
-                                    .saveFiles(REF, Map.of("file", new byte[]{1}), "ordinary seed", GitCommitAuthor.EMPTY);
+                                    .saveFiles(REF, Map.of("file", GitFile.regular(new byte[]{1})),
+                                            "ordinary seed", GitCommitAuthor.EMPTY);
                         }
                         String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                                 .repositoryName().orElseThrow();
@@ -164,7 +167,8 @@ class BootstrapProxyEndpointIT {
                                 }
                                 assertThat(repository.refs()).containsEntry(REF, commit.name());
                                 assertThat(repository.loadFiles(REF, List.of("client-marker")).files())
-                                        .containsEntry("client-marker", ("launch " + launch).getBytes(StandardCharsets.UTF_8));
+                                        .containsEntry("client-marker",
+                                                GitFile.regular(("launch " + launch).getBytes(StandardCharsets.UTF_8)));
                                 assertThat(Git.lsRemoteRepository().setRemote(reader.uri(ENDPOINT))
                                         .setTransportConfigCallback(reader.callback()).call())
                                         .anySatisfy(ref -> {

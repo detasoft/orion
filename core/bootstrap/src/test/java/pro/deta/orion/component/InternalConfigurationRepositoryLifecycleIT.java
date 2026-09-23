@@ -18,6 +18,7 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -93,7 +94,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                         List.of(ACL_PATH));
                 firstVersion = snapshot.version().orElseThrow();
                 AccessControl acl = new XmlService().deserialize(
-                        new ByteArrayInputStream(snapshot.files().get(ACL_PATH)));
+                        new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
                 assertThat(acl.getUsers()).extracting(AccessControl.User::getId).contains("root");
             } finally {
                 assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -243,7 +244,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(snapshot.version()).isPresent();
             assertThat(snapshot.version().orElseThrow()).isNotEqualTo(versionBeforeReset);
             AccessControl acl = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH)));
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
             AccessControl.User root = acl.getUsers().stream()
                     .filter(user -> "root".equalsIgnoreCase(user.getId()))
                     .findFirst()
@@ -435,7 +436,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .valueOrFailure("configuration repository");
         repository.saveFiles(
                 CONFIGURATION_REF,
-                Map.of(ACL_PATH, primaryAcl, secondaryPath, secondaryAcl),
+                Map.of(ACL_PATH, GitFile.regular(primaryAcl), secondaryPath, GitFile.regular(secondaryAcl)),
                 "seed split ACL",
                 GitCommitAuthor.EMPTY);
 
@@ -456,9 +457,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                     CONFIGURATION_REF,
                     List.of(ACL_PATH, secondaryPath));
             AccessControl primary = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH)));
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
             AccessControl secondary = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(secondaryPath)));
+                    new ByteArrayInputStream(snapshot.files().get(secondaryPath).content()));
             assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
             assertThat(secondary.getUsers()).isEmpty();
@@ -514,7 +515,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             repository(first).saveFiles(
                     CONFIGURATION_REF,
-                    Map.of(ACL_PATH, duplicateRootAclBytes()),
+                    Map.of(ACL_PATH, GitFile.regular(duplicateRootAclBytes())),
                     "seed ambiguous root ACL",
                     GitCommitAuthor.EMPTY);
             versionBeforeReset = repository(first)
@@ -867,7 +868,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String candidateRef = "refs/heads/candidate-" + candidateName;
         repository.saveFiles(
                 candidateRef,
-                Map.of(ACL_PATH, content),
+                Map.of(ACL_PATH, GitFile.regular(content)),
                 "candidate " + candidateName,
                 GitCommitAuthor.EMPTY);
         return repository.refs().get(candidateRef);
@@ -964,7 +965,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         List<AccessControl.User> users = new java.util.ArrayList<>();
         XmlService xmlService = new XmlService();
         for (String path : paths) {
-            AccessControl acl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(path)));
+            AccessControl acl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(path).content()));
             users.addAll(acl.getUsers());
         }
         return List.copyOf(users);
