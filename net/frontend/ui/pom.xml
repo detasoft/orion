@@ -40,28 +40,6 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <id>npm-ci</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <configuration>
-                            <arguments>ci --no-audit --no-fund</arguments>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>npm-build</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <configuration>
-                            <arguments>
-                                run build -- --outDir target/classes/META-INF/orion/frontend
-                            </arguments>
-                        </configuration>
-                    </execution>
-                    <execution>
                         <id>npm-test</id>
                         <phase>test</phase>
                         <goals>
@@ -71,6 +49,28 @@
                             <arguments>test</arguments>
                             <!-- Temporarily run frontend tests explicitly with npm test. -->
                             <skip>true</skip>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>npm-build</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>python3</executable>
+                            <arguments>
+                                <argument>${project.basedir}/build.py</argument>
+                                <argument>${project.build.directory}/node/node</argument>
+                                <argument>${project.build.outputDirectory}/META-INF/orion/frontend</argument>
+                            </arguments>
                         </configuration>
                     </execution>
                 </executions>
