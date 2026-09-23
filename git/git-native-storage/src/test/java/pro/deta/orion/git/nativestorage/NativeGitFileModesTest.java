@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -42,7 +43,7 @@ class NativeGitFileModesTest {
                 "run.sh", new GitFile(EXECUTABLE_FILE, script),
                 "next.sh", GitFile.regular(script),
                 "link", new GitFile(SYMLINK, bytes("run.sh")));
-        repository.saveFiles("main", initial, "create", GitCommitAuthor.EMPTY);
+        repository.saveFiles("main", initial, Set.of(), "create", GitCommitAuthor.EMPTY);
         List<String> paths = List.of("run.sh", "next.sh", "link");
         assertThat(repository.loadFiles("main", paths).files()).isEqualTo(initial);
 
@@ -50,7 +51,7 @@ class NativeGitFileModesTest {
                 "run.sh", GitFile.regular(bytes("updated")),
                 "next.sh", new GitFile(EXECUTABLE_FILE, script),
                 "link", new GitFile(SYMLINK, bytes("next.sh")));
-        repository.saveFiles("main", updated, "update", GitCommitAuthor.EMPTY);
+        repository.saveFiles("main", updated, Set.of(), "update", GitCommitAuthor.EMPTY);
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
@@ -98,7 +99,7 @@ class NativeGitFileModesTest {
         assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                 .isEqualTo(RefUpdateResult.Status.APPLIED);
 
-        assertThatCode(() -> repository.saveFiles("main", Map.of("config.txt", GitFile.regular(bytes("updated"))),
+        assertThatCode(() -> repository.saveFiles("main", Map.of("config.txt", GitFile.regular(bytes("updated"))), Set.of(),
                 "update", GitCommitAuthor.EMPTY)).doesNotThrowAnyException();
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)

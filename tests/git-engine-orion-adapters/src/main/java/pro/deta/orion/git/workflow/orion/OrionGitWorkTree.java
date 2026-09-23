@@ -9,6 +9,7 @@ import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitFile;
+import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
@@ -138,14 +139,24 @@ final class OrionGitWorkTree implements GitWorkTree {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
         Map<String, GitFile> files = new LinkedHashMap<>();
+        Set<String> deletedPaths = new LinkedHashSet<>();
         for (String path : stagedPaths) {
             Path source = directory.resolve(path);
+            if (Files.notExists(source)) {
+                try {
+                    repository.loadFiles(currentBranch, List.of(path));
+                } catch (GitOperationException failure) {
+                    throw new IOException("Staged Git path is not tracked: " + path, failure);
+                }
+                deletedPaths.add(path);
+                continue;
+            }
             if (!Files.isRegularFile(source)) {
                 throw new IOException("Staged Git path is not a regular file: " + path);
             }
             files.put(path, GitFile.regular(Files.readAllBytes(source)));
         }
-        repository.saveFiles(currentBranch, files, message, PARITY_AUTHOR);
+        repository.saveFiles(currentBranch, files, deletedPaths, message, PARITY_AUTHOR);
         stagedPaths.clear();
     }
 

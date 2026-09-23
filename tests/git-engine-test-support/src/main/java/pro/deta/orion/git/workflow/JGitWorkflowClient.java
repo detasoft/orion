@@ -127,7 +127,8 @@ final class JGitWorkflowClient implements GitClient {
         @Override
         public void add(String... pathspecs) throws Exception {
             for (String pathspec : pathspecs) {
-                git.add().addFilepattern(pathspec).call();
+                git.add().addFilepattern(pathspec)
+                        .setUpdate(java.nio.file.Files.notExists(directory.resolve(pathspec))).call();
             }
         }
 

@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,7 +28,8 @@ class NativeGitRepositoryTest {
     void normalizesNestedUnicodePathsForReadingAndSaving() throws Exception {
         try (NativeGitRepository repository = repository()) {
             GitFile file = GitFile.regular("content".getBytes(StandardCharsets.UTF_8));
-            repository.saveFiles("topic", Map.of("./каталог//файл.txt", file), "create", GitCommitAuthor.EMPTY);
+            repository.saveFiles("topic", Map.of("./каталог//файл.txt", file), Set.of(),
+                    "create", GitCommitAuthor.EMPTY);
             assertThat(repository.loadFiles("refs/heads/topic", List.of("каталог/./файл.txt")).files())
                     .containsExactlyEntriesOf(Map.of("каталог/файл.txt", file));
             assertThatThrownBy(() -> repository.loadFiles("topic", List.of("missing")))
@@ -42,10 +44,11 @@ class NativeGitRepositoryTest {
     void rejectsInvalidPathsForReadingAndSaving(String path) throws Exception {
         try (NativeGitRepository repository = repository()) {
             GitFile file = GitFile.regular(new byte[]{1});
-            repository.saveFiles("main", Map.of("file", file), "create", GitCommitAuthor.EMPTY);
+            repository.saveFiles("main", Map.of("file", file), Set.of(), "create", GitCommitAuthor.EMPTY);
             assertThatThrownBy(() -> repository.loadFiles("main", List.of(path)))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.saveFiles("main", Map.of(path, file), "invalid", GitCommitAuthor.EMPTY))
+            assertThatThrownBy(() -> repository.saveFiles("main", Map.of(path, file), Set.of(),
+                    "invalid", GitCommitAuthor.EMPTY))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -61,7 +64,7 @@ class NativeGitRepositoryTest {
             assertThatThrownBy(() -> repository.loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
             assertThatThrownBy(() -> repository.prepareFileUpdate("main",
-                    Map.of("other", GitFile.regular(new byte[]{1})), "update", GitCommitAuthor.EMPTY))
+                    Map.of("other", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
         }
     }
@@ -75,7 +78,7 @@ class NativeGitRepositoryTest {
             assertThatThrownBy(() -> repository.loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
             assertThatThrownBy(() -> repository.prepareFileUpdate("main",
-                    Map.of("file", GitFile.regular(new byte[]{1})), "update", GitCommitAuthor.EMPTY))
+                    Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
         }
     }
@@ -107,7 +110,7 @@ class NativeGitRepositoryTest {
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
             NativeGitFileUpdate prepared = repository.prepareFileUpdate("configuration",
-                    Map.of("config.txt", GitFile.regular(new byte[]{1})),
+                    Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
                     "configuration", GitCommitAuthor.EMPTY);
             repository.publishPack(prepared.pack(), prepared.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL);
@@ -155,7 +158,7 @@ class NativeGitRepositoryTest {
 
         repository.saveFiles(
                 "main",
-                Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
@@ -178,7 +181,7 @@ class NativeGitRepositoryTest {
 
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
-                Map.of("orion.xml", GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "prepared acl",
                 GitCommitAuthor.EMPTY);
 
@@ -205,13 +208,13 @@ class NativeGitRepositoryTest {
                         "orion.xml",
                         GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8)),
                         "nested/acl.xml",
-                        GitFile.regular("nested acl".getBytes(StandardCharsets.UTF_8))),
+                        GitFile.regular("nested acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
         repository.saveFiles(
                 "main",
-                Map.of("orion.xml", GitFile.regular("updated acl".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("updated acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "updated acl",
                 GitCommitAuthor.EMPTY);
 
@@ -234,7 +237,7 @@ class NativeGitRepositoryTest {
                 "refs/heads/main");
         repository.saveFiles(
                 "main",
-                Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
         String versionOne = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
@@ -242,7 +245,7 @@ class NativeGitRepositoryTest {
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)),
-                        "winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8))),
+                        "winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version two",
                 GitCommitAuthor.EMPTY);
         String versionTwo = repository.refs().get("refs/heads/main");
@@ -250,7 +253,7 @@ class NativeGitRepositoryTest {
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
                 versionOne,
-                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "stale",
                 GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = repository.publishPack(
@@ -273,7 +276,7 @@ class NativeGitRepositoryTest {
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
         first.saveFiles(
                 "main",
-                Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
         FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
@@ -283,7 +286,7 @@ class NativeGitRepositoryTest {
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)),
-                        "winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8))),
+                        "winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version two",
                 GitCommitAuthor.EMPTY);
         String versionTwo = first.refs().get("refs/heads/main");
@@ -291,7 +294,7 @@ class NativeGitRepositoryTest {
         NativeGitFileUpdate update = second.prepareFileUpdate(
                 "main",
                 versionOne,
-                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "stale",
                 GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = second.publishPack(
@@ -318,7 +321,7 @@ class NativeGitRepositoryTest {
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8)),
-                        "preserved.txt", GitFile.regular("preserved".getBytes(StandardCharsets.UTF_8))),
+                        "preserved.txt", GitFile.regular("preserved".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
         String expectedVersion = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
@@ -326,7 +329,7 @@ class NativeGitRepositoryTest {
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
                 expectedVersion,
-                Map.of("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version two",
                 GitCommitAuthor.EMPTY);
         assertThat(repository.publishPack(
@@ -352,7 +355,7 @@ class NativeGitRepositoryTest {
 
         repository.saveFiles(
                 "master",
-                Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))),
+                Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 

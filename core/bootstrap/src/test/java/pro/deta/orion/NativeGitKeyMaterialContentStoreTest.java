@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,7 +60,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 "orion.xml", GitFile.regular(bytes("initial config"))));
         NativeGitKeyMaterialContentStore store = fixture.store();
         String version = store.read().orElseThrow().version();
-        fixture.repository().saveFiles(REF, Map.of("orion.xml", GitFile.regular(bytes("new config"))),
+        fixture.repository().saveFiles(REF, Map.of("orion.xml", GitFile.regular(bytes("new config"))), Set.of(),
                 "configuration update", GitCommitAuthor.EMPTY);
 
         String saved = store.write(bytes("updated material"), version);
@@ -92,7 +93,7 @@ class NativeGitKeyMaterialContentStoreTest {
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
         repository.saveFiles(
                 REF,
-                Map.of(MATERIAL_PATH, GitFile.regular(bytes("initial"))),
+                Map.of(MATERIAL_PATH, GitFile.regular(bytes("initial"))), Set.of(),
                 "seed repository",
                 GitCommitAuthor.EMPTY);
         InterleavingProvider provider = new InterleavingProvider(backend, () -> {
@@ -100,7 +101,7 @@ class NativeGitKeyMaterialContentStoreTest {
                 backend.saveFiles(
                         REPOSITORY,
                         REF,
-                        Map.of("orion.xml", GitFile.regular(bytes("concurrent configuration"))),
+                        Map.of("orion.xml", GitFile.regular(bytes("concurrent configuration"))), Set.of(),
                         "concurrent update",
                         GitCommitAuthor.EMPTY);
             } catch (Exception failure) {
@@ -170,7 +171,7 @@ class NativeGitKeyMaterialContentStoreTest {
     private static Fixture fixture(Map<String, GitFile> initialFiles) throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
-        repository.saveFiles(REF, initialFiles, "seed repository", GitCommitAuthor.EMPTY);
+        repository.saveFiles(REF, initialFiles, Set.of(), "seed repository", GitCommitAuthor.EMPTY);
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
         return new Fixture(repository, provider);
     }

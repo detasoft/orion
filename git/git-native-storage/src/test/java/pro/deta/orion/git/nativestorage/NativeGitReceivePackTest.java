@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,9 +85,9 @@ class NativeGitReceivePackTest {
     @Test
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
-        repository.saveFiles(MAIN, files("initial"), "initial", GitCommitAuthor.EMPTY);
+        repository.saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
         NativeGitFileUpdate stale = prepare(repository, "stale");
-        repository.saveFiles(MAIN, files("concurrent"), "concurrent", GitCommitAuthor.EMPTY);
+        repository.saveFiles(MAIN, files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
         String current = repository.refs().get(MAIN);
 
         assertThat(repository.publishPack(stale.pack(), stale.refUpdates(), true,
@@ -112,13 +113,13 @@ class NativeGitReceivePackTest {
     @Test
     void checksAllCommitParentsAndRejectsForcedRewrites() throws Exception {
         NativeGitRepository repository = repository();
-        repository.saveFiles(MAIN, files("initial"), "initial", GitCommitAuthor.EMPTY);
+        repository.saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
-            repository.saveFiles(MAIN, files("next" + index), "next" + index, GitCommitAuthor.EMPTY);
+            repository.saveFiles(MAIN, files("next" + index), Set.of(), "next" + index, GitCommitAuthor.EMPTY);
         }
         String descendant = repository.refs().get(MAIN);
-        repository.saveFiles("side", files("side"), "side", GitCommitAuthor.EMPTY);
+        repository.saveFiles("side", files("side"), Set.of(), "side", GitCommitAuthor.EMPTY);
         String side = repository.refs().get("refs/heads/side");
         String treeLine = new String(repository.readObject(new ObjectId(descendant)).orElseThrow().data(),
                 java.nio.charset.StandardCharsets.UTF_8).split("\n")[0];
@@ -158,10 +159,10 @@ class NativeGitReceivePackTest {
     @Test
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
-        repository.saveFiles(MAIN, files("initial"), "initial", GitCommitAuthor.EMPTY);
+        repository.saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
         NativeGitFileUpdate prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
-        repository.saveFiles("side", files("concurrent"), "concurrent", GitCommitAuthor.EMPTY);
+        repository.saveFiles("side", files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
         String concurrent = repository.refs().get("refs/heads/side");
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
             @Override
@@ -182,7 +183,7 @@ class NativeGitReceivePackTest {
 
     private static NativeGitFileUpdate prepare(NativeGitRepository repository, String value)
             throws GitOperationException {
-        return repository.prepareFileUpdate(MAIN, files(value), value, GitCommitAuthor.EMPTY);
+        return repository.prepareFileUpdate(MAIN, files(value), Set.of(), value, GitCommitAuthor.EMPTY);
     }
 
     private static Map<String, GitFile> files(String value) {

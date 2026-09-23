@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,13 +30,13 @@ class BootstrapGitRuntimeProxyTest {
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository.saveFiles(
                 location.refName(),
-                Map.of("orion.xml", GitFile.regular("first".getBytes())),
+                Map.of("orion.xml", GitFile.regular("first".getBytes())), Set.of(),
                 "first",
                 GitCommitAuthor.EMPTY);
         String oldId = repository.refs().get(location.refName());
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 location.refName(),
-                Map.of("orion.xml", GitFile.regular("second".getBytes())),
+                Map.of("orion.xml", GitFile.regular("second".getBytes())), Set.of(),
                 "second",
                 GitCommitAuthor.EMPTY);
         AtomicInteger refreshes = new AtomicInteger();

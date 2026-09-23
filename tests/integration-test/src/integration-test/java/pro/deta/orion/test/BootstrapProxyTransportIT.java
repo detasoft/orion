@@ -34,6 +34,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,7 +70,7 @@ class BootstrapProxyTransportIT {
             byte[] originalConfiguration = upstream.accessControlService().accessControlConfigurationFile();
             repository.saveFiles(REF, Map.of(
                     "orion.xml", GitFile.regular(originalConfiguration),
-                    "material.p12", GitFile.regular(materialBytes(configuration, environment))),
+                    "material.p12", GitFile.regular(materialBytes(configuration, environment))), Set.of(),
                     "bootstrap inputs", GitCommitAuthor.EMPTY);
 
             var upstreamProvider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
@@ -117,7 +118,7 @@ class BootstrapProxyTransportIT {
                         ByteArrayOutputStream xml = new ByteArrayOutputStream();
                         OrionXml.write(current.get(), xml);
                         byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
-                        repository.saveFiles(REF, Map.of("orion.xml", GitFile.regular(updatedConfiguration)),
+                        repository.saveFiles(REF, Map.of("orion.xml", GitFile.regular(updatedConfiguration)), Set.of(),
                                 "upstream edit", GitCommitAuthor.EMPTY);
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
                         assertThat(retained.loadFiles(REF, List.of("orion.xml")).files())
@@ -155,16 +156,16 @@ class BootstrapProxyTransportIT {
                         current.set(rotated);
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
-                        retained.saveFiles(REF, Map.of("marker.txt", GitFile.regular(bytes("proxy edit"))),
+                        retained.saveFiles(REF, Map.of("marker.txt", GitFile.regular(bytes("proxy edit"))), Set.of(),
                                 "proxy edit", GitCommitAuthor.EMPTY);
                         assertThat(repository.loadFiles(REF, List.of("marker.txt")).files())
                                 .containsEntry("marker.txt", GitFile.regular(bytes("proxy edit")));
 
                         var stale = retained.prepareFileUpdate(
-                                REF, Map.of("marker.txt", GitFile.regular(bytes("stale edit"))),
+                                REF, Map.of("marker.txt", GitFile.regular(bytes("stale edit"))), Set.of(),
                                 "stale candidate", GitCommitAuthor.EMPTY);
                         repository.saveFiles(REF,
-                                Map.of("marker.txt", GitFile.regular(bytes("concurrent upstream edit"))),
+                                Map.of("marker.txt", GitFile.regular(bytes("concurrent upstream edit"))), Set.of(),
                                 "concurrent edit", GitCommitAuthor.EMPTY);
                         String upstreamRevision = repository.refs().get(REF);
                         assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,

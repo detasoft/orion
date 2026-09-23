@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +48,7 @@ class NativeGitAccessControlStorageTest {
                 "refs/heads/main",
                 Map.of(
                         ACL_PATH, GitFile.regular(bytes("resolved acl")),
-                        secondaryPath, GitFile.regular(bytes("resolved roles"))),
+                        secondaryPath, GitFile.regular(bytes("resolved roles"))), Set.of(),
                 "seed",
                 GitCommitAuthor.EMPTY);
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
@@ -77,7 +78,7 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(root);
         NativeGitRepository selected = backend.create("team/repo").valueOrFailure("selected repository");
         String ref = "refs/heads/configuration";
-        selected.saveFiles(ref, Map.of(ACL_PATH, GitFile.regular(bytes("selected ACL"))), "seed",
+        selected.saveFiles(ref, Map.of(ACL_PATH, GitFile.regular(bytes("selected ACL"))), Set.of(), "seed",
                 GitCommitAuthor.EMPTY);
         BootstrapConfigurationSourceConfig configuration = config();
         configuration.setLocation("local:team%2Frepo");
@@ -155,7 +156,7 @@ class NativeGitAccessControlStorageTest {
                 .valueOrFailure("repository");
         repository.saveFiles(
                 "refs/heads/configuration",
-                Map.of("README.md", GitFile.regular(bytes("not an ACL"))),
+                Map.of("README.md", GitFile.regular(bytes("not an ACL"))), Set.of(),
                 "add readme",
                 GitCommitAuthor.EMPTY);
         AccessControlStorage storage = preparedStorage(provider);
@@ -173,7 +174,7 @@ class NativeGitAccessControlStorageTest {
                 .valueOrFailure("repository");
         repository.saveFiles(
                 "refs/heads/configuration",
-                Map.of(ACL_PATH, GitFile.regular(bytes("primary ACL"))),
+                Map.of(ACL_PATH, GitFile.regular(bytes("primary ACL"))), Set.of(),
                 "add primary ACL",
                 GitCommitAuthor.EMPTY);
         AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH, "config/roles.xml"));
@@ -197,7 +198,7 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSaveRequest("first", UserEmail.EMPTY));
         provider.find("internal/configuration").valueOrFailure("repository").saveFiles(
                 "refs/heads/other",
-                Map.of(ACL_PATH, GitFile.regular(bytes("other"))),
+                Map.of(ACL_PATH, GitFile.regular(bytes("other"))), Set.of(),
                 "other branch",
                 GitCommitAuthor.EMPTY);
         storage.save(
@@ -223,7 +224,7 @@ class NativeGitAccessControlStorageTest {
         repository.saveFiles(
                 "refs/heads/configuration",
                 Map.of(ACL_PATH, GitFile.regular(bytes("version two")),
-                        "winner.txt", GitFile.regular(bytes("winner"))),
+                        "winner.txt", GitFile.regular(bytes("winner"))), Set.of(),
                 "version two",
                 GitCommitAuthor.EMPTY);
         String winningVersion = repository.refs().get("refs/heads/configuration");
@@ -247,7 +248,7 @@ class NativeGitAccessControlStorageTest {
         NativeGitRepository repository = provider.create("internal/configuration").valueOrFailure("repository");
         repository.saveFiles(
                 "refs/heads/configuration",
-                Map.of("winner.txt", GitFile.regular(bytes("winner"))),
+                Map.of("winner.txt", GitFile.regular(bytes("winner"))), Set.of(),
                 "winner",
                 GitCommitAuthor.EMPTY);
         AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH));
@@ -270,7 +271,7 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage storage = preparedStorage(provider);
         backend.find("internal/configuration").valueOrFailure("repository").saveFiles(
                 "refs/heads/configuration",
-                Map.of(ACL_PATH, GitFile.regular(bytes("provider acl"))),
+                Map.of(ACL_PATH, GitFile.regular(bytes("provider acl"))), Set.of(),
                 "seed",
                 GitCommitAuthor.EMPTY);
 
@@ -371,11 +372,12 @@ class NativeGitAccessControlStorageTest {
                 String repositoryName,
                 String refName,
                 Map<String, GitFile> files,
+                Set<String> deletedPaths,
                 String message,
                 GitCommitAuthor author) throws pro.deta.orion.git.nativestorage.GitOperationException {
             saves.incrementAndGet();
             savedRef = refName;
-            NativeGitRepositoryProvider.super.saveFiles(repositoryName, refName, files, message, author);
+            NativeGitRepositoryProvider.super.saveFiles(repositoryName, refName, files, deletedPaths, message, author);
         }
     }
 }

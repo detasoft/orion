@@ -34,9 +34,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
+/**
+ * Native Git objects and ref publication. File updates save and delete explicit paths in one commit;
+ * omitted paths retain their contents and modes. Deleting a missing path is a no-op. A path cannot be
+ * both saved and deleted in the same update, including after path normalization.
+ */
 @Slf4j
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
@@ -66,37 +72,42 @@ public class NativeGitRepository implements AutoCloseable {
     public void saveFiles(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        new NativeRepositoryFileSaver(this).saveFiles(branch, files, message, author);
+        new NativeRepositoryFileSaver(this).saveFiles(branch, files, deletedPaths, message, author);
     }
 
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        return new NativeRepositoryFileSaver(this).prepareFiles(branch, files, message, author);
+        return new NativeRepositoryFileSaver(this).prepareFiles(branch, files, deletedPaths, message, author);
     }
 
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(
-                branch, expectedRefRevision, files, message, author, true);
+                branch, expectedRefRevision, files, deletedPaths, message, author, true);
     }
 
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(
                 branch,
                 files,
+                deletedPaths,
                 message,
                 author,
                 false);
@@ -106,10 +117,11 @@ public class NativeGitRepository implements AutoCloseable {
             String branch,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return new NativeRepositoryFileSaver(this).prepareFiles(
-                branch, expectedRefRevision, files, message, author, false);
+                branch, expectedRefRevision, files, deletedPaths, message, author, false);
     }
 
     public String defaultHead() {

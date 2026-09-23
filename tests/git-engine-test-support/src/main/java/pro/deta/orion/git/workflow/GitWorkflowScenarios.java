@@ -45,6 +45,8 @@ public final class GitWorkflowScenarios {
                     GitWorkflowScenarios::multiCommitSinglePush),
             scenario("complex-file-update", WRITE,
                     complexFileState(), GitWorkflowScenarios::complexFileUpdate),
+            scenario("delete-file-and-pull", PULL,
+                    deletedFileState(), GitWorkflowScenarios::deleteFileAndPull),
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
                     GitWorkflowScenarios::secondBranchFetchAndCheckout),
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
@@ -224,6 +226,32 @@ public final class GitWorkflowScenarios {
             execution.bind("second", source.head());
             source.push("origin", "main");
             execution.assertTerminal(transferred(context, source));
+        }
+    }
+
+    private static void deleteFileAndPull(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.writeFile(README, INITIAL_CONTENT);
+            source.writeFile("nested/remove.txt", "remove\n");
+            source.add(README, "nested/remove.txt");
+            source.commit("initial");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone before deletion");
+                source.delete("nested/remove.txt");
+                source.add("nested/remove.txt");
+                source.commit("delete file");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                clone.pull("origin", "main");
+                equivalent(terminal, clone.snapshot(), "pull after deletion");
+                execution.assertTerminal(terminal);
+            }
         }
     }
 
@@ -537,6 +565,13 @@ public final class GitWorkflowScenarios {
                 "initial", expectedCommit(List.of(), Map.of(README, text(INITIAL_CONTENT))),
                 "second", expectedCommit(List.of("initial"), Map.of(README, text("second\n"))),
                 "third", expectedCommit(List.of("second"), Map.of(README, text(content)))));
+    }
+
+    private static ExpectedRepositoryState deletedFileState() {
+        return state(Map.of(MAIN, "second"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(
+                        README, text(INITIAL_CONTENT), "nested/remove.txt", text("remove\n"))),
+                "second", expectedCommit(List.of("initial"), Map.of(README, text(INITIAL_CONTENT)))));
     }
 
     private static ExpectedRepositoryState complexFileState() {

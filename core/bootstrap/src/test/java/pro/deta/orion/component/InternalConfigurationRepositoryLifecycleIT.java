@@ -53,6 +53,7 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -436,7 +437,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .valueOrFailure("configuration repository");
         repository.saveFiles(
                 CONFIGURATION_REF,
-                Map.of(ACL_PATH, GitFile.regular(primaryAcl), secondaryPath, GitFile.regular(secondaryAcl)),
+                Map.of(ACL_PATH, GitFile.regular(primaryAcl), secondaryPath, GitFile.regular(secondaryAcl)), Set.of(),
                 "seed split ACL",
                 GitCommitAuthor.EMPTY);
 
@@ -515,7 +516,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             repository(first).saveFiles(
                     CONFIGURATION_REF,
-                    Map.of(ACL_PATH, GitFile.regular(duplicateRootAclBytes())),
+                    Map.of(ACL_PATH, GitFile.regular(duplicateRootAclBytes())), Set.of(),
                     "seed ambiguous root ACL",
                     GitCommitAuthor.EMPTY);
             versionBeforeReset = repository(first)
@@ -868,7 +869,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String candidateRef = "refs/heads/candidate-" + candidateName;
         repository.saveFiles(
                 candidateRef,
-                Map.of(ACL_PATH, GitFile.regular(content)),
+                Map.of(ACL_PATH, GitFile.regular(content)), Set.of(),
                 "candidate " + candidateName,
                 GitCommitAuthor.EMPTY);
         return repository.refs().get(candidateRef);

@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public final class NativeGitAccessControlStorage implements AccessControlStorage {
@@ -82,7 +83,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                         repositoryName,
                         configurationRef,
                         snapshot.version().orElseThrow(),
-                        files,
+                        files, Set.of(),
                         request.message(),
                         author);
                 List<RefUpdateResult> results = repositoryProvider.publishPack(
@@ -99,7 +100,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                 repositoryProvider.saveFiles(
                         repositoryName,
                         configurationRef,
-                        files,
+                        files, Set.of(),
                         request.message(),
                         author);
             }

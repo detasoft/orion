@@ -52,7 +52,7 @@ class NativeBootstrapGitPusherTest {
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("from proxy".getBytes()),
                         "run.sh", new GitFile(FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes()),
-                        "link", new GitFile(FileMode.SYMLINK, "run.sh".getBytes())),
+                        "link", new GitFile(FileMode.SYMLINK, "run.sh".getBytes())), Set.of(),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
@@ -95,7 +95,7 @@ class NativeBootstrapGitPusherTest {
         String localOldId = repository.refs().get(location.refName());
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 location.refName(),
-                Map.of("orion.xml", GitFile.regular("proxy change".getBytes())),
+                Map.of("orion.xml", GitFile.regular("proxy change".getBytes())), Set.of(),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
         Optional<PackId> received = ingest(repository, update);
@@ -130,7 +130,7 @@ class NativeBootstrapGitPusherTest {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
         NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
-                Map.of("orion.xml", GitFile.regular(new byte[]{1})), "update", GitCommitAuthor.EMPTY);
+                Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
                 (selected, transport, target) -> { },

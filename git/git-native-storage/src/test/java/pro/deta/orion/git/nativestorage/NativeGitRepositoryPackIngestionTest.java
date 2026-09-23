@@ -7,6 +7,7 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -15,7 +16,7 @@ class NativeGitRepositoryPackIngestionTest {
     void independentIngestionsRemainUnpublishedUntilPersisted() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", new GitStorageApi(), "refs/heads/main")) {
-            byte[] bytes = repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1})),
+            byte[] bytes = repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {

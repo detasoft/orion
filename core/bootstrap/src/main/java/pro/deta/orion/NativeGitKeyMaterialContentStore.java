@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore {
     private static final String SAVE_MESSAGE = "Update server identity material";
@@ -79,7 +80,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
                     repositoryName,
                     refName,
                     observation.refRevision(),
-                    Map.of(path, GitFile.regular(bytes)),
+                    Map.of(path, GitFile.regular(bytes)), Set.of(),
                     SAVE_MESSAGE,
                     GitCommitAuthor.EMPTY);
             List<RefUpdateResult> results = repositoryProvider.publishPack(

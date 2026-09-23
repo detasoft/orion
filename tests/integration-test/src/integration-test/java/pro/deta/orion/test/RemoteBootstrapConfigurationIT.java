@@ -28,6 +28,7 @@ import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -65,7 +66,7 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("native bootstrap repository");
             repository.saveFiles("refs/heads/bootstrap",
                     Map.of("config/acl.xml", GitFile.regular(xml),
-                            "keys/server.p12", GitFile.regular(material)),
+                            "keys/server.p12", GitFile.regular(material)), Set.of(),
                     "seed remote bootstrap inputs", GitCommitAuthor.EMPTY);
             target.getBootstrap().getAccessControl().setRef("refs/heads/bootstrap");
             target.getBootstrap().getAccessControl().setPath("config/acl.xml");
@@ -196,10 +197,10 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("material upstream");
             configurationRepository.saveFiles(acl.getRef(),
                     Map.of(acl.getPath(),
-                            GitFile.regular(configurationServer.accessControlService().accessControlConfigurationFile())),
+                            GitFile.regular(configurationServer.accessControlService().accessControlConfigurationFile())), Set.of(),
                     "seed configuration", GitCommitAuthor.EMPTY);
             materialRepository.saveFiles(material.getRef(),
-                    Map.of(material.getPath(), GitFile.regular(materialBytes(target, environment))),
+                    Map.of(material.getPath(), GitFile.regular(materialBytes(target, environment))), Set.of(),
                     "seed material", GitCommitAuthor.EMPTY);
 
             String configurationRevision = null;
@@ -239,7 +240,7 @@ class RemoteBootstrapConfigurationIT {
                             var materialRefs = materialRepository.refs();
                             provider.openForWrite(configurationCache).valueOrFailure("configuration proxy")
                                     .saveFiles(acl.getRef(),
-                                            Map.of("configuration-marker", GitFile.regular(payload)),
+                                            Map.of("configuration-marker", GitFile.regular(payload)), Set.of(),
                                             "write configuration upstream", GitCommitAuthor.EMPTY);
                             assertThat(configurationRepository.loadFiles(acl.getRef(), List.of("configuration-marker"))
                                     .files()).containsEntry("configuration-marker", GitFile.regular(payload));
@@ -247,7 +248,7 @@ class RemoteBootstrapConfigurationIT {
                             var configurationRefs = configurationRepository.refs();
                             provider.openForWrite(materialCache).valueOrFailure("material proxy")
                                     .saveFiles(material.getRef(),
-                                            Map.of("material-marker", GitFile.regular(payload)),
+                                            Map.of("material-marker", GitFile.regular(payload)), Set.of(),
                                             "write material upstream", GitCommitAuthor.EMPTY);
                             assertThat(materialRepository.loadFiles(material.getRef(), List.of("material-marker"))
                                     .files()).containsEntry("material-marker", GitFile.regular(payload));

@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -119,9 +120,9 @@ class NativeBootstrapGitFetcherTest {
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
-        repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})),
+        repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
                 "local", GitCommitAuthor.EMPTY);
-        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})),
+        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})), Set.of(),
                 "remote", GitCommitAuthor.EMPTY);
         Map<String, String> before = repository.refs();
 

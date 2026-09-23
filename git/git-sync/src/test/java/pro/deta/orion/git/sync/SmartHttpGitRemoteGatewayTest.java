@@ -23,6 +23,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -72,7 +73,7 @@ class SmartHttpGitRemoteGatewayTest {
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
                 local.saveFiles(
                         "main",
-                        Map.of("orion.txt", GitFile.regular("outbound\n".getBytes())),
+                        Map.of("orion.txt", GitFile.regular("outbound\n".getBytes())), Set.of(),
                         "Orion outbound",
                         new GitCommitAuthor("Orion", "orion@example.invalid"));
                 String desired = local.refs().get("refs/heads/main");

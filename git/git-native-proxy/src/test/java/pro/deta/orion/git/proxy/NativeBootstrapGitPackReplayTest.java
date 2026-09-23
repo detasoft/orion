@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,11 +117,11 @@ class NativeBootstrapGitPackReplayTest {
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                     "proxy", new GitStorageApi(), "refs/heads/main");
-        repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), "local",
+        repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
                 GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");
         var unrelated = repository.prepareFileUpdate("other",
-                Map.of("other.txt", GitFile.regular(new byte[]{2})),
+                Map.of("other.txt", GitFile.regular(new byte[]{2})), Set.of(),
                 "unrelated", GitCommitAuthor.EMPTY);
         Optional<PackId> received = ingest(repository, unrelated.pack());
         Path bare = directory.resolve("missing-objects.git");

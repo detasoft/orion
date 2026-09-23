@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public interface NativeGitRepositoryProvider {
     default List<String> repositoryNames() {
@@ -37,11 +38,12 @@ public interface NativeGitRepositoryProvider {
             String repositoryName,
             String refName,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .saveFiles(refName, files, message, author);
+                .saveFiles(refName, files, deletedPaths, message, author);
     }
 
     default NativeGitFileUpdate prepareFileUpdate(
@@ -49,11 +51,12 @@ public interface NativeGitRepositoryProvider {
             String refName,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .prepareFileUpdate(refName, expectedRefRevision, files, message, author);
+                .prepareFileUpdate(refName, expectedRefRevision, files, deletedPaths, message, author);
     }
 
     default List<RefUpdateResult> publishPack(

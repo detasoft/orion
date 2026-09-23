@@ -61,6 +61,7 @@ import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1420,7 +1421,7 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("ACL repository should be created")
                 .saveFiles(
                         "refs/heads/" + BRANCH,
-                        Map.of("orion.xml", GitFile.regular(output.toByteArray())),
+                        Map.of("orion.xml", GitFile.regular(output.toByteArray())), Set.of(),
                         "seed e2e access control",
                         new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }
@@ -1494,7 +1495,7 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("Project repository should be created")
                 .saveFiles(
                         "refs/heads/" + BRANCH,
-                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))),
+                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
                         "seed " + repositoryName,
                         new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }

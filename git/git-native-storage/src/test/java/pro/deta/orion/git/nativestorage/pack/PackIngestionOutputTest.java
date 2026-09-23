@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -80,7 +81,7 @@ class PackIngestionOutputTest {
     private static NativeGitFileUpdate prepared() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository(
                 "source", new GitStorageApi(), "refs/heads/main")) {
-            return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})),
+            return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY);
         }
     }

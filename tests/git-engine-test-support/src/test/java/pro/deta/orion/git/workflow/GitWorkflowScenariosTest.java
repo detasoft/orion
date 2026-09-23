@@ -19,6 +19,7 @@ class GitWorkflowScenariosTest {
             "alternating-two-client-round-trip",
             "multi-commit-single-push",
             "complex-file-update",
+            "delete-file-and-pull",
             "second-branch-fetch-and-checkout",
             "multi-ref-push",
             "delete-branch",

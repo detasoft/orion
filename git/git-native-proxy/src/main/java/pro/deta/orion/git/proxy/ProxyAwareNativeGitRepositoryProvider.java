@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
@@ -442,18 +443,19 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             String repositoryName,
             String refName,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         String canonicalName = repositoryName(repositoryName);
         BootstrapGitRuntimeProxy proxy = binding(canonicalName);
         if (proxy == null) {
-            NativeGitRepositoryProvider.super.saveFiles(canonicalName, refName, files, message, author);
+            NativeGitRepositoryProvider.super.saveFiles(canonicalName, refName, files, deletedPaths, message, author);
             return;
         }
         NativeGitRepository repository = backend.find(proxy.repositoryName())
                 .valueOrFailure("Cannot open native repository " + canonicalName);
         new PolicyBoundNativeGitRepository(this, canonicalName, repository)
-                .saveFiles(refName, files, message, author);
+                .saveFiles(refName, files, deletedPaths, message, author);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {

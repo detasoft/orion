@@ -24,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 import static pro.deta.orion.git.nativestorage.NativeRepositoryFileLoader.*;
@@ -40,9 +41,10 @@ final class NativeRepositoryFileSaver {
     void saveFiles(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        publish(prepareFiles(branch, files, message, author));
+        publish(prepareFiles(branch, files, deletedPaths, message, author));
     }
 
     private void publish(NativeGitFileUpdate update) throws GitOperationException {
@@ -56,14 +58,16 @@ final class NativeRepositoryFileSaver {
     NativeGitFileUpdate prepareFiles(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        return prepareFiles(branch, files, message, author, true);
+        return prepareFiles(branch, files, deletedPaths, message, author, true);
     }
 
     NativeGitFileUpdate prepareFiles(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
@@ -71,6 +75,7 @@ final class NativeRepositoryFileSaver {
                 branch,
                 resolveBranch(branch),
                 files,
+                deletedPaths,
                 message,
                 author,
                 initializeDefaultHead);
@@ -80,21 +85,28 @@ final class NativeRepositoryFileSaver {
             String branch,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
         Optional<ObjectId> parent = Optional.ofNullable(expectedRefRevision).map(ObjectId::new);
-        return prepareFiles(branch, parent, files, message, author, initializeDefaultHead);
+        return prepareFiles(branch, parent, files, deletedPaths, message, author, initializeDefaultHead);
     }
 
     private NativeGitFileUpdate prepareFiles(
             String branch,
             Optional<ObjectId> parent,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author,
             boolean initializeDefaultHead) throws GitOperationException {
         Objects.requireNonNull(files, "files");
+        Objects.requireNonNull(deletedPaths, "deletedPaths");
+        Set<String> normalizedDeletions = new java.util.HashSet<>();
+        for (String path : deletedPaths) {
+            normalizedDeletions.add(gitPath(path));
+        }
         Map<ObjectId, LooseObject> preparedObjects = new LinkedHashMap<>();
         String branchRefName = branchRefName(branch);
         TreeMap<String, TreeEntry> treeEntries = new TreeMap<>();
@@ -102,8 +114,14 @@ final class NativeRepositoryFileSaver {
             readTreeEntries(rootTreeId(parent.get(), readObject(parent.get())), "", treeEntries);
         }
 
+        for (String path : normalizedDeletions) {
+            treeEntries.remove(path);
+        }
         for (Map.Entry<String, GitFile> entry : files.entrySet()) {
             String path = gitPath(entry.getKey());
+            if (normalizedDeletions.contains(path)) {
+                throw new IllegalArgumentException("Git file is both saved and deleted: " + path);
+            }
             GitFile file = Objects.requireNonNull(entry.getValue(), "file");
             ObjectId blobId = writeObject(preparedObjects, GitObjectType.BLOB, file.content());
             treeEntries.put(path, new TreeEntry(file.mode(), path.substring(path.lastIndexOf('/') + 1), blobId));

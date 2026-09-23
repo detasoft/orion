@@ -49,6 +49,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
@@ -840,7 +841,7 @@ class BootstrapContextTest {
         NativeGitRepository repository = backend.create("orion").valueOrFailure("create repository");
         repository.saveFiles(
                 configuration.getBootstrap().getAccessControl().selectedRef(),
-                files,
+                files, Set.of(),
                 "seed bootstrap inputs",
                 GitCommitAuthor.EMPTY);
         return backend;

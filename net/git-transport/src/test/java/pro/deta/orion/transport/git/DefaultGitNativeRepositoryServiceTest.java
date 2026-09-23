@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -130,7 +131,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         NativeGitFileUpdate prepared = repository.prepareFileUpdate("feature",
-                Map.of("a", GitFile.regular(new byte[]{1})),
+                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         RefUpdate feature = prepared.refUpdates().getFirst();
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
@@ -149,11 +150,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
         backend = new FileNativeGitRepositoryProvider(directory);
         NativeGitRepository repository = createRepository(backend, "demo");
-        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{0})), "initial",
+        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{0})), Set.of(), "initial",
                 GitCommitAuthor.EMPTY);
         String initial = repository.refs().get("refs/heads/main");
         NativeGitFileUpdate update = repository.prepareFileUpdate("main",
-                Map.of("a", GitFile.regular(new byte[]{1})),
+                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
@@ -172,7 +173,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectPublication = true;
         NativeGitFileUpdate update = repository.prepareFileUpdate("main",
-                Map.of("a", GitFile.regular(new byte[]{1})),
+                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
@@ -211,11 +212,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void distinguishesFastForwardAndForcedUpdatesForAuthorization() throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), "first",
+        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "first",
                 GitCommitAuthor.EMPTY);
         String first = repository.refs().get("refs/heads/main");
         NativeGitFileUpdate next = repository.prepareFileUpdate("main",
-                Map.of("a", GitFile.regular(new byte[]{2})),
+                Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
                 "next", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         IndexedPack pack = ingest(repository, next.pack());
@@ -278,9 +279,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void keepsAuthorizedTargetWhenWantedRefMovesDuringAccessCheck(String wantedRef, boolean detached)
             throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), "allowed",
+        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "allowed",
                 GitCommitAuthor.EMPTY);
-        repository.saveFiles("secret", Map.of("a", GitFile.regular(new byte[]{2})), "denied",
+        repository.saveFiles("secret", Map.of("a", GitFile.regular(new byte[]{2})), Set.of(), "denied",
                 GitCommitAuthor.EMPTY);
         ObjectId allowed = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId denied = new ObjectId(repository.refs().get("refs/heads/secret"));
@@ -331,7 +332,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @ValueSource(booleans = {false, true})
     void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), "initial",
+        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "initial",
                 GitCommitAuthor.EMPTY);
         String target = repository.refs().get("refs/heads/main");
         ObjectId inner = repository.writeObject(GitObjectType.TAG,
@@ -376,7 +377,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @CsvSource({"false,main", "true,main", "false,tag", "false,HEAD"})
     void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), "initial",
+        repository.saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "initial",
                 GitCommitAuthor.EMPTY);
         if (!ref.equals("main")) {
             String tip = repository.refs().get("refs/heads/main");

@@ -101,7 +101,8 @@ class OrionGitHttpInteroperabilityTest {
                 for (int number = 0; number < 64; number++) {
                     repository.saveFiles("main",
                             Map.of("README.md", GitFile.regular(("history " + number).getBytes(
-                                    StandardCharsets.UTF_8))), "history " + number, GitCommitAuthor.EMPTY);
+                                    StandardCharsets.UTF_8))), Set.of(),
+                                            "history " + number, GitCommitAuthor.EMPTY);
                     history.addFirst(repository.refs().get("refs/heads/main"));
                 }
             }
@@ -110,7 +111,7 @@ class OrionGitHttpInteroperabilityTest {
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
                 repository.saveFiles("main",
-                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))),
+                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
                         "update", GitCommitAuthor.EMPTY);
                 String commit = repository.refs().get("refs/heads/main");
                 history.addFirst(commit);

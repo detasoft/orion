@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 final class PolicyBoundNativeGitRepository extends NativeGitRepository {
@@ -55,9 +56,10 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     public void saveFiles(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        NativeGitFileUpdate update = repository().prepareProxyFileUpdate(branch, files, message, author);
+        NativeGitFileUpdate update = repository().prepareProxyFileUpdate(branch, files, deletedPaths, message, author);
         GitOperationException.requireSuccess(publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL));
     }
@@ -66,9 +68,10 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     public NativeGitFileUpdate prepareFileUpdate(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        return repository().prepareProxyFileUpdate(branch, files, message, author);
+        return repository().prepareProxyFileUpdate(branch, files, deletedPaths, message, author);
     }
 
     @Override
@@ -76,19 +79,21 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             String branch,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(
-                branch, expectedRefRevision, files, message, author);
+                branch, expectedRefRevision, files, deletedPaths, message, author);
     }
 
     @Override
     public NativeGitFileUpdate prepareProxyFileUpdate(
             String branch,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        return repository().prepareProxyFileUpdate(branch, files, message, author);
+        return repository().prepareProxyFileUpdate(branch, files, deletedPaths, message, author);
     }
 
     @Override
@@ -96,10 +101,11 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             String branch,
             String expectedRefRevision,
             Map<String, GitFile> files,
+            Set<String> deletedPaths,
             String message,
             GitCommitAuthor author) throws GitOperationException {
         return repository().prepareProxyFileUpdate(
-                branch, expectedRefRevision, files, message, author);
+                branch, expectedRefRevision, files, deletedPaths, message, author);
     }
 
     @Override

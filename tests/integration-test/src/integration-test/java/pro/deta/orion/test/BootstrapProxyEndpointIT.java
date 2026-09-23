@@ -41,6 +41,7 @@ import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -93,7 +94,7 @@ class BootstrapProxyEndpointIT {
             OrionXml.write(document.replaceAccessControl(aclDraft.toAccessControl()), xml);
             repository.saveFiles(REF, Map.of(
                     "orion.xml", GitFile.regular(xml.toByteArray()),
-                    "material.p12", GitFile.regular(materialBytes(target, environment))),
+                    "material.p12", GitFile.regular(materialBytes(target, environment))), Set.of(),
                     "seed inputs", GitCommitAuthor.EMPTY);
             for (int launch = 0; launch < 2; launch++) {
                 try (var bootstrap = BootstrapContext.open(target, environment)) {
@@ -112,7 +113,7 @@ class BootstrapProxyEndpointIT {
                             }
                             acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
-                                    .saveFiles(REF, Map.of("file", GitFile.regular(new byte[]{1})),
+                                    .saveFiles(REF, Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                                             "ordinary seed", GitCommitAuthor.EMPTY);
                         }
                         String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)

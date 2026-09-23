@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -146,7 +147,7 @@ class GitBlockingWireSessionShallowHistoryTest {
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("file", GitFile.regular(new byte[]{1})), "initial",
+        repository.saveFiles("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "initial",
                 pro.deta.orion.git.nativestorage.GitCommitAuthor.EMPTY);
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
