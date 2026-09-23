@@ -13,6 +13,7 @@ class GitWorkflowScenariosTest {
     private static final Set<String> REQUIRED_NAMES = Set.of(
             "empty-repository-discovery",
             "initial-push-and-clone",
+            "empty-clone-and-first-push",
             "clone-multiple-commit-history",
             "fast-forward-push-and-pull",
             "alternating-two-client-round-trip",

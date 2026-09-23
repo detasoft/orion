@@ -78,10 +78,14 @@ final class JGitWorkflowClient implements GitClient {
                     .setNoCheckout(true)
                     .call();
             configure(git);
-            git.reset()
-                    .setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD)
-                    .setRef("refs/heads/" + GitScenarioContext.DEFAULT_BRANCH)
-                    .call();
+            if (git.getRepository().getRefDatabase().getRefsByPrefix("refs/").isEmpty()) {
+                git.getRepository().updateRef("HEAD").link("refs/heads/" + GitScenarioContext.DEFAULT_BRANCH);
+            } else {
+                git.reset()
+                        .setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD)
+                        .setRef("refs/heads/" + GitScenarioContext.DEFAULT_BRANCH)
+                        .call();
+            }
             return new JGitWorkTree(this, directory, git);
         } catch (Exception | Error failure) {
             if (git != null) {

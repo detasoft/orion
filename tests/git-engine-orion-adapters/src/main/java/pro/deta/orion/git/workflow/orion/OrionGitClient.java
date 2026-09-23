@@ -56,8 +56,9 @@ final class OrionGitClient implements GitClient {
         OrionGitWorkTree workTree = OrionGitWorkTree.create(this, directory);
         try {
             workTree.addRemote("origin", new GitRemoteRepository(directory, remoteUri));
-            workTree.fetch("origin");
-            workTree.updateRef("refs/heads/main", "refs/remotes/origin/main");
+            if (workTree.fetchBranch("origin", "main")) {
+                workTree.updateRef("refs/heads/main", "refs/remotes/origin/main");
+            }
             return workTree;
         } catch (Exception | Error failure) {
             workTree.close();

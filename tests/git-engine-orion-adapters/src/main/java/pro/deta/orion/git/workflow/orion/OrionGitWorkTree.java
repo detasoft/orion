@@ -313,11 +313,14 @@ final class OrionGitWorkTree implements GitWorkTree {
         return remote;
     }
 
-    private void fetchBranch(String remoteName, String branch) throws Exception {
+    boolean fetchBranch(String remoteName, String branch) throws Exception {
         GitRemoteRepository remote = remote(remoteName);
         GitRemoteAdvertisement advertisement = OrionGitClient.requireSuccess(
                 client.uploadPack().discover(client.uri(remote), client.options()),
                 "upload-pack discovery");
+        if (advertisement.refs().isEmpty()) {
+            return false;
+        }
         String remoteRef = "refs/heads/" + branch;
         String wantedId = advertisement.findRef(remoteRef)
                 .map(GitRemoteAdvertisement.Ref::objectId)
@@ -346,6 +349,7 @@ final class OrionGitWorkTree implements GitWorkTree {
                 throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
             }
         }
+        return true;
     }
 
     private String requireRef(String refName) {

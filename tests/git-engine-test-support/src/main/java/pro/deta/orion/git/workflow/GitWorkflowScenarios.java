@@ -33,6 +33,8 @@ public final class GitWorkflowScenarios {
                     state(Map.of(), Map.of()), GitWorkflowScenarios::emptyRepositoryDiscovery),
             scenario("initial-push-and-clone", CLONE,
                     initialState(), GitWorkflowScenarios::initialPushAndClone),
+            scenario("empty-clone-and-first-push", CLONE,
+                    initialState(), GitWorkflowScenarios::emptyCloneAndFirstPush),
             scenario("clone-multiple-commit-history", CLONE, threeCommitState("third\n"),
                     GitWorkflowScenarios::cloneMultipleCommitHistory),
             scenario("fast-forward-push-and-pull", PULL, twoCommitState("updated\n"),
@@ -96,6 +98,23 @@ public final class GitWorkflowScenarios {
             try (GitWorkTree clone = context.client().clone(
                     context.remote(), context.workTreeDirectory("clone"))) {
                 equivalent(remote, clone.snapshot(), "initial clone");
+            }
+            execution.assertTerminal(remote);
+        }
+    }
+
+    private static void emptyCloneAndFirstPush(GitScenarioContext context, Execution execution) throws Exception {
+        RepositorySnapshot empty = context.server().snapshot(context.remote());
+        try (GitWorkTree clone = context.client().clone(
+                context.remote(), context.workTreeDirectory("empty-clone"))) {
+            equivalent(empty, clone.snapshot(), "empty clone");
+            equivalent(empty, context.server().snapshot(context.remote()), "remote after empty clone");
+            execution.bind("initial", commit(clone, README, INITIAL_CONTENT, "initial"));
+            clone.push("origin", "main");
+            RepositorySnapshot remote = transferred(context, clone);
+            try (GitWorkTree observer = context.client().clone(
+                    context.remote(), context.workTreeDirectory("after-first-push"))) {
+                equivalent(remote, observer.snapshot(), "clone after first push from empty clone");
             }
             execution.assertTerminal(remote);
         }
