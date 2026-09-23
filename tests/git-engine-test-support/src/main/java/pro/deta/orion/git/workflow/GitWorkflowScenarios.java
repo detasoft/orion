@@ -1,6 +1,7 @@
 package pro.deta.orion.git.workflow;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -47,6 +48,8 @@ public final class GitWorkflowScenarios {
                     complexFileState(), GitWorkflowScenarios::complexFileUpdate),
             scenario("delete-file-and-pull", PULL,
                     deletedFileState(), GitWorkflowScenarios::deleteFileAndPull),
+            scenario("rename-file-and-pull", PULL,
+                    renamedFileState(), GitWorkflowScenarios::renameFileAndPull),
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
                     GitWorkflowScenarios::secondBranchFetchAndCheckout),
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
@@ -250,6 +253,33 @@ public final class GitWorkflowScenarios {
                 RepositorySnapshot terminal = transferred(context, source);
                 clone.pull("origin", "main");
                 equivalent(terminal, clone.snapshot(), "pull after deletion");
+                execution.assertTerminal(terminal);
+            }
+        }
+    }
+
+    private static void renameFileAndPull(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.writeFile("old/name.txt", "moved\n");
+            source.writeFile("old/keep.txt", "old neighbor\n");
+            source.writeFile("new/keep.txt", "new neighbor\n");
+            source.add("old/name.txt", "old/keep.txt", "new/keep.txt");
+            source.commit("initial");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone before rename");
+                Files.move(source.directory().resolve("old/name.txt"), source.directory().resolve("new/name.txt"));
+                source.add("old/name.txt", "new/name.txt");
+                source.commit("rename file");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                clone.pull("origin", "main");
+                equivalent(terminal, clone.snapshot(), "pull after rename");
                 execution.assertTerminal(terminal);
             }
         }
@@ -572,6 +602,16 @@ public final class GitWorkflowScenarios {
                 "initial", expectedCommit(List.of(), Map.of(
                         README, text(INITIAL_CONTENT), "nested/remove.txt", text("remove\n"))),
                 "second", expectedCommit(List.of("initial"), Map.of(README, text(INITIAL_CONTENT)))));
+    }
+
+    private static ExpectedRepositoryState renamedFileState() {
+        return state(Map.of(MAIN, "second"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(
+                        "old/name.txt", text("moved\n"),
+                        "old/keep.txt", text("old neighbor\n"), "new/keep.txt", text("new neighbor\n"))),
+                "second", expectedCommit(List.of("initial"), Map.of(
+                        "new/name.txt", text("moved\n"),
+                        "old/keep.txt", text("old neighbor\n"), "new/keep.txt", text("new neighbor\n")))));
     }
 
     private static ExpectedRepositoryState complexFileState() {
