@@ -49,6 +49,10 @@ public final class GitWorkflowScenarios {
                     GitWorkflowScenarios::cloneMultipleCommitHistory),
             scenario("fast-forward-push-and-pull", PULL, twoCommitState("updated\n"),
                     GitWorkflowScenarios::fastForwardPushAndPull),
+            scenario("repeat-sync-without-changes", Set.of(
+                    GitCapability.INITIALIZE, GitCapability.COMMIT, GitCapability.PUSH,
+                    GitCapability.CLONE, GitCapability.FETCH, GitCapability.FAST_FORWARD_PULL),
+                    twoCommitState("updated\n"), GitWorkflowScenarios::repeatSyncWithoutChanges),
             scenario("alternating-two-client-round-trip", PULL, threeCommitState("first-again\n"),
                     GitWorkflowScenarios::alternatingTwoClientRoundTrip),
             scenario("multi-commit-single-push", WRITE, threeCommitState("third\n"),
@@ -170,6 +174,38 @@ public final class GitWorkflowScenarios {
                 equivalent(remote, clone.snapshot(), "multi-commit clone");
             }
             execution.assertTerminal(remote);
+        }
+    }
+
+    private static void repeatSyncWithoutChanges(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone before repeated sync");
+                for (int round = 0; round < 2; round++) {
+                    clone.fetch("origin", "main");
+                    equivalent(initial, clone.snapshot(), "local after unchanged fetch");
+                    equivalent(initial, context.server().snapshot(context.remote()), "remote after unchanged fetch");
+                    clone.pull("origin", "main");
+                    equivalent(initial, clone.snapshot(), "local after unchanged pull");
+                    equivalent(initial, context.server().snapshot(context.remote()), "remote after unchanged pull");
+                    clone.push("origin", "main");
+                    equivalent(initial, clone.snapshot(), "local after unchanged push");
+                    equivalent(initial, context.server().snapshot(context.remote()), "remote after unchanged push");
+                }
+                execution.bind("second", commit(clone, README, "updated\n", "update after repeated sync"));
+                clone.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, clone);
+                source.fetch("origin", "main");
+                equivalent(initial, source.snapshot(), "fetch keeps local branch before pull");
+                source.pull("origin", "main");
+                equivalent(terminal, source.snapshot(), "pull update after repeated sync");
+                execution.assertTerminal(context.server().snapshot(context.remote()));
+            }
         }
     }
 

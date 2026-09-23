@@ -16,6 +16,7 @@ class GitWorkflowScenariosTest {
             "empty-clone-and-first-push",
             "clone-multiple-commit-history",
             "fast-forward-push-and-pull",
+            "repeat-sync-without-changes",
             "alternating-two-client-round-trip",
             "multi-commit-single-push",
             "complex-file-update",
