@@ -22,6 +22,8 @@ const identity = ref(null)
 const navItems = computed(() => identity.value?.organization
   ? allNavItems.filter((item) => item.id === 'repositories') : allNavItems)
 const signIn = ref(null)
+const providerRevision = ref(0)
+const OrganizationOidc = defineAsyncComponent(() => import('./components/OrganizationOidc.vue'))
 const OrganizationInvitations = defineAsyncComponent(() => import('./components/OrganizationInvitations.vue'))
 const OrganizationSignIn = defineAsyncComponent(() => import('./components/OrganizationSignIn.vue'))
 const activeView = ref('overview')
@@ -577,7 +579,9 @@ onMounted(() => {
         </template>
 
         <section v-else-if="activeView === 'people'" class="people-grid">
-          <OrganizationInvitations v-if="isConnected && identity?.admin" :token="settings.token"
+          <OrganizationOidc v-if="isConnected && identity?.admin" :token="settings.token"
+            @saved="providerRevision++" @authorization-error="clearExpiredCredentials" />
+          <OrganizationInvitations v-if="isConnected && identity?.admin" :key="providerRevision" :token="settings.token"
             @authorization-error="clearExpiredCredentials" />
           <div v-else class="empty-state panel"><h3>Connect as an administrator to invite users</h3></div>
         </section>

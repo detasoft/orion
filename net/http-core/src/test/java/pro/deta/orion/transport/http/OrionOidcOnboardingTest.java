@@ -186,6 +186,93 @@ class OrionOidcOnboardingTest {
         }
     }
 
+    @Test
+    void adminSavesEncryptedProviderRotatesSecretAndRejectsStaleOrUnauthorizedEdits() throws Exception {
+        try (Fixture f = new Fixture()) {
+            String invite = f.invite("acme");
+            Reply listing = f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, f.admin);
+            String revision = listing.json.path("revision").asText();
+            Map<String, Object> input = new HashMap<>(Map.of("organization", "acme", "id", "google",
+                    "issuer", "https://accounts.google.com", "clientId", "google-client",
+                    "clientSecret", "private-google-secret", "revision", revision));
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null,
+                    SecurityContext.createContext()).status).isEqualTo(403);
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
+            OrganizationId id = new OrganizationId("acme");
+            OidcProvider provider = null;
+            for (OidcProvider candidate : f.accounts.organization(id).oidcProviders()) {
+                if (candidate.id().equals("google")) provider = candidate;
+            }
+            assertThat(provider).isNotNull();
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.desired.current().document(),
+                    f.material.configurationCipher());
+            assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
+                    .isEqualTo("private-google-secret".toCharArray());
+            assertThat(new String(f.storage.snapshot.files().get("orion.xml"), StandardCharsets.UTF_8))
+                    .doesNotContain("private-google-secret");
+            assertThat(f.accounts.invitation(id, invite)).isNotNull();
+            assertThat(f.accounts.organization(new OrganizationId("default")).oidcProviders()).hasSize(1);
+            listing = f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, f.admin);
+            assertThat(listing.json.toString()).doesNotContain("private-google-secret", "envelope", provider.secret());
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(409);
+            input.put("revision", listing.json.path("revision").asText());
+            input.put("clientSecret", "");
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
+            assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
+                    .isEqualTo("private-google-secret".toCharArray());
+            input.put("revision", f.desired.current().revision().orElseThrow());
+            input.put("issuer", "https://other.example.test");
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(400);
+            input.put("issuer", "https://accounts.google.com");
+            input.put("clientSecret", "rotated-secret");
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
+            f.acl.reload("reload rotated provider");
+            assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
+                    .isEqualTo("rotated-secret".toCharArray());
+        }
+    }
+
+    @Test
+    void rotatingSharedProviderSecretLeavesOtherConsumersAndOrganizationsUntouched() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+                List<OrionDocument.Organization> organizations = new ArrayList<>();
+                for (OrionDocument.Organization org : document.organizations()) {
+                    List<OidcProvider> providers = new ArrayList<>(org.oidcProviders());
+                    providers.add(new OidcProvider("second", f.issuer, "second-client", "oidc"));
+                    organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), org.users(),
+                            org.grants(), org.roles(), org.teams(), org.secrets(), providers, org.invitations()));
+                }
+                return new OrionDocument(document.system(), organizations);
+            }, new AccessControlSaveRequest("share fixture secret", null));
+            Map<String, Object> input = Map.of("organization", "acme", "id", "corporate",
+                    "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
+                    "revision", f.desired.current().revision().orElseThrow());
+            SecurityContext scoped = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
+                    f.admin.getUserIdentity().getGrants(), Optional.of(new OrganizationId("acme"))));
+            assertThat(f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, scoped).status).isEqualTo(403);
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, scoped).status).isEqualTo(403);
+            f.storage.conflict = true;
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(409);
+            assertThat(f.accounts.organization(new OrganizationId("acme")).secrets()).hasSize(1);
+            f.storage.conflict = false;
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> f.desired.current().document(),
+                    f.material.configurationCipher());
+            for (String org : List.of("acme", "default")) {
+                OrganizationId id = new OrganizationId(org);
+                assertThat(secrets.resolveOrganization(f.desired.current().document(), id, "oidc"))
+                        .isEqualTo("secret".toCharArray());
+                for (OidcProvider provider : f.accounts.organization(id).oidcProviders()) {
+                    String expected = org.equals("acme") && provider.id().equals("corporate")
+                            ? "new-secret" : "secret";
+                    assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
+                            .isEqualTo(expected.toCharArray());
+                }
+            }
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final ObjectMapper mapper = new ObjectMapper();
         final MemoryStorage storage = new MemoryStorage();
@@ -296,7 +383,8 @@ class OrionOidcOnboardingTest {
             accounts = new OrganizationAccounts(acl, desired);
             OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
-                    new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper))), new OrionHttpResponseWriter(mapper));
+                    new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
+                    new OrionAdminOidcRoute(desired, acl, secrets, mapper))), new OrionHttpResponseWriter(mapper));
         }
 
         String invite(String organization) throws Exception {

@@ -57,6 +57,10 @@ export function createOrionClient(options = {}) {
     setToken(value) {
       token = value
     },
+    oidcSettings() { return request('/api/admin/oidc') },
+    saveOidcProvider(input) {
+      return request('/api/admin/oidc', { method: 'POST', body: JSON.stringify(input) })
+    },
     me() { return request('/api/auth/me') },
     invitations() { return request('/api/admin/invitations') },
     invite(input) {

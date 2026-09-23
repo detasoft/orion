@@ -463,20 +463,21 @@ YAML/TOML file.
    tokens. The ID token must include `sub`, `email`, and boolean
    `email_verified: true`; `given_name` and `family_name` are optional. Orion does
    not fetch missing email claims from the UserInfo endpoint.
-3. **Store the client secret in the organization.** The provider's `secret`
-   field names an encrypted entry in that same organization's `<secrets>`
-   collection. It is not the plaintext client secret or an environment variable.
-   There is currently no CLI command or UI form to provision organization OIDC
-   secrets. Provisioning requires the internal
-   [ConfigurationSecrets API](core/common/src/main/java/pro/deta/orion/config/ConfigurationSecrets.java):
-   `create(document, ConfigurationScope.organization(organizationId), secretId, secretChars)`
-   returns a candidate document containing the encrypted entry; persist it using
-   the configuration revision check. Use `replace` for rotation. Encryption is
-   bound to the owning organization and secret ID, so copying an envelope from
-   another scope will not work. The **People** form only creates invitations.
-4. **Add the provider to the organization.** After provisioning the secret, put
-   `<oidc>` after `<secrets>` and before `<invitations>`, if present. For Google,
-   the block is:
+3. **Save the provider in Orion.** Sign in as a system administrator and open
+   **People → Organization sign-in**. Select the organization, choose **Add
+   provider**, and enter a provider ID (such as `google`), issuer URL, client ID,
+   and client secret. Select **Save provider**. The server encrypts the secret
+   into that organization's `<secrets>` and saves the provider reference in the
+   same configuration update. The saved secret is never returned to the browser.
+   To edit a provider, select it in the same form. Leave **Client secret** empty
+   to keep it, or enter a replacement to rotate it. Changing the issuer or client
+   ID requires a secret for the new client. If another configuration change wins
+   the race, use **Reload providers**, review the settings, and retry. Rotating a
+   secret shared by other configuration entries gives this provider its own
+   encrypted entry, leaving the other consumers unchanged.
+4. **Configuration reference (optional).** The form writes this structure in
+   the organization. For manual edits, `<oidc>` follows `<secrets>` and precedes
+   `<invitations>`, if present. A Google provider looks like:
 
    ```xml
    <oidc>
@@ -488,15 +489,16 @@ YAML/TOML file.
    </oidc>
    ```
 
-   Here `google-client` must be the ID of the encrypted secret created in step 3.
+   Here `google-client` illustrates an existing encrypted secret ID; the UI generates
+   its own secret ID. Keep the reference written by the form.
    For a corporate provider, use its issuer, client ID, and organization secret
    reference. The issuer must be an HTTPS URL without credentials, query, or
    fragment. Enter the issuer itself, not its discovery-document URL. Orion reads
    `ISSUER/.well-known/openid-configuration`; its `issuer` must match the configured
    value, and its authorization, token, and JWKS endpoints must use HTTPS.
-5. **Apply the configuration and test an invitation.** Commit and push `orion.xml`
-   to the configured configuration repository/ref; accepted updates reload the
-   configuration. Sign in to Orion as a system administrator, open **People**,
+5. **Test an invitation.** UI saves take effect immediately. If you edited XML
+   manually, commit and push `orion.xml` to the configured configuration
+   repository/ref; accepted updates reload the configuration. Open **People**,
    select the organization, enter the invitee's email, and copy the generated
    link. Open it in the browser that will complete sign-in, choose the provider,
    and sign in with that email. Complete the profile and check that only the
@@ -526,8 +528,8 @@ default token configuration satisfies Orion's requirements.
 2. Create an OAuth client ID of type **Web application**, named `Orion`.
 3. Add `https://orion.example.com/api/auth/oidc/callback` to **Authorized redirect
    URIs**. If the app is limited to test users, add the invited accounts.
-4. Copy the client ID and client secret into Orion's provider configuration and
-   encrypted organization secret, respectively.
+4. Enter the client ID and client secret in **People → Organization sign-in**
+   and save the provider.
 
 Issuer: `https://accounts.google.com`
 

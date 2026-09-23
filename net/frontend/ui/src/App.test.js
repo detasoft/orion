@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const client = {
   me: vi.fn(),
+  oidcSettings: vi.fn(),
   invitations: vi.fn(),
   createRepository: vi.fn(),
   createOrUpdateUser: vi.fn(),
@@ -61,6 +62,7 @@ beforeEach(() => {
   sessionStorage.clear()
   vi.clearAllMocks()
   for (const method of Object.values(client)) method.mockReset()
+  client.oidcSettings.mockResolvedValue({ revision: '1', organizations: [] })
   client.me.mockResolvedValue({ userId: 'admin', organization: '', admin: true })
   client.invitations.mockResolvedValue({ organizations: [] })
   client.routes.mockResolvedValue({

@@ -10,6 +10,12 @@ import jakarta.inject.Singleton;
 public class OrionHttpModule {
     @Provides
     @IntoSet
+    static OrionHttpRoute providerConfigurationRoute(OrionAdminOidcRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute oidcRoute(OrionOidcRoute route) {
         return route;
     }
