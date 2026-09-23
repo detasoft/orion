@@ -93,7 +93,8 @@ class BootstrapProxyAdoptionTest {
             current.set(secrets.createSystem(current.get(), "existing", "existing-token".toCharArray()));
             current.set(withProxy(current.get(), binding("configuration", "https://git.example/other", "existing")));
             var provider = provider("external-token");
-            provider.prepareProvisional("configuration", source("https://git.example/repo"));
+            provider.prepareProvisional("ordinary", source("https://git.example/repo"));
+            current.set(withProxy(current.get(), binding("ordinary", "https://git.example/other", "existing")));
             assertThatThrownBy(() -> provider.adoptProvisional(current.get(), secrets))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("alias");
             assertThat(current.get().system().secrets()).hasSize(1);

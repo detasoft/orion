@@ -58,7 +58,7 @@ class NativeBootstrapGitPusherTest {
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
                 repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
                 fetcher,
                 new NativeBootstrapGitPusher());
 
@@ -115,7 +115,7 @@ class NativeBootstrapGitPusherTest {
 
         assertThat(accepted).containsExactly(false);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
                 (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
         assertThat(proxy.publish(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
@@ -132,7 +132,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
                 Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
                 (selected, transport, target) -> { },
                 (selected, transport, target, received, updates, atomic) -> new NativeBootstrapGitPusher().push(
                         selected, (service, uri, options) -> {

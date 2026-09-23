@@ -43,7 +43,7 @@ public final class GitSshClientTransport implements GitClientTransport {
 
     private final SshClient client;
     private final GitCredentials credentials;
-    private final Set<String> knownHosts;
+    private final ServerKeyVerifier hostKeyVerifier;
 
     public GitSshClientTransport(
             SshClient client,
@@ -57,18 +57,21 @@ public final class GitSshClientTransport implements GitClientTransport {
     public static GitSshClientTransport strictKnownHosts(
             Set<String> knownHosts,
             GitCredentials credentials) {
-        Objects.requireNonNull(knownHosts, "knownHosts");
-        return new GitSshClientTransport(null, credentials, knownHosts);
+        Set<String> keys = GitProxyBinding.canonicalKnownHosts(knownHosts);
+        return verifyingHostKeys((session, address, key) -> keys.contains(PublicKeyEntry.toString(key)), credentials);
+    }
+
+    public static GitSshClientTransport verifyingHostKeys(ServerKeyVerifier verifier, GitCredentials credentials) {
+        return new GitSshClientTransport(null, credentials, Objects.requireNonNull(verifier, "verifier"));
     }
 
     private GitSshClientTransport(
             SshClient client,
             GitCredentials credentials,
-            Set<String> knownHosts) {
+            ServerKeyVerifier hostKeyVerifier) {
         this.client = client;
         this.credentials = Objects.requireNonNull(credentials, "credentials");
-        this.knownHosts = knownHosts == null ? null
-                : GitProxyBinding.canonicalKnownHosts(knownHosts);
+        this.hostKeyVerifier = hostKeyVerifier;
     }
 
     @Override
@@ -193,12 +196,11 @@ public final class GitSshClientTransport implements GitClientTransport {
     }
 
     private Attempt newAttempt() {
-        if (knownHosts == null) {
+        if (hostKeyVerifier == null) {
             return new Attempt(client, TrackingVerifier.none(), null);
         }
         SshClient strictClient = SshClient.setUpDefaultClient();
-        TrackingVerifier verifier = new TrackingVerifier(
-                (session, address, key) -> knownHosts.contains(PublicKeyEntry.toString(key)));
+        TrackingVerifier verifier = new TrackingVerifier(hostKeyVerifier);
         strictClient.setServerKeyVerifier(verifier);
         strictClient.start();
         return new Attempt(strictClient, verifier, strictClient);

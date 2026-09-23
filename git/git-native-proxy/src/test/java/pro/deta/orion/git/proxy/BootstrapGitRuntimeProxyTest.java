@@ -43,7 +43,7 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
                 repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of())),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
                 (ignoredLocation, ignoredTransport, ignoredRepository) -> refreshes.incrementAndGet(),
                 (ignoredLocation, ignoredTransport, ignoredRepository, received, updates, atomic) ->
                         java.util.Collections.nCopies(updates.size(), false));

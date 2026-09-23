@@ -55,7 +55,7 @@ class BootstrapGitTransportFactoryTest {
             BootstrapGitLocation location = httpLocation(
                     uri, "password", Map.of("credentialUsername", "orion"));
             BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
-                    new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", "password")));
+                    new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", "password")), ignored -> java.util.List.of());
             AtomicReference<GitClientTransport> retained = new AtomicReference<>();
             IOException failure = new IOException("operation failed");
             BootstrapGitTransportFactory.TransportOperation<Void> operation = (selected, transport) -> {
@@ -107,7 +107,7 @@ class BootstrapGitTransportFactoryTest {
         BootstrapGitLocation location = sshLocation("password", "env:SSH_PASSWORD",
                 first + "\n" + second + "\n" + first);
         BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
-                new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")));
+                new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")), ignored -> java.util.List.of());
         factory.withTransport(location, (selected, transport) -> {
             assertThat(selected.knownHosts()).containsExactlyInAnyOrder(first, second);
             return null;
@@ -141,7 +141,7 @@ class BootstrapGitTransportFactoryTest {
                     + "/repository.git");
             BootstrapGitLocation location = httpLocation(uri, credentialKind, extraAuth);
             BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
-                    new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", credential)));
+                    new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", credential)), ignored -> java.util.List.of());
 
             GitClientResult<GitRemoteAdvertisement> result = factory.withTransport(
                     location,

@@ -41,6 +41,49 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PersistentProxyActivationTest {
     @Test
+    void movedBootstrapSourceKeepsYamlConnectionUntilConfigurationIsReconciled() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
+            String name = provider.prepareProvisional("configuration", fixture.source());
+            fixture.adopt(provider);
+            GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
+            GitProxyBinding old = new GitProxyBinding(actual.alias(),
+                    URI.create(actual.upstream() + "/old"), actual.ref(), actual.credentialKind(),
+                    actual.secret(), actual.username(), actual.knownHosts());
+            fixture.current.set(withProxies(fixture.current.get(), List.of(old)));
+            fixture.unavailable.set(old.upstream());
+            assertThat(provider.adoptProvisional(fixture.current.get(), fixture.secrets))
+                    .isSameAs(fixture.current.get());
+
+            provider.activate(fixture.current::get, fixture.secrets);
+            provider.openForRead(name).valueOrFailure("bootstrap source");
+            provider.openForRead(old.publicRepositoryName()).valueOrFailure("bootstrap proxy");
+            assertThat(provider.retry(old.alias(), fixture.current::get, fixture.secrets).isFailure()).isFalse();
+            assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
+            assertThat(fixture.current.get().system().proxies()).containsExactly(old);
+        }
+    }
+
+    @Test
+    void ordinaryProxyCannotInheritTrustFromARelocatedBootstrapConnection() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
+            String name = provider.prepareProvisional("configuration", fixture.source());
+            fixture.adopt(provider);
+            GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
+            GitProxyBinding previous = new GitProxyBinding(actual.alias(),
+                    URI.create(actual.upstream() + "/old"), actual.ref(), actual.credentialKind(),
+                    actual.secret(), actual.username(), actual.knownHosts());
+            GitProxyBinding ordinary = new GitProxyBinding(new RemoteAlias("other"), actual.upstream(),
+                    actual.ref(), actual.credentialKind(), actual.secret(), actual.username(), actual.knownHosts());
+            fixture.current.set(withProxies(fixture.current.get(), List.of(previous, ordinary)));
+            assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("same bootstrap repository");
+            assertThat(provider.openForRead(name).isFailure()).isFalse();
+        }
+    }
+
+    @Test
     void retainedHandlesUseStoredCredentialsAndPickUpRotationOnTheNextConnection() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
