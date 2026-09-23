@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.http;
+package pro.deta.orion.git.workflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -32,6 +32,11 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
+import pro.deta.orion.transport.http.OrionAuthorizationFilter;
+import pro.deta.orion.transport.http.OrionGitRoute;
+import pro.deta.orion.transport.http.OrionHttpResponseWriter;
+import pro.deta.orion.transport.http.OrionHttpRouteRegistry;
+import pro.deta.orion.transport.http.OrionHttpRouteServlet;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -41,17 +46,19 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitHttpInteroperabilityTest {
+    private static final GitCommandRunner GIT = new GitCommandRunner("git", Duration.ofSeconds(30));
+
     @TempDir
     Path directory;
 
@@ -185,27 +192,10 @@ class OrionGitHttpInteroperabilityTest {
         }
     }
 
-    private String git(Path local, String version, String... arguments) throws Exception {
-        List<String> command = new ArrayList<>(List.of("git", "-c", "protocol.version=" + version,
+    private static String git(Path local, String version, String... arguments) throws IOException {
+        List<String> command = new ArrayList<>(List.of("-c", "protocol.version=" + version,
                 "-c", "fetch.negotiationAlgorithm=consecutive"));
         command.addAll(List.of(arguments));
-        Path output = Files.createTempFile(directory, "git-output-", ".log");
-        Path errors = Files.createTempFile(directory, "git-error-", ".log");
-        ProcessBuilder builder = new ProcessBuilder(command).directory(local.toFile())
-                .redirectOutput(output.toFile()).redirectError(errors.toFile());
-        builder.environment().put("GIT_CONFIG_NOSYSTEM", "1");
-        builder.environment().put("GIT_CONFIG_GLOBAL", "/dev/null");
-        builder.environment().put("GIT_TERMINAL_PROMPT", "0");
-        Process process = builder.start();
-        try {
-            assertThat(process.waitFor(30, TimeUnit.SECONDS)).as("Git command finished: %s", command).isTrue();
-            assertThat(process.exitValue()).as("%s: %s", command, Files.readString(errors)).isZero();
-            return Files.readString(output);
-        } finally {
-            if (process.isAlive()) {
-                process.destroyForcibly();
-                process.waitFor(5, TimeUnit.SECONDS);
-            }
-        }
+        return GIT.run(local, command.toArray(String[]::new)).output();
     }
 }
