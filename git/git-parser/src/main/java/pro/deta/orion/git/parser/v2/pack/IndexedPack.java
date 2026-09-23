@@ -202,6 +202,11 @@ public final class IndexedPack implements AutoCloseable {
         return new PackId(trailer.array());
     }
 
+    public boolean checksumMatches(PackId expected) throws IOException {
+        return checksum().equals(expected)
+                && MessageDigest.isEqual(digest(size() - 20), expected.toBytes());
+    }
+
     private byte[] digest(long length) throws IOException {
         MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
         ByteBuffer buffer = ByteBuffer.allocate(8192);

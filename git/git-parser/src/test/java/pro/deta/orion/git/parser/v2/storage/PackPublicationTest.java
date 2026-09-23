@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -102,6 +103,35 @@ class PackPublicationTest {
                     .containsEntry(object, List.of(expected));
         }
         assertStagingEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {12, 9000, -1})
+    void duplicatePublicationRejectsCorruptPackAndPreservesExistingFiles(int corruptOffset) throws Exception {
+        byte[] content = new byte[20000];
+        new Random(42).nextBytes(content);
+        byte[] wire = pack(blob(content));
+        GitStorageApi storage = new GitStorageApi(directory);
+        PackId id;
+        try (IndexedPack first = ingest(wire, storage.newPack())) {
+            id = new GitPackObjectResolver(first, storage).complete();
+            storage.persist(first);
+        }
+        byte[] index = Files.readAllBytes(path(id, ".mv"));
+        byte[] corrupt = wire.clone();
+        corrupt[corruptOffset < 0 ? corrupt.length - 1 : corruptOffset] ^= 1;
+        Files.write(path(id, ".pack"), corrupt);
+
+        GitStorageApi reopened = new GitStorageApi(directory);
+        try (IndexedPack duplicate = ingest(wire, reopened.newPack())) {
+            assertThat(new GitPackObjectResolver(duplicate, reopened).complete()).isEqualTo(id);
+            assertThatThrownBy(() -> reopened.persist(duplicate))
+                    .isInstanceOf(IOException.class).hasMessageContaining("checksum mismatch");
+            assertThatThrownBy(duplicate::size).isInstanceOf(ClosedChannelException.class);
+            assertThat(Files.readAllBytes(path(id, ".pack"))).containsExactly(corrupt);
+            assertThat(Files.readAllBytes(path(id, ".mv"))).containsExactly(index);
+            assertStagingEmpty();
+        }
     }
 
     @Test

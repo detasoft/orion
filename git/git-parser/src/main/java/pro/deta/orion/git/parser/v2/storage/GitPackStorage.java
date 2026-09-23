@@ -7,9 +7,7 @@ import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.EOFException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
@@ -17,8 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -307,9 +303,7 @@ final class GitPackStorage {
             forceDirectory(packs);
             if (Files.exists(index)) {
                 try (IndexedPack bytes = IndexedPack.open(target, index)) {
-                    long size = bytes.size();
-                    if (size < 32 || !MessageDigest.isEqual(digest(bytes, size - 20), id.toBytes())
-                            || !MessageDigest.isEqual(readExactly(bytes, size - 20, 20), id.toBytes())) {
+                    if (!bytes.checksumMatches(id)) {
                         throw new IOException("Published pack checksum mismatch: " + id);
                     }
                 }
@@ -341,48 +335,6 @@ final class GitPackStorage {
 
     private interface PublishedIndexRead<R> {
         Optional<R> read(PackId id, Path index) throws IOException;
-    }
-
-    private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(length);
-        while (buffer.hasRemaining()) {
-            int count = bytes.read(offset, buffer);
-            if (count < 0) {
-                throw new EOFException("Truncated pack file");
-            }
-            if (count == 0) {
-                throw new IOException("Pack file read made no progress");
-            }
-            offset += count;
-        }
-        return buffer.array();
-    }
-
-    private static byte[] digest(IndexedPack bytes, long length) throws IOException {
-        MessageDigest hash = sha1();
-        ByteBuffer buffer = ByteBuffer.allocate(8192);
-        long position = 0;
-        while (position < length) {
-            buffer.clear().limit((int) Math.min(buffer.capacity(), length - position));
-            int count = bytes.read(position, buffer);
-            if (count < 0) {
-                throw new EOFException("Truncated pack file during checksum calculation");
-            }
-            if (count == 0) {
-                throw new IOException("Pack file read made no progress");
-            }
-            hash.update(buffer.array(), 0, count);
-            position += count;
-        }
-        return hash.digest();
-    }
-
-    private static MessageDigest sha1() {
-        try {
-            return MessageDigest.getInstance("SHA-1");
-        } catch (NoSuchAlgorithmException error) {
-            throw new IllegalStateException("SHA-1 is required for Git packs", error);
-        }
     }
 
     static void closeFailed(AutoCloseable resource, Throwable failure) {
