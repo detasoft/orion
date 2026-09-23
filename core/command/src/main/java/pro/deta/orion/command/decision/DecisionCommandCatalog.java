@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.git.command;
+package pro.deta.orion.command.decision;
 
 import jakarta.inject.Inject;
 import pro.deta.orion.auth.SecurityContext;
@@ -18,7 +18,7 @@ import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.resource.ScopedResourceCandidate;
 import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
-import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.schema.orion.ConfigurationScope;
@@ -121,11 +121,11 @@ public final class DecisionCommandCatalog {
             return new CommandResult.Failure(CommandFailureCode.INVALID_ARGUMENTS,
                     "Decision action is required", List.of());
         }
-        Result<Decision> result = registry.decide(requestId(invocation),
-                new Decision(action, actor(invocation.context().securityContext())));
+        Result<DecisionAnswer> result = registry.decide(requestId(invocation),
+                new DecisionAnswer(action, actor(invocation.context().securityContext())));
         return switch (result) {
-            case Result.Success<Decision> ignored -> new CommandResult.Message("Decision recorded");
-            case Result.Failure<Decision> failure -> switch (failure.code()) {
+            case Result.Success<DecisionAnswer> ignored -> new CommandResult.Message("Decision recorded");
+            case Result.Failure<DecisionAnswer> failure -> switch (failure.code()) {
                 case NOT_FOUND -> unavailable();
                 case NOT_SUPPORTED -> new CommandResult.Failure(CommandFailureCode.INVALID_ARGUMENTS,
                         "Decision action is unavailable", List.of());

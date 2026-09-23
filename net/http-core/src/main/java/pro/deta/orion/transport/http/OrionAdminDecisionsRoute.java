@@ -8,7 +8,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.schema.orion.ConfigurationScope;
@@ -94,11 +94,11 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
         } catch (IllegalArgumentException exception) {
             return failure(400, "Invalid decision request ID");
         }
-        Result<Decision> result = registry.decide(id, new Decision(answer.path("action").asText(), actor));
+        Result<DecisionAnswer> result = registry.decide(id, new DecisionAnswer(answer.path("action").asText(), actor));
         return switch (result) {
-            case Result.Success<Decision> ignored ->
+            case Result.Success<DecisionAnswer> ignored ->
                     OrionHttpResponse.empty(204).withHeader("Cache-Control", "no-store");
-            case Result.Failure<Decision> rejected -> switch (rejected.code()) {
+            case Result.Failure<DecisionAnswer> rejected -> switch (rejected.code()) {
                 case NOT_FOUND -> failure(404, "Decision request is unavailable");
                 case NOT_SUPPORTED -> failure(400, "Decision action is unavailable");
                 default -> failure(500, "Could not record decision");

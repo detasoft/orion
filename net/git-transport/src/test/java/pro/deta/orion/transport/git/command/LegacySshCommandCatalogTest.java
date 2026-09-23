@@ -2,29 +2,25 @@ package pro.deta.orion.transport.git.command;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agent.server.AgentSessionServer;
-import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
-import java.nio.file.Path;
-import java.util.UUID;
-import java.util.Base64;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialListResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.command.decision.DecisionCommandCatalog;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandContext;
@@ -42,8 +38,9 @@ import pro.deta.orion.command.RowOutputFormat;
 import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.PendingDecision;
+import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -57,10 +54,16 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,7 +75,7 @@ class LegacySshCommandCatalogTest {
     private AgentSessionServer agentServer;
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
-    private final DecisionRegistry decisions = new DecisionRegistry(8, (actor, scope) -> true);
+    private final DecisionRegistry decisions = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
     private final CommandNode commandTree = new LegacySshCommandCatalog(
             accessControl,
             new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
@@ -94,9 +97,12 @@ class LegacySshCommandCatalogTest {
     @ParameterizedTest
     @ValueSource(strings = {"replace", "reject"})
     void decisionCommandsResolveRequestsInTheSuppliedRegistry(String action) {
-        PendingDecision pending = decisions.register(Optional.of(ConfigurationScope.parse("acme/platform/api")),
+        Decision pending = decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+                Optional.of(ConfigurationScope.parse("acme/platform/api")),
                 "SSH host key changed", "Review the new fingerprint",
-                Map.of("replace", "Replace key", "reject", "Reject connection"))
+                Map.of("replace", "Replace key", "reject", "Reject connection"))) {
+                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
+                })
                 .valueOrFailure("register decision");
         String id = pending.request().id().toString();
         UserIdentity operator = user(List.of());
@@ -112,8 +118,10 @@ class LegacySshCommandCatalogTest {
                                 "description", CommandValue.text("Review the new fingerprint")));
         assertThat(dispatch("/decision/" + id + " resolve " + action, operator))
                 .isEqualTo(new CommandResult.Message("Decision recorded"));
-        assertThat(pending.result().toCompletableFuture())
-                .isCompletedWithValue(new Decision(action, PrincipalAddress.parse("system/operator")));
+        assertThat(pending.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
+                .toCompletableFuture())
+                .isCompletedWithValue(new DecisionAnswer(action, PrincipalAddress.parse("system/operator")));
         assertThat(dispatch("/decision ls", operator)).isInstanceOfSatisfying(CommandResult.Rows.class,
                 rows -> assertThat(rows.values()).isEmpty());
         assertFailure(dispatch("/decision/" + id + " resolve " + action, operator),
@@ -122,8 +130,11 @@ class LegacySshCommandCatalogTest {
 
     @Test
     void decisionCommandsRejectAnonymousRequestsWithoutResolvingThem() {
-        PendingDecision pending = decisions.register(Optional.empty(), "Confirm operation", "Details",
-                Map.of("accept", "Accept")).valueOrFailure("register decision");
+        Decision pending = decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+                Optional.empty(), "Confirm operation", "Details",
+                Map.of("accept", "Accept"))) {
+                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
+                }).valueOrFailure("register decision");
         String path = "/decision/" + pending.request().id();
 
         assertFailure(dispatch("/decision ls", SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);

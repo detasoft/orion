@@ -2,8 +2,10 @@ package pro.deta.orion.component;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.PendingDecision;
+import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
 import pro.deta.orion.internal.OrionExecutor;
@@ -16,8 +18,10 @@ import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 import pro.deta.orion.util.Result;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -31,17 +35,20 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 class OrionRuntimeStateMachineTest {
     @Test
     void stopBeforeStartCancelsDecisionsWithoutCreatingServices() {
-        try (DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry()) {
+        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+                DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry(executor)) {
             OrionRuntimeStateMachine runtime = runtime(decisions,
                     new OrionExecutorStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                     new OrionEventManagerStateMachine(OrionRuntimeStateMachineTest::unstartedService));
-            PendingDecision pending = register(decisions).valueOrFailure("register decision");
+            Decision pending = register(decisions).valueOrFailure("register decision");
 
             runtime.stop();
 
             assertThat(runtime.currentState()).isEqualTo(FIN);
             assertThat(pending.result().toCompletableFuture()).isCompletedExceptionally();
-            assertThatThrownBy(() -> pending.result().toCompletableFuture().join())
+            assertThatThrownBy(() -> pending.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
+                .toCompletableFuture().join())
                     .isInstanceOf(CompletionException.class)
                     .hasCauseInstanceOf(CancellationException.class);
             assertThat(register(decisions)).isInstanceOf(Result.Failure.class);
@@ -51,7 +58,7 @@ class OrionRuntimeStateMachineTest {
     @Test
     void stopAfterFailedStartupDispatchesCancellationBeforeExecutorShutdown() throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry()) {
+                DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry(executor)) {
             OrionEventManager events = new OrionEventManager() {
                 @Override
                 public void onStart() {
@@ -65,8 +72,9 @@ class OrionRuntimeStateMachineTest {
             OrionRuntimeStateMachine runtime = runtime(decisions,
                     new OrionExecutorStateMachine(() -> executor),
                     new OrionEventManagerStateMachine(() -> events));
-            PendingDecision pending = register(decisions).valueOrFailure("register decision");
+            Decision pending = register(decisions).valueOrFailure("register decision");
             CompletableFuture<Throwable> continued = pending.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
                     .handleAsync((decision, failure) -> failure, executor).toCompletableFuture();
             assertThatThrownBy(runtime::start).isInstanceOf(StateTransitionFailedException.class);
             assertThat(runtime.currentState()).isEqualTo(ERR);
@@ -94,9 +102,11 @@ class OrionRuntimeStateMachineTest {
                         new JettyHTTPServerStateMachine(OrionRuntimeStateMachineTest::unstartedService)),
                 () -> { throw new AssertionError("Bootstrap proxies must not start"); }, decisions);
     }
-
-    private static Result<PendingDecision> register(DecisionRegistry decisions) {
-        return decisions.register(Optional.empty(), "Confirm operation", "", Map.of("accept", "Accept"));
+    private static Result<Decision> register(DecisionRegistry decisions) {
+        return decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+                Optional.empty(), "Confirm operation", "", Map.of("accept", "Accept"))) {
+                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
+                });
     }
 
     private static <T> T unstartedService() {

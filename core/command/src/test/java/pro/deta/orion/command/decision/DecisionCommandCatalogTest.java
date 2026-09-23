@@ -1,6 +1,5 @@
-package pro.deta.orion.transport.git.command;
+package pro.deta.orion.command.decision;
 
-import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -19,15 +18,20 @@ import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.PendingDecision;
+import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.util.Result;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,22 +44,24 @@ class DecisionCommandCatalogTest {
     void usesOrganizationIdentityForListsAndAnswers() {
         UserIdentity user = new InternalUserImpl("reviewer", List.of(),
                 Optional.of(new OrganizationId("acme")));
-        try (DecisionRegistry registry = new DecisionRegistry(4, (actor, scope) -> true)) {
-            PendingDecision own = register(registry, "acme");
-            PendingDecision system = register(registry, null);
+        try (DecisionRegistry registry = new DecisionRegistry(4, Runnable::run, (actor, scope) -> true)) {
+            Decision own = register(registry, "acme");
+            Decision system = register(registry, null);
             assertThat(((CommandResult.Rows) dispatch(registry, "/decision ls", user)).values()).hasSize(1);
             assertFailure(dispatch(registry, "/decision/" + system.request().id() + " show", user),
                     CommandFailureCode.MISSING_RESOURCE);
             assertThat(dispatch(registry, "/decision/" + own.request().id() + " resolve replace", user))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
-            assertThat(own.result().toCompletableFuture())
-                    .isCompletedWithValue(new Decision("replace", PrincipalAddress.parse("acme/reviewer")));
+            assertThat(own.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
+                .toCompletableFuture())
+                    .isCompletedWithValue(new DecisionAnswer("replace", PrincipalAddress.parse("acme/reviewer")));
         }
     }
 
     @Test
     void listsScopesAndShowsDescriptionAndAvailableActions() {
-        try (DecisionRegistry registry = new DecisionRegistry(8, (actor, scope) -> true)) {
+        try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true)) {
             for (String scope : new String[]{null, "acme", "acme/platform", "acme/platform/api"}) {
                 register(registry, scope);
             }
@@ -83,8 +89,8 @@ class DecisionCommandCatalogTest {
 
     @Test
     void resolvesWithAuthenticatedActorAndRemovesRequestFromCommandsAndCompletion() {
-        try (DecisionRegistry registry = new DecisionRegistry(8, (actor, scope) -> true)) {
-            PendingDecision pending = register(registry, "acme/platform/api");
+        try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true)) {
+            Decision pending = register(registry, "acme/platform/api");
             String id = pending.request().id().toString();
             CommandNavigator navigator = new CommandNavigator(new DecisionCommandCatalog(registry).commandTree());
             String line = "/decision/";
@@ -93,7 +99,10 @@ class DecisionCommandCatalogTest {
 
             assertThat(dispatch(registry, "/decision/" + id.substring(0, 8) + " resolve replace", REVIEWER))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
-            assertThat(pending.result().toCompletableFuture()).isCompletedWithValue(new Decision("replace", ACTOR));
+            assertThat(pending.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
+                .toCompletableFuture())
+                .isCompletedWithValue(new DecisionAnswer("replace", ACTOR));
             assertThat(((CommandResult.Rows) dispatch(registry, "/decision ls", REVIEWER)).values()).isEmpty();
             assertFailure(dispatch(registry, "/decision/" + id + " show", REVIEWER),
                     CommandFailureCode.MISSING_RESOURCE);
@@ -106,8 +115,8 @@ class DecisionCommandCatalogTest {
 
     @Test
     void invalidActionOrArgumentsLeaveRequestPending() {
-        try (DecisionRegistry registry = new DecisionRegistry(8, (actor, scope) -> true)) {
-            PendingDecision pending = register(registry, null);
+        try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true)) {
+            Decision pending = register(registry, null);
             String command = "/decision/" + pending.request().id() + " resolve";
             for (String suffix : List.of("", " unknown", " replace extra", " replace actor=someone", " ''")) {
                 assertFailure(dispatch(registry, command + suffix, REVIEWER), CommandFailureCode.INVALID_ARGUMENTS);
@@ -115,18 +124,21 @@ class DecisionCommandCatalogTest {
             }
             assertThat(dispatch(registry, command + " reject", REVIEWER))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
-            assertThat(pending.result().toCompletableFuture()).isCompletedWithValue(new Decision("reject", ACTOR));
+            assertThat(pending.result()
+                .thenApply(result -> result.valueOrFailure("decision execution"))
+                .toCompletableFuture())
+                .isCompletedWithValue(new DecisionAnswer("reject", ACTOR));
         }
     }
 
     @Test
     void rejectsAnonymousAndUnaddressableIdentitiesBeforeConsultingRegistry() {
         AtomicInteger checks = new AtomicInteger();
-        try (DecisionRegistry registry = new DecisionRegistry(8, (actor, scope) -> {
+        try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> {
             checks.incrementAndGet();
             return true;
         })) {
-            PendingDecision pending = register(registry, null);
+            Decision pending = register(registry, null);
             for (UserIdentity identity : new UserIdentity[]{SecurityContext.ANONYMOUS, null,
                     new InternalUserImpl(" ", List.of()), new InternalUserImpl("acme/reviewer", List.of())}) {
                 assertFailure(dispatch(registry, "/decision ls", identity), CommandFailureCode.ACCESS_DENIED);
@@ -142,10 +154,10 @@ class DecisionCommandCatalogTest {
 
     @Test
     void usesRegistryVisibilityForListingLookupAndCompletion() {
-        try (DecisionRegistry registry = new DecisionRegistry(8,
+        try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run,
                 (actor, scope) -> actor.equals(ACTOR) && scope.isEmpty())) {
-            PendingDecision visible = register(registry, null);
-            PendingDecision hidden = register(registry, "acme");
+            Decision visible = register(registry, null);
+            Decision hidden = register(registry, "acme");
             CommandResult.Rows rows = (CommandResult.Rows) dispatch(registry, "/decision ls", REVIEWER);
             assertThat(rows.values()).extracting(row -> row.getFirst().asText())
                     .containsExactly(visible.request().id().toString());
@@ -165,9 +177,9 @@ class DecisionCommandCatalogTest {
     void rechecksRegistryAccessAfterResourceResolution() {
         for (String action : List.of("show", "resolve replace")) {
             AtomicInteger checks = new AtomicInteger();
-            try (DecisionRegistry registry = new DecisionRegistry(8,
+            try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run,
                     (actor, scope) -> checks.incrementAndGet() == 1)) {
-                PendingDecision pending = register(registry, null);
+                Decision pending = register(registry, null);
                 assertFailure(dispatch(registry, "/decision/" + pending.request().id() + " " + action, REVIEWER),
                         CommandFailureCode.MISSING_RESOURCE);
                 assertThat(checks).hasValue(2);
@@ -175,13 +187,15 @@ class DecisionCommandCatalogTest {
             }
         }
     }
-
-    private static PendingDecision register(DecisionRegistry registry, String scope) {
+    private static Decision register(DecisionRegistry registry, String scope) {
         Map<String, String> actions = new LinkedHashMap<>();
         actions.put("replace", "Replace stored key");
         actions.put("reject", "Reject connection");
-        return registry.register(Optional.ofNullable(scope).map(ConfigurationScope::parse),
-                "SSH host key changed", "Old fingerprint -> new fingerprint", actions)
+        return registry.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+                Optional.ofNullable(scope).map(ConfigurationScope::parse),
+                "SSH host key changed", "Old fingerprint -> new fingerprint", actions)) {
+                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
+                })
                 .valueOrFailure("register decision");
     }
 

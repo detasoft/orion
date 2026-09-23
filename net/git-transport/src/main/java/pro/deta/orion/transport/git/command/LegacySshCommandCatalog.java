@@ -16,6 +16,7 @@ import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
+import pro.deta.orion.command.decision.DecisionCommandCatalog;
 import pro.deta.orion.command.CommandDefinition;
 import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandFailureCode;

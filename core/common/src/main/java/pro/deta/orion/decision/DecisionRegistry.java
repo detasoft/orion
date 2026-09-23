@@ -4,7 +4,6 @@ import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,30 +11,34 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.function.BiPredicate;
 
 /**
  * Bounded in-memory owner of pending requests. The supplied authorization check evaluates current rights
  * for each read or answer; callers supply authenticated principal addresses. Completion handlers execute
- * outside the registry lock. Closing rejects new requests and cancels outstanding waits.
+ * outside the registry lock. The registry schedules accepted actions on the supplied executor;
+ * the runtime owns that executor's lifecycle. Closing rejects new requests and cancels outstanding waits.
  */
 public final class DecisionRegistry implements AutoCloseable {
     private final int capacity;
+    private final Executor executor;
     private final BiPredicate<PrincipalAddress, Optional<ConfigurationScope>> authorization;
-    private final Map<UUID, PendingDecision> requests = new LinkedHashMap<>();
+    private final Map<UUID, Decision> requests = new LinkedHashMap<>();
     private boolean closed;
 
-    public DecisionRegistry(int capacity,
+    public DecisionRegistry(int capacity, Executor executor,
             BiPredicate<PrincipalAddress, Optional<ConfigurationScope>> authorization) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
         this.capacity = capacity;
+        this.executor = Objects.requireNonNull(executor, "executor");
         this.authorization = Objects.requireNonNull(authorization, "authorization");
     }
 
-    public Result<PendingDecision> register(Optional<ConfigurationScope> scope,
-            String title, String description, Map<String, String> actions) {
+    public Result<Decision> register(Decision pending) {
+        Objects.requireNonNull(pending, "decision");
         synchronized (requests) {
             if (closed) {
                 return new Result.Failure<>(Result.FailureCode.CREATION_FAILED, "Decision registry is closed");
@@ -44,9 +47,11 @@ public final class DecisionRegistry implements AutoCloseable {
             if (requests.size() >= capacity) {
                 return new Result.Failure<>(Result.FailureCode.CREATION_FAILED, "Decision registry is full");
             }
-            DecisionRequest request = new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                    scope, title, description, actions);
-            PendingDecision pending = new PendingDecision(request);
+            DecisionRequest request = pending.request();
+            if (!pending.isPending() || requests.containsKey(request.id())) {
+                return new Result.Failure<>(Result.FailureCode.CREATION_FAILED,
+                        "Decision is already registered or no longer pending");
+            }
             requests.put(request.id(), pending);
             pending.result().whenComplete((decision, failure) -> {
                 synchronized (requests) {
@@ -59,12 +64,12 @@ public final class DecisionRegistry implements AutoCloseable {
 
     public List<DecisionRequest> list(PrincipalAddress actor) {
         Objects.requireNonNull(actor, "actor");
-        List<PendingDecision> snapshot;
+        List<Decision> snapshot;
         synchronized (requests) {
             snapshot = List.copyOf(requests.values());
         }
         List<DecisionRequest> visible = new ArrayList<>();
-        for (PendingDecision pending : snapshot) {
+        for (Decision pending : snapshot) {
             if (authorized(actor, pending.request().scope()) && pending.isPending()) {
                 visible.add(pending.request());
             }
@@ -73,42 +78,50 @@ public final class DecisionRegistry implements AutoCloseable {
     }
 
     public Optional<DecisionRequest> find(UUID id, PrincipalAddress actor) {
-        PendingDecision pending = accessible(id, actor);
+        Decision pending = accessible(id, actor);
         return pending == null ? Optional.empty() : Optional.of(pending.request());
     }
 
-    public Result<Decision> decide(UUID id, Decision decision) {
+    public Result<DecisionAnswer> decide(UUID id, DecisionAnswer decision) {
         Objects.requireNonNull(decision, "decision");
-        PendingDecision pending = accessible(id, decision.actor());
+        Decision pending = accessible(id, decision.actor());
         if (pending == null) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Decision request is unavailable");
         }
         if (!pending.request().actions().containsKey(decision.action())) {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Decision action is unavailable");
         }
-        if (!pending.decide(decision)) {
+        if (!pending.accept(decision)) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Decision request is unavailable");
+        }
+        synchronized (requests) {
+            requests.remove(id, pending);
+        }
+        try {
+            executor.execute(() -> pending.run(decision));
+        } catch (RuntimeException failure) {
+            pending.fail(failure);
         }
         return Result.of(decision);
     }
 
     @Override
     public void close() {
-        List<PendingDecision> outstanding;
+        List<Decision> outstanding;
         synchronized (requests) {
             closed = true;
             outstanding = List.copyOf(requests.values());
             requests.clear();
         }
-        for (PendingDecision pending : outstanding) {
+        for (Decision pending : outstanding) {
             pending.cancel();
         }
     }
 
-    private PendingDecision accessible(UUID id, PrincipalAddress actor) {
+    private Decision accessible(UUID id, PrincipalAddress actor) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(actor, "actor");
-        PendingDecision pending;
+        Decision pending;
         synchronized (requests) {
             pending = requests.get(id);
         }

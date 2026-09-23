@@ -9,6 +9,7 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
@@ -32,8 +33,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static DecisionRegistry decisionRegistry() {
-        return new DecisionRegistry(MAX_PENDING_DECISIONS, (actor, scope) -> true);
+    static DecisionRegistry decisionRegistry(OrionExecutor executor) {
+        return new DecisionRegistry(MAX_PENDING_DECISIONS, executor, (actor, scope) -> true);
     }
 
     @Provides

@@ -14,7 +14,7 @@ import java.util.UUID;
  * Immutable description of a pending decision for HTTP and SSH administration.
  * An empty scope identifies a system request; otherwise it belongs to an organization, team, or repository.
  * Actions map identifiers to display labels in presentation order. The producer supplies safe display text;
- * authorization and the waiting operation belong to the registry, not this description.
+ * authorization belongs to the registry and execution belongs to Decision, not this description.
  */
 public record DecisionRequest(
         UUID id,
