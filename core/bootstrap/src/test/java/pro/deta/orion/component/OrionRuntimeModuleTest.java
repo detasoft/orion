@@ -13,16 +13,16 @@ import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
-import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.ACLUtil;
@@ -38,9 +38,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -65,22 +63,20 @@ class OrionRuntimeModuleTest {
     void decisionAuthorizationPreservesOrganizationBoundary(String scopePath) {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
                 DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor)) {
-            Decision pending = registry.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-
-                    Optional.ofNullable(scopePath).map(ConfigurationScope::parse),
-                    "Confirm operation", "", Map.of("replace", "Replace", "reject", "Reject"))) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                })
+            Decision pending = registry.register(new Decision(UUID.randomUUID(),
+                Optional.ofNullable(scopePath).map(ConfigurationScope::parse), "Confirm operation", "",
+                List.of(new DecisionAction("Replace", actor -> Result.of(null)),
+                        new DecisionAction("Reject", actor -> Result.of(null)))))
                     .valueOrFailure("register pending decision");
             PrincipalAddress foreign = PrincipalAddress.parse("other/reviewer");
             assertThat(registry.list(foreign)).isEmpty();
             assertThat(registry.find(pending.request().id(), foreign)).isEmpty();
-            assertThat(registry.decide(pending.request().id(), new DecisionAnswer("replace", foreign)).isFailure())
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, foreign)).isFailure())
                     .isTrue();
             assertThat(pending.result().toCompletableFuture()).isNotDone();
             PrincipalAddress actor = PrincipalAddress.parse(
                     scopePath == null ? "system/reviewer" : "acme/reviewer");
-            DecisionAnswer decision = new DecisionAnswer("replace", actor);
+            DecisionAnswer decision = new DecisionAnswer(0, actor);
 
             assertThat(registry.list(actor)).containsExactly(pending.request());
             assertThat(registry.find(pending.request().id(), actor)).contains(pending.request());

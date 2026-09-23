@@ -5,9 +5,7 @@ import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
-import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -25,6 +23,66 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DecisionRegistryTest {
     @Test
+    void reusesResourceDecisionEvenAtCapacityAndUntilExecutionCompletes() {
+        java.util.ArrayDeque<Runnable> work = new java.util.ArrayDeque<>();
+        try (DecisionRegistry registry = new DecisionRegistry(1, work::add, (actor, scope) -> true)) {
+            Decision first = resourceDecision("proxy:one", null);
+            registry.register(first).valueOrFailure("register");
+            assertThat(registry.register(resourceDecision("proxy:one", null)).valueOrFailure("duplicate"))
+                    .isSameAs(first);
+            assertThat(registry.register(resourceDecision("proxy:two", null)).isFailure()).isTrue();
+            assertThat(registry.list(ADMIN)).containsExactly(first.request());
+            registry.decide(first.request().id(), new DecisionAnswer(0, ADMIN)).valueOrFailure("answer");
+            assertThat(registry.register(resourceDecision("proxy:one", null)).valueOrFailure("executing"))
+                    .isSameAs(first);
+            assertThat(work).hasSize(1);
+            work.remove().run();
+            Decision next = resourceDecision("proxy:one", null);
+            assertThat(registry.register(next).valueOrFailure("completed")).isSameAs(next);
+            next.cancel();
+            assertThat(registry.register(resourceDecision("proxy:one", null)).isFailure()).isFalse();
+        }
+    }
+
+    @Test
+    void sameResourceNameInDifferentScopesRemainsIndependent() {
+        record Connection(int id) { }
+        try (DecisionRegistry registry = registry(3)) {
+            for (String scope : new String[]{null, "acme", "other"}) {
+                registry.register(resourceDecision(new Connection(1), scope)).valueOrFailure("register");
+            }
+            assertThat(registry.list(ADMIN)).hasSize(3);
+            Decision duplicate = registry.register(resourceDecision(new Connection(1), "acme"))
+                    .valueOrFailure("duplicate");
+            assertThat(duplicate.request()).isEqualTo(registry.list(ADMIN).get(1));
+        }
+    }
+
+    @Test
+    void concurrentRegistrationsReturnOneCanonicalDecision() throws Exception {
+        try (DecisionRegistry registry = registry(1); ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CountDownLatch start = new CountDownLatch(1);
+            Future<Decision> first = executor.submit(() -> {
+                start.await();
+                return registry.register(resourceDecision("proxy:one", null)).valueOrFailure("first");
+            });
+            Future<Decision> second = executor.submit(() -> {
+                start.await();
+                return registry.register(resourceDecision("proxy:one", null)).valueOrFailure("second");
+            });
+            start.countDown();
+            assertThat(first.get(2, TimeUnit.SECONDS)).isSameAs(second.get(2, TimeUnit.SECONDS));
+            assertThat(registry.list(ADMIN)).hasSize(1);
+        }
+    }
+
+    private static Decision resourceDecision(Object resource, String scope) {
+        return new Decision(resource,
+                Optional.ofNullable(scope).map(ConfigurationScope::parse), "Confirm", "",
+                List.of(new DecisionAction("Accept", actor -> Result.of(null))));
+    }
+
+    @Test
     void closingRegistryDoesNotShutDownTheSuppliedExecutor() throws Exception {
         try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
             DecisionRegistry registry = new DecisionRegistry(1, executor, (actor, scope) -> true);
@@ -37,12 +95,12 @@ class DecisionRegistryTest {
     }
 
     @Test
-    void refusesDuplicateRegistrationAndCompletedDecisions() {
+    void reusesDuplicateRegistrationAndRefusesCompletedDecisions() {
         try (DecisionRegistry registry = registry(2)) {
             Decision pending = register(registry, null);
-            assertThat(registry.register(pending).isFailure()).isTrue();
+            assertThat(registry.register(pending).valueOrFailure("duplicate")).isSameAs(pending);
             assertThat(registry.list(ADMIN)).containsExactly(pending.request());
-            registry.decide(pending.request().id(), new DecisionAnswer("accept", ADMIN))
+            registry.decide(pending.request().id(), new DecisionAnswer(0, ADMIN))
                     .valueOrFailure("answer");
             assertThat(registry.register(pending).isFailure()).isTrue();
             assertThat(registry.list(ADMIN)).isEmpty();
@@ -54,15 +112,12 @@ class DecisionRegistryTest {
         java.util.ArrayDeque<Runnable> work = new java.util.ArrayDeque<>();
         java.util.concurrent.atomic.AtomicInteger executed = new java.util.concurrent.atomic.AtomicInteger();
         try (DecisionRegistry registry = new DecisionRegistry(1, work::add, (actor, scope) -> true)) {
-            Decision pending = new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                    Optional.empty(), "Resume", "", Map.of("resume", "Resume"))) {
-                @Override protected Result<Void> execute(DecisionAnswer answer) {
-                    executed.incrementAndGet();
-                    return Result.of(null);
-                }
-            };
+            Decision pending = new Decision(UUID.randomUUID(),
+                Optional.empty(), "Resume", "",
+                List.of(new DecisionAction("Resume", actor -> { executed.incrementAndGet();
+                    return Result.of(null); })));
             registry.register(pending).valueOrFailure("register");
-            registry.decide(pending.request().id(), new DecisionAnswer("resume", ADMIN)).valueOrFailure("answer");
+            registry.decide(pending.request().id(), new DecisionAnswer(0, ADMIN)).valueOrFailure("answer");
             assertThat(registry.list(ADMIN)).isEmpty();
             Decision next = register(registry, null);
             registry.close();
@@ -88,10 +143,10 @@ class DecisionRegistryTest {
             assertThat(registry.list(actor)).containsExactly(own.request());
             for (Decision hidden : List.of(other, system)) {
                 assertThat(registry.find(hidden.request().id(), actor)).isEmpty();
-                assertThat(registry.decide(hidden.request().id(), new DecisionAnswer("accept", actor)).isFailure()).isTrue();
+                assertThat(registry.decide(hidden.request().id(), new DecisionAnswer(0, actor)).isFailure()).isTrue();
                 assertThat(hidden.result().toCompletableFuture()).isNotDone();
             }
-            assertThat(registry.decide(own.request().id(), new DecisionAnswer("accept", actor)).isFailure()).isFalse();
+            assertThat(registry.decide(own.request().id(), new DecisionAnswer(0, actor)).isFailure()).isFalse();
         }
     }
 
@@ -104,7 +159,7 @@ class DecisionRegistryTest {
             assertThat(first.request().id()).isNotEqualTo(second.request().id());
             assertThat(registry.list(ADMIN)).containsExactly(first.request(), second.request());
             assertThat(registry.find(first.request().id(), ADMIN)).contains(first.request());
-            DecisionAnswer decision = new DecisionAnswer("accept", ADMIN);
+            DecisionAnswer decision = new DecisionAnswer(0, ADMIN);
             assertThat(registry.decide(first.request().id(), decision)).isEqualTo(Result.of(decision));
             assertThat(first.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
@@ -129,10 +184,10 @@ class DecisionRegistryTest {
                     .containsExactly(organization.request(), team.request(), repository.request());
             assertThat(registry.find(system.request().id(), ALICE)).isEmpty();
             assertThat(registry.find(other.request().id(), ALICE)).isEmpty();
-            assertThat(registry.decide(other.request().id(), new DecisionAnswer("accept", ALICE)))
-                    .isEqualTo(registry.decide(UUID.randomUUID(), new DecisionAnswer("accept", ALICE)));
+            assertThat(registry.decide(other.request().id(), new DecisionAnswer(0, ALICE)))
+                    .isEqualTo(registry.decide(UUID.randomUUID(), new DecisionAnswer(0, ALICE)));
             assertThat(other.isPending()).isTrue();
-            assertThat(registry.decide(repository.request().id(), new DecisionAnswer("accept", BOB)))
+            assertThat(registry.decide(repository.request().id(), new DecisionAnswer(0, BOB)))
                     .isInstanceOf(Result.Success.class);
         }
     }
@@ -147,7 +202,7 @@ class DecisionRegistryTest {
 
             assertThat(registry.list(ALICE)).isEmpty();
             assertThat(registry.find(pending.request().id(), ALICE)).isEmpty();
-            assertThat(registry.decide(pending.request().id(), new DecisionAnswer("accept", ALICE)))
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, ALICE)))
                     .isInstanceOf(Result.Failure.class);
             assertThat(pending.isPending()).isTrue();
         }
@@ -157,10 +212,10 @@ class DecisionRegistryTest {
     void unknownActionLeavesRequestAvailable() {
         try (DecisionRegistry registry = registry(1)) {
             Decision pending = register(registry, null);
-            assertThat(registry.decide(pending.request().id(), new DecisionAnswer("replace", ADMIN)))
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(2, ADMIN)))
                     .isInstanceOf(Result.Failure.class);
             assertThat(registry.list(ADMIN)).containsExactly(pending.request());
-            assertThat(registry.decide(pending.request().id(), new DecisionAnswer("reject", ADMIN)))
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(1, ADMIN)))
                     .isInstanceOf(Result.Success.class);
         }
     }
@@ -194,7 +249,7 @@ class DecisionRegistryTest {
         }
         assertThat(registry.list(ADMIN)).isEmpty();
         assertThat(submit(registry, null)).isInstanceOf(Result.Failure.class);
-        assertThat(registry.decide(first.request().id(), new DecisionAnswer("accept", ADMIN)))
+        assertThat(registry.decide(first.request().id(), new DecisionAnswer(0, ADMIN)))
                 .isInstanceOf(Result.Failure.class);
     }
 
@@ -211,7 +266,7 @@ class DecisionRegistryTest {
                     throw new CompletionException(failure);
                 }
             }).toCompletableFuture();
-            assertThat(registry.decide(pending.request().id(), new DecisionAnswer("accept", ADMIN)))
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, ADMIN)))
                     .isInstanceOf(Result.Success.class);
             assertThat(registry.list(ADMIN)).containsExactly(next.get(2, TimeUnit.SECONDS).request());
         }
@@ -241,8 +296,8 @@ class DecisionRegistryTest {
     void concurrentAuthorizedAnswersDeliverOneDecision() throws Exception {
         try (ExecutorService executor = Executors.newFixedThreadPool(2); DecisionRegistry registry = registry(1)) {
             Decision pending = register(registry, "acme");
-            DecisionAnswer accept = new DecisionAnswer("accept", ALICE);
-            DecisionAnswer reject = new DecisionAnswer("reject", BOB);
+            DecisionAnswer accept = new DecisionAnswer(0, ALICE);
+            DecisionAnswer reject = new DecisionAnswer(1, BOB);
             CountDownLatch start = new CountDownLatch(1);
             Future<Result<DecisionAnswer>> first = executor.submit(() -> {
                 start.await();
@@ -274,10 +329,9 @@ class DecisionRegistryTest {
         return submit(registry, scope).valueOrFailure("register decision request");
     }
     private static Result<Decision> submit(DecisionRegistry registry, String scope) {
-        return registry.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                Optional.ofNullable(scope).map(ConfigurationScope::parse),
-                "Confirm operation", "", Map.of("accept", "Accept", "reject", "Reject"))) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                });
+        return registry.register(new Decision(UUID.randomUUID(),
+                Optional.ofNullable(scope).map(ConfigurationScope::parse), "Confirm operation", "",
+                List.of(new DecisionAction("Accept", actor -> Result.of(null)),
+                        new DecisionAction("Reject", actor -> Result.of(null)))));
     }
 }

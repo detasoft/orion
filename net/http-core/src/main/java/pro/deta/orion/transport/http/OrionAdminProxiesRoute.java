@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
@@ -13,25 +14,36 @@ import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.decision.DecisionRequiredException;
+import pro.deta.orion.decision.Decisionable;
+import pro.deta.orion.git.client.GitSshClientTransport.HostKeyRejectedException;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.ssh.SshHostKeyDecision;
+import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /** Administers system proxy bindings through revision-checked configuration updates and safe audit records. */
@@ -43,11 +55,12 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final BootstrapRepositorySources sources;
     private final CommandAuditSink audit;
     private final ObjectMapper mapper;
+    private final DecisionRegistry decisions;
 
     @Inject
     public OrionAdminProxiesRoute(OrionDesiredState desiredState, ProxyAwareNativeGitRepositoryProvider provider,
             OrionAccessControlServiceImpl acl, ConfigurationSecrets secrets, BootstrapRepositorySources sources,
-            CommandAuditSink audit, ObjectMapper mapper) {
+            CommandAuditSink audit, ObjectMapper mapper, DecisionRegistry decisions) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.desiredState = desiredState;
         this.provider = provider;
@@ -56,6 +69,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         this.sources = sources;
         this.audit = audit;
         this.mapper = mapper;
+        this.decisions = decisions;
     }
 
     @Override
@@ -100,13 +114,9 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 acl.updatePrimaryConfiguration(request.revision(), document -> update(document, selected, mutation),
                         new AccessControlSaveRequest("proxy " + action + " " + alias, UserEmail.EMPTY));
             }
-            var applied = desiredState.current();
-            SyncObservation observation = provider.retry(selected, () -> desiredState.current().document(), secrets);
-            var snapshot = desiredState.current();
-            if (!snapshot.revision().equals(applied.revision())) {
-                throw new AccessControlConcurrentUpdateException("Configuration changed during retry", null);
-            }
+            OrionDesiredState.Snapshot snapshot = desiredState.current();
             GitProxyBinding binding = find(snapshot.document(), selected);
+            SyncObservation observation = retry(snapshot, binding);
             String status = action.equals("retry") ? "retried" : "saved";
             resultCode = status + ":" + wireStatus(observation);
             response = OrionHttpResponse.json(action.equals("create") ? 201 : 200,
@@ -135,6 +145,93 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             recordAudit(req, action, alias, response.status(), resultCode, System.nanoTime() - started);
         }
         return response;
+    }
+
+    private SyncObservation retry(OrionDesiredState.Snapshot snapshot, GitProxyBinding binding) {
+        if (!desiredState.current().revision().equals(snapshot.revision())) {
+            throw new AccessControlConcurrentUpdateException("Configuration changed before retry", null);
+        }
+        Result<SyncObservation> result = provider.retry(binding.alias(),
+                () -> desiredState.current().document(), secrets);
+        if (!desiredState.current().revision().equals(snapshot.revision())) {
+            throw new AccessControlConcurrentUpdateException("Configuration changed during retry", null);
+        }
+        if (result instanceof Result.Success<SyncObservation> success) return success.value();
+        Throwable failure = prepareDecision(snapshot, binding, ((Result.Failure<SyncObservation>) result).throwable());
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && visited.add(cause); cause = cause.getCause()) {
+            if (cause instanceof Decisionable required) {
+                Result<Decision> registered = decisions.register(required.decision());
+                if (registered instanceof Result.Failure<Decision>) {
+                    throw new IllegalStateException("Could not register connection decision", failure);
+                }
+                break;
+            }
+        }
+        return provider.syncObservation(binding);
+    }
+
+    private Throwable prepareDecision(OrionDesiredState.Snapshot snapshot,
+            GitProxyBinding binding, Throwable failure) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && visited.add(cause); cause = cause.getCause()) {
+            if (cause instanceof Decisionable) return failure;
+            if (!(cause instanceof HostKeyRejectedException rejected)) continue;
+            int port = binding.upstream().getPort() < 0 ? 22 : binding.upstream().getPort();
+            if (!binding.upstream().getHost().equalsIgnoreCase(rejected.host()) || port != rejected.port()) {
+                throw new IllegalStateException("Rejected host key belongs to another server", failure);
+            }
+            String key = PublicKeyEntry.toString(rejected.serverKey());
+            Result<SshHostKeyDecision> prepared = SshHostKeyDecision.create(binding.alias(),
+                    Optional.empty(),
+                    rejected.host(), rejected.port(), rejected.serverKey(),
+                    actor -> trust(snapshot, binding, key, actor));
+            if (prepared instanceof Result.Failure<SshHostKeyDecision>) {
+                throw new IllegalStateException("Could not prepare SSH host key decision", failure);
+            }
+            SshHostKeyDecision decision = ((Result.Success<SshHostKeyDecision>) prepared).value();
+            return new DecisionRequiredException(decision, failure);
+        }
+        return failure;
+    }
+
+    private Result<Void> trust(OrionDesiredState.Snapshot snapshot,
+            GitProxyBinding binding, String key, PrincipalAddress actor) {
+        try {
+            Set<String> keys = new TreeSet<>(binding.knownHosts());
+            keys.add(key);
+            GitProxyBinding replacement = new GitProxyBinding(binding.alias(), binding.upstream(), binding.ref(),
+                    binding.credentialKind(), binding.secret(), binding.username(), keys);
+            acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
+                if (!document.system().proxies().contains(binding)) {
+                    throw new AccessControlConcurrentUpdateException("Connection configuration changed", null);
+                }
+                List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
+                bindings.set(bindings.indexOf(binding), replacement);
+                OrionDocument.SystemConfiguration system = document.system();
+                return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
+                        system.https(), system.secrets(), bindings), document.organizations());
+            }, new AccessControlSaveRequest("Trust SSH host key for " + binding.alias().value()
+                    + " approved by " + actor, UserEmail.EMPTY));
+            recordTrustAudit(binding, actor, "saved");
+            return Result.of(null);
+        } catch (AccessControlConcurrentUpdateException failure) {
+            recordTrustAudit(binding, actor, "configuration-conflict");
+            return new Result.Failure<>(Result.FailureCode.GENERAL, "Connection configuration changed", failure);
+        } catch (RuntimeException failure) {
+            recordTrustAudit(binding, actor, "operation-failed");
+            return new Result.Failure<>(Result.FailureCode.GENERAL, "Could not save SSH host key", failure);
+        }
+    }
+
+    private void recordTrustAudit(GitProxyBinding binding, PrincipalAddress actor, String result) {
+        try {
+            audit.record(new CommandAuditRecord(actor.toString(), UUID.randomUUID().toString(),
+                    "", "", OrionAdminPaths.PROXIES, "trust-host-key", Map.of("alias", binding.alias().value()),
+                    result.equals("saved") ? "success" : "failed", result, 0, Map.of("scope", "system")));
+        } catch (RuntimeException failure) {
+            LoggerFactory.getLogger(OrionAdminProxiesRoute.class).warn("Could not record SSH trust operation audit");
+        }
     }
 
     private OrionDocument update(OrionDocument document, RemoteAlias alias, MutationRequest request) {

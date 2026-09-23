@@ -145,11 +145,13 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(initial.system().accessControl(),
                 Optional.empty(), List.of(), List.of(initial.system().proxies().getFirst(), added)), List.of()));
 
-        assertThat(provider.retry(added.alias(), current::get, secrets(current.get())).status())
-                .isEqualTo(AUTHENTICATION_FAILED);
+        assertThat(provider.retry(added.alias(), current::get, secrets(current.get())))
+                .isInstanceOfSatisfying(Result.Failure.class, failure ->
+                        assertThat(failure.throwable()).isInstanceOf(BootstrapGitProxyException.class));
         assertThat(provider.syncObservation(added).status()).isEqualTo(AUTHENTICATION_FAILED);
         unavailable.set(false);
-        assertThat(provider.retry(added.alias(), current::get, secrets(current.get())).status()).isEqualTo(SUCCESS);
+        assertThat(provider.retry(added.alias(), current::get, secrets(current.get()))
+                .valueOrFailure("retry").status()).isEqualTo(SUCCESS);
         assertThat(visited).containsExactly("/other.git", "/other.git");
         assertThat(provider.syncObservation(initial.system().proxies().getFirst()).status()).isEqualTo(SUCCESS);
         assertThat(provider.repositoryNames()).isEmpty();

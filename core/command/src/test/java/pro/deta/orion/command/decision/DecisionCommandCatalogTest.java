@@ -18,16 +18,14 @@ import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
-import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,12 +48,12 @@ class DecisionCommandCatalogTest {
             assertThat(((CommandResult.Rows) dispatch(registry, "/decision ls", user)).values()).hasSize(1);
             assertFailure(dispatch(registry, "/decision/" + system.request().id() + " show", user),
                     CommandFailureCode.MISSING_RESOURCE);
-            assertThat(dispatch(registry, "/decision/" + own.request().id() + " resolve replace", user))
+            assertThat(dispatch(registry, "/decision/" + own.request().id() + " resolve 0", user))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
             assertThat(own.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                    .isCompletedWithValue(new DecisionAnswer("replace", PrincipalAddress.parse("acme/reviewer")));
+                    .isCompletedWithValue(new DecisionAnswer(0, PrincipalAddress.parse("acme/reviewer")));
         }
     }
 
@@ -82,8 +80,8 @@ class DecisionCommandCatalogTest {
                     Map.entry("title", CommandValue.text("SSH host key changed")),
                     Map.entry("createdAt", rows.values().getFirst().get(3)),
                     Map.entry("description", CommandValue.text("Old fingerprint -> new fingerprint")),
-                    Map.entry("action.replace", CommandValue.text("Replace stored key")),
-                    Map.entry("action.reject", CommandValue.text("Reject connection")));
+                    Map.entry("action.0", CommandValue.text("Replace stored key")),
+                    Map.entry("action.1", CommandValue.text("Reject connection")));
         }
     }
 
@@ -97,16 +95,16 @@ class DecisionCommandCatalogTest {
             assertThat(navigator.complete(context(REVIEWER), CommandPath.root(), line, line.length()).candidates())
                     .contains(id + "/");
 
-            assertThat(dispatch(registry, "/decision/" + id.substring(0, 8) + " resolve replace", REVIEWER))
+            assertThat(dispatch(registry, "/decision/" + id.substring(0, 8) + " resolve 0", REVIEWER))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
             assertThat(pending.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                .isCompletedWithValue(new DecisionAnswer("replace", ACTOR));
+                .isCompletedWithValue(new DecisionAnswer(0, ACTOR));
             assertThat(((CommandResult.Rows) dispatch(registry, "/decision ls", REVIEWER)).values()).isEmpty();
             assertFailure(dispatch(registry, "/decision/" + id + " show", REVIEWER),
                     CommandFailureCode.MISSING_RESOURCE);
-            assertFailure(dispatch(registry, "/decision/" + id + " resolve reject", REVIEWER),
+            assertFailure(dispatch(registry, "/decision/" + id + " resolve 1", REVIEWER),
                     CommandFailureCode.MISSING_RESOURCE);
             assertThat(navigator.complete(context(REVIEWER), CommandPath.root(), line, line.length()).candidates())
                     .containsExactly("ls");
@@ -118,16 +116,16 @@ class DecisionCommandCatalogTest {
         try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true)) {
             Decision pending = register(registry, null);
             String command = "/decision/" + pending.request().id() + " resolve";
-            for (String suffix : List.of("", " unknown", " replace extra", " replace actor=someone", " ''")) {
+            for (String suffix : List.of("", " unknown", " -1", " 2", " 0 extra", " 0 actor=someone", " ''")) {
                 assertFailure(dispatch(registry, command + suffix, REVIEWER), CommandFailureCode.INVALID_ARGUMENTS);
                 assertThat(pending.result().toCompletableFuture()).isNotDone();
             }
-            assertThat(dispatch(registry, command + " reject", REVIEWER))
+            assertThat(dispatch(registry, command + " 1", REVIEWER))
                     .isEqualTo(new CommandResult.Message("Decision recorded"));
             assertThat(pending.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                .isCompletedWithValue(new DecisionAnswer("reject", ACTOR));
+                .isCompletedWithValue(new DecisionAnswer(1, ACTOR));
         }
     }
 
@@ -144,7 +142,7 @@ class DecisionCommandCatalogTest {
                 assertFailure(dispatch(registry, "/decision ls", identity), CommandFailureCode.ACCESS_DENIED);
                 assertFailure(dispatch(registry, "/decision/" + pending.request().id() + " show", identity),
                         CommandFailureCode.ACCESS_DENIED);
-                assertFailure(dispatch(registry, "/decision/" + pending.request().id() + " resolve replace", identity),
+                assertFailure(dispatch(registry, "/decision/" + pending.request().id() + " resolve 0", identity),
                         CommandFailureCode.ACCESS_DENIED);
             }
             assertThat(checks).hasValue(0);
@@ -163,7 +161,7 @@ class DecisionCommandCatalogTest {
                     .containsExactly(visible.request().id().toString());
             assertFailure(dispatch(registry, "/decision/" + hidden.request().id() + " show", REVIEWER),
                     CommandFailureCode.MISSING_RESOURCE);
-            assertFailure(dispatch(registry, "/decision/" + hidden.request().id() + " resolve replace", REVIEWER),
+            assertFailure(dispatch(registry, "/decision/" + hidden.request().id() + " resolve 0", REVIEWER),
                     CommandFailureCode.MISSING_RESOURCE);
             CommandNode tree = new DecisionCommandCatalog(registry).commandTree();
             assertThat(new CommandNavigator(tree).complete(context(REVIEWER), CommandPath.root(),
@@ -175,7 +173,7 @@ class DecisionCommandCatalogTest {
 
     @Test
     void rechecksRegistryAccessAfterResourceResolution() {
-        for (String action : List.of("show", "resolve replace")) {
+        for (String action : List.of("show", "resolve 0")) {
             AtomicInteger checks = new AtomicInteger();
             try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run,
                     (actor, scope) -> checks.incrementAndGet() == 1)) {
@@ -188,14 +186,11 @@ class DecisionCommandCatalogTest {
         }
     }
     private static Decision register(DecisionRegistry registry, String scope) {
-        Map<String, String> actions = new LinkedHashMap<>();
-        actions.put("replace", "Replace stored key");
-        actions.put("reject", "Reject connection");
-        return registry.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+        return registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scope).map(ConfigurationScope::parse),
-                "SSH host key changed", "Old fingerprint -> new fingerprint", actions)) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                })
+                "SSH host key changed", "Old fingerprint -> new fingerprint",
+                List.of(new DecisionAction("Replace stored key", actor -> Result.of(null)),
+                        new DecisionAction("Reject connection", actor -> Result.of(null)))))
                 .valueOrFailure("register decision");
     }
 

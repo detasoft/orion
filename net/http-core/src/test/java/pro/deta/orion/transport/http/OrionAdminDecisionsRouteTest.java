@@ -15,9 +15,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -29,7 +29,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrionAdminDecisionsRouteTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/reviewer");
-    private static final Map<String, String> ACTIONS = Map.of("replace", "Replace key", "reject", "Reject");
+    private static final Map<String, String> ACTIONS = Map.of("0", "Replace key", "1", "Reject");
 
     @Test
     void organizationIdentityOnlySeesAndAnswersOwnDecisions() throws Exception {
@@ -58,16 +57,16 @@ class OrionAdminDecisionsRouteTest {
             assertThat(decisions.size()).isEqualTo(1);
             assertThat(decisions.get(0).path("id").asText()).isEqualTo(own.request().id().toString());
             for (Decision hidden : List.of(other, system)) {
-                assertThat(peer.request("POST", answer(hidden, "replace"), "reviewer", "application/json")
+                assertThat(peer.request("POST", answer(hidden, "0"), "reviewer", "application/json")
                         .statusCode()).isEqualTo(404);
                 assertThat(hidden.result().toCompletableFuture()).isNotDone();
             }
-            assertThat(peer.request("POST", answer(own, "replace"), "reviewer", "application/json")
+            assertThat(peer.request("POST", answer(own, "0"), "reviewer", "application/json")
                     .statusCode()).isEqualTo(204);
             assertThat(own.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                    .isCompletedWithValue(new DecisionAnswer("replace", PrincipalAddress.parse("acme/reviewer")));
+                    .isCompletedWithValue(new DecisionAnswer(0, PrincipalAddress.parse("acme/reviewer")));
         }
     }
 
@@ -99,7 +98,7 @@ class OrionAdminDecisionsRouteTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"replace", "reject"})
+    @ValueSource(strings = {"0", "1"})
     void answersWithAuthenticatedActorAndRejectsRepeatedAnswer(String action) throws Exception {
         try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
              Peer peer = new Peer(registry)) {
@@ -111,7 +110,7 @@ class OrionAdminDecisionsRouteTest {
             assertThat(pending.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                .isCompletedWithValue(new DecisionAnswer(action, ACTOR));
+                .isCompletedWithValue(new DecisionAnswer(Integer.parseInt(action), ACTOR));
             assertThat(JSON.readTree(peer.request("GET", null, "reviewer", null).body()).path("decisions"))
                     .isEmpty();
             assertThat(peer.request("POST", body, "reviewer", "application/json").statusCode()).isEqualTo(404);
@@ -123,11 +122,12 @@ class OrionAdminDecisionsRouteTest {
         try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
              Peer peer = new Peer(registry)) {
             Decision pending = register(registry, null);
-            String valid = answer(pending, "replace");
+            String valid = answer(pending, "0");
             for (String body : List.of("", "{", "null", "[]", "{}", valid + " {}",
-                    "{\"id\":1,\"action\":\"replace\"}",
-                    "{\"id\":\"invalid\",\"action\":\"replace\"}",
-                    valid.replace("\"replace\"", "false"), answer(pending, " "), answer(pending, "unknown"),
+                    "{\"id\":1,\"action\":\"0\"}",
+                    "{\"id\":\"invalid\",\"action\":\"0\"}",
+                    valid.replace("\"0\"", "false"), answer(pending, " "), answer(pending, "unknown"),
+                    answer(pending, "-1"), answer(pending, "2"),
                     valid.substring(0, valid.length() - 1) + ",\"actor\":\"system/root\"}")) {
                 assertThat(peer.request("POST", body, "reviewer", "application/json").statusCode())
                         .as("body: %s", body).isEqualTo(400);
@@ -144,7 +144,7 @@ class OrionAdminDecisionsRouteTest {
             Decision pending = register(registry, null);
             for (String identity : new String[]{null, "acme/reviewer", "Invalid"}) {
                 assertThat(peer.request("GET", null, identity, null).statusCode()).isEqualTo(403);
-                assertThat(peer.request("POST", answer(pending, "replace"), identity, "application/json")
+                assertThat(peer.request("POST", answer(pending, "0"), identity, "application/json")
                         .statusCode()).isEqualTo(403);
             }
             assertThat(pending.result().toCompletableFuture()).isNotDone();
@@ -163,10 +163,10 @@ class OrionAdminDecisionsRouteTest {
                     .path("decisions");
             assertThat(requests.size()).isEqualTo(1);
             assertThat(requests.get(0).path("id").asText()).isEqualTo(visible.request().id().toString());
-            assertThat(peer.request("POST", answer(hidden, "replace"), "reviewer", "application/json")
+            assertThat(peer.request("POST", answer(hidden, "0"), "reviewer", "application/json")
                     .statusCode()).isEqualTo(404);
             allowed.set(false);
-            assertThat(peer.request("POST", answer(visible, "replace"), "reviewer", "application/json")
+            assertThat(peer.request("POST", answer(visible, "0"), "reviewer", "application/json")
                     .statusCode()).isEqualTo(404);
             assertThat(JSON.readTree(peer.request("GET", null, "reviewer", null).body()).path("decisions"))
                     .isEmpty();
@@ -180,7 +180,7 @@ class OrionAdminDecisionsRouteTest {
         try (DecisionRegistry registry = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
              Peer peer = new Peer(registry)) {
             Decision pending = register(registry, null);
-            String body = answer(pending, "replace");
+            String body = answer(pending, "0");
             for (String contentType : new String[]{null, "text/plain"}) {
                 assertThat(peer.request("POST", body, "reviewer", contentType).statusCode()).isEqualTo(415);
             }
@@ -201,10 +201,10 @@ class OrionAdminDecisionsRouteTest {
              Peer peer = new Peer(registry)) {
             Decision pending = register(registry, null);
             CompletableFuture<HttpResponse<String>> replace = peer.client.sendAsync(
-                    peer.message("POST", answer(pending, "replace"), "reviewer", "application/json"),
+                    peer.message("POST", answer(pending, "0"), "reviewer", "application/json"),
                     HttpResponse.BodyHandlers.ofString());
             CompletableFuture<HttpResponse<String>> reject = peer.client.sendAsync(
-                    peer.message("POST", answer(pending, "reject"), "other", "application/json"),
+                    peer.message("POST", answer(pending, "1"), "other", "application/json"),
                     HttpResponse.BodyHandlers.ofString());
             int replaceStatus = replace.get(5, TimeUnit.SECONDS).statusCode();
             int rejectStatus = reject.get(5, TimeUnit.SECONDS).statusCode();
@@ -213,16 +213,15 @@ class OrionAdminDecisionsRouteTest {
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
                 .isCompletedWithValue(replaceStatus == 204
-                    ? new DecisionAnswer("replace", ACTOR)
-                    : new DecisionAnswer("reject", PrincipalAddress.parse("system/other")));
+                    ? new DecisionAnswer(0, ACTOR)
+                    : new DecisionAnswer(1, PrincipalAddress.parse("system/other")));
         }
     }
     private static Decision register(DecisionRegistry registry, String scope) {
-        return registry.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                Optional.ofNullable(scope).map(ConfigurationScope::parse),
-                "SSH host key changed", "Review the new fingerprint", ACTIONS)) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                }).valueOrFailure("register decision");
+        return registry.register(new Decision(UUID.randomUUID(),
+                Optional.ofNullable(scope).map(ConfigurationScope::parse), "SSH host key changed", "Review the new fingerprint",
+                List.of(new DecisionAction("Replace key", actor -> Result.of(null)),
+                        new DecisionAction("Reject", actor -> Result.of(null))))).valueOrFailure("register decision");
     }
     private static String answer(Decision pending, String action) throws IOException {
         return JSON.writeValueAsString(Map.of("id", pending.request().id().toString(), "action", action));

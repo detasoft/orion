@@ -3,36 +3,32 @@ package pro.deta.orion.ssh;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.decision.Decision;
-import pro.deta.orion.decision.DecisionAnswer;
-import pro.deta.orion.decision.DecisionRequest;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
 import java.security.PublicKey;
-import java.time.Instant;
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.Function;
 
 /**
  * Approval of one SSH server key with its trust operation bound before registration.
- * Choosing "add" executes the captured operation, which owns saving this key and retrying the connection;
- * "reject" completes with a refusal. Completion reports the operation's outcome, not just the user's answer.
+ * The trust action executes the captured operation, which owns saving this key;
+ * the rejection action completes with a refusal. Completion reports the operation's outcome, not just the user's answer.
  * The supplied operation must be bound to the same server, key and configuration shown in the request.
  */
 public final class SshHostKeyDecision extends Decision {
-    private final Function<PrincipalAddress, Result<Void>> trust;
-
-    private SshHostKeyDecision(DecisionRequest request,
-            Function<PrincipalAddress, Result<Void>> trust) {
-        super(request);
-        this.trust = trust;
+    private SshHostKeyDecision(Object resource, Optional<ConfigurationScope> scope,
+            String title, String description, Function<PrincipalAddress, Result<Void>> trust) {
+        super(resource, scope, title, description, List.of(new DecisionAction("Add and trust", trust),
+                new DecisionAction("Reject", actor ->
+                        new Result.Failure<>(Result.FailureCode.FALSE, "SSH host key was not trusted"))));
     }
 
-    public static Result<SshHostKeyDecision> create(Optional<ConfigurationScope> scope,
+    public static Result<SshHostKeyDecision> create(Object resource, Optional<ConfigurationScope> scope,
             String host, int port, PublicKey serverKey,
             Function<PrincipalAddress, Result<Void>> trust) {
         Objects.requireNonNull(scope, "scope");
@@ -51,18 +47,7 @@ public final class SshHostKeyDecision extends Decision {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Unsupported SSH host key", unsupported);
         }
         String address = "[" + host + "]:" + port;
-        LinkedHashMap<String, String> actions = new LinkedHashMap<>();
-        actions.put("add", "Add and trust");
-        actions.put("reject", "Reject");
-        DecisionRequest request = new DecisionRequest(UUID.randomUUID(), Instant.now(), scope,
-                "Trust SSH host key for " + address,
-                "Server: " + address + "\nKey: " + key + "\nFingerprint: " + fingerprint, actions);
-        return Result.of(new SshHostKeyDecision(request, trust));
-    }
-
-    @Override
-    protected Result<Void> execute(DecisionAnswer answer) {
-        return answer.action().equals("add") ? trust.apply(answer.actor())
-                : new Result.Failure<>(Result.FailureCode.FALSE, "SSH host key was not trusted");
+        return Result.of(new SshHostKeyDecision(resource, scope, "Trust SSH host key for " + address,
+                "Server: " + address + "\nKey: " + key + "\nFingerprint: " + fingerprint, trust));
     }
 }

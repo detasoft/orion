@@ -3,9 +3,8 @@ package pro.deta.orion.component;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
 import pro.deta.orion.decision.Decision;
-import pro.deta.orion.decision.DecisionAnswer;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
 import pro.deta.orion.internal.OrionExecutor;
@@ -18,8 +17,7 @@ import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 import pro.deta.orion.util.Result;
 
-import java.time.Instant;
-import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -103,10 +101,9 @@ class OrionRuntimeStateMachineTest {
                 () -> { throw new AssertionError("Bootstrap proxies must not start"); }, decisions);
     }
     private static Result<Decision> register(DecisionRegistry decisions) {
-        return decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                Optional.empty(), "Confirm operation", "", Map.of("accept", "Accept"))) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                });
+        return decisions.register(new Decision(UUID.randomUUID(),
+                Optional.empty(), "Confirm operation", "",
+                List.of(new DecisionAction("Accept", actor -> Result.of(null)))));
     }
 
     private static <T> T unstartedService() {

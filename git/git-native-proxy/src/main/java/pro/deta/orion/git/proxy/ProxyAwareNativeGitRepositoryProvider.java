@@ -197,7 +197,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         NOT_CHECKED, SUCCESS, UNAVAILABLE, AUTHENTICATION_FAILED, CONFLICT
     }
 
-    public synchronized SyncObservation retry(RemoteAlias alias, Supplier<OrionDocument> current,
+    public synchronized Result<SyncObservation> retry(RemoteAlias alias, Supplier<OrionDocument> current,
             ConfigurationSecrets secrets) {
         if (!activePhase) {
             throw new IllegalStateException("Proxy runtime is not active");
@@ -232,9 +232,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         try {
             runtime.refresh();
         } catch (BootstrapGitProxyException failure) {
-            // The runtime retains the safe result so the operator can retry after recovery.
+            return new Result.Failure<>(Result.FailureCode.GENERAL, failure.getMessage(), failure);
         }
-        return runtime.syncObservation();
+        return Result.of(runtime.syncObservation());
     }
 
     public boolean isBootstrapSource(GitProxyBinding binding, BootstrapRepositorySources sources) {

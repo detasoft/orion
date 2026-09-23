@@ -20,7 +20,6 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.command.decision.DecisionCommandCatalog;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandContext;
@@ -37,10 +36,11 @@ import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.RowOutputFormat;
 import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.audit.CommandAuditRecord;
+import pro.deta.orion.command.decision.DecisionCommandCatalog;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -55,7 +55,6 @@ import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -95,14 +94,12 @@ class LegacySshCommandCatalogTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"replace", "reject"})
+    @ValueSource(strings = {"0", "1"})
     void decisionCommandsResolveRequestsInTheSuppliedRegistry(String action) {
-        Decision pending = decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
-                Optional.of(ConfigurationScope.parse("acme/platform/api")),
-                "SSH host key changed", "Review the new fingerprint",
-                Map.of("replace", "Replace key", "reject", "Reject connection"))) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                })
+        Decision pending = decisions.register(new Decision(UUID.randomUUID(),
+                Optional.of(ConfigurationScope.parse("acme/platform/api")), "SSH host key changed", "Review the new fingerprint",
+                List.of(new DecisionAction("Replace key", actor -> Result.of(null)),
+                        new DecisionAction("Reject connection", actor -> Result.of(null)))))
                 .valueOrFailure("register decision");
         String id = pending.request().id().toString();
         UserIdentity operator = user(List.of());
@@ -121,7 +118,7 @@ class LegacySshCommandCatalogTest {
         assertThat(pending.result()
                 .thenApply(result -> result.valueOrFailure("decision execution"))
                 .toCompletableFuture())
-                .isCompletedWithValue(new DecisionAnswer(action, PrincipalAddress.parse("system/operator")));
+                .isCompletedWithValue(new DecisionAnswer(Integer.parseInt(action), PrincipalAddress.parse("system/operator")));
         assertThat(dispatch("/decision ls", operator)).isInstanceOfSatisfying(CommandResult.Rows.class,
                 rows -> assertThat(rows.values()).isEmpty());
         assertFailure(dispatch("/decision/" + id + " resolve " + action, operator),
@@ -130,11 +127,9 @@ class LegacySshCommandCatalogTest {
 
     @Test
     void decisionCommandsRejectAnonymousRequestsWithoutResolvingThem() {
-        Decision pending = decisions.register(new Decision(new DecisionRequest(UUID.randomUUID(), Instant.now(),
+        Decision pending = decisions.register(new Decision(UUID.randomUUID(),
                 Optional.empty(), "Confirm operation", "Details",
-                Map.of("accept", "Accept"))) {
-                    @Override protected Result<Void> execute(DecisionAnswer answer) { return Result.of(null); }
-                }).valueOrFailure("register decision");
+                List.of(new DecisionAction("Accept", actor -> Result.of(null))))).valueOrFailure("register decision");
         String path = "/decision/" + pending.request().id();
 
         assertFailure(dispatch("/decision ls", SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);

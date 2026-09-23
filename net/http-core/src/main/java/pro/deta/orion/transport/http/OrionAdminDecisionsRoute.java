@@ -89,12 +89,14 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
             return failure(400, "Expected id and action strings");
         }
         UUID id;
+        int action;
         try {
             id = UUID.fromString(answer.path("id").asText());
+            action = Integer.parseInt(answer.path("action").asText());
         } catch (IllegalArgumentException exception) {
-            return failure(400, "Invalid decision request ID");
+            return failure(400, "Invalid decision request ID or action index");
         }
-        Result<DecisionAnswer> result = registry.decide(id, new DecisionAnswer(answer.path("action").asText(), actor));
+        Result<DecisionAnswer> result = registry.decide(id, new DecisionAnswer(action, actor));
         return switch (result) {
             case Result.Success<DecisionAnswer> ignored ->
                     OrionHttpResponse.empty(204).withHeader("Cache-Control", "no-store");

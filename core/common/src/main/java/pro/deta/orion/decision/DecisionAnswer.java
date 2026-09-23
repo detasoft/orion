@@ -6,14 +6,10 @@ import java.util.Objects;
 
 /**
  * A user's selected action and identity, delivered to the operation awaiting a decision.
- * The requesting operation defines the action identifiers and their meaning.
+ * The action is an index in the decision's immutable list of titled actions.
  */
-public record DecisionAnswer(String action, PrincipalAddress actor) {
+public record DecisionAnswer(int action, PrincipalAddress actor) {
     public DecisionAnswer {
-        Objects.requireNonNull(action, "action");
         Objects.requireNonNull(actor, "actor");
-        if (action.isBlank()) {
-            throw new IllegalArgumentException("action must not be blank");
-        }
     }
 }

@@ -117,12 +117,15 @@ public final class DecisionCommandCatalog {
 
     private CommandResult resolve(CommandInvocation invocation) {
         String action = invocation.arguments().positional().getFirst();
-        if (action.isBlank()) {
+        int index;
+        try {
+            index = Integer.parseInt(action);
+        } catch (NumberFormatException failure) {
             return new CommandResult.Failure(CommandFailureCode.INVALID_ARGUMENTS,
-                    "Decision action is required", List.of());
+                    "Decision action index is required", List.of());
         }
         Result<DecisionAnswer> result = registry.decide(requestId(invocation),
-                new DecisionAnswer(action, actor(invocation.context().securityContext())));
+                new DecisionAnswer(index, actor(invocation.context().securityContext())));
         return switch (result) {
             case Result.Success<DecisionAnswer> ignored -> new CommandResult.Message("Decision recorded");
             case Result.Failure<DecisionAnswer> failure -> switch (failure.code()) {

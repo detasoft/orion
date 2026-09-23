@@ -9,6 +9,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import org.apache.sshd.server.SshServer;
+import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
+import org.apache.sshd.server.shell.ProcessShellFactory;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.*;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -17,6 +21,10 @@ import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
+import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
@@ -26,6 +34,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
 import java.io.*;
@@ -36,10 +45,162 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminProxyMutationTest {
+    private static final PrincipalAddress OPERATOR = PrincipalAddress.parse("system/operator");
+
+    @Test
+    void repeatedRetriesReuseThePendingConnectionDecision() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
+            DecisionRequest first = f.decisions.list(OPERATOR).getFirst();
+            for (int attempt = 0; attempt < 3; attempt++) {
+                assertThat(f.post(f.command("retry", "cluster", null, null)).status).isEqualTo(200);
+                assertThat(f.decisions.list(OPERATOR)).containsExactly(first);
+            }
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.work).isEmpty();
+        }
+    }
+
+    @Test
+    void approvedHostKeyIsSavedAndManualRetryPreservesClusterKeys(@TempDir Path root) throws Exception {
+        Path bare = root.resolve("upstream.git");
+        Path work = Files.createDirectory(root.resolve("work"));
+        git(work, "init", "-b", "main");
+        Files.writeString(work.resolve("file"), "content");
+        git(work, "add", "file");
+        git(work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "seed");
+        git(root, "clone", "--bare", work.toString(), bare.toString());
+        try (Fixture f = new Fixture()) {
+            f.ssh.setCommandFactory((channel, command) ->
+                    new ProcessShellFactory("git-upload-pack", List.of("git-upload-pack", bare.toString()))
+                            .createShell(channel));
+            String previous = PublicKeyEntry.toString(new SimpleGeneratorHostKeyProvider()
+                    .loadKeys(null).getFirst().getPublic());
+            Reply created = f.createSsh(Set.of(previous));
+            assertThat(created.status).isEqualTo(201);
+            assertThat(created.json.at("/alias/status").asText()).isEqualTo("unavailable");
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.work).isEmpty();
+            DecisionRequest pending = f.decisions.list(OPERATOR).getFirst();
+            assertThat(pending.description()).contains(f.hostKey());
+            Reply visible = f.request("/api/admin/decisions", "GET", Map.of(), true);
+            assertThat(visible.json.get("decisions")).hasSize(1);
+            byte[] secondary = f.storage.snapshot.files().get("secondary.xml");
+            int saves = f.storage.saves;
+
+            assertThat(f.answer(pending, "0").status).isEqualTo(204);
+            assertThat(f.answer(pending, "0").status).isEqualTo(404);
+            assertThat(f.storage.saves).isEqualTo(saves);
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.work).hasSize(1);
+            f.work.remove().run();
+
+            assertThat(f.storage.saves).isEqualTo(saves + 1);
+            assertThat(f.storage.snapshot.files().get("secondary.xml")).isEqualTo(secondary);
+            f.acl.reload("verify host key persistence");
+            var binding = f.desired.current().document().system().proxies().getFirst();
+            assertThat(binding.knownHosts()).containsExactlyInAnyOrder(previous, f.hostKey());
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.post(f.command("retry", "cluster", null, null)).json.at("/alias/status").asText())
+                    .isEqualTo("success");
+            assertThat(f.storage.saves).isEqualTo(saves + 1);
+            assertThat(f.provider.syncObservation(binding).status().name()).isEqualTo("SUCCESS");
+            assertThat(f.sshAuthentications.get()).isPositive();
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
+            assertThat(f.audit).anySatisfy(record -> {
+                assertThat(record.action()).isEqualTo("trust-host-key");
+                assertThat(record.resultCode()).isEqualTo("saved");
+                assertThat(record.userId()).isEqualTo(OPERATOR.toString());
+            });
+            assertThat(f.audit.toString()).doesNotContain("ssh-private-password", f.hostKey());
+        }
+    }
+
+    @Test
+    void rejectsTheKeyThenAllowsANewManualRetryToRequestApproval() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.createSsh(Set.of());
+            int saves = f.storage.saves;
+            DecisionRequest first = f.decisions.list(OPERATOR).getFirst();
+            assertThat(f.answer(first, "1").status).isEqualTo(204);
+            f.work.remove().run();
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
+            assertThat(f.work).isEmpty();
+            assertThat(f.storage.saves).isEqualTo(saves);
+            assertThat(f.sshAuthentications).hasValue(0);
+
+            assertThat(f.post(f.command("retry", "cluster", null, null)).status).isEqualTo(200);
+            assertThat(f.decisions.list(OPERATOR)).hasSize(1);
+            assertThat(f.decisions.list(OPERATOR).getFirst().id()).isNotEqualTo(first.id());
+            f.decisions.close();
+            assertThat(f.work).isEmpty();
+        }
+    }
+
+    @Test
+    void staleApprovalDoesNotSaveOrRetry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.createSsh(Set.of());
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
+            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> document,
+                    new AccessControlSaveRequest("concurrent update", null));
+            int saves = f.storage.saves;
+            f.work.remove().run();
+            assertThat(f.storage.saves).isEqualTo(saves);
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("configuration-conflict");
+        }
+    }
+
+    @Test
+    void failedSaveDoesNotTrustOrRetry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.createSsh(Set.of());
+            int saves = f.storage.saves;
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
+            f.storage.failSave = true;
+            f.work.remove().run();
+            assertThat(f.storage.saves).isEqualTo(saves);
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("operation-failed");
+        }
+    }
+
+    @Test
+    void executorRejectionDoesNotSaveOrRetry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.createSsh(Set.of());
+            int saves = f.storage.saves;
+            f.rejectExecution = true;
+            assertThat(f.answer(f.decisions.list(OPERATOR).getFirst(), "0").status).isEqualTo(204);
+            assertThat(f.work).isEmpty();
+            assertThat(f.storage.saves).isEqualTo(saves);
+            assertThat(f.sshAuthentications).hasValue(0);
+        }
+    }
+
+    @Test
+    void fullDecisionRegistryReportsFailureWithoutTrustingTheKey() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.decisions.register(new Decision(UUID.randomUUID(),
+                Optional.empty(), "occupied", "",
+                List.of(new DecisionAction("Reject", actor -> Result.of(null)))));
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(503);
+            assertThat(f.decisions.list(OPERATOR)).hasSize(1);
+            assertThat(f.work).isEmpty();
+            assertThat(f.sshAuthentications).hasValue(0);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+        }
+    }
+
     @Test
     void savesKnownHostsAsKeysAndDoesNotTransferTrustToAnotherUrl() throws Exception {
         try (var f = new Fixture()) {
@@ -88,6 +249,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.audit).hasSize(2);
             assertThat(f.audit.toString()).doesNotContain("first-private-token", "second-private-token", f.upstream());
             assertThat(replaced.json.toString()).doesNotContain("second-private-token", secret);
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
         }
     }
 
@@ -236,6 +398,15 @@ class OrionAdminProxyMutationTest {
         final HttpServer server;
         final List<String> authorization = new CopyOnWriteArrayList<>();
         final List<CommandAuditRecord> audit = new ArrayList<>();
+        final ArrayDeque<Runnable> work = new ArrayDeque<>();
+        boolean rejectExecution;
+        final DecisionRegistry decisions = new DecisionRegistry(1, command -> {
+            if (rejectExecution) throw new RejectedExecutionException("stopped");
+            work.add(command);
+        }, (actor, scope) -> actor.equals(OPERATOR));
+        final SshServer ssh = SshServer.setUpDefaultServer();
+        final SimpleGeneratorHostKeyProvider hostKeys = new SimpleGeneratorHostKeyProvider();
+        final AtomicInteger sshAuthentications = new AtomicInteger();
         OrionHttpRouteServlet servlet;
         int bodyReads;
 
@@ -263,9 +434,36 @@ class OrionAdminProxyMutationTest {
         }
 
         void routes(BootstrapRepositorySources sources) {
-            var route = new OrionAdminProxiesRoute(desired, provider, acl, secrets, sources, audit::add, mapper);
-            servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(route)),
+            var route = new OrionAdminProxiesRoute(desired, provider, acl, secrets, sources, audit::add, mapper,
+                    decisions);
+            servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(
+                    Set.of(route, new OrionAdminDecisionsRoute(decisions, mapper))),
                     new OrionHttpResponseWriter(mapper));
+        }
+
+        Reply createSsh(Set<String> knownHosts) throws Exception {
+            ssh.setHost("127.0.0.1");
+            ssh.setPort(0);
+            ssh.setKeyPairProvider(hostKeys);
+            ssh.setPasswordAuthenticator((username, password, session) -> {
+                sshAuthentications.incrementAndGet();
+                return password.equals("ssh-private-password");
+            });
+            ssh.start();
+            Map<String, Object> create = command("create", "cluster",
+                    "ssh://git@127.0.0.1:" + ssh.getPort() + "/repo", "ssh-private-password");
+            create.put("credentialKind", "PASSWORD");
+            create.put("knownHosts", knownHosts);
+            return post(create);
+        }
+
+        String hostKey() {
+            return PublicKeyEntry.toString(hostKeys.loadKeys(null).getFirst().getPublic());
+        }
+
+        Reply answer(DecisionRequest pending, String action) throws Exception {
+            return request("/api/admin/decisions", "POST",
+                    Map.of("id", pending.id().toString(), "action", action), true);
         }
 
         String upstream() { return "http://127.0.0.1:" + server.getAddress().getPort() + "/repository.git"; }
@@ -288,38 +486,52 @@ class OrionAdminProxyMutationTest {
         Reply post(Map<String, Object> body) throws Exception { return request("POST", body, true); }
 
         Reply request(String method, Map<String, Object> body, boolean admin) throws Exception {
+            return request("/api/admin/proxies", method, body, admin);
+        }
+
+        Reply request(String path, String method, Map<String, Object> body, boolean admin) throws Exception {
             var grants = admin ? List.of(new AccessControlDraft.Grant("admin", new ArrayList<>())
                     .addKey(AccessControl.GrantKey.ADMIN, "true").toAccessControl()) : List.<AccessControl.Grant>of();
             var context = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("operator", grants));
             byte[] bytes = mapper.writeValueAsBytes(body);
             var request = stub(HttpServletRequest.class, (proxy, called, args) -> switch (called.getName()) {
                 case "getMethod" -> method;
-                case "getPathInfo" -> "/api/admin/proxies";
+                case "getPathInfo" -> path;
+                case "getContentType" -> "application/json";
                 case "getRemoteAddr" -> "127.0.0.1";
                 case "getAttribute" -> context;
                 case "getInputStream" -> { bodyReads++; yield new Body(bytes); }
                 default -> throw new UnsupportedOperationException(called.toString());
             });
             int[] status = {0};
+            String[] contentType = {""};
             var output = new StringWriter();
             var response = stub(HttpServletResponse.class, (proxy, called, args) -> switch (called.getName()) {
                 case "sendError", "setStatus" -> { status[0] = (int) args[0]; yield null; }
-                case "setContentType", "setHeader" -> null;
+                case "setContentType" -> { contentType[0] = (String) args[0]; yield null; }
+                case "setHeader" -> null;
                 case "getWriter" -> new PrintWriter(output);
                 default -> throw new UnsupportedOperationException(called.toString());
             });
             servlet.service(request, response);
             return new Reply(status[0], output.toString().isEmpty() ? mapper.nullNode()
-                    : mapper.readTree(output.toString()));
+                    : contentType[0].contains("json") ? mapper.readTree(output.toString())
+                    : mapper.getNodeFactory().textNode(output.toString()));
         }
 
-        @Override public void close() { server.stop(0); material.close(); }
+        @Override public void close() throws Exception {
+            decisions.close();
+            ssh.stop(true);
+            server.stop(0);
+            material.close();
+        }
     }
 
     private static final class MemoryStorage implements AccessControlStorage {
         AccessControlSnapshot snapshot;
         int saves;
         boolean conflict;
+        boolean failSave;
 
         MemoryStorage() throws IOException {
             var output = new ByteArrayOutputStream();
@@ -330,6 +542,7 @@ class OrionAdminProxyMutationTest {
         @Override public Result<AccessControlSnapshot> load() { return new Result.Success<>(snapshot); }
         @Override public String primaryPath() { return "orion.xml"; }
         @Override public void save(AccessControlSnapshot next, AccessControlSaveRequest request) {
+            if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.version().equals(next.version())) {
                 throw new AccessControlConcurrentUpdateException("configuration conflict", null);
             }
