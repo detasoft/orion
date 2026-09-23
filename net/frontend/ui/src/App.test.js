@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const client = {
   createRepository: vi.fn(),
   createOrUpdateUser: vi.fn(),
+  decisions: vi.fn(),
+  resolveDecision: vi.fn(),
   lifecycleState: vi.fn(),
   repositories: vi.fn(),
   remoteAliases: vi.fn(),
@@ -63,6 +65,8 @@ beforeEach(() => {
   client.lifecycleState.mockResolvedValue('RUNNING')
   client.repositories.mockResolvedValue({ repositories: [] })
   client.remoteAliases.mockResolvedValue({ aliases: [] })
+  client.decisions.mockResolvedValue({ decisions: [] })
+  client.resolveDecision.mockResolvedValue('')
   client.transports.mockResolvedValue({
     http: { enabled: true, url: 'http://localhost:8000' },
     https: { enabled: true, url: 'https://localhost:8443' },
@@ -73,6 +77,55 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('requires a connection before loading pending decisions', async () => {
+    const wrapper = mountApp()
+    const decisions = wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Pending decisions')
+    expect(decisions).toBeDefined()
+    await decisions.trigger('click')
+    expect(wrapper.text()).toContain('Connect to Orion first')
+    expect(client.decisions).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('opens pending decisions and records an answer after connecting', async () => {
+    client.decisions.mockResolvedValue({ decisions: [{
+      id: 'request-1', title: 'Review host key', description: 'Unknown host',
+      scope: 'system', createdAt: '2026-09-23T12:00:00Z', actions: { accept: 'Accept key' },
+    }] })
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Pending decisions').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+
+    expect(client.decisions).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('Review host key')
+    await wrapper.findAll('button').find((button) => button.text() === 'Accept key').trigger('click')
+    await flushPromises()
+    expect(client.resolveDecision).toHaveBeenCalledWith('request-1', 'accept', expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('Decision recorded.')
+    expect(wrapper.text()).not.toContain('Review host key')
+    wrapper.unmount()
+  })
+
+  it.each([401, 403])('clears the connection when pending decisions rejects credentials with %s', async (status) => {
+    client.decisions.mockRejectedValueOnce(Object.assign(new Error('Expired token'), { status }))
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Pending decisions').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+
+    expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+    expect(wrapper.get('.server-card').text()).toContain('Not connected')
+    expect(wrapper.text()).toContain('Connect to Orion first')
+    expect(wrapper.find('.decision-actions').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('offers remote aliases separately and requires a connection', async () => {
     const wrapper = mountApp()
     const aliases = wrapper.findAll('.primary-nav .nav-item')

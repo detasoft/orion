@@ -5,12 +5,14 @@ import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
 
 const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAliases.vue'))
+const PendingDecisions = defineAsyncComponent(() => import('./components/PendingDecisions.vue'))
 const SessionTerminal = defineAsyncComponent(() => import('./components/SessionTerminal.vue'))
 
 const navItems = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
   { id: 'repositories', label: 'Repositories', icon: 'repository' },
   { id: 'remote-aliases', label: 'Remote aliases', icon: 'git-branch' },
+  { id: 'pending-decisions', label: 'Pending decisions', icon: 'bell' },
   { id: 'people', label: 'People', icon: 'users' },
   { id: 'activity', label: 'Activity', icon: 'activity' },
   { id: 'terminal', label: 'Terminal', icon: 'terminal' },
@@ -42,6 +44,7 @@ const titles = {
   overview: ['Overview', 'A quiet view of everything happening in Orion.'],
   repositories: ['Repositories', 'Browse and manage source repositories.'],
   'remote-aliases': ['Remote aliases', 'Inspect upstream-backed Git access paths.'],
+  'pending-decisions': ['Pending decisions', 'Review requests awaiting your response.'],
   people: ['People', 'Manage members and repository access.'],
   activity: ['Activity', 'The latest changes across your server.'],
   terminal: ['Terminal', 'Session history and live terminal output.'],
@@ -526,6 +529,18 @@ onMounted(() => {
           <div v-else class="empty-state panel">
             <h3>Connect to Orion first</h3>
             <p>Open Settings to inspect remote aliases.</p>
+          </div>
+        </template>
+
+        <template v-else-if="activeView === 'pending-decisions'">
+          <PendingDecisions
+            v-if="isConnected"
+            :token="settings.token"
+            @authorization-error="clearExpiredCredentials"
+          />
+          <div v-else class="empty-state panel">
+            <h3>Connect to Orion first</h3>
+            <p>Open Settings to review pending decisions.</p>
           </div>
         </template>
 
