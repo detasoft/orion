@@ -1,36 +1,5 @@
 # Module Review: `git/git-native-proxy`
 
-## 3. Provisional location metadata is stored in two registries
-
-**Problem and evidence.**
-[Provider registries](src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L42)
-store both `provisionalBindings` and `provisionalLocations`, while each
-[runtime](src/main/java/pro/deta/orion/git/proxy/BootstrapGitRuntimeProxy.java#L18) already owns its immutable
-location.
-[prepareProvisional](src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L141)
-inserts the same metadata
-twice and coordinates paired rollback at lines 182–185. Resolution failure, activation and adoption also
-remove, clear or query both registries. Every bootstrap source must maintain their agreement.
-
-**Contract.** Preserve compatible source sharing, conflicting authentication rejection, failed-new-binding
-cleanup, earlier successful sources, private-cache isolation and atomic activation.
-The separate source-ID-to-repository map is required because several sources can share one binding.
-
-**Minimal repair and validation.** Derive location from the existing runtime through package-private access;
-remove `provisionalLocations`, `locationAdded` and paired bookkeeping. Preparation, resolution, adoption
-and activation are already synchronized on the provider; no independent location publication is required.
-Preserve shared-source/failure tests in
-[ProxyAwareNativeGitRepositoryProviderTest](src/test/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProviderTest.java),
-adoption tests and
-[PersistentProxyActivationTest](src/test/java/pro/deta/orion/git/proxy/PersistentProxyActivationTest.java)'s
-failed-candidate and stale-handle cases.
-
-**Alternatives and consequences.** A new holder or generic registry would only relocate complexity.
-Keep provisional/active phases and bootstrap credential lifetime; they are distinct verified contracts.
-
-**Confidence and priority.** High from writes, readers and rollback paths. P2 duplicated authoritative state,
-straightforward local repair without a configuration or persistence change.
-
 ## 4. A single-consumer publication helper repeats full closure traversal
 
 **Problem and evidence.**

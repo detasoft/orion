@@ -39,6 +39,10 @@ final class BootstrapGitRuntimeProxy {
         return observation;
     }
 
+    BootstrapGitLocation location() {
+        return location;
+    }
+
     String repositoryName() {
         return repository.name();
     }

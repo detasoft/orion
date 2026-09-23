@@ -42,7 +42,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     private final BootstrapGitFetcher fetcher;
     private final BootstrapGitPusher pusher;
     private final ConcurrentMap<String, BootstrapGitRuntimeProxy> provisionalBindings = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, BootstrapGitLocation> provisionalLocations = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> provisionalSources = new ConcurrentHashMap<>();
     private volatile Map<String, BootstrapGitRuntimeProxy> activeBindings = Map.of();
     private volatile boolean activePhase;
@@ -134,7 +133,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 provisionalSources.remove(id, repositoryName);
                 if (remote && !provisionalSources.containsValue(repositoryName)) {
                     provisionalBindings.remove(repositoryName);
-                    provisionalLocations.remove(repositoryName);
                 }
             }
             throw error;
@@ -154,14 +152,12 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         if (previousSource != null && !previousSource.equals(repositoryName)) {
             throw new IllegalStateException("Bootstrap source binding conflicts");
         }
-        BootstrapGitLocation previousLocation = provisionalLocations.get(repositoryName);
-        if (previousLocation != null && !previousLocation.isBindingCompatibleWith(location)) {
+        BootstrapGitRuntimeProxy previousBinding = provisionalBindings.get(repositoryName);
+        if (previousBinding != null && !previousBinding.location().isBindingCompatibleWith(location)) {
             throw new IllegalStateException("Bootstrap proxy binding configuration conflicts");
         }
         boolean sourceAdded = previousSource == null;
-        boolean locationAdded = previousLocation == null;
         provisionalSources.putIfAbsent(id, repositoryName);
-        provisionalLocations.putIfAbsent(repositoryName, location);
         BootstrapGitRuntimeProxy candidate = null;
         try {
             NativeGitRepository repository = findOrCreate(repositoryName);
@@ -181,10 +177,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (sourceAdded) {
                 provisionalSources.remove(id, repositoryName);
             }
-            if (candidate != null && provisionalBindings.remove(repositoryName, candidate) && locationAdded) {
-                provisionalLocations.remove(repositoryName, location);
-            } else if (locationAdded && !provisionalBindings.containsKey(repositoryName)) {
-                provisionalLocations.remove(repositoryName, location);
+            if (candidate != null) {
+                provisionalBindings.remove(repositoryName, candidate);
             }
             throw error;
         }
@@ -257,7 +251,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
             locations.put(location.proxyName(), location);
         }
-        if (!activePhase && !locations.keySet().containsAll(provisionalLocations.keySet())) {
+        if (!activePhase && !locations.keySet().containsAll(provisionalBindings.keySet())) {
             throw new IllegalStateException("Bootstrap proxy sources must be adopted before activation");
         }
         BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(current, secrets);
@@ -277,7 +271,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         transportFactory = null;
         secretResolver = null;
         provisionalBindings.clear();
-        provisionalLocations.clear();
         provisionalSources.clear();
     }
 
@@ -309,10 +302,11 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
         Map<GitProxyBinding, BootstrapGitLocation> additions = new LinkedHashMap<>();
         for (var source : new java.util.TreeMap<>(provisionalSources).entrySet()) {
-            BootstrapGitLocation location = provisionalLocations.get(source.getValue());
-            if (location == null) {
+            BootstrapGitRuntimeProxy runtime = provisionalBindings.get(source.getValue());
+            if (runtime == null) {
                 continue;
             }
+            BootstrapGitLocation location = runtime.location();
             var upstream = GitProxyBinding.canonicalUpstream(location.remoteUri());
             String identity = upstream.toASCIIString() + "#" + location.refName();
             if (identities.containsKey(identity)) {

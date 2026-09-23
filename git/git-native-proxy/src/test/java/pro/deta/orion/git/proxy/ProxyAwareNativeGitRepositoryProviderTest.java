@@ -600,19 +600,61 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     @Test
-    void failedBootstrapRefreshLeavesNoAccessibleCache() {
+    void failedBootstrapRefreshLeavesNoAccessibleCacheAndAllowsNewAuthentication() {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
-                backend, new BootstrapSecretResolver(Map.of()),
-                (location, transport, repository) -> { throw new IllegalStateException("upstream unavailable"); },
+                backend, new BootstrapSecretResolver(Map.of("OLD_TOKEN", "old", "NEW_TOKEN", "new")),
+                (location, transport, repository) -> {
+                    if (refreshes.incrementAndGet() == 1) {
+                        throw new IllegalStateException("upstream unavailable");
+                    }
+                },
                 (location, transport, repository, received, updates, atomic) -> List.of());
-        BootstrapSourceConfig source = remoteSource("orion.xml");
+        BootstrapSourceConfig source = remoteHttpSource(
+                "git+https://example.test/orion.git", "orion.xml", "env:OLD_TOKEN");
 
         assertThatThrownBy(() -> provider.prepareProvisional("configuration", source))
                 .isInstanceOf(BootstrapGitProxyException.class);
         String name = BootstrapGitLocation.parse(source).proxyName();
         assertThat(backend.exists(name)).isTrue();
         assertUnavailableCache(provider, name);
+
+        BootstrapSourceConfig replacement = remoteHttpSource(
+                "git+https://example.test/orion.git", "orion.xml", "env:NEW_TOKEN");
+        assertThat(provider.prepareProvisional("configuration", replacement)).isEqualTo(name);
+        assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
+        assertThatThrownBy(() -> provider.prepareProvisional("material", source))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap proxy binding configuration conflicts");
+    }
+
+    @Test
+    void failedSharedRefreshPreservesOriginalBindingAndReleasesTheNewSource() {
+        AtomicInteger refreshes = new AtomicInteger();
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
+                new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> {
+                    if (refreshes.incrementAndGet() == 2) {
+                        throw new IllegalStateException("upstream unavailable");
+                    }
+                },
+                (location, transport, repository, received, updates, atomic) -> List.of());
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+
+        assertThatThrownBy(() -> provider.prepareProvisional("aaa-material", remoteSource("material.p12")))
+                .isInstanceOf(BootstrapGitProxyException.class);
+
+        assertThat(provider.exists(name)).isTrue();
+        assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
+        OrionDocument empty = OrionDocument.withAccessControl(new AccessControl());
+        OrionDocument adopted = provider.adoptProvisional(empty, secrets(empty));
+        assertThat(adopted.system().proxies()).extracting(GitProxyBinding::alias)
+                .containsExactly(new RemoteAlias("configuration"));
+        BootstrapSourceConfig replacement = remoteSource("material.p12");
+        replacement.setLocation("git+file:///material.git");
+        assertThat(provider.prepareProvisional("aaa-material", replacement))
+                .isEqualTo(BootstrapGitLocation.parse(replacement).proxyName());
     }
 
     @Test
