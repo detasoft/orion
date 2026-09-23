@@ -55,6 +55,21 @@ class GitSshClientTransportTest {
             assertThat(result).isInstanceOf(GitClientResult.Failed.class);
             assertThat(failure(result).kind()).isEqualTo(
                     GitClientFailure.Kind.VERIFICATION_FAILED);
+            assertThat(failure(result).retryable()).isFalse();
+            Throwable cause = failure(result).cause().getCause();
+            assertThat(cause).isInstanceOf(GitSshClientTransport.HostKeyRejectedException.class);
+            GitSshClientTransport.HostKeyRejectedException rejected =
+                    (GitSshClientTransport.HostKeyRejectedException) cause;
+            assertThat(rejected.host()).isEqualTo("127.0.0.1");
+            assertThat(rejected.port()).isEqualTo(server.port());
+            assertThat(PublicKeyEntry.toString(rejected.serverKey()))
+                    .isEqualTo(PublicKeyEntry.toString(server.keyProvider.loadKeys(null).getFirst().getPublic()));
+            assertThat(Files.readString(knownHosts)).isEqualTo("");
+
+            Files.writeString(knownHosts, server.knownHostEntry());
+            assertThat(new GitUploadPackClient(transport).discover(
+                    server.repositoryUri(), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientResult.Success.class);
         }
     }
 
@@ -89,6 +104,7 @@ class GitSshClientTransportTest {
         }
         try (TestSshServer changed = TestSshServer.start(
                 temporaryDirectory.resolve("changed-key"), repository.path(), port)) {
+            String previous = Files.readString(knownHosts);
             GitClientTransport transport = new GitRemoteClientTransport(null,
                     new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
                     knownHosts, false);
@@ -99,6 +115,21 @@ class GitSshClientTransportTest {
             assertThat(result).isInstanceOf(GitClientResult.Failed.class);
             assertThat(failure(result).kind()).isEqualTo(
                     GitClientFailure.Kind.VERIFICATION_FAILED);
+            assertThat(failure(result).retryable()).isFalse();
+            Throwable cause = failure(result).cause().getCause();
+            assertThat(cause).isInstanceOf(GitSshClientTransport.HostKeyRejectedException.class);
+            GitSshClientTransport.HostKeyRejectedException rejected =
+                    (GitSshClientTransport.HostKeyRejectedException) cause;
+            assertThat(rejected.host()).isEqualTo("127.0.0.1");
+            assertThat(rejected.port()).isEqualTo(changed.port());
+            assertThat(PublicKeyEntry.toString(rejected.serverKey()))
+                    .isEqualTo(PublicKeyEntry.toString(changed.keyProvider.loadKeys(null).getFirst().getPublic()));
+            assertThat(Files.readString(knownHosts)).isEqualTo(previous);
+
+            Files.writeString(knownHosts, changed.knownHostEntry());
+            assertThat(new GitUploadPackClient(transport).discover(
+                    changed.repositoryUri(), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientResult.Success.class);
         }
     }
 

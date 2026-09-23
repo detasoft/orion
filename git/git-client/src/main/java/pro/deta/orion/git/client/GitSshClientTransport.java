@@ -32,7 +32,7 @@ import java.security.spec.RSAPublicKeySpec;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Blocking Git transport over Apache MINA SSH. Injected clients remain caller-owned;
@@ -94,7 +94,7 @@ public final class GitSshClientTransport implements GitClientTransport {
                 throw new SshTimeoutException(error);
             } catch (IOException error) {
                 if (attempt.verifier().wasRejected()) {
-                    throw new VerificationException(error);
+                    throw new HostKeyRejectedException(remote, attempt.verifier().rejectedKey.get(), error);
                 }
                 throw new AuthenticationException(error);
             }
@@ -114,14 +114,14 @@ public final class GitSshClientTransport implements GitClientTransport {
                     false,
                     "Git SSH authentication failed",
                     error.getCause());
-        } catch (VerificationException error) {
+        } catch (HostKeyRejectedException error) {
             closeAfterFailure(channel, session, error);
             stopAfterFailure(attempt, error);
             throw new GitClientTransportException(
                     GitClientFailure.Kind.VERIFICATION_FAILED,
                     false,
                     "Git SSH server host key was rejected",
-                    error.getCause());
+                    error);
         } catch (SshTimeoutException error) {
             closeAfterFailure(channel, session, error);
             stopAfterFailure(attempt, error);
@@ -141,7 +141,9 @@ public final class GitSshClientTransport implements GitClientTransport {
                     attempt.verifier().wasRejected()
                             ? "Git SSH server host key was rejected"
                             : "Failed to open Git SSH session",
-                    error);
+                    attempt.verifier().wasRejected()
+                            ? new HostKeyRejectedException(remote, attempt.verifier().rejectedKey.get(), error)
+                            : error);
         }
     }
 
@@ -290,7 +292,7 @@ public final class GitSshClientTransport implements GitClientTransport {
 
     private static final class TrackingVerifier implements ServerKeyVerifier {
         private final ServerKeyVerifier delegate;
-        private final AtomicBoolean rejected = new AtomicBoolean();
+        private final AtomicReference<PublicKey> rejectedKey = new AtomicReference<>();
 
         private TrackingVerifier(ServerKeyVerifier delegate) {
             this.delegate = delegate;
@@ -308,13 +310,13 @@ public final class GitSshClientTransport implements GitClientTransport {
             boolean accepted = delegate.verifyServerKey(
                     session, remoteAddress, serverKey);
             if (!accepted) {
-                rejected.set(true);
+                rejectedKey.compareAndSet(null, serverKey);
             }
             return accepted;
         }
 
         private boolean wasRejected() {
-            return rejected.get();
+            return rejectedKey.get() != null;
         }
     }
 
@@ -324,9 +326,32 @@ public final class GitSshClientTransport implements GitClientTransport {
         }
     }
 
-    private static final class VerificationException extends IOException {
-        private VerificationException(IOException cause) {
-            super(cause);
+    /**
+     * The key rejected by the configured verifier, bound to the requested host and port.
+     * This evidence does not authorize trusting the key or bypassing known-hosts file checks.
+     */
+    public static final class HostKeyRejectedException extends IOException {
+        private final String host;
+        private final int port;
+        private final PublicKey serverKey;
+
+        private HostKeyRejectedException(Remote remote, PublicKey serverKey, Throwable cause) {
+            super("Git SSH server host key was rejected", cause);
+            this.host = remote.host();
+            this.port = remote.port();
+            this.serverKey = Objects.requireNonNull(serverKey, "serverKey");
+        }
+
+        public String host() {
+            return host;
+        }
+
+        public int port() {
+            return port;
+        }
+
+        public PublicKey serverKey() {
+            return serverKey;
         }
     }
 
