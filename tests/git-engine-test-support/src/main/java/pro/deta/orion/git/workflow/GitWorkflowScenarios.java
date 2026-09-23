@@ -55,6 +55,8 @@ public final class GitWorkflowScenarios {
                     renamedFileState(), GitWorkflowScenarios::renameFileAndPull),
             scenario("file-directory-replacement-and-pull", PULL,
                     fileDirectoryReplacementState(), GitWorkflowScenarios::fileDirectoryReplacementAndPull),
+            scenario("file-modes-clone-and-fetch", FETCH, fileModesState(),
+                    GitWorkflowScenarios::fileModesCloneAndFetch),
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
                     GitWorkflowScenarios::secondBranchFetchAndCheckout),
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
@@ -513,6 +515,42 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void fileModesCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.writeFile(README, INITIAL_CONTENT);
+            source.writeFile("run.sh", "#!/bin/sh\nexit 0\n");
+            Path script = source.directory().resolve("run.sh");
+            require(script.toFile().setExecutable(true, false), "cannot make script executable");
+            Path link = source.directory().resolve("link");
+            Files.createSymbolicLink(link, Path.of(README));
+            source.add(README, "run.sh", "link");
+            source.commit("initial file modes");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone with executable and symbolic link");
+                require(script.toFile().setExecutable(false, false), "cannot clear executable bit");
+                Files.delete(link);
+                Files.createSymbolicLink(link, Path.of("missing-target"));
+                source.add("run.sh", "link");
+                source.commit("change mode and link target");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                execution.assertTerminal(terminal);
+                clone.fetch("origin", "main");
+                clone.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                equivalent(RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("initial"), "refs/heads/fetched", execution.id("second")),
+                        terminal.commits()), clone.snapshot(), "fetch changed mode and dangling link");
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after file modes fetch");
+            }
+        }
+    }
+
     private static void incrementalFetchWithCommonCommit(
             GitScenarioContext context,
             Execution execution) throws Exception {
@@ -710,6 +748,20 @@ public final class GitWorkflowScenarios {
                         README, text(INITIAL_CONTENT), "item/child.txt", text("child\n"))),
                 "third", expectedCommit(List.of("second"), Map.of(
                         README, text(INITIAL_CONTENT), "item", text("replacement\n")))));
+    }
+
+    private static ExpectedRepositoryState fileModesState() {
+        return state(Map.of(MAIN, "second"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(
+                        README, text(INITIAL_CONTENT),
+                        "run.sh", new ExpectedRepositoryState.ExpectedFile(
+                                0100755, sha256("#!/bin/sh\nexit 0\n".getBytes(StandardCharsets.UTF_8))),
+                        "link", new ExpectedRepositoryState.ExpectedFile(
+                                0120000, sha256(README.getBytes(StandardCharsets.UTF_8))))),
+                "second", expectedCommit(List.of("initial"), Map.of(
+                        README, text(INITIAL_CONTENT), "run.sh", text("#!/bin/sh\nexit 0\n"),
+                        "link", new ExpectedRepositoryState.ExpectedFile(
+                                0120000, sha256("missing-target".getBytes(StandardCharsets.UTF_8)))))));
     }
 
     private static ExpectedRepositoryState mergedHistoryState() {

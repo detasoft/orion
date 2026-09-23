@@ -99,7 +99,7 @@ final class JGitWorkflowClient implements GitClient {
         StoredConfig config = git.getRepository().getConfig();
         config.setBoolean("commit", null, "gpgSign", false);
         config.setBoolean("core", null, "autocrlf", false);
-        config.setBoolean("core", null, "fileMode", false);
+        config.setBoolean("core", null, "fileMode", true);
         config.save();
     }
 

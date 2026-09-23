@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -142,6 +143,11 @@ final class OrionGitWorkTree implements GitWorkTree {
         Set<String> deletedPaths = new LinkedHashSet<>();
         for (String path : stagedPaths) {
             Path source = directory.resolve(path);
+            if (Files.isSymbolicLink(source)) {
+                files.put(path, new GitFile(FileMode.SYMLINK,
+                        Files.readSymbolicLink(source).toString().getBytes(StandardCharsets.UTF_8)));
+                continue;
+            }
             boolean deleted = Files.notExists(source) || Files.isDirectory(source);
             for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
                  parent = parent.getParent()) {
@@ -159,7 +165,8 @@ final class OrionGitWorkTree implements GitWorkTree {
             if (!Files.isRegularFile(source)) {
                 throw new IOException("Staged Git path is not a regular file: " + path);
             }
-            files.put(path, GitFile.regular(Files.readAllBytes(source)));
+            FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
+            files.put(path, new GitFile(mode, Files.readAllBytes(source)));
         }
         repository.saveFiles(currentBranch, files, deletedPaths, message, PARITY_AUTHOR);
         stagedPaths.clear();

@@ -24,7 +24,7 @@ final class GitCommandRunner {
             "-c", "user.email=" + GitScenarioContext.IDENTITY_EMAIL,
             "-c", "commit.gpgSign=false",
             "-c", "core.autocrlf=false",
-            "-c", "core.fileMode=false");
+            "-c", "core.fileMode=true");
     private static final Map<String, String> ENVIRONMENT = Map.of(
             "GIT_CONFIG_NOSYSTEM", "1",
             "GIT_CONFIG_GLOBAL", nullConfigurationPath(),

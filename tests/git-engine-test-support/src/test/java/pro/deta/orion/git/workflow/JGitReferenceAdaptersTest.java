@@ -35,7 +35,7 @@ class JGitReferenceAdaptersTest {
             assertThat(repository.getFullBranch()).isEqualTo("refs/heads/main");
             assertThat(repository.getConfig().getBoolean("commit", null, "gpgSign", true)).isFalse();
             assertThat(repository.getConfig().getBoolean("core", null, "autocrlf", true)).isFalse();
-            assertThat(repository.getConfig().getBoolean("core", null, "fileMode", true)).isFalse();
+            assertThat(repository.getConfig().getBoolean("core", null, "fileMode", false)).isTrue();
             assertThat(Files.readAllBytes(directory.resolve("clone/lines.txt")))
                     .isEqualTo("first\nsecond\n".getBytes(StandardCharsets.UTF_8));
         } finally {
