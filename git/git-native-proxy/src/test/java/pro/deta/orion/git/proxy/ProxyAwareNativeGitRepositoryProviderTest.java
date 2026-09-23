@@ -199,7 +199,9 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         String internal = BootstrapGitLocation.persistent(binding).proxyName();
 
         assertThatThrownBy(() -> provider.openForRead(internal))
-                .hasMessageNotContaining("secret").hasNoCause();
+                .hasMessageNotContaining("secret")
+                .hasCauseInstanceOf(GitClientTransportException.class)
+                .cause().hasMessage("private upstream response with secret");
         assertThat(provider.syncObservation(binding).status()).isEqualTo(AUTHENTICATION_FAILED);
         var failedAt = provider.syncObservation(binding).observedAt();
         assertThat(failedAt).isNotNull();

@@ -126,7 +126,7 @@ class NativeBootstrapGitPusherTest {
     }
 
     @Test
-    void runtimeRecordsNativePushAuthenticationFailureWithoutKeepingTheRemoteMessage() throws Exception {
+    void runtimeRecordsNativePushAuthenticationFailureAndPreservesItsCause() throws Exception {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
         NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
@@ -141,7 +141,9 @@ class NativeBootstrapGitPusherTest {
                         }, target, received, updates, atomic));
 
         assertThatThrownBy(() -> proxy.publish(ingest(repository, update), update.refUpdates(), true))
-                .hasMessageNotContaining("upstream-secret-response").hasNoCause();
+                .hasMessageNotContaining("upstream-secret-response")
+                .hasCauseInstanceOf(GitClientTransportException.class)
+                .cause().hasMessage("upstream-secret-response");
         assertThat(proxy.syncObservation().status()).isEqualTo(AUTHENTICATION_FAILED);
         assertThat(proxy.syncObservation().observedAt()).isNotNull();
     }
