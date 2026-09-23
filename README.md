@@ -673,8 +673,15 @@ requires a signed, recent `auth_time` claim; providers must support this
 Activity never moves the mandatory sign-in deadline. Changing provider settings
 invalidates existing sessions on their next activity or renewal.
 
-Sessions are held in server memory, so restarting Orion requires signing in again once the current
-access token needs renewal. Reloading the same browser tab preserves renewal
+Browser sessions survive restarts in `<baseDir>/oidc-sessions`, one encrypted file per session.
+Orion reuses its persisted configuration encryption key with a separate session context bound to
+that file's identifier. AES-GCM detects modified contents and records copied under another
+identifier. Cookie secrets are not stored on disk. Session updates replace files atomically;
+logout deletes the file before reporting success. Expired records are removed during authentication
+and activity requests, including the first request after restart. Keep the data directory and key
+material persistent. Run only one Orion process against a session directory.
+Encryption does not prevent restoring an older valid file from backup, so restoring session files
+can restore sessions that were subsequently signed out. Reloading the same browser tab preserves renewal
 metadata; manually supplied Admin API tokens are not renewed.
 
 **Sign out** revokes the browser session and removes the local access token.

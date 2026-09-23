@@ -19,7 +19,17 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.OidcProvider;
 import pro.deta.orion.schema.orion.OrganizationId;
 
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretContext;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
+import pro.deta.orion.util.ConfigurationContext;
+
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.GeneralSecurityException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -33,13 +43,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Owns bounded browser login attempts and sessions; persistent accounts and invitations belong to the ACL. */
+/**
+ * Owns bounded login attempts and encrypted browser sessions. The in-process session cache has one writer;
+ * account and invitation ownership remains in the ACL. Session files are restored on the first request.
+ */
 @Singleton
 public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private static final String COOKIE = "__Host-orion-oidc";
     private static final String SESSION_COOKIE = "__Host-orion-session";
     private final Map<String, Session> sessions = new HashMap<>();
     private final Clock clock;
+    private final Path sessionDirectory;
+    private final ConfigurationCipherCapability sessionCipher;
+    private final ConfigurationSecretEnvelopeCodec sessionCodec = new ConfigurationSecretEnvelopeCodec();
+    private boolean sessionsLoaded;
     private final Map<String, Attempt> attempts = new HashMap<>();
     private final Map<String, Verified> verified = new HashMap<>();
     private final SecureRandom random = new SecureRandom();
@@ -52,14 +69,19 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
-            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper) {
-        this(accounts, acl, desired, secrets, mapper, Clock.systemUTC());
+            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper,
+            ConfigurationContext configuration, ConfigurationCipherCapability cipher) {
+        this(accounts, acl, desired, secrets, mapper, Clock.systemUTC(),
+                configuration.getBaseDir().resolve("oidc-sessions"), cipher);
     }
 
     OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
-            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock) {
+            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
+            Path sessionDirectory, ConfigurationCipherCapability sessionCipher) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.clock = clock;
+        this.sessionDirectory = sessionDirectory;
+        this.sessionCipher = sessionCipher;
         this.accounts = accounts;
         this.acl = acl;
         this.desired = desired;
@@ -239,8 +261,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         }
         verified.remove(body.path("ticket").asText());
         String sessionToken = randomToken();
-        sessions.remove(previousSession);
-        sessions.put(sessionKey(sessionToken), session);
+        removeSession(previousSession);
+        saveSession(sessionKey(sessionToken), session);
         return tokenResponse(token, session)
                 .withHeader("Set-Cookie", sessionCookie(sessionToken, session.expiresAt() - now));
     }
@@ -257,17 +279,17 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         try {
             if (!session.origin().equals(publicOrigin())
                     || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
-                sessions.remove(key);
+                removeSession(key);
                 return expiredSession();
             }
         } catch (IllegalArgumentException unavailable) {
-            sessions.remove(key);
+            removeSession(key);
             return expiredSession();
         }
         long now = clock.instant().getEpochSecond();
         TokenIssueResult result = issueToken(session, now);
         if (!(result instanceof TokenIssueResult.Success token)) {
-            sessions.remove(key);
+            removeSession(key);
             return expiredSession();
         }
         return tokenResponse(token, session)
@@ -297,23 +319,23 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         try {
             if (!session.origin().equals(publicOrigin())
                     || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
-                sessions.remove(key);
+                removeSession(key);
                 return null;
             }
         } catch (IllegalArgumentException unavailable) {
-            sessions.remove(key);
+            removeSession(key);
             return null;
         }
         long now = clock.instant().getEpochSecond();
         Session active = new Session(session.organization(), session.provider(), session.userId(), session.subject(),
                 session.origin(), session.authenticatedAt(), now);
-        sessions.put(key, active);
+        if (now != session.lastActiveAt()) saveSession(key, active);
         return sessionCookie(value, active.expiresAt() - now);
     }
 
     private synchronized OrionHttpResponse logout(HttpServletRequest request) {
         cleanup();
-        sessions.remove(sessionKey(cookieValue(request, SESSION_COOKIE)));
+        removeSession(sessionKey(cookieValue(request, SESSION_COOKIE)));
         return OrionHttpResponse.empty(204).withHeader("Set-Cookie", sessionCookie("", 0));
     }
 
@@ -332,7 +354,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private static String sessionKey(String value) {
         try {
-            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256")
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException(impossible);
@@ -388,9 +410,96 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private void cleanup() {
         long now = clock.instant().getEpochSecond();
-        sessions.values().removeIf(session -> session.expiresAt() <= now);
+        loadSessions();
+        for (String key : new ArrayList<>(sessions.keySet())) {
+            if (sessions.get(key).expiresAt() <= now) removeSession(key);
+        }
         attempts.values().removeIf(attempt -> attempt.expiresAt() <= now);
         verified.values().removeIf(login -> login.attempt().expiresAt() <= now);
+    }
+
+    private ConfigurationSecretContext sessionContext(String key) {
+        return new ConfigurationSecretContext("oidc-session/" + key, "browser-session-v1");
+    }
+
+    private void loadSessions() {
+        if (sessionsLoaded) return;
+        Map<String, Session> loaded = new HashMap<>();
+        try {
+            Files.createDirectories(sessionDirectory);
+            try (java.nio.file.DirectoryStream<Path> files = Files.newDirectoryStream(sessionDirectory, "*.session")) {
+                for (Path file : files) {
+                    String name = file.getFileName().toString();
+                    String key = name.substring(0, name.length() - ".session".length());
+                    if (!key.matches("[A-Za-z0-9_-]{43}")) continue;
+                    byte[] plaintext = null;
+                    try {
+                        if (Files.isSymbolicLink(file) || Files.size(file) > 65536) {
+                            throw new IllegalArgumentException("Invalid session file");
+                        }
+                        plaintext = sessionCipher.open(sessionCodec.parse(Files.readString(file)), sessionContext(key));
+                        Session session = mapper.readValue(plaintext, Session.class);
+                        long now = clock.instant().getEpochSecond();
+                        if (session.authenticatedAt() <= 0 || session.lastActiveAt() < session.authenticatedAt()
+                                || session.lastActiveAt() > now || session.expiresAt() <= now
+                                || session.userId() == null || session.subject() == null
+                                || !session.origin().equals(publicOrigin())
+                                || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
+                            throw new IllegalArgumentException("Session is unavailable");
+                        }
+                        if (loaded.size() >= 4096) throw new IOException("Too many stored browser sessions");
+                        loaded.put(key, session);
+                    } catch (GeneralSecurityException | IllegalArgumentException invalid) {
+                        Files.deleteIfExists(file);
+                    } finally {
+                        if (plaintext != null) Arrays.fill(plaintext, (byte) 0);
+                    }
+                }
+            }
+            sessions.putAll(loaded);
+            sessionsLoaded = true;
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Cannot load browser sessions", failure);
+        }
+    }
+
+    private void saveSession(String key, Session session) {
+        byte[] plaintext = null;
+        Path temporary = null;
+        try {
+            plaintext = mapper.writeValueAsBytes(session);
+            String envelope = sessionCodec.serialize(sessionCipher.seal(plaintext, sessionContext(key)));
+            if (envelope.length() > 65536) throw new IOException("Browser session is too large");
+            temporary = Files.createTempFile(sessionDirectory, ".session-", ".tmp");
+            Files.writeString(temporary, envelope);
+            try (java.nio.channels.FileChannel file = java.nio.channels.FileChannel.open(
+                    temporary, java.nio.file.StandardOpenOption.WRITE)) {
+                file.force(true);
+            }
+            Files.move(temporary, sessionDirectory.resolve(key + ".session"),
+                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            sessions.put(key, session);
+        } catch (IOException | GeneralSecurityException failure) {
+            throw new IllegalStateException("Cannot persist browser session", failure);
+        } finally {
+            if (plaintext != null) Arrays.fill(plaintext, (byte) 0);
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException failure) {
+                    throw new UncheckedIOException("Cannot remove temporary session file", failure);
+                }
+            }
+        }
+    }
+
+    private void removeSession(String key) {
+        try {
+            Files.deleteIfExists(sessionDirectory.resolve(key + ".session"));
+            sessions.remove(key);
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Cannot delete browser session", failure);
+        }
     }
 
     private String randomToken() {

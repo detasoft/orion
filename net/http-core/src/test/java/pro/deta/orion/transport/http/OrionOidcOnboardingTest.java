@@ -37,6 +37,9 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.DirectoryStream;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.time.Instant;
@@ -48,6 +51,96 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
+    @Test
+    void sessionSurvivesRestartAndLogoutIsDurable() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Reply login = f.signIn("corporate", f.invite("acme"));
+            f.clock.now = f.clock.now.plusSeconds(47 * 3600);
+            f.activity("GET", "/api/admin/repositories", login.json.path("token").asText());
+            f.restart();
+            f.clock.now = f.clock.now.plusSeconds(2 * 3600);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
+            assertThat(f.post("logout", Map.of(), null).status).isEqualTo(204);
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void modifiedSessionIsRejectedAfterRestart() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(f.sessions)) {
+                for (Path file : files) {
+                    String encrypted = Files.readString(file);
+                    assertThat(encrypted).doesNotContain("alice", "corporate", f.sessionCookie);
+                    Files.writeString(file, encrypted.substring(0, encrypted.length() - 5) + "AAAAA");
+                }
+            }
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void copiedSessionCannotReplaceAnotherBrowsersSession() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            Path first;
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(f.sessions)) {
+                first = files.iterator().next();
+            }
+            byte[] encrypted = Files.readAllBytes(first);
+            f.sessionCookie = null;
+            f.signIn("corporate", "");
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(f.sessions)) {
+                for (Path file : files) {
+                    if (!file.equals(first)) Files.write(file, encrypted);
+                }
+            }
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void failedSessionDeletionDoesNotReportSuccessfulLogout() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            Path file;
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(f.sessions)) {
+                file = files.iterator().next();
+            }
+            byte[] encrypted = Files.readAllBytes(file);
+            Files.delete(file);
+            Files.createDirectory(file);
+            Path blocker = Files.writeString(file.resolve("blocker"), "blocked");
+            try {
+                assertThat(f.post("logout", Map.of(), null).status).isEqualTo(400);
+            } finally {
+                Files.delete(blocker);
+                Files.delete(file);
+                Files.write(file, encrypted);
+            }
+            assertThat(f.post("logout", Map.of(), null).status).isEqualTo(204);
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void expiredSessionIsNotRestored() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            f.clock.now = f.clock.now.plusSeconds(48 * 3600);
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(f.sessions)) {
+                assertThat(files).isEmpty();
+            }
+        }
+    }
+
     @Test
     void adminRejectsInvalidTimeoutsWithoutSavingTheProvider() throws Exception {
         try (Fixture f = new Fixture()) {
@@ -143,6 +236,7 @@ class OrionOidcOnboardingTest {
             assertThat(renewal.status).isEqualTo(200);
             claims = JWTParser.parse(renewal.json.path("token").asText()).getJWTClaimsSet();
             assertThat(claims.getExpirationTime().getTime() - claims.getIssueTime().getTime()).isEqualTo(10000);
+            f.restart();
             f.clock.now = f.clock.now.plusSeconds(10);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
             f.sessionCookie = unlimitedCookie;
@@ -485,8 +579,10 @@ class OrionOidcOnboardingTest {
         final SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
                 List.of(new AccessControl.Grant("admin", List.of(
                         new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
-        final OrionHttpRouteServlet servlet;
-        final OrionAuthorizationFilter filter;
+        OrionHttpRouteServlet servlet;
+        OrionAuthorizationFilter filter;
+        final Path sessions = Files.createTempDirectory("orion-oidc-sessions-");
+        ConfigurationSecrets secrets;
         String bearer;
         Long authenticationTime;
         Map<String, String> authorizationParameters;
@@ -564,7 +660,7 @@ class OrionOidcOnboardingTest {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(descriptor, List.of()), 2048, true);
             }
-            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> desired.current().document(),
+            secrets = new ConfigurationSecrets(() -> desired.current().document(),
                     material.configurationCipher());
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 443,
                     URI.create("https://orion.test"), Optional.empty(), Optional.empty(),
@@ -589,7 +685,12 @@ class OrionOidcOnboardingTest {
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired);
             acl.reload("fixture");
             accounts = new OrganizationAccounts(acl, desired);
-            OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper, clock);
+            restart();
+        }
+
+        void restart() {
+            OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper, clock,
+                    sessions, material.configurationCipher());
             filter = new OrionAuthorizationFilter(acl, oidc);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
                     new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
@@ -712,6 +813,12 @@ class OrionOidcOnboardingTest {
             provider.stop(0);
             HttpsURLConnection.setDefaultSSLSocketFactory(originalTls);
             material.close();
+            try (DirectoryStream<Path> files = Files.newDirectoryStream(sessions)) {
+                for (Path file : files) Files.delete(file);
+                Files.delete(sessions);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            }
         }
     }
 
