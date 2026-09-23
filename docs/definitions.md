@@ -153,6 +153,11 @@ For each checkpoint:
 2. Implement the agreed checkpoint while preserving unrelated work.
 3. Run its required pre-commit verification and automatic review.
 4. Stage only the ready result and present it with verification to the user.
+   Include a copyable `git diff --staged -- <owned-paths>` command selecting
+   exactly this checkpoint's staged files, with repository-relative paths and
+   shell quoting where needed. A directory shortcut is allowed only when every
+   staged change under it belongs to this checkpoint; otherwise list its owned
+   files explicitly. Exclude unrelated staged changes.
    Wait for approval of the staged result unless an explicit commit instruction
    already covers it. Approval to start implementation is not commit approval.
 5. Approval of the presented result authorizes its commit. Commit immediately

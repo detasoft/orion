@@ -53,7 +53,12 @@ until the current checkpoint has been committed and its context compacted.
    `git diff --cached`, and `git diff --cached --check`.
 7. Present the stable task name, proposed subject, staged checkpoint,
    verification summary, automatic-review result, remaining checkpoints, and
-   unrelated workspace state. Wait for approval of this staged result unless an
+   unrelated workspace state. Include a copyable review command selecting exactly
+   this checkpoint's staged files, for example `git diff --staged -- A.txt B.txt`.
+   Use repository-relative paths and shell quoting where needed. A directory
+   shortcut is allowed only when every staged change under that directory belongs
+   to this checkpoint; otherwise list its owned files explicitly. Exclude
+   unrelated staged changes. Wait for approval of this staged result unless an
    explicit commit instruction already covers the checkpoint. Approval to start
    implementation does not authorize committing the resulting changes.
 8. Approval of the presented staged result, including an explicit `commit`
