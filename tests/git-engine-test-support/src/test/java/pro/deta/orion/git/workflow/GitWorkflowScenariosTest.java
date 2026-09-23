@@ -22,6 +22,7 @@ class GitWorkflowScenariosTest {
             "delete-file-and-pull",
             "rename-file-and-pull",
             "file-directory-replacement-and-pull",
+            "large-binary-clone-and-fetch",
             "file-modes-clone-and-fetch",
             "second-branch-fetch-and-checkout",
             "multi-ref-push",

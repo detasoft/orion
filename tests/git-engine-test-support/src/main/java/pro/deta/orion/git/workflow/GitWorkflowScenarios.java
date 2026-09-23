@@ -13,6 +13,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 public final class GitWorkflowScenarios {
@@ -55,6 +56,8 @@ public final class GitWorkflowScenarios {
                     renamedFileState(), GitWorkflowScenarios::renameFileAndPull),
             scenario("file-directory-replacement-and-pull", PULL,
                     fileDirectoryReplacementState(), GitWorkflowScenarios::fileDirectoryReplacementAndPull),
+            scenario("large-binary-clone-and-fetch", FETCH, largeBinaryState(),
+                    GitWorkflowScenarios::largeBinaryCloneAndFetch),
             scenario("file-modes-clone-and-fetch", FETCH, fileModesState(),
                     GitWorkflowScenarios::fileModesCloneAndFetch),
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
@@ -515,6 +518,47 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void largeBinaryCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.writeFile(README, INITIAL_CONTENT);
+            source.writeFile("large.bin", largeBinaryContent(false));
+            source.add(README, "large.bin");
+            source.commit("initial large binary");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone of large binary");
+                source.writeFile("large.bin", largeBinaryContent(true));
+                source.add("large.bin");
+                source.commit("change binary region");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                execution.assertTerminal(terminal);
+                clone.fetch("origin", "main");
+                clone.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                equivalent(RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("initial"), "refs/heads/fetched", execution.id("second")),
+                        terminal.commits()), clone.snapshot(), "incremental fetch of large binary");
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after binary fetch");
+            }
+        }
+    }
+
+    private static byte[] largeBinaryContent(boolean updated) {
+        byte[] content = new byte[256 * 1024];
+        new Random(0x4f72696f6eL).nextBytes(content);
+        if (updated) {
+            for (int i = 64 * 1024 - 512; i < 64 * 1024 + 512; i++) {
+                content[i] ^= (byte) 0xff;
+            }
+        }
+        return content;
+    }
+
     private static void fileModesCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
         try (GitWorkTree source = source(context)) {
             source.writeFile(README, INITIAL_CONTENT);
@@ -748,6 +792,14 @@ public final class GitWorkflowScenarios {
                         README, text(INITIAL_CONTENT), "item/child.txt", text("child\n"))),
                 "third", expectedCommit(List.of("second"), Map.of(
                         README, text(INITIAL_CONTENT), "item", text("replacement\n")))));
+    }
+
+    private static ExpectedRepositoryState largeBinaryState() {
+        return state(Map.of(MAIN, "second"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(
+                        README, text(INITIAL_CONTENT), "large.bin", bytes(largeBinaryContent(false)))),
+                "second", expectedCommit(List.of("initial"), Map.of(
+                        README, text(INITIAL_CONTENT), "large.bin", bytes(largeBinaryContent(true))))));
     }
 
     private static ExpectedRepositoryState fileModesState() {
