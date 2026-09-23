@@ -320,6 +320,65 @@ class GitBlockingClientsTest {
                 .contains(OLD_ID + " " + NEW_ID + " " + ref + "\0report-status");
     }
 
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    void rejectsInvalidUtf8AndControlBytesInPushStatus(boolean sideBand) {
+        for (byte[] invalid : List.of(
+                new byte[] {(byte) 0xc3, 0x28}, new byte[] {0x01}, new byte[] {0x09}, new byte[] {0x7f})) {
+            byte[] report = concat(packet("unpack ok\n"), packet(concat(
+                    "ng refs/heads/main rejected ".getBytes(StandardCharsets.UTF_8), invalid)), flush());
+            RecordingTransport transport = new RecordingTransport(pushStatusResponse(sideBand, report));
+            GitReceivePackRequest request = new GitReceivePackRequest(
+                    List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                    output -> { });
+
+            GitClientResult<GitReceivePackResult> result = new GitReceivePackClient(transport)
+                    .push(REMOTE, GitClientOptions.defaults(), request);
+
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+            assertThat(transport.session.closed).isTrue();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, 0", "true, 0", "false, 1", "true, 1"})
+    void enforcesPushStatusSizeLimit(boolean sideBand, int excessBytes) {
+        int reportBytes = 1024 * 1024 + excessBytes;
+        List<GitReceivePackRequest.Command> commands = new ArrayList<>();
+        List<GitReceivePackResult.RefStatus> expected = new ArrayList<>();
+        ByteArrayOutputStream report = new ByteArrayOutputStream();
+        report.writeBytes(packet("unpack ok\n"));
+        for (int index = 0; index < 17; index++) {
+            String ref = "refs/heads/branch-" + index;
+            commands.add(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, ref));
+            String prefix = "ng " + ref + " ";
+            int packetBytes = (reportBytes - report.size() - flush().length) / (17 - index);
+            int reasonBytes = packetBytes - 4 - prefix.getBytes(StandardCharsets.UTF_8).length - 1;
+            String reason = "я".repeat(reasonBytes / 2) + "x".repeat(reasonBytes % 2);
+            expected.add(new GitReceivePackResult.RefStatus(ref, false, reason));
+            report.writeBytes(packet(prefix + reason + "\n"));
+        }
+        report.writeBytes(flush());
+        RecordingTransport transport = new RecordingTransport(pushStatusResponse(sideBand, report.toByteArray()));
+        GitReceivePackRequest request = new GitReceivePackRequest(commands, output -> { });
+
+        GitClientResult<GitReceivePackResult> result = new GitReceivePackClient(transport)
+                .push(REMOTE, GitClientOptions.defaults(), request);
+
+        if (excessBytes == 0) {
+            GitReceivePackResult status = success(result);
+            assertThat(status.accepted()).isFalse();
+            assertThat(status.unpackStatus()).isEqualTo("ok");
+            assertThat(status.refs()).containsExactlyElementsOf(expected);
+        } else {
+            assertThat(result instanceof GitClientResult.Failed<?>).as("oversized report rejected").isTrue();
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+        }
+        assertThat(transport.session.closed).isTrue();
+    }
+
     @Test
     void rejectsInvalidUtf8AndControlBytesInAdvertisedNames() {
         for (byte[] suffix : List.of(new byte[] {(byte) 0xc3, 0x28}, new byte[] {0x7f}, new byte[] {0x01})) {
@@ -667,6 +726,21 @@ class GitBlockingClientsTest {
         return concat(
                 packet(OLD_ID + " refs/heads/main\0" + capabilities + "\n"),
                 flush());
+    }
+
+    private static byte[] pushStatusResponse(boolean sideBand, byte[] report) {
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        response.writeBytes(advertisement("report-status" + (sideBand ? " side-band-64k" : "")));
+        if (sideBand) {
+            for (int offset = 0; offset < report.length; offset += 8191) {
+                response.writeBytes(sideBandPacket(1,
+                        Arrays.copyOfRange(report, offset, Math.min(offset + 8191, report.length))));
+            }
+            response.writeBytes(flush());
+        } else {
+            response.writeBytes(report);
+        }
+        return response.toByteArray();
     }
 
     private static byte[] sideBandPacket(int channel, byte[] data) {

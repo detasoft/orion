@@ -344,9 +344,12 @@ final class GitBlockingClientWire {
     private List<String> readDirectStatus()
             throws IOException, GitClientProtocolException {
         List<String> lines = new ArrayList<>();
+        int statusBytes = 0;
         while (true) {
             GitPktLine packet = readPacket(
                     GitClientFailure.Phase.REPORT_STATUS);
+            statusBytes += packet.length();
+            requireStatusSize(statusBytes);
             ByteBuf payload = wire.payloadBuffer(packet);
             try {
                 if (packet == GitPktLine.Control.FLUSH) {
@@ -384,13 +387,7 @@ final class GitBlockingClientWire {
                         payload.readerIndex() + 1,
                         payload.readableBytes() - 1);
                 if (channel == 1) {
-                    if (status.size() + data.readableBytes()
-                            > MAXIMUM_REPORT_STATUS_BYTES) {
-                        throw protocolFailure(
-                                GitClientFailure.Kind.MALFORMED_RESPONSE,
-                                GitClientFailure.Phase.REPORT_STATUS,
-                                "Receive-pack status exceeds size limit");
-                    }
+                    requireStatusSize(status.size() + data.readableBytes());
                     byte[] bytes = new byte[data.readableBytes()];
                     data.getBytes(data.readerIndex(), bytes);
                     status.writeBytes(bytes);
@@ -411,6 +408,15 @@ final class GitBlockingClientWire {
         }
     }
 
+    private static void requireStatusSize(int bytes) throws GitClientProtocolException {
+        if (bytes > MAXIMUM_REPORT_STATUS_BYTES) {
+            throw protocolFailure(
+                    GitClientFailure.Kind.MALFORMED_RESPONSE,
+                    GitClientFailure.Phase.REPORT_STATUS,
+                    "Receive-pack status exceeds size limit");
+        }
+    }
+
     private static List<String> parsePacketLines(byte[] bytes)
             throws GitClientProtocolException {
         List<String> lines = new ArrayList<>();
@@ -425,8 +431,15 @@ final class GitBlockingClientWire {
                         }
                         return List.copyOf(lines);
                     }
-                    case GitPktLine.Data data ->
-                            lines.add(stripLf(new String(data.content(), StandardCharsets.UTF_8)));
+                    case GitPktLine.Data data -> {
+                        ByteBuf payload = Unpooled.wrappedBuffer(data.content());
+                        try {
+                            lines.add(stripLf(text(
+                                    payload, GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
+                        } finally {
+                            payload.release();
+                        }
+                    }
                     case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw malformedStatus();
                 }
             }
