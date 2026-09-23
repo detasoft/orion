@@ -161,7 +161,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets"})
+    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders"})
     public static final class Organization {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -181,6 +181,25 @@ public class OrionV2 {
         @XmlElementWrapper(name = "secrets")
         @XmlElement(name = "secret")
         private List<Secret> secrets;
+        @XmlElementWrapper(name = "oidc")
+        @XmlElement(name = "provider")
+        private List<OidcProvider> oidcProviders;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"issuer", "clientId", "secret"})
+    public static final class OidcProvider {
+        @XmlAttribute(required = true)
+        private String id;
+        @XmlElement(required = true)
+        private String issuer;
+        @XmlElement(required = true)
+        private String clientId;
+        @XmlElement(required = true)
+        private String secret;
     }
 
     @Data

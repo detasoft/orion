@@ -246,6 +246,13 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="oidc" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="provider" type="oidcProvider" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
@@ -409,6 +416,15 @@
       <xs:element name="allowDeletes" type="xs:boolean"/>
       <xs:element name="allowTagRewrites" type="xs:boolean"/>
     </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="oidcProvider" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="issuer" type="xs:string"/>
+      <xs:element name="clientId" type="xs:string"/>
+      <xs:element name="secret" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
 
   <xs:simpleType name="credentialType">

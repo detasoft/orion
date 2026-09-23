@@ -44,6 +44,34 @@ class OrionXmlTest {
     }
 
     @Test
+    void roundTripsOrganizationOidcProviders() throws Exception {
+        String xml = minimalV2("""
+                <organization id="default">
+                  <teams/>
+                  <secrets><secret id="google-client"><envelope>encrypted-value</envelope></secret></secrets>
+                  <oidc><provider id="google">
+                    <issuer>https://accounts.google.com</issuer>
+                    <clientId>google-client-id</clientId><secret>google-client</secret>
+                  </provider></oidc>
+                </organization>
+                <organization id="acme">
+                  <teams/>
+                  <secrets><secret id="google-client"><envelope>other-encrypted-value</envelope></secret></secrets>
+                  <oidc><provider id="google">
+                    <issuer>https://sso.example.test/realms/acme</issuer>
+                    <clientId>corporate-client-id</clientId><secret>google-client</secret>
+                  </provider></oidc>
+                </organization>
+                """, "");
+
+        OrionDocument document = read(xml);
+        String serialized = write(document);
+
+        assertThat(read(serialized)).isEqualTo(document);
+        assertThat(serialized).contains("https://accounts.google.com", "google-client-id", "corporate-client-id");
+    }
+
+    @Test
     void readsTheSameUserShapeInSystemAndOrganizationScopes() throws Exception {
         String user = """
                 <user id="alice">
@@ -641,7 +669,7 @@ class OrionXmlTest {
                 new OrionDocument.Team(new TeamId("team"), null, List.of(), List.of(), List.of(repository));
         return new OrionDocument.Organization(
                 new OrganizationId(id), null, List.of(), List.of(), List.of(), List.of(team),
-                List.of());
+                List.of(), List.of());
     }
 
     private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
@@ -667,7 +695,7 @@ class OrionXmlTest {
                 List.of(),
                 List.of(),
                 List.of(team),
-                List.of());
+                List.of(), List.of());
         return document(new AccessControl(), List.of(organization));
     }
 

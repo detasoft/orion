@@ -71,7 +71,7 @@ class GitHubRemoteProfileTest {
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), null, List.of(), List.of(),
                 List.of(), List.of(new OrionDocument.Team(new TeamId("platform"), null, List.of(), List.of(),
-                List.of(repository))), List.of())));
+                List.of(repository))), List.of(), List.of())));
         current.set(secrets.create(document, ConfigurationScope.repository(REPOSITORY),
                 "github-token", "fine-grained-token".toCharArray()));
     }

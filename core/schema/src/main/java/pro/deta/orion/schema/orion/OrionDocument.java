@@ -82,7 +82,8 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<Team> teams,
-            List<ConfigurationSecret> secrets) {
+            List<ConfigurationSecret> secrets,
+            List<OidcProvider> oidcProviders) {
         public Organization {
             Objects.requireNonNull(id, "id");
             users = copyUnique(users, AccessControl.User::getId, "user");
@@ -90,6 +91,17 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             roles = copyUnique(roles, ScopedRole::id, "role");
             teams = copyTeams(teams);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
+            Set<String> secretIds = new HashSet<>();
+            for (ConfigurationSecret secret : secrets) {
+                secretIds.add(secret.id());
+            }
+            for (OidcProvider provider : oidcProviders) {
+                if (!secretIds.contains(provider.secret())) {
+                    throw new IllegalArgumentException("OIDC secret is unavailable in organization scope: "
+                            + provider.secret());
+                }
+            }
         }
 
         private static List<Team> copyTeams(List<Team> source) {

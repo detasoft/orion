@@ -24,6 +24,7 @@ import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OidcProvider;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.RemoteAlias;
@@ -71,6 +72,27 @@ class ConfigurationSecretsTest {
     @AfterEach
     void close() {
         keyMaterial.close();
+    }
+
+    @Test
+    void preservesOidcProvidersWhenOrganizationAndRepositorySecretsChange() {
+        ConfigurationScope organizationScope = ConfigurationScope.organization(REPOSITORY.organizationId());
+        current.set(secrets.create(current.get(), organizationScope, "oidc-client", "original".toCharArray()));
+        OrionDocument.Organization organization = current.get().organizations().getFirst();
+        OidcProvider provider = new OidcProvider(
+                "google", URI.create("https://accounts.google.com"), "client-id", "oidc-client");
+        current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
+                organization.id(), organization.displayName(), organization.users(), organization.grants(),
+                organization.roles(), organization.teams(), organization.secrets(), List.of(provider)))));
+
+        current.set(secrets.replace(current.get(), organizationScope, "oidc-client", "replacement".toCharArray()));
+        current.set(secrets.create(current.get(), ConfigurationScope.repository(REPOSITORY),
+                "github-token", "repository-token".toCharArray()));
+
+        assertThat(current.get().organizations().getFirst().oidcProviders()).containsExactly(provider);
+        assertThat(secrets.resolve(REPOSITORY, new ConfigurationSecretReference(
+                ConfigurationSecretReference.Scope.ORGANIZATION, "oidc-client")))
+                .isEqualTo("replacement".toCharArray());
     }
 
     @Test
@@ -254,7 +276,7 @@ class ConfigurationSecretsTest {
         OrionDocument.Organization original = current.get().organizations().getFirst();
         OrionDocument.Organization other = new OrionDocument.Organization(new OrganizationId("other"),
                 original.displayName(), original.users(), original.grants(), original.roles(),
-                original.teams(), original.secrets());
+                original.teams(), original.secrets(), List.of());
         current.set(new OrionDocument(current.get().system(), List.of(original, other)));
 
         assertThat(secrets.resolve(REPOSITORY, REFERENCE)).isEqualTo("do-not-report".toCharArray());
@@ -338,7 +360,7 @@ class ConfigurationSecretsTest {
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
                 organization.roles(), List.of(new OrionDocument.Team(team.id(), team.displayName(),
-                team.grants(), team.roles(), List.of(changed))), organization.secrets()))));
+                team.grants(), team.roles(), List.of(changed))), organization.secrets(), List.of()))));
     }
 
     private static OrionDocument.Repository repository(OrionDocument document) {
@@ -352,7 +374,7 @@ class ConfigurationSecretsTest {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(),
                 List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("platform"), "Platform",
-                List.of(), List.of(), List.of(repository))), List.of())));
+                List.of(), List.of(), List.of(repository))), List.of(), List.of())));
     }
 
     private static KeyMaterialOptions options() {

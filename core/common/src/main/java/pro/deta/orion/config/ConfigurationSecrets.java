@@ -245,7 +245,7 @@ public final class ConfigurationSecrets {
             }
             organizations.add(new OrionDocument.Organization(organization.id(), organization.displayName(),
                     organization.users(), organization.grants(), organization.roles(), teams,
-                    scope.teamId().isEmpty() ? secrets : organization.secrets()));
+                    scope.teamId().isEmpty() ? secrets : organization.secrets(), organization.oidcProviders()));
         }
         return new OrionDocument(document.system(), organizations);
     }

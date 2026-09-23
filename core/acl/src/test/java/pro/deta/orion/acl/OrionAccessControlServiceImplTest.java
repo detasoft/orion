@@ -1,6 +1,8 @@
 package pro.deta.orion.acl;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
@@ -618,6 +620,75 @@ class OrionAccessControlServiceImplTest {
                             assertThat(success.credentials()).containsExactlyInAnyOrder(
                                     descriptor(KEY_ONE.getPublic()),
                                     descriptor(KEY_THREE.getPublic())));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void createsDefaultOrganizationOnlyForNewConfigurationAndPreservesItOnRestart(boolean resetRoot)
+            throws Exception {
+        AtomicReference<AccessControlSnapshot> persisted = new AtomicReference<>(
+                new AccessControlSnapshot(Map.of(), Optional.empty()));
+        AccessControlStorage storage = new AccessControlStorage() {
+            @Override
+            public Result<AccessControlSnapshot> load() {
+                return new Result.Success<>(persisted.get());
+            }
+
+            @Override
+            public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+                persisted.set(snapshot);
+            }
+
+            @Override
+            public String primaryPath() {
+                return ACL_PATH;
+            }
+
+            @Override
+            public boolean createIfMissing() {
+                return true;
+            }
+        };
+        OrionEventManager events = new OrionEventManager();
+        OrionProvider provider = new OrionProvider(() -> null, () -> events, () -> null);
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage, new OrionPasswordHashingService(), provider, new OrionRuntimeOptions(resetRoot),
+                testServerIdentity(), desired);
+        PrintStream originalOut = System.out;
+        events.onStart();
+        try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
+            System.setOut(output);
+            service.onStart();
+            OrionDocument created = parseDocument(persisted.get().files().get(ACL_PATH));
+            assertThat(created.organizations()).extracting(org -> org.id().value()).containsExactly("default");
+            assertThat(created.organizations().getFirst().users()).isEmpty();
+            assertThat(created.system().accessControl().getUsers()).extracting(AccessControl.User::getId)
+                    .contains("root");
+            service.onStop();
+            byte[] beforeRestart = persisted.get().files().get(ACL_PATH);
+            OrionAccessControlServiceImpl restarted = new OrionAccessControlServiceImpl(
+                    storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                    testServerIdentity(), desired);
+            try {
+                restarted.onStart();
+                assertThat(persisted.get().files().get(ACL_PATH)).isEqualTo(beforeRestart);
+                assertThat(desired.current().document().organizations()).isEqualTo(created.organizations());
+            } finally {
+                restarted.onStop();
+            }
+        } finally {
+            System.setOut(originalOut);
+            service.onStop();
+            events.onStop();
+        }
+    }
+
+    @Test
+    void doesNotInsertDefaultOrganizationIntoExistingConfiguration() {
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            assertThat(parseDocument(fixture.storage.snapshot.files().get(ACL_PATH)).organizations()).isEmpty();
         }
     }
 

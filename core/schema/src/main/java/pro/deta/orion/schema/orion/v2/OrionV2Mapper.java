@@ -7,6 +7,7 @@ import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OidcProvider;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
@@ -171,7 +172,8 @@ public final class OrionV2Mapper {
                     toCurrentScopedGrants(organization.getGrants()),
                     toCurrentScopedRoles(organization.getRoles()),
                     toCurrentTeams(organization.getTeams()),
-                    toCurrentSecrets(organization.getSecrets())));
+                    toCurrentSecrets(organization.getSecrets()),
+                    toCurrentOidcProviders(organization.getOidcProviders())));
         }
         return organizations;
     }
@@ -214,6 +216,25 @@ public final class OrionV2Mapper {
                     toCurrentSecrets(repository.getSecrets())));
         }
         return repositories;
+    }
+
+    private static List<OidcProvider> toCurrentOidcProviders(List<OrionV2.OidcProvider> source) {
+        List<OidcProvider> providers = new ArrayList<>();
+        for (OrionV2.OidcProvider provider : sorted(
+                source, Comparator.comparing(OrionV2.OidcProvider::getId, NULL_SAFE_STRINGS))) {
+            providers.add(new OidcProvider(provider.getId(), URI.create(provider.getIssuer()),
+                    provider.getClientId(), provider.getSecret()));
+        }
+        return providers;
+    }
+
+    private static List<OrionV2.OidcProvider> fromCurrentOidcProviders(List<OidcProvider> source) {
+        List<OrionV2.OidcProvider> providers = new ArrayList<>();
+        for (OidcProvider provider : sorted(source, Comparator.comparing(OidcProvider::id))) {
+            providers.add(new OrionV2.OidcProvider(provider.id(), provider.issuer().toString(),
+                    provider.clientId(), provider.secret()));
+        }
+        return providers;
     }
 
     private static List<AccessControl.User> toCurrentUsers(List<OrionV2.User> source) {
@@ -506,7 +527,8 @@ public final class OrionV2Mapper {
                     fromCurrentScopedGrants(organization.grants()),
                     fromCurrentScopedRoles(organization.roles()),
                     fromCurrentTeams(organization.teams()),
-                    fromCurrentSecrets(organization.secrets())));
+                    fromCurrentSecrets(organization.secrets()),
+                    fromCurrentOidcProviders(organization.oidcProviders())));
         }
         return organizations;
     }

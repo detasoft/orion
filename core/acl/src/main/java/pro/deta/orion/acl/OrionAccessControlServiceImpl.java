@@ -39,6 +39,7 @@ import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
@@ -119,7 +120,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         if (runtimeOptions.resetRootPassword()) {
                             resetRootPassword(AccessControlSnapshot.singleFile(
                                     accessControlStorage.primaryPath(),
-                                    serializeAccessControlConfiguration(new AccessControlDraft().toAccessControl())));
+                                    serializeInitialConfiguration(new AccessControl())));
                         } else {
                             createDefaultAccessControlAndRequestUpdate();
                         }
@@ -734,8 +735,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private byte[] serializeAccessControlConfiguration(AccessControl accessControl) {
-        return serializeOrionConfiguration(OrionDocument.withAccessControl(accessControl));
+    private byte[] serializeInitialConfiguration(AccessControl accessControl) {
+        OrionDocument.Organization organization = new OrionDocument.Organization(
+                new OrganizationId("default"), "Default", List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of());
+        return serializeOrionConfiguration(new OrionDocument(
+                new OrionDocument.SystemConfiguration(accessControl), List.of(organization)));
     }
 
     private byte[] serializeAccessControlConfiguration(
@@ -895,7 +900,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControl ac = createDefaultAccessControl(
                     passwordHash,
                     defaultPasswordCredentialType(passwordHashingAlgorithm));
-            saveAccessControlAndReload(ac, "default scheme applied", UserEmail.EMPTY);
+            saveAccessControlSnapshotAndReload(
+                    AccessControlSnapshot.singleFile(
+                            accessControlStorage.primaryPath(), serializeInitialConfiguration(ac)),
+                    "default scheme applied", UserEmail.EMPTY);
             printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
         } finally {
             Arrays.fill(defaultRootPassword, '\0');
@@ -1546,22 +1554,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private static void mergeAccessControl(AccessControlDraft target, AccessControl source) {
         target.merge(source);
-    }
-
-    private void saveAccessControl(AccessControl accessControl, String message, UserEmail author) {
-        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            xmlService.serializeDocument(OrionDocument.withAccessControl(accessControl), output);
-            accessControlStorage.save(
-                    AccessControlSnapshot.singleFile(accessControlStorage.primaryPath(), output.toByteArray()),
-                    new AccessControlSaveRequest(message, author));
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot serialize ACL", e);
-        }
-    }
-
-    private void saveAccessControlAndReload(AccessControl accessControl, String message, UserEmail author) {
-        saveAccessControl(accessControl, message, author);
-        reload(author + " " + message);
     }
 
     private void saveAccessControlSnapshotAndReload(

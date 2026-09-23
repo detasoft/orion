@@ -429,6 +429,27 @@ as scoped role references, role cycles and HTTPS configuration constraints
 are checked separately by Orion when reading the document. Orion uses its own
 schema for validation and does not fetch the document's schema hint.
 
+OIDC providers are configured per organization, including the ordinary `default`
+organization created on first initialization. Provider settings are persisted
+now; browser login and invitations will be added separately. Organizations do
+not inherit providers from `default`. Each provider's `secret` names an encrypted
+entry in that same organization's `<secrets>` collection:
+
+```xml
+<oidc>
+  <provider id="google">
+    <issuer>https://accounts.google.com</issuer>
+    <clientId>your-client-id</clientId>
+    <secret>google-client</secret>
+  </provider>
+</oidc>
+```
+
+Place `<oidc>` after `<secrets>` within `<organization>`. Corporate providers use
+the same fields. The issuer is an HTTPS URL without credentials, a query or a
+fragment, following [OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata).
+The client secret itself belongs in an encrypted secret entry, not in this block.
+
 HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 
 ```xml
@@ -517,6 +538,9 @@ repository-backed ACL such as `local:orion` is opened directly through the
 native storage backend, while a filesystem ACL uses the configured `file:`
 directory. Orion creates an empty configured repository or ref during first
 startup, commits the generated `orion.xml`, and reuses that commit on restart.
+New configuration includes an empty organization with ID `default`; it does not
+receive system administrator privileges. Existing configurations are preserved,
+including those without `default`.
 Accepted pushes to the configured ref reload the ACL; an invalid candidate
 leaves the last valid ACL active. The internal repository is returned by
 `GET /api/admin/repositories` together with user-created repositories.
