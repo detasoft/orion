@@ -28,6 +28,8 @@ import java.util.zip.Deflater;
  * Completes the object index and makes a received pack self-contained before publication.
  * {@link PackIngestor} first verifies the checksum of the received bytes against the trailer and
  * assigns their {@link PackId}, before resolving any deltas, whether their bases are present or missing.
+ * At that point every entry boundary and the trailer are stored, so local content reads use indexed
+ * compressed bounds and decompress only in the content reader.
  * Resolving OFS/REF deltas against bases in the same pack adds object IDs, logical types and sizes
  * to the index; the stored delta instructions and pack bytes remain unchanged, so the PackId is retained.
  * Adding external bases changes the pack bytes and object count, invalidating the cached PackId.
@@ -117,7 +119,7 @@ public final class GitPackObjectResolver {
         byte[] content;
         while (true) {
             if (entry.baseId().isEmpty() && entry.baseOffset().isEmpty()) {
-                content = pack.readObject(entry.offset(),
+                content = pack.readObject(entry, pack.dataEnd(entry.offset()), entry.baseId(),
                         new ContentGitObjectRead<>((type, size, unused, input) -> readBytes(input, size)));
                 break;
             }
@@ -137,35 +139,38 @@ public final class GitPackObjectResolver {
         }
         while (!deltas.isEmpty()) {
             byte[] base = content;
-            content = pack.readObject(deltas.pop().offset(), new ContentGitObjectRead<>((type, size, unused, input) -> {
-                DeltaByteSource delta = new DeltaByteSource(input, base);
-                try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
-                    byte[] result = readBytes(restored, delta.size());
-                    if (restored.buffer() != null) {
-                        throw new IOException("Delta content exceeds its declared size");
-                    }
-                    return result;
-                }
-            }));
+            IndexedPack.EntryMetadata deltaEntry = deltas.pop();
+            content = pack.readObject(deltaEntry, pack.dataEnd(deltaEntry.offset()), deltaEntry.baseId(),
+                    new ContentGitObjectRead<>((type, size, unused, input) -> {
+                        DeltaByteSource delta = new DeltaByteSource(input, base);
+                        try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
+                            byte[] result = readBytes(restored, delta.size());
+                            if (restored.buffer() != null) {
+                                throw new IOException("Delta content exceeds its declared size");
+                            }
+                            return result;
+                        }
+                    }));
         }
         return content;
     }
 
     private IndexedPack.Record resolve(IndexedPack.EntryMetadata entry, GitObjectType type, byte[] base)
             throws IOException {
-        return pack.readObject(entry.offset(), new ContentGitObjectRead<>((physicalType, size, unused, input) -> {
-            DeltaByteSource delta = new DeltaByteSource(input, base);
-            try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
-                MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
-                hash.update((type.name().toLowerCase(Locale.ROOT) + " " + delta.size() + "\0")
-                        .getBytes(StandardCharsets.US_ASCII));
-                ByteBuffer buffer;
-                while ((buffer = restored.buffer()) != null) {
-                    hash.update(buffer);
-                }
-                return new IndexedPack.Record(entry, new ObjectId(hash.digest()), type, delta.size());
-            }
-        }));
+        return pack.readObject(entry, pack.dataEnd(entry.offset()), entry.baseId(),
+                new ContentGitObjectRead<>((physicalType, size, unused, input) -> {
+                    DeltaByteSource delta = new DeltaByteSource(input, base);
+                    try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
+                        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
+                        hash.update((type.name().toLowerCase(Locale.ROOT) + " " + delta.size() + "\0")
+                                .getBytes(StandardCharsets.US_ASCII));
+                        ByteBuffer buffer;
+                        while ((buffer = restored.buffer()) != null) {
+                            hash.update(buffer);
+                        }
+                        return new IndexedPack.Record(entry, new ObjectId(hash.digest()), type, delta.size());
+                    }
+                }));
     }
 
     private static byte[] readBytes(BufferedByteInputV2 input, long size) throws IOException {

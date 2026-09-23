@@ -13,6 +13,7 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -118,6 +119,29 @@ class GitPackObjectResolverTest {
                 assertThatThrownBy(() -> new GitPackObjectResolver(target, storage).complete())
                         .isInstanceOf(IOException.class);
             }
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, false", "true, false", "false, true", "true, true"})
+    void rejectsCorruptBaseOrDeltaAfterIngestion(boolean memory, boolean corruptBase) throws Exception {
+        byte[] base = blob(new byte[]{1});
+        byte[] source = pack(base, delta(objectId(GitObjectType.BLOB, new byte[]{1}),
+                new byte[]{1, 1, 1, 2}));
+        try (GitStorageApi storage = new GitStorageApi();
+             IndexedPack target = ingest(source,
+                     memory ? IndexedPack.create() : IndexedPack.create(directory.resolve("staging")))) {
+            long offset = PackHeader.SIZE + (corruptBase ? 0 : base.length);
+            long lastCompressedByte = target.dataEnd(offset) - 1;
+            ByteBuffer corrupted = ByteBuffer.allocate(1);
+            assertThat(target.read(lastCompressedByte, corrupted)).isEqualTo(1);
+            corrupted.put(0, (byte) (corrupted.get(0) ^ 1));
+            target.write(lastCompressedByte, corrupted.flip());
+
+            assertThatThrownBy(() -> new GitPackObjectResolver(target, storage).complete())
+                    .isInstanceOf(IOException.class);
+            assertThatThrownBy(target::size).isInstanceOf(ClosedChannelException.class);
+            assertThat(storage.packIds()).isEmpty();
         }
     }
 }
