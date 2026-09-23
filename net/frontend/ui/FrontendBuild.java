@@ -19,7 +19,7 @@ class FrontendBuild {
         try (FileChannel channel = FileChannel.open(lockFile,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                 FileLock lock = channel.lock()) {
-            runNpm(directory, nodeDirectory, List.of("ci", "--no-audit", "--no-fund"));
+            runNpm(directory, nodeDirectory, List.of("install", "--no-save", "--no-audit", "--no-fund"));
             runNpm(directory, nodeDirectory,
                     List.of("run", "build", "--", "--outDir", outputDirectory.toString()));
         }

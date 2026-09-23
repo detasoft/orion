@@ -73,9 +73,12 @@ mvn verify -Pdev -T 4 -pl :frontend-ui -am
 ```
 
 The Maven frontend build uses Maven's JDK to run `FrontendBuild.java`. It holds an
-OS lock on `.npm-build.lock` across `npm ci` and `npm run build`, so concurrent
+OS lock on `.npm-build.lock` across `npm install` and `npm run build`, so concurrent
 Maven builds in the same worktree wait instead of modifying `node_modules`
-simultaneously. Different worktrees build independently. The output directory
+simultaneously. Installation reuses `node_modules` and updates dependencies as needed
+without deleting the whole directory first. `--no-save` prevents the build from
+rewriting `package.json` or `package-lock.json`.
+Different worktrees build independently. The output directory
 remains shared. The ignored lock file stays outside `target` and must not be deleted
 while builds are running. Direct npm commands bypass this lock; do not run them, or Maven
 `clean`, concurrently with a Maven build in the same worktree.
