@@ -434,34 +434,189 @@ Organization identities are confined to repositories addressed as
 that boundary; wildcard grants never cross it. HTTP repository listings, SSH
 catalogs and pending decisions use the same organization boundary. System
 administration, system SSH credentials and system token issuance require a
-system identity, even when an organization user has the same user ID. OIDC access tokens carry the organization identity and use these same checks.
+system identity, even when an organization user has the same user ID. OIDC access
+tokens carry the organization identity and use these same checks.
 
-OIDC providers are configured per organization, including the ordinary `default`
-organization created on first initialization. Organizations do not inherit providers from `default`. Each provider's `secret` names an encrypted
-entry in that same organization's `<secrets>` collection:
+### Configure an OIDC provider
 
-```xml
-<oidc>
-  <provider id="google">
-    <issuer>https://accounts.google.com</issuer>
-    <clientId>your-client-id</clientId>
-    <secret>google-client</secret>
-  </provider>
-</oidc>
-```
+Providers belong to an organization, including the ordinary `default`
+organization created on first initialization. Organizations do not inherit
+providers from `default`. Configure each organization that needs browser login.
+Provider configuration is stored in the versioned `orion.xml`, not the startup
+YAML/TOML file.
 
-Place `<oidc>` after `<secrets>` within `<organization>`. Corporate providers use
-the same fields. The issuer is an HTTPS URL without credentials, a query or a
-fragment, following [OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata).
-The client secret itself belongs in an encrypted secret entry, not in this block.
+1. **Set Orion's public address.** In `system/https/publicUrl`, set the HTTPS
+   origin users open in their browsers, for example `https://orion.example.test`.
+   Use the external address when Orion runs behind a reverse proxy. Do not include
+   an application path, query, or fragment. This setting does not enable HTTPS
+   by itself: configure Orion's HTTPS listener or TLS termination at the proxy.
+2. **Register a web application with the provider.** Use a confidential OIDC
+   client with authorization code flow and a client secret. Register this exact
+   redirect URI for the example address:
 
-Set `system/https/publicUrl` to the public HTTPS origin, for example
-`https://orion.example.test`, and register
-`https://orion.example.test/api/auth/oidc/callback` with each provider.
-The provider must support authorization code flow with PKCE S256, client secret
-basic or post authentication, RS256-signed ID tokens, and include `email` and
-boolean `email_verified: true` in the ID token. The requested scopes are
-`openid email profile`.
+   ```text
+   https://orion.example.test/api/auth/oidc/callback
+   ```
+
+   Allow `openid email profile` scopes, PKCE S256, and `client_secret_basic` or
+   `client_secret_post` authentication. Orion currently accepts RS256-signed ID
+   tokens. The ID token must include `sub`, `email`, and boolean
+   `email_verified: true`; `given_name` and `family_name` are optional. Orion does
+   not fetch missing email claims from the UserInfo endpoint.
+3. **Store the client secret in the organization.** The provider's `secret`
+   field names an encrypted entry in that same organization's `<secrets>`
+   collection. It is not the plaintext client secret or an environment variable.
+   There is currently no CLI command or UI form to provision organization OIDC
+   secrets. Provisioning requires the internal
+   [ConfigurationSecrets API](core/common/src/main/java/pro/deta/orion/config/ConfigurationSecrets.java):
+   `create(document, ConfigurationScope.organization(organizationId), secretId, secretChars)`
+   returns a candidate document containing the encrypted entry; persist it using
+   the configuration revision check. Use `replace` for rotation. Encryption is
+   bound to the owning organization and secret ID, so copying an envelope from
+   another scope will not work. The **People** form only creates invitations.
+4. **Add the provider to the organization.** After provisioning the secret, put
+   `<oidc>` after `<secrets>` and before `<invitations>`, if present. For Google,
+   the block is:
+
+   ```xml
+   <oidc>
+     <provider id="google">
+       <issuer>https://accounts.google.com</issuer>
+       <clientId>YOUR_CLIENT_ID.apps.googleusercontent.com</clientId>
+       <secret>google-client</secret>
+     </provider>
+   </oidc>
+   ```
+
+   Here `google-client` must be the ID of the encrypted secret created in step 3.
+   For a corporate provider, use its issuer, client ID, and organization secret
+   reference. The issuer must be an HTTPS URL without credentials, query, or
+   fragment. Enter the issuer itself, not its discovery-document URL. Orion reads
+   `ISSUER/.well-known/openid-configuration`; its `issuer` must match the configured
+   value, and its authorization, token, and JWKS endpoints must use HTTPS.
+5. **Apply the configuration and test an invitation.** Commit and push `orion.xml`
+   to the configured configuration repository/ref; accepted updates reload the
+   configuration. Sign in to Orion as a system administrator, open **People**,
+   select the organization, enter the invitee's email, and copy the generated
+   link. Open it in the browser that will complete sign-in, choose the provider,
+   and sign in with that email. Complete the profile and check that only the
+   organization's repositories are visible. Later, use **Sign in with OIDC**
+   with the same organization; a new invitation is not required.
+
+#### Provider registration examples
+
+All examples assume Orion is available at `https://orion.example.com`:
+
+| Setting | Value |
+| --- | --- |
+| Orion `system/https/publicUrl` | `https://orion.example.com` |
+| Callback registered with every provider | `https://orion.example.com/api/auth/oidc/callback` |
+| Requested scopes | `openid email profile` |
+
+Replace example domains, realm names, and tenant IDs with your own values.
+The callback always points to **Orion**; the issuer points to the **provider**.
+Copy the issuer exactly from its discovery document, including a trailing slash
+when present. These are registration examples, not a claim that every provider's
+default token configuration satisfies Orion's requirements.
+
+**Google / Google Workspace**
+
+1. Open [Google Cloud credentials](https://console.cloud.google.com/apis/credentials)
+   and select the project for Orion. Configure the OAuth consent screen/audience.
+2. Create an OAuth client ID of type **Web application**, named `Orion`.
+3. Add `https://orion.example.com/api/auth/oidc/callback` to **Authorized redirect
+   URIs**. If the app is limited to test users, add the invited accounts.
+4. Copy the client ID and client secret into Orion's provider configuration and
+   encrypted organization secret, respectively.
+
+Issuer: `https://accounts.google.com`
+
+Discovery: `https://accounts.google.com/.well-known/openid-configuration`
+
+See [Google's OIDC registration guide](https://developers.google.com/identity/openid-connect/openid-connect).
+
+**Auth0**
+
+1. Open the [Auth0 Dashboard](https://manage.auth0.com/), choose your tenant, then
+   **Applications → Applications → Create Application**.
+2. Name it `Orion` and choose **Regular Web Applications**.
+3. In **Settings**, add `https://orion.example.com/api/auth/oidc/callback` to
+   **Allowed Callback URLs**. Keep RS256 signing and use client secret basic or
+   post authentication. Enable the connection users will sign in through.
+4. Copy **Client ID** and **Client Secret**. Use the issuer for the same tenant
+   domain used during login; users must have a verified email.
+
+Example issuer: `https://YOUR_TENANT.eu.auth0.com/`
+
+Discovery: `https://YOUR_TENANT.eu.auth0.com/.well-known/openid-configuration`
+
+Use your actual domain; a custom Auth0 domain also changes the issuer.
+See [Auth0 application settings](https://auth0.com/docs/get-started/applications/application-settings).
+
+**Keycloak**
+
+1. Open your deployment's admin console, for example
+   `https://sso.example.com/admin/`, and select the realm, such as `employees`.
+2. Under **Clients**, create an **OpenID Connect** client with client ID `orion`.
+3. Enable **Client authentication** and **Standard flow**. Set **Valid redirect
+   URIs** to `https://orion.example.com/api/auth/oidc/callback` and configure PKCE
+   method **S256**. Copy the secret from **Credentials**.
+4. Include the `email` and `profile` client scopes in ID tokens. Configure email
+   verification so invited users receive `email_verified: true` after verification;
+   do not replace verification with an unconditional claim.
+
+Example issuer: `https://sso.example.com/realms/employees`
+
+Discovery: `https://sso.example.com/realms/employees/.well-known/openid-configuration`
+
+If Keycloak uses an additional public path prefix, include it in the issuer.
+See [Keycloak client administration](https://www.keycloak.org/docs/latest/server_admin/)
+and [OIDC endpoints](https://www.keycloak.org/securing-apps/oidc-layers).
+
+**Microsoft Entra ID (Azure AD)**
+
+1. Open the [Microsoft Entra admin center](https://entra.microsoft.com/), then
+   **Entra ID → App registrations → New registration**.
+2. Name the application `Orion` and choose a single tenant for the organization.
+3. Under **Authentication**, add a **Web** platform with redirect URI
+   `https://orion.example.com/api/auth/oidc/callback`.
+4. Under **Certificates & secrets**, create a client secret. Copy its **Value**,
+   not its secret ID, and the **Application (client) ID** from **Overview**.
+
+Example issuer: `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0`
+
+Discovery: `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0/.well-known/openid-configuration`
+
+Use the directory's tenant GUID, not `common` or `organizations`: Orion expects
+an exact issuer, not a tenant-dependent issuer template.
+
+**Current compatibility limitation:** ordinary Entra workforce tokens do not
+provide the verified-email guarantee required by this Orion flow. Adding an
+`email` claim alone is insufficient; Orion rejects tokens without boolean
+`email_verified: true`. Therefore this registration alone does not make direct
+Entra login ready to use. It needs a separate verified-email onboarding design
+or a broker that actually verifies email and issues compatible tokens. Do not
+hard-code `email_verified` to bypass the check.
+
+See [Entra app registration](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app),
+[redirect URI configuration](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri),
+and [ID token claims and email limitations](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference).
+
+#### Troubleshooting provider setup
+
+If setup fails, check:
+
+- **Organization cannot be selected in People:** no OIDC provider is configured
+  for it yet.
+- **Invitation creation fails:** check the public HTTPS URL, email, and provider
+  configuration; an existing user with that email cannot be invited again.
+- **Provider rejects the redirect:** scheme, hostname, port, and callback path
+  must exactly match the registered URI.
+- **Orion rejects sign-in:** check the issuer and secret, token claims, invitation
+  email and expiry, and that the callback opens in the same browser. Restart the
+  login flow after changing provider configuration or restarting Orion.
+
+### Invitations and account lifecycle
 
 In the UI, a system administrator opens **People**, selects any organization
 with OIDC configured, and enters the invitee's email. Orion returns a link to
@@ -482,6 +637,7 @@ a server restart requires restarting login, while unused invitations survive.
 The one-hour access token is stored in the browser's session storage. Removing
 the user, its OIDC binding, or the trusted issuer invalidates its tokens.
 
+### HTTPS and ACME
 
 HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 
