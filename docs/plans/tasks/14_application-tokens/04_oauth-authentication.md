@@ -1,137 +1,111 @@
-# OAuth and Application Token Authentication
+# OIDC Login and Email Invitations
 
-## Goal
+- Owner: codex, session 01a0cd57-6e6e-7083-bffc-2f8231e97bc9, branch `codex/oidc-invitations-01a0cd57`,
+  worktree `.worktrees/oidc-invitations-01a0cd57`, started 2026-09-23 10:22 Europe/Amsterdam.
 
-Improve Orion authentication so human users can sign in through OAuth or OIDC
-providers and automated clients can use managed application tokens with
-explicit scope, lifetime, rotation, and revocation.
+## Required result
 
-## Current State
+Provide one configurable OIDC login mechanism for Google and corporate OIDC
+providers. Administrators invite a specific email into an existing organization
+with initial roles/team memberships. The recipient authenticates with an
+allowed provider, fills in their profile, and becomes an Orion user. Subsequent
+logins use the external identity and Orion permissions. Registration is closed
+without an invitation. The administrator receives a shareable link; automatic
+email delivery is outside this task.
 
-Orion stores users, credentials, roles, and grants in the ACL model.
+## Current model and dependencies
 
-HTTP token issuance currently uses Basic credentials on `/api/admin/token` and
-returns a Bearer JWT. SSH can also issue a token through `issue-token`.
+HTTP uses OrionAuthorizationFilter and existing Bearer verification. User
+creation currently uses OrionAdminCreateOrUpdateUserRoute. OrionDocument has
+organization users with first/last/email, enabled, credentials, memberships,
+and role assignments. Configuration changes can use the existing optimistic
+revision-checked persistence; ConfigurationSecrets provides encrypted secret
+references. These are the foundation for this task. Inspect actual wiring and
+published identity mapping before extending it.
 
-`JwtAccessTokenService` issues RS256 JWTs with issuer, subject, issued-at, and
-expiration claims. Verification checks signature, issuer, subject, expiration,
-and that the subject still maps to an ACL user.
+Application-token storage, rotation, and scoped automation tokens remain in
+01_model-and-storage.md, 02_admin-api-and-usage.md, and
+03_scoped-authorization.md. They are not prerequisites for OIDC browser login
+and are not deliverables here. Existing Basic/Bearer/SSH authentication must
+continue working. Do not introduce another ACL or user store.
 
-Bearer token authentication is stateless. There is no token id, no scope claim,
-no refresh token, no revocation list, no rotation lifecycle, and no persisted
-application-token record.
+## Design
 
-## Non-Goals
+- Configure trusted OIDC providers with id/display name, issuer, client id,
+  encrypted client secret reference, and configured redirect URI. Use discovery
+  and a maintained OIDC/JWT library where available; never implement signature
+  cryptography manually. Google is a provider configuration, not a separate
+  production login path. Organizational allowed-provider policy controls login
+  and invitation redemption. SAML and account linking UI are out of scope.
+- Persist external identity as issuer plus subject linked to an organization
+  user. Email is not identity. Never implicitly link an existing user by email.
+  Validate uniqueness and organization boundaries. Changed provider policy,
+  disabled/deleted users, and expired sessions must take effect for access.
+- Invitation contains organization, normalized email, initial roles/memberships,
+  expiry, and a cryptographically random secret whose digest alone is persisted.
+  Support administrator creation, safe listing, and revocation. Validate grants
+  within the target organization. Do not log tokens or return secrets in lists.
+- Authorization code flow binds state, nonce, PKCE, provider, invitation, and
+  browser. Verify signature, issuer, audience/authorized party, expiration,
+  nonce, and email verification. Require exact intended email at redemption.
+  Reject wrong browser/state/provider, replay, expired invitations, and wrong
+  emails without consuming valid invitations. Bound transient login state,
+  network requests, token sizes, and sessions. Trust only admin-configured
+  issuers/endpoints; do not accept arbitrary callback redirects.
+- Before completing profile, expose only the onboarding operation, not a fully
+  authorized account/session. Validate first/last and user identifier according
+  to existing domain rules. Atomically persist user, external identity, and
+  invitation consumption using existing configuration concurrency control.
+  Concurrent/replayed completion cannot duplicate users or consume another
+  invitation. Durable records survive reload/restart; incomplete ephemeral
+  login may require restarting sign-in after a restart.
+- Use a secure HttpOnly browser session cookie and explicit CSRF defense for
+  mutations, including existing HTTP mutation routes when cookie-authenticated.
+  Preserve Bearer clients. Provide logout and current-user/session status.
+  Use bounded short-lived sessions with fresh user/policy validation; do not
+  expose provider tokens or client secrets to the frontend.
+- Browser UI provides login/provider selection, invitation entry flow, profile
+  completion, error handling, and logout. Add administrator invitation controls
+  in the existing frontend where appropriate. Anonymous users must be able to
+  reach sign-in; preserve existing admin and session features.
 
-Do not replace the existing ACL and grant system.
+## Implementation plan
 
-Do not add OAuth provider support before Orion has a stable mapping from
-external identities to local users and grants.
+1. Trace existing configuration schema/XML translation, persistence, secret
+   resolution, scoped principals, token issuance, HTTP authorization/routes,
+   frontend auth/API client, and tests. Read local class rules. Extend the
+   existing canonical model with provider policy, invitations, and identities;
+   update every real constructor/translator/consumer that copies those models.
+2. Cover and implement durable invitation management and atomic redemption,
+   identity uniqueness, organization isolation, expiry/revocation, reload,
+   concurrent completion, and failure without partial persistence.
+3. Implement shared OIDC discovery/code exchange/token verification with native
+   HTTP timeouts, browser-bound one-time login transactions, and short-lived
+   onboarding/session state. Integrate existing permission evaluation and
+   secret resolution without preserving duplicate authorization models.
+4. Register public authentication and protected invitation/profile/session
+   routes. Add cookie-aware authentication, logout, CSRF checks, appropriate
+   no-store headers and sanitized errors. Preserve existing Bearer/SSH paths.
+5. Add browser login, first-use profile, and invitation administration UI with
+   behavior tests. Document concrete Google and corporate OIDC setup, secret
+   provisioning, redirect URL, invitation use, expiry, and limitations in an
+   appropriate existing documentation location.
+6. Exercise the flow with a controlled local OIDC provider fixture, including
+   both Google-shaped and corporate issuer configuration. Test normal login,
+   invitation onboarding, repeat login, wrong email/state/nonce/audience/issuer,
+   unverified email, duplicate/replayed callbacks, disabled users, revoked and
+   expired invitations, concurrent redemption, restart/reload, logout, CSRF,
+   and unchanged Bearer access. Run focused tests via make run-test and the
+   complete required make test check; run frontend tests/build as applicable.
 
-Do not treat long-lived application tokens as ordinary short-lived session
-tokens.
+## Acceptance
 
-Do not store raw application tokens. Store only a verifier or hash.
-
-## Scope
-
-Split token concepts:
-
-- short-lived access tokens used for HTTP requests;
-- application tokens intended for automation;
-- external OAuth or OIDC login identities;
-- optional refresh or renewal tokens, if a browser flow is added later.
-
-Add token metadata:
-
-- token id;
-- subject user id;
-- token kind;
-- display name;
-- created time;
-- expires time;
-- last used time;
-- revoked time;
-- allowed scopes or grant snapshot;
-- optional origin such as OAuth provider or SSH issue command.
-
-Application tokens should be persisted, individually revocable, and rotatable.
-The token value should be shown once and stored as a strong hash or verifier.
-
-OAuth or OIDC support should introduce provider configuration, callback routes,
-state validation, external identity mapping, and clear behavior for first login
-when no matching Orion user exists.
-
-## Phased Plan
-
-Phase 1: Token model and storage.
-
-Add persisted application-token records with hashed token verifiers. Keep the
-existing JWT access token path working. Add tests for create, authenticate,
-expire, revoke, rotate, and reload.
-
-Phase 2: Scoped token authorization.
-
-Decide whether token scopes are independent permissions or a restriction on the
-user's ACL grants. Prefer a restrictive model where the final permission is the
-intersection of user grants and token scopes. The detailed scoped authorization
-design lives in
-[the scoped authorization task](03_scoped-authorization.md).
-
-Phase 3: Admin token API.
-
-Add endpoints to create, list, revoke, and rotate application tokens. The create
-response returns the token once. List responses never include token secret
-material. The detailed admin API and usage-accounting design lives in
-[the admin API task](02_admin-api-and-usage.md).
-
-Phase 4: JWT improvements.
-
-Add token id and token kind claims to issued JWTs where appropriate. Decide
-whether short-lived JWTs remain stateless or must check a server-side token
-record for revocation-sensitive flows.
-
-Phase 5: OAuth or OIDC provider abstraction.
-
-Add provider config for issuer, client id, client secret reference, redirect
-URI, allowed domains, and claim mapping. Add callback routes with state and
-nonce validation.
-
-Phase 6: External identity mapping.
-
-Define how provider identities map to ACL users: by explicit link, verified
-email, provider subject, or admin-created binding. Avoid automatic admin grants.
-
-## Open Questions
-
-Should application tokens authenticate directly, or should they exchange for
-short-lived JWT access tokens?
-
-Should token scopes be named actions, ACL grant expressions, or both?
-
-Where should token records be stored: inside ACL XML, alongside ACL storage, or
-in a separate operational store?
-
-What is the minimum viable OAuth provider: generic OIDC, GitHub, GitLab, or a
-single configured issuer?
-
-How should CLI and Git clients authenticate when OAuth is the human login
-method?
-
-Should existing Basic password token issuance remain enabled by default after
-OAuth is available?
-
-## Verification
-
-Cover at least these cases:
-
-- existing Basic-to-Bearer token issue continues to work;
-- application token is shown once and only a verifier is persisted;
-- expired and revoked application tokens are rejected;
-- rotated tokens invalidate the previous secret;
-- token scopes restrict the user's effective grants;
-- token list omits secret material and includes last-used metadata;
-- OAuth callback rejects missing state, wrong state, and provider errors;
-- external identity mapping does not create unintended admin access;
-- token authentication survives ACL reloads according to the selected storage
-  model.
+The browser and admin routes are wired into the running application. A user can
+accept an email-bound invitation through either configured OIDC provider, set a
+profile, obtain exactly the invitation's permissions, logout, and log in again.
+An unrelated/unauthorized external account cannot create, link, or access a user.
+Invitation and identity persistence are verified through real supported APIs.
+Configuration round trips preserve all new and existing fields. Secrets remain
+protected. Existing SSH/API login continues to pass its tests. Real external
+provider smoke tests require deployment credentials and are reported separately
+from deterministic local verification.
