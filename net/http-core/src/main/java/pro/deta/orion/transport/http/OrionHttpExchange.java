@@ -29,7 +29,7 @@ public final class OrionHttpExchange {
         return path;
     }
 
-    private static String routePath(HttpServletRequest request) {
+    static String routePath(HttpServletRequest request) {
         String path = request.getPathInfo();
         if (path != null && !path.isBlank()) {
             return path;

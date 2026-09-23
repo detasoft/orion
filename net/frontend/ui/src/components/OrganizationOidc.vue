@@ -13,6 +13,8 @@ const id = ref('')
 const issuer = ref('')
 const clientId = ref('')
 const clientSecret = ref('')
+const idleHours = ref(48)
+const reauthenticationHours = ref(0)
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
@@ -26,6 +28,8 @@ function reset() {
   issuer.value = original.value?.issuer ?? ''
   clientId.value = original.value?.clientId ?? ''
   clientSecret.value = ''
+  idleHours.value = (original.value?.idleTimeoutSeconds ?? 172800) / 3600
+  reauthenticationHours.value = (original.value?.reauthenticationTimeoutSeconds ?? 0) / 3600
   saved.value = false
 }
 watch(organization, () => { selected.value = ''; reset() })
@@ -57,7 +61,9 @@ async function save() {
   saved.value = false
   error.value = ''
   const input = { organization: organization.value, revision: revision.value, id: id.value.trim(),
-    issuer: issuer.value.trim(), clientId: clientId.value.trim(), clientSecret: clientSecret.value }
+    issuer: issuer.value.trim(), clientId: clientId.value.trim(), clientSecret: clientSecret.value,
+    idleTimeoutSeconds: Math.round(Number(idleHours.value) * 3600),
+    reauthenticationTimeoutSeconds: Math.round(Number(reauthenticationHours.value) * 3600) }
   clientSecret.value = ''
   try {
     await api.saveOidcProvider(input)
@@ -101,6 +107,15 @@ onMounted(reload)
       </label>
       <p>{{ needsSecret ? 'Enter the secret for this client.' : 'Leave empty to keep the saved secret.' }}
         Secrets are encrypted when saved and are never displayed.</p>
+      <label>Inactivity timeout (hours)
+        <input v-model.number="idleHours" name="idleHours" type="number" min="0.000278" max="596523"
+          step="any" required :disabled="busy" />
+      </label>
+      <label>Require sign-in every (hours; 0 disables)
+        <input v-model.number="reauthenticationHours" name="reauthenticationHours" type="number"
+          min="0" max="596523" step="any" required :disabled="busy" />
+      </label>
+      <p>Timeouts apply separately to each browser session using this provider.</p>
       <button class="primary-button" :disabled="busy || !organization || !revision">Save provider</button>
     </form>
     <p v-if="saved" role="status">Provider saved. You can now invite users to this organization.</p>

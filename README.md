@@ -642,16 +642,45 @@ computer wakes up. Renewal uses a separate `Secure`, `HttpOnly`, `SameSite=Stric
 cookie; JavaScript cannot read that credential. No additional provider settings
 or provider refresh tokens are needed.
 
-Browser sessions have a fixed seven-day renewal window measured from sign-in.
-Renewing an access token does not extend that window. Sessions are held in
-server memory, so restarting Orion requires signing in again once the current
+Each OIDC provider has its own session timeout policy, editable in **People →
+Organization sign-in**. The UI accepts hours; XML stores seconds:
+
+- `idleTimeoutSeconds`: inactivity limit, default `172800` (48 hours), greater than zero.
+- `reauthenticationTimeoutSeconds`: maximum time since authentication, default `0`
+  (disabled). Set `604800` for mandatory sign-in every seven days.
+
+Both settings accept whole seconds up to `2147483647`. Omitting them in XML
+uses the defaults. For example, add these after `<secret>` inside `<provider>`:
+
+```xml
+<idleTimeoutSeconds>172800</idleTimeoutSeconds>
+<reauthenticationTimeoutSeconds>604800</reauthenticationTimeoutSeconds>
+```
+
+Each browser session keeps its own activity time. Authenticated requests to
+working `/api/` endpoints extend inactivity, including background polling of
+those endpoints. Authentication endpoints (`/api/auth/`), lifecycle health
+checks, `/api/health`, `/api/ready`, `/api/live`, static files, `OPTIONS`, and
+`HEAD` do not extend inactivity. Requests require a matching session cookie
+and user identity; one user's activity cannot extend another session.
+
+Token renewal itself does not extend inactivity. An expired session cannot be
+revived by sending another request. Issued access tokens last at most one hour
+and never outlive either current session deadline. With mandatory sign-in
+configured, Orion requests fresh authentication using OIDC `max_age=0` and
+requires a signed, recent `auth_time` claim; providers must support this
+[OIDC behavior](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest).
+Activity never moves the mandatory sign-in deadline. Changing provider settings
+invalidates existing sessions on their next activity or renewal.
+
+Sessions are held in server memory, so restarting Orion requires signing in again once the current
 access token needs renewal. Reloading the same browser tab preserves renewal
 metadata; manually supplied Admin API tokens are not renewed.
 
 **Sign out** revokes the browser session and removes the local access token.
-Previously issued access tokens remain subject to their original one-hour
-expiry. Removing the user, its OIDC binding, or the trusted issuer invalidates
-its access tokens and prevents renewal. Changes to the session's provider
+Previously issued access tokens remain subject to their original expiry
+(at most one hour). Removing the user, its OIDC binding, or the trusted issuer
+invalidates its access tokens and prevents renewal. Changes to the session's provider
 configuration or public origin also prevent renewal. Temporary network failures
 retain a still-valid access token and retry renewal; an expired or revoked
 session requires signing in again.

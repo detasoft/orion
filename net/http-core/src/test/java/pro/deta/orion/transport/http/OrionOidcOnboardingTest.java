@@ -49,16 +49,134 @@ import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
     @Test
-    void renewalDoesNotExtendTheSevenDayDeadline() throws Exception {
+    void adminRejectsInvalidTimeoutsWithoutSavingTheProvider() throws Exception {
+        try (Fixture f = new Fixture()) {
+            String revision = f.desired.current().revision().orElseThrow();
+            Map<String, Object> input = new HashMap<>(Map.of("organization", "acme", "id", "invalid",
+                    "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "secret",
+                    "revision", revision, "reauthenticationTimeoutSeconds", 0));
+            for (Object invalid : List.of(0, -1, 1.5, "3600", Long.MAX_VALUE)) {
+                input.put("idleTimeoutSeconds", invalid);
+                assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(400);
+                assertThat(f.desired.current().revision()).contains(revision);
+            }
+            input.put("idleTimeoutSeconds", 172800);
+            input.put("reauthenticationTimeoutSeconds", -1);
+            assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(400);
+            assertThat(f.desired.current().revision()).contains(revision);
+        }
+    }
+
+    @Test
+    void aDifferentOrganizationsTokenCannotExtendTheSession() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            String acmeCookie = f.sessionCookie;
+            f.sessionCookie = null;
+            Login other = f.start("default", f.invite("default"));
+            Reply complete = f.post("complete", Map.of("ticket", f.callback(other), "first", "Alice"), other.cookie);
+            f.sessionCookie = acmeCookie;
+            f.clock.now = f.clock.now.plusSeconds(47 * 3600);
+            assertThat(f.activity("GET", "/api/admin/repositories", complete.json.path("token").asText()).headers)
+                    .doesNotContainKey("Set-Cookie");
+            f.clock.now = f.clock.now.plusSeconds(3600);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void authenticatedRequestsExtendOnlyTheirOwnSessionBeyondSevenDays() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Reply first = f.signIn("corporate", f.invite("acme"));
+            String firstCookie = f.sessionCookie;
+            f.sessionCookie = null;
+            f.signIn("corporate", "");
+            String idleCookie = f.sessionCookie;
+            f.sessionCookie = firstCookie;
+            String token = first.json.path("token").asText();
+            for (int day = 0; day < 9; day++) {
+                f.clock.now = f.clock.now.plusSeconds(86400);
+                Reply activity = f.activity("GET", "/api/admin/repositories", token);
+                assertThat(activity.headers.get("Set-Cookie")).contains("Max-Age=172800");
+                assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
+            }
+            f.sessionCookie = idleCookie;
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/auth/me", "/api/auth/oidc/refresh", "/api/health",
+            "/api/admin/lifecycle/state", "/assets/app.js", "OPTIONS", "HEAD", "anonymous"})
+    void excludedRequestsDoNotKeepSessionsAlive(String excluded) throws Exception {
+        try (Fixture f = new Fixture()) {
+            Reply login = f.signIn("corporate", f.invite("acme"));
+            f.clock.now = f.clock.now.plusSeconds(47 * 3600);
+            String method = excluded.equals("OPTIONS") || excluded.equals("HEAD") ? excluded : "GET";
+            String path = excluded.startsWith("/") ? excluded : "/api/admin/repositories";
+            String token = excluded.equals("anonymous") ? "" : login.json.path("token").asText();
+            f.activity(method, path, token);
+            f.clock.now = f.clock.now.plusSeconds(3600);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            assertThat(f.activity("GET", "/api/admin/repositories", token).headers).doesNotContainKey("Set-Cookie");
+        }
+    }
+
+    @Test
+    void providerPoliciesAreIndependentAndAbsoluteExpiryCapsIssuedTokens() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.saveProvider("short", 3600, 120);
+            f.authenticationTime = f.clock.now.getEpochSecond();
+            Reply limited = f.signIn("short", f.invite("acme"));
+            assertThat(f.authorizationParameters).containsEntry("max_age", "0");
+            String limitedCookie = f.sessionCookie;
+            JWTClaimsSet claims = JWTParser.parse(limited.json.path("token").asText()).getJWTClaimsSet();
+            assertThat(claims.getExpirationTime().getTime() - claims.getIssueTime().getTime()).isEqualTo(120000);
+            f.sessionCookie = null;
+            f.signIn("corporate", "");
+            assertThat(f.authorizationParameters).doesNotContainKey("max_age");
+            String unlimitedCookie = f.sessionCookie;
+            f.sessionCookie = limitedCookie;
+            f.clock.now = f.clock.now.plusSeconds(110);
+            f.activity("GET", "/api/admin/repositories", limited.json.path("token").asText());
+            Reply renewal = f.post("refresh", Map.of(), null);
+            assertThat(renewal.status).isEqualTo(200);
+            claims = JWTParser.parse(renewal.json.path("token").asText()).getJWTClaimsSet();
+            assertThat(claims.getExpirationTime().getTime() - claims.getIssueTime().getTime()).isEqualTo(10000);
+            f.clock.now = f.clock.now.plusSeconds(10);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            f.sessionCookie = unlimitedCookie;
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void mandatoryReauthenticationRejectsMissingAndStaleProviderAuthenticationTime() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.saveProvider("short", 172800, 604800);
+            String invite = f.invite("acme");
+            for (Long time : Arrays.asList(null, f.clock.now.minusSeconds(300).getEpochSecond(),
+                    f.clock.now.plusSeconds(300).getEpochSecond())) {
+                f.authenticationTime = time;
+                Login login = f.start("acme", invite, "short");
+                assertThat(f.callbackReply(login, login.cookie).status).isEqualTo(400);
+            }
+            f.authenticationTime = f.clock.now.getEpochSecond();
+            assertThat(f.signIn("short", invite).status).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void backgroundRenewalDoesNotExtendTheIdleDeadline() throws Exception {
         try (Fixture f = new Fixture()) {
             Login login = f.start("acme", f.invite("acme"));
             Reply complete = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
             f.sessionCookie = complete.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
-            f.clock.now = f.clock.now.plusSeconds(6 * 24 * 60 * 60);
+            f.clock.now = f.clock.now.plusSeconds(47 * 60 * 60);
             Reply refreshed = f.post("refresh", Map.of(), null);
             assertThat(refreshed.status).isEqualTo(200);
-            assertThat(refreshed.headers).doesNotContainKey("Set-Cookie");
-            f.clock.now = f.clock.now.plusSeconds(24 * 60 * 60);
+            assertThat(refreshed.headers.get("Set-Cookie")).contains("Max-Age=3600");
+            f.clock.now = f.clock.now.plusSeconds(60 * 60);
             Reply expired = f.post("refresh", Map.of(), null);
             assertThat(expired.status).isEqualTo(401);
             assertThat(expired.headers.get("Set-Cookie")).contains("Max-Age=0");
@@ -72,7 +190,7 @@ class OrionOidcOnboardingTest {
             Reply complete = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
             String header = complete.headers.get("Set-Cookie");
             assertThat(header).startsWith("__Host-orion-session=")
-                    .contains("HttpOnly", "Secure", "SameSite=Strict", "Max-Age=604800");
+                    .contains("HttpOnly", "Secure", "SameSite=Strict", "Max-Age=172800");
             f.sessionCookie = header.split(";", 2)[0].split("=", 2)[1];
             Reply refreshed = f.post("refresh", Map.of(), null);
             assertThat(refreshed.status).isEqualTo(200);
@@ -319,7 +437,8 @@ class OrionOidcOnboardingTest {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OidcProvider> providers = new ArrayList<>(org.oidcProviders());
-                    providers.add(new OidcProvider("second", f.issuer, "second-client", "oidc"));
+                    providers.add(new OidcProvider("second", f.issuer, "second-client", "oidc",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0));
                     organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), org.users(),
                             org.grants(), org.roles(), org.teams(), org.secrets(), providers, org.invitations()));
                 }
@@ -367,6 +486,10 @@ class OrionOidcOnboardingTest {
                 List.of(new AccessControl.Grant("admin", List.of(
                         new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
         final OrionHttpRouteServlet servlet;
+        final OrionAuthorizationFilter filter;
+        String bearer;
+        Long authenticationTime;
+        Map<String, String> authorizationParameters;
         final MutableClock clock = new MutableClock();
         String sessionCookie;
         String origin = "https://orion.test";
@@ -416,7 +539,8 @@ class OrionOidcOnboardingTest {
                                     .subject("external-alice").audience(audience).issueTime(new Date())
                                     .expirationTime(Date.from(Instant.now().plusSeconds(300)))
                                     .claim("nonce", badNonce ? "wrong" : nonce).claim("email", email)
-                                    .claim("email_verified", emailVerified).claim("given_name", "Alice").build();
+                                    .claim("email_verified", emailVerified).claim("given_name", "Alice")
+                                    .claim("auth_time", authenticationTime).build();
                             SignedJWT jwt = new SignedJWT(new JWSHeader.Builder(JWSAlgorithm.RS256)
                                     .keyID("provider-key").build(), claims);
                             jwt.sign(new RSASSASigner(forgedSignature ? new RSAKeyGenerator(2048).generate() : signingKey));
@@ -449,7 +573,8 @@ class OrionOidcOnboardingTest {
             for (String id : List.of("default", "acme")) {
                 organizations.add(new OrionDocument.Organization(new OrganizationId(id), id, List.of(), List.of(),
                         List.of(), List.of(), List.of(new ConfigurationSecret("oidc", "placeholder")),
-                        List.of(new OidcProvider("corporate", issuer, "client", "oidc")), List.of()));
+                        List.of(new OidcProvider("corporate", issuer, "client", "oidc",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0)), List.of()));
             }
             OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.of(https), List.of(), List.of()), organizations);
@@ -465,6 +590,7 @@ class OrionOidcOnboardingTest {
             acl.reload("fixture");
             accounts = new OrganizationAccounts(acl, desired);
             OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper, clock);
+            filter = new OrionAuthorizationFilter(acl, oidc);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
                     new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
                     new OrionAdminOidcRoute(desired, acl, secrets, mapper))), new OrionHttpResponseWriter(mapper));
@@ -478,15 +604,45 @@ class OrionOidcOnboardingTest {
         }
 
         Login start(String organization, String invitation) throws Exception {
-            Reply reply = post("start", Map.of("organization", organization, "provider", "corporate",
+            return start(organization, invitation, "corporate");
+        }
+
+        Login start(String organization, String invitation, String selectedProvider) throws Exception {
+            Reply reply = post("start", Map.of("organization", organization, "provider", selectedProvider,
                     "invitation", invitation), null);
             assertThat(reply.status).isEqualTo(200);
             Map<String, String> parameters = query(URI.create(reply.json.path("url").asText()).getRawQuery());
+            authorizationParameters = parameters;
             nonce = parameters.get("nonce");
             challenge = parameters.get("code_challenge");
             assertThat(parameters.get("code_challenge_method")).isEqualTo("S256");
             String cookie = reply.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
             return new Login(parameters.get("state"), cookie);
+        }
+
+        void saveProvider(String id, long idle, long reauthentication) throws Exception {
+            Reply result = request("POST", "/api/admin/oidc", Map.of("organization", "acme", "id", id,
+                    "issuer", issuer.toString(), "clientId", "client", "clientSecret", "secret",
+                    "revision", desired.current().revision().orElseThrow(), "idleTimeoutSeconds", idle,
+                    "reauthenticationTimeoutSeconds", reauthentication), Map.of(), null, admin);
+            assertThat(result.status).isEqualTo(200);
+        }
+
+        Reply signIn(String selectedProvider, String invitation) throws Exception {
+            Login login = start("acme", invitation, selectedProvider);
+            Reply result = post("complete", Map.of("ticket", callback(login), "first", "Alice"), login.cookie);
+            assertThat(result.status).isEqualTo(200);
+            sessionCookie = result.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
+            return result;
+        }
+
+        Reply activity(String method, String path, String token) throws Exception {
+            bearer = token;
+            try {
+                return request(method, path, Map.of(), Map.of(), null, SecurityContext.createContext());
+            } finally {
+                bearer = null;
+            }
         }
 
         Reply callbackReply(Login login, String cookie) throws Exception {
@@ -508,13 +664,20 @@ class OrionOidcOnboardingTest {
         Reply request(String method, String path, Map<String, Object> body, Map<String, String> parameters,
                 String cookie, SecurityContext context) throws Exception {
             byte[] bytes = mapper.writeValueAsBytes(body);
+            SecurityContext[] currentContext = {context};
             HttpServletRequest request = stub(HttpServletRequest.class, (proxy, called, args) -> switch (called.getName()) {
                 case "getMethod" -> method;
                 case "getPathInfo" -> path;
-                case "getAttribute" -> context;
+                case "getAttribute" -> currentContext[0];
+                case "setAttribute" -> { currentContext[0] = (SecurityContext) args[1]; yield null; }
+                case "toString" -> "OIDC test request";
                 case "getRemoteAddr" -> "127.0.0.1";
                 case "getContentType" -> "application/json";
-                case "getHeader" -> "Origin".equals(args[0]) ? origin : null;
+                case "getHeader" -> switch ((String) args[0]) {
+                    case "Origin" -> origin;
+                    case "Authorization" -> bearer == null ? null : "Bearer " + bearer;
+                    default -> null;
+                };
                 case "getParameter" -> parameters.get(args[0]);
                 case "getCookies" -> {
                     List<Cookie> cookies = new ArrayList<>();
@@ -531,11 +694,15 @@ class OrionOidcOnboardingTest {
             HttpServletResponse response = stub(HttpServletResponse.class, (proxy, called, args) -> switch (called.getName()) {
                 case "sendError", "setStatus" -> { status[0] = (int) args[0]; yield null; }
                 case "setContentType" -> { headers.put("Content-Type", (String) args[0]); yield null; }
-                case "setHeader" -> { headers.put((String) args[0], (String) args[1]); yield null; }
+                case "setHeader", "addHeader" -> { headers.put((String) args[0], (String) args[1]); yield null; }
                 case "getWriter" -> new PrintWriter(output);
                 default -> throw new UnsupportedOperationException(called.toString());
             });
-            servlet.service(request, response);
+            if (bearer == null) {
+                servlet.service(request, response);
+            } else {
+                filter.doFilter(request, response, (ignoredRequest, ignoredResponse) -> response.setStatus(200));
+            }
             String value = output.toString();
             JsonNode json = value.startsWith("{") ? mapper.readTree(value) : mapper.nullNode();
             return new Reply(status[0], json, headers);

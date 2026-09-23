@@ -47,10 +47,11 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
         OrionDesiredState.Snapshot snapshot = desired.current();
         List<Map<String, Object>> organizations = new ArrayList<>();
         for (OrionDocument.Organization organization : snapshot.document().organizations()) {
-            List<Map<String, String>> providers = new ArrayList<>();
+            List<Map<String, Object>> providers = new ArrayList<>();
             for (OidcProvider provider : organization.oidcProviders()) {
                 providers.add(Map.of("id", provider.id(), "issuer", provider.issuer().toString(),
-                        "clientId", provider.clientId()));
+                        "clientId", provider.clientId(), "idleTimeoutSeconds", provider.idleTimeoutSeconds(),
+                        "reauthenticationTimeoutSeconds", provider.reauthenticationTimeoutSeconds()));
             }
             organizations.add(Map.of("id", organization.id().value(), "providers", providers));
         }
@@ -74,7 +75,9 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             OrganizationId id = new OrganizationId(input.path("organization").asText());
             String revision = input.path("revision").asText();
             OidcProvider provider = new OidcProvider(input.path("id").asText(),
-                    URI.create(input.path("issuer").asText()), input.path("clientId").asText(), "placeholder");
+                    URI.create(input.path("issuer").asText()), input.path("clientId").asText(), "placeholder",
+                    timeout(input, "idleTimeoutSeconds", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS),
+                    timeout(input, "reauthenticationTimeoutSeconds", 0));
             secret = input.path("clientSecret").asText("").toCharArray();
             if (secret.length > 4096) throw new IllegalArgumentException();
             char[] suppliedSecret = secret;
@@ -95,6 +98,13 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             if (secret != null) Arrays.fill(secret, '\0');
             if (bytes != null) Arrays.fill(bytes, (byte) 0);
         }
+    }
+
+    private static long timeout(JsonNode input, String field, long defaultValue) {
+        if (!input.has(field)) return defaultValue;
+        JsonNode value = input.get(field);
+        if (!value.isIntegralNumber() || !value.canConvertToLong()) throw new IllegalArgumentException();
+        return value.longValue();
     }
 
     private OrionDocument save(OrionDocument document, OrganizationId id, OidcProvider input, char[] secret) {
@@ -121,7 +131,8 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
         } else {
             secretId = previous.secret();
         }
-        OidcProvider updated = new OidcProvider(input.id(), input.issuer(), input.clientId(), secretId);
+        OidcProvider updated = new OidcProvider(input.id(), input.issuer(), input.clientId(), secretId,
+                input.idleTimeoutSeconds(), input.reauthenticationTimeoutSeconds());
         List<OrionDocument.Organization> organizations = new ArrayList<>();
         for (OrionDocument.Organization candidate : document.organizations()) {
             if (!candidate.id().equals(id)) {

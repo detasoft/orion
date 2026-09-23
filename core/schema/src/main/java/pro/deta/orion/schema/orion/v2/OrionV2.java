@@ -208,7 +208,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"issuer", "clientId", "secret"})
+    @XmlType(propOrder = {"issuer", "clientId", "secret", "idleTimeoutSeconds", "reauthenticationTimeoutSeconds"})
     public static final class OidcProvider {
         @XmlAttribute(required = true)
         private String id;
@@ -218,6 +218,8 @@ public class OrionV2 {
         private String clientId;
         @XmlElement(required = true)
         private String secret;
+        private Long idleTimeoutSeconds;
+        private Long reauthenticationTimeoutSeconds;
     }
 
     @Data

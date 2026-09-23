@@ -244,7 +244,11 @@ public final class OrionV2Mapper {
         for (OrionV2.OidcProvider provider : sorted(
                 source, Comparator.comparing(OrionV2.OidcProvider::getId, NULL_SAFE_STRINGS))) {
             providers.add(new OidcProvider(provider.getId(), URI.create(provider.getIssuer()),
-                    provider.getClientId(), provider.getSecret()));
+                    provider.getClientId(), provider.getSecret(),
+                    provider.getIdleTimeoutSeconds() == null
+                            ? OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS : provider.getIdleTimeoutSeconds(),
+                    provider.getReauthenticationTimeoutSeconds() == null
+                            ? 0 : provider.getReauthenticationTimeoutSeconds()));
         }
         return providers;
     }
@@ -253,7 +257,8 @@ public final class OrionV2Mapper {
         List<OrionV2.OidcProvider> providers = new ArrayList<>();
         for (OidcProvider provider : sorted(source, Comparator.comparing(OidcProvider::id))) {
             providers.add(new OrionV2.OidcProvider(provider.id(), provider.issuer().toString(),
-                    provider.clientId(), provider.secret()));
+                    provider.clientId(), provider.secret(),
+                    provider.idleTimeoutSeconds(), provider.reauthenticationTimeoutSeconds()));
         }
         return providers;
     }

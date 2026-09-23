@@ -618,7 +618,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     public TokenIssueResult issueOrganizationToken(OrganizationId organizationId, String userId,
-            String issuer, String subject) {
+            String issuer, String subject, long expiresInSeconds) {
+        if (expiresInSeconds <= 0 || expiresInSeconds > 3600) {
+            return TokenIssueResult.failure("Invalid organization token lifetime");
+        }
         String generation = oidcGeneration(issuer, subject);
         TokenAuthenticationResult authentication = verifyOrganizationToken(
                 organizationId.value(), userId, generation, "pending");
@@ -627,7 +630,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         try {
             JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
-                    userId, 3600, generation, organizationId.value());
+                    userId, expiresInSeconds, generation, organizationId.value());
             return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
         } catch (GeneralSecurityException failure) {
             return TokenIssueResult.failure("Token issue failed", failure);

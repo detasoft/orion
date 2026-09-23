@@ -42,7 +42,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void allowsAdminRequestWithBearerTokenAndAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -59,7 +59,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void allowsTokenEndpointWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/token", basicAuth(BASIC_USER, BASIC_PASSWORD), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -76,7 +76,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void addsSecurityContextForNonAdminRequestWithBearerToken() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("GET", "/repositories/project/info/refs", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -93,7 +93,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void passesNonPublicRequestWithoutBearerTokenToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("GET", "/repositories/project/info/refs", null, "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -110,7 +110,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void allowsPublicChallengeRequestWithoutBearerToken() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("GET", "/.well-known/acme-challenge/token", null, "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -127,7 +127,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void passesAdminRequestWithoutBearerTokenToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", null, "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -142,7 +142,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void passesAdminRequestWithInvalidBearerTokenToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth("wrong"), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -159,7 +159,7 @@ class OrionAuthorizationFilterTest {
     @Test
     void passesBasicCredentialsOnAdminResourcesToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", basicAuth(BASIC_USER, BASIC_PASSWORD), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -175,7 +175,7 @@ class OrionAuthorizationFilterTest {
     void passesAdminRequestWithoutAdminGrantToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         accessControlService.adminGrant = false;
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -192,7 +192,7 @@ class OrionAuthorizationFilterTest {
     void passesRouteTableRequestWithoutAdminGrantToRoute() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         accessControlService.adminGrant = false;
-        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService, null);
         RequestRecorder request = new RequestRecorder("GET", "/api/admin/routes", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();

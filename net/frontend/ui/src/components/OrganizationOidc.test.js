@@ -26,7 +26,8 @@ it('creates a provider in an organization without OIDC and clears the secret', a
   await wrapper.get('form').trigger('submit')
   await flushPromises()
   expect(submitted).toEqual({ organization: 'default', revision: 'v1', id: 'corporate',
-    issuer: 'https://sso.example.test/realms/employees', clientId: 'orion', clientSecret: 'private-secret' })
+    issuer: 'https://sso.example.test/realms/employees', clientId: 'orion', clientSecret: 'private-secret',
+    idleTimeoutSeconds: 172800, reauthenticationTimeoutSeconds: 0 })
   expect(wrapper.get('input[type=password]').element.value).toBe('')
   expect(wrapper.emitted('saved')).toHaveLength(1)
   expect(wrapper.get('[role=status]').text()).toContain('Provider saved')
@@ -60,4 +61,28 @@ it('reports a revision conflict, clears the entered secret and reloads explicitl
   await wrapper.get('.secondary-button').trigger('click')
   await flushPromises()
   expect(api.oidcSettings).toHaveBeenCalledTimes(2)
+})
+
+it('edits timeout policy for the selected provider without replacing its secret', async () => {
+  let submitted
+  api.oidcSettings.mockResolvedValue({ revision: 'v1', organizations: [{ id: 'acme', providers: [
+    { id: 'google', issuer: 'https://accounts.google.com', clientId: 'client',
+      idleTimeoutSeconds: 172800, reauthenticationTimeoutSeconds: 0 },
+    { id: 'corporate', issuer: 'https://sso.example.test', clientId: 'work',
+      idleTimeoutSeconds: 3600, reauthenticationTimeoutSeconds: 604800 },
+  ] }] })
+  api.saveOidcProvider.mockImplementation(async (input) => { submitted = { ...input }; return { saved: true } })
+  const wrapper = mount(OrganizationOidc, { props: { token: 'admin' } })
+  await flushPromises()
+  await wrapper.findAll('select')[1].setValue('corporate')
+  expect(wrapper.get('[name=idleHours]').element.value).toBe('1')
+  expect(wrapper.get('[name=reauthenticationHours]').element.value).toBe('168')
+  await wrapper.get('[name=idleHours]').setValue(48)
+  await wrapper.get('[name=reauthenticationHours]').setValue(0)
+  expect(wrapper.get('input[type=password]').attributes('required')).toBeUndefined()
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(submitted).toMatchObject({ id: 'corporate', clientSecret: '',
+    idleTimeoutSeconds: 172800, reauthenticationTimeoutSeconds: 0 })
+  wrapper.unmount()
 })

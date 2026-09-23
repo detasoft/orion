@@ -79,6 +79,8 @@ class OrionXmlTest {
                   <oidc><provider id="google">
                     <issuer>https://sso.example.test/realms/acme</issuer>
                     <clientId>corporate-client-id</clientId><secret>google-client</secret>
+                    <idleTimeoutSeconds>3600</idleTimeoutSeconds>
+                    <reauthenticationTimeoutSeconds>604800</reauthenticationTimeoutSeconds>
                   </provider></oidc>
                 </organization>
                 """, "");
@@ -88,6 +90,12 @@ class OrionXmlTest {
 
         assertThat(read(serialized)).isEqualTo(document);
         assertThat(serialized).contains("https://accounts.google.com", "google-client-id", "corporate-client-id");
+        for (OrionDocument.Organization organization : document.organizations()) {
+            OidcProvider provider = organization.oidcProviders().getFirst();
+            boolean defaults = organization.id().value().equals("default");
+            assertThat(provider.idleTimeoutSeconds()).isEqualTo(defaults ? 172800 : 3600);
+            assertThat(provider.reauthenticationTimeoutSeconds()).isEqualTo(defaults ? 0 : 604800);
+        }
     }
 
     @Test

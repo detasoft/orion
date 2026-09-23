@@ -81,7 +81,8 @@ class ConfigurationSecretsTest {
         current.set(secrets.create(current.get(), organizationScope, "oidc-client", "original".toCharArray()));
         OrionDocument.Organization organization = current.get().organizations().getFirst();
         OidcProvider provider = new OidcProvider(
-                "google", URI.create("https://accounts.google.com"), "client-id", "oidc-client");
+                "google", URI.create("https://accounts.google.com"), "client-id", "oidc-client",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
                 organization.roles(), organization.teams(), organization.secrets(), List.of(provider), List.of()))));

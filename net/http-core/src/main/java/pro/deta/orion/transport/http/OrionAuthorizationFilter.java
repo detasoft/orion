@@ -8,6 +8,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenAuthenticationResult;
@@ -21,10 +22,12 @@ public class OrionAuthorizationFilter implements Filter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final OrionAccessControlService accessControlService;
+    private final OrionOidcRoute oidc;
 
     @Inject
-    public OrionAuthorizationFilter(OrionAccessControlService accessControlService) {
+    public OrionAuthorizationFilter(OrionAccessControlService accessControlService, OrionOidcRoute oidc) {
         this.accessControlService = accessControlService;
+        this.oidc = oidc;
     }
 
     public String filterPath() {
@@ -34,7 +37,16 @@ public class OrionAuthorizationFilter implements Filter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         if (request instanceof HttpServletRequest httpRequest) {
-            httpRequest.setAttribute(SECURITY_CONTEXT_ATTRIBUTE, securityContextFor(httpRequest));
+            SecurityContext context = securityContextFor(httpRequest);
+            httpRequest.setAttribute(SECURITY_CONTEXT_ATTRIBUTE, context);
+            if (context.getUserIdentity().getOrganizationId().isPresent()
+                    && response instanceof HttpServletResponse httpResponse) {
+                String cookie = oidc.recordActivity(httpRequest, context);
+                if (cookie != null) {
+                    httpResponse.addHeader("Set-Cookie", cookie);
+                    httpResponse.setHeader("Cache-Control", "no-store");
+                }
+            }
         }
         chain.doFilter(request, response);
     }

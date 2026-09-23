@@ -20,6 +20,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -62,6 +63,7 @@ final class OidcClient {
         parameters.put("client_id", provider.clientId());
         parameters.put("redirect_uri", callback.toString());
         parameters.put("scope", "openid email profile");
+        if (provider.reauthenticationTimeoutSeconds() > 0) parameters.put("max_age", "0");
         parameters.put("state", state);
         parameters.put("nonce", nonce);
         parameters.put("code_challenge", challenge);
@@ -71,7 +73,7 @@ final class OidcClient {
     }
 
     Identity exchange(OidcProvider provider, Metadata metadata, URI callback, String code, String nonce,
-            String verifier, char[] secret) throws Exception {
+            String verifier, char[] secret, long authenticationNotBefore) throws Exception {
         Map<String, String> parameters = new LinkedHashMap<>();
         parameters.put("grant_type", "authorization_code");
         parameters.put("code", code);
@@ -96,12 +98,22 @@ final class OidcClient {
         if (!values.path("email_verified").isBoolean() || !values.path("email_verified").booleanValue()) {
             throw new IOException("Verified email is required");
         }
+        long authenticatedAt = 0;
+        if (provider.reauthenticationTimeoutSeconds() > 0) {
+            JsonNode value = values.path("auth_time");
+            if (!value.isIntegralNumber() || !value.canConvertToLong()
+                    || value.longValue() < authenticationNotBefore - 60
+                    || value.longValue() > Instant.now().getEpochSecond() + 60) {
+                throw new IOException("Fresh provider authentication is required");
+            }
+            authenticatedAt = value.longValue();
+        }
         String subject = claims.getSubject().getValue();
         if (subject.isBlank() || subject.length() > 255) {
             throw new IOException("Invalid OIDC subject");
         }
         return new Identity(subject, OrganizationInvitation.normalizeEmail(values.path("email").asText()),
-                values.path("given_name").asText(""), values.path("family_name").asText(""));
+                values.path("given_name").asText(""), values.path("family_name").asText(""), authenticatedAt);
     }
 
     private JsonNode request(URI endpoint, String body, String authorization) throws Exception {
@@ -164,5 +176,5 @@ final class OidcClient {
     }
 
     record Metadata(URI authorization, URI token, URI keys, boolean basic) { }
-    record Identity(String subject, String email, String first, String last) { }
+    record Identity(String subject, String email, String first, String last, long authenticatedAt) { }
 }

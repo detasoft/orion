@@ -15,9 +15,11 @@ class OidcProviderTest {
     @Test
     void keepsProviderSettingsAndSecretsWithinTheirOrganization() {
         OidcProvider google = new OidcProvider(
-                "google", URI.create("https://accounts.google.com"), "google-client", "client-secret");
+                "google", URI.create("https://accounts.google.com"), "google-client", "client-secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         OidcProvider corporate = new OidcProvider(
-                "google", URI.create("https://sso.example.test/realms/acme"), "corporate-client", "client-secret");
+                "google", URI.create("https://sso.example.test/realms/acme"), "corporate-client", "client-secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         List<OidcProvider> providers = new ArrayList<>(List.of(google));
         OrionDocument.Organization defaults = organization("default", providers);
         OrionDocument.Organization acme = organization("acme", List.of(corporate));
@@ -39,19 +41,36 @@ class OidcProviderTest {
     @ValueSource(strings = {"http://sso.example.test", "https:/sso", "relative", "https://user:pass@sso.test",
             "https://sso.test?tenant=acme", "https://sso.test#tenant"})
     void rejectsInvalidIssuerAddresses(String issuer) {
-        assertThatThrownBy(() -> new OidcProvider("sso", URI.create(issuer), "client", "secret"))
+        assertThatThrownBy(() -> new OidcProvider("sso", URI.create(issuer), "client", "secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("OIDC issuer");
     }
 
     @Test
     void requiresProviderIdClientIdAndSecretReference() {
         URI issuer = URI.create("https://sso.example.test");
-        assertThatThrownBy(() -> new OidcProvider("../sso", issuer, "client", "secret"))
+        assertThatThrownBy(() -> new OidcProvider("../sso", issuer, "client", "secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("provider id");
-        assertThatThrownBy(() -> new OidcProvider("sso", issuer, " ", "secret"))
+        assertThatThrownBy(() -> new OidcProvider("sso", issuer, " ", "secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("client id");
-        assertThatThrownBy(() -> new OidcProvider("sso", issuer, "client", "../other/secret"))
+        assertThatThrownBy(() -> new OidcProvider("sso", issuer, "client", "../other/secret",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("secret reference");
+    }
+
+    @Test
+    void validatesIndependentIdleAndReauthenticationTimeouts() {
+        URI issuer = URI.create("https://sso.example.test");
+        assertThat(new OidcProvider("sso", issuer, "client", "secret", 172800, 0)
+                .reauthenticationTimeoutSeconds()).isZero();
+        assertThatThrownBy(() -> new OidcProvider("sso", issuer, "client", "secret", 0, 0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OidcProvider("sso", issuer, "client", "secret", 1, -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OidcProvider("sso", issuer, "client", "secret", Long.MAX_VALUE, 0))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static OrionDocument.Organization organization(String id, List<OidcProvider> providers) {
