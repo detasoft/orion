@@ -1,6 +1,8 @@
 package pro.deta.orion.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
@@ -9,6 +11,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CommandLineParserTest {
     private final CommandLineParser parser = new CommandLineParser();
+
+    @ParameterizedTest
+    @ValueSource(strings = {"plain", "a!=b", "a=b", "!=value", "=value", "a != b"})
+    void preservesOperatorTextInsidePredicateValues(String value) {
+        ParsedCommand equal = success("/repository ls where name='" + value + "'", CommandPath.root());
+        ParsedCommand unequal = success("/repository ls where name!='" + value + "'", CommandPath.root());
+        assertThat(equal.predicates()).containsExactly(
+                new WherePredicate("name", WherePredicate.Operator.EQUALS, value));
+        assertThat(unequal.predicates()).containsExactly(
+                new WherePredicate("name", WherePredicate.Operator.NOT_EQUALS, value));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"name", "=value", "!=value", "name=", "name!="})
+    void rejectsIncompletePredicates(String predicate) {
+        assertFailure("/repository ls where " + predicate, CommandPath.root(), "predicate");
+    }
 
     @Test
     void parsesAbsoluteAndContextRelativePaths() {

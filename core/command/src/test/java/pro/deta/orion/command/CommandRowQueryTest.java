@@ -1,6 +1,8 @@
 package pro.deta.orion.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,6 +11,23 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CommandRowQueryTest {
+    @ParameterizedTest
+    @CsvSource({"=,a!=b", "!=,other"})
+    void filtersRowsWithOperatorTextInTheirNames(String operator, String expected) {
+        CommandParseResult parsed = new CommandLineParser().parse(
+                "/repository ls where name" + operator + "'a!=b'", CommandPath.root(),
+                (path, action) -> action.equals("ls"));
+        assertThat(parsed).isInstanceOf(CommandParseResult.Success.class);
+        ParsedCommand command = ((CommandParseResult.Success) parsed).command();
+        CommandResult.Rows rows = CommandResult.Rows.unqueried(List.of(CommandColumn.text("name")),
+                List.of(List.of(CommandValue.text("a!=b")), List.of(CommandValue.text("other"))));
+        CommandResult result = query.apply(rows,
+                new CommandArguments(command.positionalArguments(), command.namedParameters(), command.predicates()),
+                CommandQuery.enabled(List.of("name"), Map.of()), CommandPresentation.plain());
+        assertThat(result).isInstanceOf(CommandResult.Rows.class);
+        assertThat(((CommandResult.Rows) result).values()).containsExactly(List.of(CommandValue.text(expected)));
+    }
+
     private final CommandRowQuery query = new CommandRowQuery();
     private final CommandQuery metadata = CommandQuery.enabled(
             List.of("id", "state", "owner", "attempts", "active", "repository"),

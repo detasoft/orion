@@ -152,19 +152,16 @@ public final class CommandLineParser {
 
     private static CommandParseResult addPredicate(Token token, List<WherePredicate> predicates) {
         String text = token.text();
-        int operator = text.indexOf("!=");
-        WherePredicate.Operator predicateOperator = WherePredicate.Operator.NOT_EQUALS;
-        int operatorLength = 2;
-        if (operator < 0) {
-            operator = text.indexOf('=');
-            predicateOperator = WherePredicate.Operator.EQUALS;
-            operatorLength = 1;
-        }
-        if (operator <= 0 || operator + operatorLength >= text.length()) {
+        int separator = text.indexOf('=');
+        boolean notEquals = separator > 0 && text.charAt(separator - 1) == '!';
+        int fieldEnd = notEquals ? separator - 1 : separator;
+        if (fieldEnd <= 0 || separator + 1 >= text.length()) {
             return failure("Invalid where predicate", token.position());
         }
-        String field = text.substring(0, operator);
-        String value = text.substring(operator + operatorLength);
+        WherePredicate.Operator predicateOperator = notEquals
+                ? WherePredicate.Operator.NOT_EQUALS : WherePredicate.Operator.EQUALS;
+        String field = text.substring(0, fieldEnd);
+        String value = text.substring(separator + 1);
         predicates.add(new WherePredicate(field, predicateOperator, value));
         return null;
     }
