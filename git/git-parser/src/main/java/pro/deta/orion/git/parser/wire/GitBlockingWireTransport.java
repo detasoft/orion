@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
@@ -51,11 +50,6 @@ public final class GitBlockingWireTransport {
 
     public Optional<GitPktLine> readNextPacket() throws IOException {
         return GitPktLine.readNextFrom(requireInput());
-    }
-
-    public ByteBuf payloadBuffer(GitPktLine control) {
-        Objects.requireNonNull(control, "control");
-        return control instanceof GitPktLine.Data data ? Unpooled.wrappedBuffer(data.content()) : Unpooled.EMPTY_BUFFER;
     }
 
     public int readRawInto(ByteBuf target, int maxLength) throws IOException {

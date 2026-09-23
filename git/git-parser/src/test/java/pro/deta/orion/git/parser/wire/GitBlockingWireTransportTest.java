@@ -56,18 +56,12 @@ class GitBlockingWireTransportTest {
         GitBlockingWireTransport transport = input("000ahello\n0000");
 
         GitPktLine data = transport.readPacket();
-        ByteBuf payload = transport.payloadBuffer(data);
-        try {
-            assertThat(data).isInstanceOf(GitPktLine.Data.class);
-            assertThat(payload.toString(StandardCharsets.UTF_8))
-                    .isEqualTo("hello\n");
+        assertThat(data).isInstanceOf(GitPktLine.Data.class);
+        assertThat(((GitPktLine.Data) data).content()).isEqualTo("hello\n".getBytes(StandardCharsets.UTF_8));
 
-            GitPktLine flush = transport.readPacket();
-            assertThat(flush).isSameAs(GitPktLine.Control.FLUSH);
-            assertThat(flush.payloadLength()).isZero();
-        } finally {
-            payload.release();
-        }
+        GitPktLine flush = transport.readPacket();
+        assertThat(flush).isSameAs(GitPktLine.Control.FLUSH);
+        assertThat(flush.payloadLength()).isZero();
     }
 
     @Test

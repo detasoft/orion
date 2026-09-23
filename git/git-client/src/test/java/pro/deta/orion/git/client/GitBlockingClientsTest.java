@@ -33,13 +33,16 @@ class GitBlockingClientsTest {
     @Test
     void fetchesLargeSideBandPackOnVirtualThreadFromFragmentedInput()
             throws Exception {
-        byte[] firstPackPart = repeated((byte) 'a', 65_000);
+        byte[] firstPackPart = new byte[65_000];
+        for (int index = 0; index < firstPackPart.length; index++) {
+            firstPackPart[index] = (byte) index;
+        }
         byte[] secondPackPart = repeated((byte) 'b', 5_000);
         byte[] response = concat(
                 advertisement("side-band-64k multi_ack_detailed"),
                 packet("NAK\n"),
                 sideBandPacket(1, firstPackPart),
-                sideBandPacket(2, "counting objects\n".getBytes(
+                sideBandPacket(2, "объекты: 70 000 🚀\n".getBytes(
                         StandardCharsets.UTF_8)),
                 sideBandPacket(1, secondPackPart),
                 flush());
@@ -60,7 +63,7 @@ class GitBlockingClientsTest {
         assertThat(value.packBytes()).isEqualTo(70_000);
         assertThat(pack.toByteArray()).isEqualTo(concat(
                 firstPackPart, secondPackPart));
-        assertThat(progress).containsExactly("counting objects\n");
+        assertThat(progress).containsExactly("объекты: 70 000 🚀\n");
         assertThat(value.advertisement().refs())
                 .extracting(GitRemoteAdvertisement.Ref::name)
                 .containsExactly("refs/heads/main");
@@ -116,6 +119,27 @@ class GitBlockingClientsTest {
         assertThat(success(result).packBytes()).isEqualTo(packBytes.length);
         assertThat(pack.toByteArray()).isEqualTo(packBytes);
         assertThat(transport.session.output.ascii()).contains(" multi_ack_detailed\n").doesNotContain("side-band");
+    }
+
+    @Test
+    void rejectsNonAsciiAndControlBytesInAcknowledgmentsBeforeReadingPack() {
+        for (String suffix : List.of("я", "\t")) {
+            RecordingTransport transport = new RecordingTransport(concat(
+                    advertisement("multi_ack_detailed"),
+                    packet("ACK " + OLD_ID + suffix + " common\n"), packet("NAK\n"),
+                    "PACKpayload".getBytes(StandardCharsets.US_ASCII)));
+            ByteArrayOutputStream pack = new ByteArrayOutputStream();
+            GitUploadPackRequest request = GitUploadPackRequest.of(
+                    OLD_ID, new OutputStreamBufferedByteOutput(pack));
+
+            GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+                    .fetch(REMOTE, GitClientOptions.defaults(), request);
+
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.NEGOTIATION);
+            assertThat(pack.size()).isZero();
+            assertThat(transport.session.closed).isTrue();
+        }
     }
 
     @Test

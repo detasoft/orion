@@ -1,7 +1,6 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
@@ -14,6 +13,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -39,22 +40,16 @@ final class GitBlockingClientWire {
         while (true) {
             GitPktLine packet = readPacket(
                     GitClientFailure.Phase.ADVERTISEMENT);
-            ByteBuf payload = wire.payloadBuffer(packet);
-            try {
-                if (packet == GitPktLine.Control.FLUSH) {
-                    break;
-                }
-                requireData(packet, GitClientFailure.Phase.ADVERTISEMENT);
-                String line = text(payload,
-                        GitClientFailure.Phase.ADVERTISEMENT, StandardCharsets.UTF_8);
-                if (lines.isEmpty() && "version 1".equals(stripLf(line))) {
-                    continue;
-                }
-                rejectServerError(line, GitClientFailure.Phase.ADVERTISEMENT);
-                lines.add(stripLf(line));
-            } finally {
-                payload.release();
+            if (packet == GitPktLine.Control.FLUSH) {
+                break;
             }
+            byte[] payload = requireData(packet, GitClientFailure.Phase.ADVERTISEMENT).content();
+            String line = text(payload, GitClientFailure.Phase.ADVERTISEMENT, StandardCharsets.UTF_8);
+            if (lines.isEmpty() && "version 1".equals(stripLf(line))) {
+                continue;
+            }
+            rejectServerError(line, GitClientFailure.Phase.ADVERTISEMENT);
+            lines.add(stripLf(line));
         }
         return parseAdvertisement(lines);
     }
@@ -97,32 +92,27 @@ final class GitBlockingClientWire {
         while (true) {
             GitPktLine packet = readPacket(
                     GitClientFailure.Phase.NEGOTIATION);
-            if (!(packet instanceof GitPktLine.Data)) {
+            if (!(packet instanceof GitPktLine.Data data)) {
                 throw protocolFailure(
                         GitClientFailure.Kind.MALFORMED_RESPONSE,
                         GitClientFailure.Phase.NEGOTIATION,
                         "Expected upload-pack negotiation response");
             }
-            if (sideBand && isSideBand(((GitPktLine.Data) packet).content())) {
+            if (sideBand && isSideBand(data.content())) {
                 return readSideBandPack(packet, request, maximumPackBytes);
             }
-            ByteBuf payload = wire.payloadBuffer(packet);
-            try {
-                String line = stripLf(text(
-                        payload, GitClientFailure.Phase.NEGOTIATION, StandardCharsets.US_ASCII));
-                rejectServerError(line, GitClientFailure.Phase.NEGOTIATION);
-                if (!"NAK".equals(line) && !line.startsWith("ACK ")) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.MALFORMED_RESPONSE,
-                            GitClientFailure.Phase.NEGOTIATION,
-                            "Unexpected upload-pack negotiation response");
-                }
-                if (line.startsWith("ACK ") && (line.endsWith(" common")
-                        || line.endsWith(" ready") || line.endsWith(" continue"))) {
-                    continue;
-                }
-            } finally {
-                payload.release();
+            String line = stripLf(text(
+                    data.content(), GitClientFailure.Phase.NEGOTIATION, StandardCharsets.US_ASCII));
+            rejectServerError(line, GitClientFailure.Phase.NEGOTIATION);
+            if (!"NAK".equals(line) && !line.startsWith("ACK ")) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.NEGOTIATION,
+                        "Unexpected upload-pack negotiation response");
+            }
+            if (line.startsWith("ACK ") && (line.endsWith(" common")
+                    || line.endsWith(" ready") || line.endsWith(" continue"))) {
+                continue;
             }
             if (!sideBand) {
                 return readRawPack(request, maximumPackBytes);
@@ -295,47 +285,40 @@ final class GitBlockingClientWire {
         long total = 0;
         GitPktLine packet = first;
         while (true) {
-            ByteBuf payload = wire.payloadBuffer(packet);
-            try {
-                if (packet == GitPktLine.Control.FLUSH) {
-                    request.packTarget().flush();
-                    return total;
-                }
-                requireData(packet, GitClientFailure.Phase.PACK_TRANSFER);
-                if (!payload.isReadable()) {
+            if (packet == GitPktLine.Control.FLUSH) {
+                request.packTarget().flush();
+                return total;
+            }
+            byte[] payload = requireData(packet, GitClientFailure.Phase.PACK_TRANSFER).content();
+            if (payload.length == 0) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.PACK_TRANSFER,
+                        "Side-band packet is empty");
+            }
+            int channel = payload[0] & 0xff;
+            int dataLength = payload.length - 1;
+            if (channel == 1) {
+                total += dataLength;
+                if (total > maximumPackBytes) {
                     throw protocolFailure(
-                            GitClientFailure.Kind.MALFORMED_RESPONSE,
+                            GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
                             GitClientFailure.Phase.PACK_TRANSFER,
-                            "Side-band packet is empty");
+                            "Remote pack exceeds configured size limit");
                 }
-                int channel = payload.getUnsignedByte(payload.readerIndex());
-                ByteBuf data = payload.slice(
-                        payload.readerIndex() + 1,
-                        payload.readableBytes() - 1);
-                if (channel == 1) {
-                    total += data.readableBytes();
-                    if (total > maximumPackBytes) {
-                        throw protocolFailure(
-                                GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
-                                GitClientFailure.Phase.PACK_TRANSFER,
-                                "Remote pack exceeds configured size limit");
-                    }
-                    request.packTarget().write(data);
-                } else if (channel == 2) {
-                    request.progress().accept(data.toString(StandardCharsets.UTF_8));
-                } else if (channel == 3) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.SIDE_BAND_ERROR,
-                            GitClientFailure.Phase.PACK_TRANSFER,
-                            sanitized(data));
-                } else {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.MALFORMED_RESPONSE,
-                            GitClientFailure.Phase.PACK_TRANSFER,
-                            "Unknown Git side-band channel");
-                }
-            } finally {
-                payload.release();
+                request.packTarget().write(payload, 1, dataLength);
+            } else if (channel == 2) {
+                request.progress().accept(new String(payload, 1, dataLength, StandardCharsets.UTF_8));
+            } else if (channel == 3) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.SIDE_BAND_ERROR,
+                        GitClientFailure.Phase.PACK_TRANSFER,
+                        sanitized(new String(payload, 1, dataLength, StandardCharsets.UTF_8)));
+            } else {
+                throw protocolFailure(
+                        GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.PACK_TRANSFER,
+                        "Unknown Git side-band channel");
             }
             packet = readPacket(GitClientFailure.Phase.PACK_TRANSFER);
         }
@@ -350,17 +333,11 @@ final class GitBlockingClientWire {
                     GitClientFailure.Phase.REPORT_STATUS);
             statusBytes += packet.length();
             requireStatusSize(statusBytes);
-            ByteBuf payload = wire.payloadBuffer(packet);
-            try {
-                if (packet == GitPktLine.Control.FLUSH) {
-                    return List.copyOf(lines);
-                }
-                requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
-                lines.add(stripLf(text(
-                        payload, GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
-            } finally {
-                payload.release();
+            if (packet == GitPktLine.Control.FLUSH) {
+                return List.copyOf(lines);
             }
+            byte[] payload = requireData(packet, GitClientFailure.Phase.REPORT_STATUS).content();
+            lines.add(stripLf(text(payload, GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
         }
     }
 
@@ -370,40 +347,31 @@ final class GitBlockingClientWire {
         while (true) {
             GitPktLine packet = readPacket(
                     GitClientFailure.Phase.REPORT_STATUS);
-            ByteBuf payload = wire.payloadBuffer(packet);
-            try {
-                if (packet == GitPktLine.Control.FLUSH) {
-                    return parsePacketLines(status.toByteArray());
-                }
-                requireData(packet, GitClientFailure.Phase.REPORT_STATUS);
-                if (!payload.isReadable()) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.MALFORMED_RESPONSE,
-                            GitClientFailure.Phase.REPORT_STATUS,
-                            "Side-band status packet is empty");
-                }
-                int channel = payload.getUnsignedByte(payload.readerIndex());
-                ByteBuf data = payload.slice(
-                        payload.readerIndex() + 1,
-                        payload.readableBytes() - 1);
-                if (channel == 1) {
-                    requireStatusSize(status.size() + data.readableBytes());
-                    byte[] bytes = new byte[data.readableBytes()];
-                    data.getBytes(data.readerIndex(), bytes);
-                    status.writeBytes(bytes);
-                } else if (channel == 3) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.SIDE_BAND_ERROR,
-                            GitClientFailure.Phase.REPORT_STATUS,
-                            sanitized(data));
-                } else if (channel != 2) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.MALFORMED_RESPONSE,
-                            GitClientFailure.Phase.REPORT_STATUS,
-                            "Unknown Git side-band channel");
-                }
-            } finally {
-                payload.release();
+            if (packet == GitPktLine.Control.FLUSH) {
+                return parsePacketLines(status.toByteArray());
+            }
+            byte[] payload = requireData(packet, GitClientFailure.Phase.REPORT_STATUS).content();
+            if (payload.length == 0) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.REPORT_STATUS,
+                        "Side-band status packet is empty");
+            }
+            int channel = payload[0] & 0xff;
+            int dataLength = payload.length - 1;
+            if (channel == 1) {
+                requireStatusSize(status.size() + dataLength);
+                status.write(payload, 1, dataLength);
+            } else if (channel == 3) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.SIDE_BAND_ERROR,
+                        GitClientFailure.Phase.REPORT_STATUS,
+                        sanitized(new String(payload, 1, dataLength, StandardCharsets.UTF_8)));
+            } else if (channel != 2) {
+                throw protocolFailure(
+                        GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.REPORT_STATUS,
+                        "Unknown Git side-band channel");
             }
         }
     }
@@ -431,15 +399,8 @@ final class GitBlockingClientWire {
                         }
                         return List.copyOf(lines);
                     }
-                    case GitPktLine.Data data -> {
-                        ByteBuf payload = Unpooled.wrappedBuffer(data.content());
-                        try {
-                            lines.add(stripLf(text(
-                                    payload, GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
-                        } finally {
-                            payload.release();
-                        }
-                    }
+                    case GitPktLine.Data data -> lines.add(stripLf(text(
+                            data.content(), GitClientFailure.Phase.REPORT_STATUS, StandardCharsets.UTF_8)));
                     case GitPktLine.Control.DELIMITER, GitPktLine.Control.RESPONSE_END -> throw malformedStatus();
                 }
             }
@@ -547,26 +508,29 @@ final class GitBlockingClientWire {
         }
     }
 
-    private static void requireData(
+    private static GitPktLine.Data requireData(
             GitPktLine packet,
             GitClientFailure.Phase phase) throws GitClientProtocolException {
-        if (!(packet instanceof GitPktLine.Data)) {
-            throw protocolFailure(
-                    GitClientFailure.Kind.MALFORMED_RESPONSE,
-                    phase,
-                    "Unexpected Git wire control packet");
+        if (packet instanceof GitPktLine.Data data) {
+            return data;
         }
+        throw protocolFailure(
+                GitClientFailure.Kind.MALFORMED_RESPONSE,
+                phase,
+                "Unexpected Git wire control packet");
     }
 
-    private static String text(ByteBuf payload, GitClientFailure.Phase phase, Charset charset)
+    private static String text(byte[] payload, GitClientFailure.Phase phase, Charset charset)
             throws GitClientProtocolException {
-        if (!ByteBufUtil.isText(payload, charset)) {
+        String text;
+        try {
+            text = charset.newDecoder().decode(ByteBuffer.wrap(payload)).toString();
+        } catch (CharacterCodingException error) {
             throw protocolFailure(GitClientFailure.Kind.MALFORMED_RESPONSE, phase,
                     "Git response contains invalid text bytes");
         }
-        for (int index = payload.readerIndex();
-                index < payload.writerIndex(); index++) {
-            int value = payload.getUnsignedByte(index);
+        for (byte current : payload) {
+            int value = current & 0xff;
             if (value != 0 && value != '\n'
                     && (value < 0x20 || value == 0x7f)) {
                 throw protocolFailure(
@@ -575,7 +539,7 @@ final class GitBlockingClientWire {
                         "Git response contains invalid text bytes");
             }
         }
-        return payload.toString(charset);
+        return text;
     }
 
     private static void requireCapability(
@@ -613,10 +577,6 @@ final class GitBlockingClientWire {
         return value.endsWith("\n")
                 ? value.substring(0, value.length() - 1)
                 : value;
-    }
-
-    private static String sanitized(ByteBuf data) {
-        return sanitized(data.toString(StandardCharsets.UTF_8));
     }
 
     private static String sanitized(String value) {
