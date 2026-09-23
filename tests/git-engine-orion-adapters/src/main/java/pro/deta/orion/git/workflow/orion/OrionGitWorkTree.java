@@ -142,7 +142,12 @@ final class OrionGitWorkTree implements GitWorkTree {
         Set<String> deletedPaths = new LinkedHashSet<>();
         for (String path : stagedPaths) {
             Path source = directory.resolve(path);
-            if (Files.notExists(source)) {
+            boolean deleted = Files.notExists(source) || Files.isDirectory(source);
+            for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
+                 parent = parent.getParent()) {
+                deleted = Files.isRegularFile(parent);
+            }
+            if (deleted) {
                 try {
                     repository.loadFiles(currentBranch, List.of(path));
                 } catch (GitOperationException failure) {

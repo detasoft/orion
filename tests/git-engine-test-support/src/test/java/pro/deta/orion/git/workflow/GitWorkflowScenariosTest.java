@@ -21,6 +21,7 @@ class GitWorkflowScenariosTest {
             "complex-file-update",
             "delete-file-and-pull",
             "rename-file-and-pull",
+            "file-directory-replacement-and-pull",
             "second-branch-fetch-and-checkout",
             "multi-ref-push",
             "delete-branch",

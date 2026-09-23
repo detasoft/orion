@@ -50,6 +50,8 @@ public final class GitWorkflowScenarios {
                     deletedFileState(), GitWorkflowScenarios::deleteFileAndPull),
             scenario("rename-file-and-pull", PULL,
                     renamedFileState(), GitWorkflowScenarios::renameFileAndPull),
+            scenario("file-directory-replacement-and-pull", PULL,
+                    fileDirectoryReplacementState(), GitWorkflowScenarios::fileDirectoryReplacementAndPull),
             scenario("second-branch-fetch-and-checkout", FETCH, branchState(),
                     GitWorkflowScenarios::secondBranchFetchAndCheckout),
             scenario("multi-ref-push", WRITE, multiRefState(), GitWorkflowScenarios::multiRefPush),
@@ -280,6 +282,47 @@ public final class GitWorkflowScenarios {
                 RepositorySnapshot terminal = transferred(context, source);
                 clone.pull("origin", "main");
                 equivalent(terminal, clone.snapshot(), "pull after rename");
+                execution.assertTerminal(terminal);
+            }
+        }
+    }
+
+    private static void fileDirectoryReplacementAndPull(GitScenarioContext context, Execution execution)
+            throws Exception {
+        try (GitWorkTree source = source(context)) {
+            source.writeFile("item", "file\n");
+            source.writeFile(README, INITIAL_CONTENT);
+            source.add("item", README);
+            source.commit("initial");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone before structural replacement");
+                source.delete("item");
+                source.add("item");
+                source.writeFile("item/child.txt", "child\n");
+                source.add("item/child.txt");
+                source.commit("file to directory");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot directoryState = transferred(context, source);
+                clone.pull("origin", "main");
+                equivalent(directoryState, clone.snapshot(), "pull after file became directory");
+
+                source.delete("item/child.txt");
+                source.add("item/child.txt");
+                source.delete("item");
+                source.writeFile("item", "replacement\n");
+                source.add("item");
+                source.commit("directory to file");
+                execution.bind("third", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                clone.pull("origin", "main");
+                equivalent(terminal, clone.snapshot(), "pull after directory became file");
                 execution.assertTerminal(terminal);
             }
         }
@@ -612,6 +655,15 @@ public final class GitWorkflowScenarios {
                 "second", expectedCommit(List.of("initial"), Map.of(
                         "new/name.txt", text("moved\n"),
                         "old/keep.txt", text("old neighbor\n"), "new/keep.txt", text("new neighbor\n")))));
+    }
+
+    private static ExpectedRepositoryState fileDirectoryReplacementState() {
+        return state(Map.of(MAIN, "third"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(README, text(INITIAL_CONTENT), "item", text("file\n"))),
+                "second", expectedCommit(List.of("initial"), Map.of(
+                        README, text(INITIAL_CONTENT), "item/child.txt", text("child\n"))),
+                "third", expectedCommit(List.of("second"), Map.of(
+                        README, text(INITIAL_CONTENT), "item", text("replacement\n")))));
     }
 
     private static ExpectedRepositoryState complexFileState() {
