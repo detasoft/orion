@@ -1,122 +1,122 @@
-# OIDC Login and Email Invitations
+# Organization OIDC Login and Email Invitations
 
 - Owner: codex, session 01a0cd57-6e6e-7083-bffc-2f8231e97bc9, branch `codex/oidc-invitations-01a0cd57`,
-  worktree `.worktrees/oidc-invitations-01a0cd57`, paused 2026-09-23 10:25 Europe/Amsterdam;
-  next: complete the authorized shared hierarchical authorization prerequisite, then resume OIDC.
+  worktree `.worktrees/oidc-invitations-01a0cd57`, started 2026-09-23 10:27 Europe/Amsterdam.
 
 ## Required result
 
-Provide one configurable OIDC login mechanism for Google and corporate OIDC
-providers. Administrators invite a specific email into an existing organization
-with initial roles/team memberships. The recipient authenticates with an
-allowed provider, fills in their profile, and becomes an Orion user. Subsequent
-logins use the external identity and Orion permissions. Registration is closed
-without an invitation. The administrator receives a shareable link; automatic
-email delivery is outside this task.
+User-approved minimal scope: configure OIDC at organization level, invite an
+email into that organization, let the recipient sign in through Google or a
+corporate OIDC provider and fill in their profile. Organization users see and
+access only that organization's repositories and other scoped resources.
+System-wide settings remain restricted to existing system administrators.
+Use one shared OIDC implementation. Administrator receives a shareable invitation
+link; automatic email sending is not required.
 
-## Current model and dependencies
+## Scope and preserved behavior
 
-HTTP uses OrionAuthorizationFilter and existing Bearer verification. User
-creation currently uses OrionAdminCreateOrUpdateUserRoute. OrionDocument has
-organization users with first/last/email, enabled, credentials, memberships,
-and role assignments. Configuration changes can use the existing optimistic
-revision-checked persistence; ConfigurationSecrets provides encrypted secret
-references. These are the foundation for this task. Inspect actual wiring and
-published identity mapping before extending it.
+The user explicitly narrowed away full hierarchical authorization, role
+inheritance, allow/deny precedence, and team-level permission design. Those
+remain in ../02_hierarchical-orion-configuration/01_hierarchical-authorization.md
+and are NOT prerequisites for this minimal organization boundary. Do not
+implement them in this change or create temporary role/evaluator frameworks.
+All enabled members have the same basic organization access; do not grant global
+administration, global secrets/configuration, or access to another organization.
+Existing system ACL, admin/root recovery, SSH, Basic/Bearer behavior is preserved.
+OIDC is the new login method; existing paths must enforce the same organization
+boundary when handling an organization principal.
 
-Inspection confirmed a prerequisite: organization users/roles are schema-only.
-OrionAccessControlServiceImpl publishes and authenticates only the flat
-system accessControl; UserIdentity and GrantAccess consume flat grants.
-The agreed organization-based invitation rights therefore depend on
-../02_hierarchical-orion-configuration/01_hierarchical-authorization.md.
-Do not implement an OIDC-only evaluator or mirror organizational users into
-the flat ACL. The user authorized connecting canonical hierarchical
-authorization first.
-No implementation edits have been made in the task worktree.
+## Current model and smallest extension
 
-Application-token storage, rotation, and scoped automation tokens remain in
-01_model-and-storage.md, 02_admin-api-and-usage.md, and
-03_scoped-authorization.md. They are not prerequisites for OIDC browser login
-and are not deliverables here. Existing Basic/Bearer/SSH authentication must
-continue working. Do not introduce another ACL or user store.
+OrionDocument contains organizations and OrganizationUser. PrincipalAddress
+already distinguishes system and organization principals, and ConfigurationScope
+and RepositoryAddress identify resource ownership. Actual authentication is
+currently flat system ACL, so add the minimal organizational principal lookup
+and organization-ownership checks at existing authentication/access boundaries.
+Do not duplicate organizational users into system ACL, introduce a parallel user
+store, or treat an organizational login as a same-name system user.
+
+Reuse OrionDesiredState and existing revision-checked configuration persistence
+for organization configuration, users, identities and invitations. Reuse
+ConfigurationSecrets for provider secrets, extending organization secret
+resolution minimally if necessary. Durable new configuration fields must round
+trip XML and survive every existing document-copy/update consumer.
 
 ## Design
 
-- Configure trusted OIDC providers with id/display name, issuer, client id,
-  encrypted client secret reference, and configured redirect URI. Use discovery
-  and a maintained OIDC/JWT library where available; never implement signature
-  cryptography manually. Google is a provider configuration, not a separate
-  production login path. Organizational allowed-provider policy controls login
-  and invitation redemption. SAML and account linking UI are out of scope.
-- Persist external identity as issuer plus subject linked to an organization
-  user. Email is not identity. Never implicitly link an existing user by email.
-  Validate uniqueness and organization boundaries. Changed provider policy,
-  disabled/deleted users, and expired sessions must take effect for access.
-- Invitation contains organization, normalized email, initial roles/memberships,
-  expiry, and a cryptographically random secret whose digest alone is persisted.
-  Support administrator creation, safe listing, and revocation. Validate grants
-  within the target organization. Do not log tokens or return secrets in lists.
-- Authorization code flow binds state, nonce, PKCE, provider, invitation, and
-  browser. Verify signature, issuer, audience/authorized party, expiration,
-  nonce, and email verification. Require exact intended email at redemption.
-  Reject wrong browser/state/provider, replay, expired invitations, and wrong
-  emails without consuming valid invitations. Bound transient login state,
-  network requests, token sizes, and sessions. Trust only admin-configured
-  issuers/endpoints; do not accept arbitrary callback redirects.
-- Before completing profile, expose only the onboarding operation, not a fully
-  authorized account/session. Validate first/last and user identifier according
-  to existing domain rules. Atomically persist user, external identity, and
-  invitation consumption using existing configuration concurrency control.
-  Concurrent/replayed completion cannot duplicate users or consume another
-  invitation. Durable records survive reload/restart; incomplete ephemeral
-  login may require restarting sign-in after a restart.
-- Use a secure HttpOnly browser session cookie and explicit CSRF defense for
-  mutations, including existing HTTP mutation routes when cookie-authenticated.
-  Preserve Bearer clients. Provide logout and current-user/session status.
-  Use bounded short-lived sessions with fresh user/policy validation; do not
-  expose provider tokens or client secrets to the frontend.
-- Browser UI provides login/provider selection, invitation entry flow, profile
-  completion, error handling, and logout. Add administrator invitation controls
-  in the existing frontend where appropriate. Anonymous users must be able to
-  reach sign-in; preserve existing admin and session features.
+- Store trusted OIDC provider configuration within each organization: id/name,
+  issuer, client id, encrypted secret reference, configured redirect URI.
+  Support at least one provider per organization; use a small provider list if
+  required to allow both Google and corporate SSO. No provider plugin registry.
+  Use discovery and a maintained existing/new OIDC/JWT library as needed.
+  Configuration and invitations are managed by existing system administrators
+  in the minimal version; no new organization-admin role machinery.
+- Link issuer+subject to OrganizationUser, with uniqueness in organization
+  scope. Same email never implicitly links to another existing account.
+  Organization/provider selection is bound to the login transaction. Subsequent
+  sign-in selects organization and configured provider; invitation supplies both
+  the organization and allowed provider choices on first use.
+- Invitation persists organization, normalized email, expiry and only the hash
+  of a cryptographically random secret. Support create/list/revoke. Do not expose
+  secrets on list or logs. Expired/revoked/wrong-email invitations cannot redeem.
+- Authorization code flow validates state, nonce, PKCE, issuer, signature,
+  audience/authorized party, expiration, verified email, and exact invited email.
+  Bind each one-time transaction to the browser, organization and provider.
+  Never trust arbitrary callback redirects/issuers. Use native HTTP deadlines
+  and bounded state/session/token data. Google is ordinary configuration.
+- First sign-in yields only onboarding authority. Recipient sets profile
+  details (first/last and user identifier as existing domain requires).
+  Atomically create user + external identity and consume invitation via existing
+  optimistic persistence. Concurrent callbacks/completion cannot duplicate
+  users or create partial state. Retry does not consume an unrelated invitation.
+- Use short-lived secure HttpOnly browser sessions, logout and current-user
+  status. Reject CSRF on cookie-authenticated mutations, including existing
+  mutation routes. Preserve Bearer clients. Revalidate current user enabled
+  state, organization existence and provider policy; no permanent rights
+  captured at login. Do not expose provider tokens/secrets to the browser.
+- Organization ownership is enforced server-side, both list filtering and
+  individual-resource operations. Matching names in another organization,
+  unqualified paths, forged IDs, direct URLs and stale sessions cannot bypass
+  it. Reuse qualified principal/resource types in HTTP/SSH/decision consumers.
+  Replace DecisionRegistry's unconditional authorization where organization
+  users can reach it; unscoped/global decisions stay system-only.
+- Expose only organization-safe data to ordinary members. Keep global admin
+  APIs restricted rather than filter sensitive global configuration payloads.
+  Frontend ordinary-member views list own organization repositories/resources,
+  without calling/exposing global admin APIs. Existing operator UI remains for
+  system administrators. Resources without a trustworthy organization owner
+  stay unavailable to ordinary members rather than inventing ownership.
 
 ## Implementation plan
 
-1. Trace existing configuration schema/XML translation, persistence, secret
-   resolution, scoped principals, token issuance, HTTP authorization/routes,
-   frontend auth/API client, and tests. Read local class rules. Extend the
-   existing canonical model with provider policy, invitations, and identities;
-   update every real constructor/translator/consumer that copies those models.
-2. Cover and implement durable invitation management and atomic redemption,
-   identity uniqueness, organization isolation, expiry/revocation, reload,
-   concurrent completion, and failure without partial persistence.
-3. Implement shared OIDC discovery/code exchange/token verification with native
-   HTTP timeouts, browser-bound one-time login transactions, and short-lived
-   onboarding/session state. Integrate existing permission evaluation and
-   secret resolution without preserving duplicate authorization models.
-4. Register public authentication and protected invitation/profile/session
-   routes. Add cookie-aware authentication, logout, CSRF checks, appropriate
-   no-store headers and sanitized errors. Preserve existing Bearer/SSH paths.
-5. Add browser login, first-use profile, and invitation administration UI with
-   behavior tests. Document concrete Google and corporate OIDC setup, secret
-   provisioning, redirect URL, invitation use, expiry, and limitations in an
-   appropriate existing documentation location.
-6. Exercise the flow with a controlled local OIDC provider fixture, including
-   both Google-shaped and corporate issuer configuration. Test normal login,
-   invitation onboarding, repeat login, wrong email/state/nonce/audience/issuer,
-   unverified email, duplicate/replayed callbacks, disabled users, revoked and
-   expired invitations, concurrent redemption, restart/reload, logout, CSRF,
-   and unchanged Bearer access. Run focused tests via make run-test and the
-   complete required make test check; run frontend tests/build as applicable.
+1. Inspect schema/XML mapper, configuration persistence/copy consumers, secret
+   resolution, UserIdentity, ACL/token lookup, access rules, resource names,
+   HTTP/SSH and decision consumers, frontend API/client and existing tests.
+2. Add minimal organization-level providers, invitations and external identities
+   to existing configuration/user model; update all real serialization and copy
+   paths. Add durable invitation operations and atomic profile completion.
+3. Add canonical organization identity resolution and shared organization
+   ownership checks. Preserve system identity wire/token compatibility and
+   existing ACL behavior. Provide member-safe resource listing/access routes
+   through existing mechanisms; do not expose global admin state.
+4. Implement generic OIDC browser flow, sessions/CSRF and registered routes.
+   Use a local controlled OIDC provider fixture for protocol behavior tests.
+5. Add browser login/provider selection, invitation onboarding, member view,
+   logout, administrator provider settings and invitation controls. Document
+   Google/corporate configuration and secret provisioning in appropriate docs.
+6. Verify normal onboarding/repeat login, wrong email, expired/revoked invite,
+   callback/state/nonce/signature/audience/issuer failures, replay/concurrency,
+   same-name accounts, cross-organization list and direct-access denial,
+   disabled user/policy reload, logout/CSRF and unchanged system Bearer/SSH.
+   Run focused make run-test plus full make test; frontend tests/build as needed.
 
 ## Acceptance
 
-The browser and admin routes are wired into the running application. A user can
-accept an email-bound invitation through either configured OIDC provider, set a
-profile, obtain exactly the invitation's permissions, logout, and log in again.
-An unrelated/unauthorized external account cannot create, link, or access a user.
-Invitation and identity persistence are verified through real supported APIs.
-Configuration round trips preserve all new and existing fields. Secrets remain
-protected. Existing SSH/API login continues to pass its tests. Real external
-provider smoke tests require deployment credentials and are reported separately
-from deterministic local verification.
+Administrator can configure organization OIDC and issue/revoke invitations.
+Recipient signs in, completes profile once, and sees their organization's
+repositories/resources. Direct requests cannot reach another organization or
+global administration. Both Google-shaped and corporate OIDC configurations use
+one tested flow. Persistence/reload, safe secrets, atomic redemption and existing
+system login are covered. No full hierarchical-role engine is added. Actual
+external-provider smoke testing needs deployment credentials and is reported
+separately from deterministic local tests.
