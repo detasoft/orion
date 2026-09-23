@@ -9,9 +9,7 @@ import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.OrionDocument;
 
-import java.io.IOException;
 import java.net.http.HttpClient;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Function;
@@ -67,12 +65,6 @@ final class BootstrapGitTransportFactory {
         char[] characters = selected.credential();
         try {
             GitTransportScheme scheme = GitTransportScheme.from(location.remoteUri());
-            if (scheme == GitTransportScheme.SSH) {
-                if (location.knownHosts() == null) {
-                    throw new BootstrapGitProxyException("SSH host-key configuration");
-                }
-                requireProtectedKnownHosts(location.knownHosts());
-            }
             boolean http = scheme == GitTransportScheme.HTTP || scheme == GitTransportScheme.HTTPS;
             try (GitCredentials credentials = new GitCredentials(
                     location.credentialKind(),
@@ -89,14 +81,6 @@ final class BootstrapGitTransportFactory {
     }
 
     private record Connection(BootstrapGitLocation location, char[] credential) {
-    }
-
-    private static void requireProtectedKnownHosts(Path knownHosts) {
-        try {
-            BootstrapSecretResolver.requireIntegrityProtectedFile(knownHosts, "SSH known-hosts");
-        } catch (IOException | RuntimeException error) {
-            throw new BootstrapGitProxyException("SSH host-key configuration");
-        }
     }
 
     @FunctionalInterface

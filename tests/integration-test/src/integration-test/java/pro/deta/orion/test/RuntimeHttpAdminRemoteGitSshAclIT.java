@@ -78,11 +78,9 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                 .valueOrFailure("Server SSH key should load");
         try (GitSshTestServer gitServer = GitSshTestServer.start(
                 repositoriesRoot, "git", hostKey, userKey.getPublic(), TestPorts.nextBatch().ssh())) {
-            Path knownHosts = tempDir.resolve("known_hosts");
-            Files.writeString(knownHosts, gitServer.knownHostsLine() + "\n");
             var authentication = Map.of("credentialKind", "private-key",
                     "credential", privateKey.toRealPath().toUri().toString(),
-                    "knownHosts", knownHosts.toRealPath().toUri().toString());
+                    "knownHosts", org.apache.sshd.common.config.keys.PublicKeyEntry.toString(hostKey.getPublic()));
             for (BootstrapSourceConfig source : List.of(configuration.getBootstrap().getAccessControl(),
                     configuration.getBootstrap().getKeyMaterial())) {
                 source.setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));

@@ -65,16 +65,13 @@ final class RemoteBootstrapTestSupport {
                     + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())
                     + "\n-----END PRIVATE KEY-----\n";
             int port = upstream.configuration().getTransport().getSsh().getPort();
-            Path knownHosts = directory.toRealPath().resolve("known_hosts");
             StringBuilder hosts = new StringBuilder();
             for (var hostKey : upstream.identity().sshHostKeys().keyPairs()) {
-                hosts.append("[localhost]:").append(port).append(' ')
-                        .append(PublicKeyEntry.toString(hostKey.getPublic())).append('\n');
+                hosts.append(PublicKeyEntry.toString(hostKey.getPublic())).append('\n');
             }
-            Files.writeString(knownHosts, hosts);
             location = "git+ssh://root@localhost:" + port + "/bootstrap-inputs.git";
             authentication = Map.of("credentialKind", "private-key", "credential", credentialReference,
-                    "knownHosts", knownHosts.toUri().toString());
+                    "knownHosts", hosts.toString());
         }
         Files.writeString(credentialFile, credential);
         if (Files.getFileStore(credentialFile).supportsFileAttributeView("posix")) {

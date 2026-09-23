@@ -771,7 +771,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     private static OrionDocument proxyDocument(String alias, String upstream) {
         var binding = new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
+                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
                 List.of(), List.of(binding)), List.of());
     }

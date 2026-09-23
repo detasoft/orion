@@ -8,8 +8,8 @@ import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.future.ConnectFuture;
 import org.apache.sshd.client.future.OpenFuture;
-import org.apache.sshd.client.keyverifier.DefaultKnownHostsServerKeyVerifier;
-import org.apache.sshd.client.keyverifier.RejectAllServerKeyVerifier;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import pro.deta.orion.schema.orion.GitProxyBinding;
 import org.apache.sshd.client.keyverifier.ServerKeyVerifier;
 import org.apache.sshd.client.session.ClientSession;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -22,7 +22,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.SocketAddress;
 import java.net.URI;
-import java.nio.file.Path;
+import java.util.Set;
 import java.security.PublicKey;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -36,14 +36,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Blocking Git transport over Apache MINA SSH. Injected clients remain caller-owned;
- * strict known-host clients are created per exchange and closed with their transport session.
+ * clients with configured trust are created per exchange and closed with their transport session.
  */
 public final class GitSshClientTransport implements GitClientTransport {
     private static final int DEFAULT_PORT = 22;
 
     private final SshClient client;
     private final GitCredentials credentials;
-    private final Path knownHosts;
+    private final Set<String> knownHosts;
 
     public GitSshClientTransport(
             SshClient client,
@@ -55,7 +55,7 @@ public final class GitSshClientTransport implements GitClientTransport {
      * Creates an SSH transport which rejects unknown and changed server host keys.
      */
     public static GitSshClientTransport strictKnownHosts(
-            Path knownHosts,
+            Set<String> knownHosts,
             GitCredentials credentials) {
         Objects.requireNonNull(knownHosts, "knownHosts");
         return new GitSshClientTransport(null, credentials, knownHosts);
@@ -64,10 +64,11 @@ public final class GitSshClientTransport implements GitClientTransport {
     private GitSshClientTransport(
             SshClient client,
             GitCredentials credentials,
-            Path knownHosts) {
+            Set<String> knownHosts) {
         this.client = client;
         this.credentials = Objects.requireNonNull(credentials, "credentials");
-        this.knownHosts = knownHosts;
+        this.knownHosts = knownHosts == null ? null
+                : GitProxyBinding.canonicalKnownHosts(knownHosts);
     }
 
     @Override
@@ -197,8 +198,7 @@ public final class GitSshClientTransport implements GitClientTransport {
         }
         SshClient strictClient = SshClient.setUpDefaultClient();
         TrackingVerifier verifier = new TrackingVerifier(
-                new DefaultKnownHostsServerKeyVerifier(
-                        RejectAllServerKeyVerifier.INSTANCE, true, knownHosts));
+                (session, address, key) -> knownHosts.contains(PublicKeyEntry.toString(key)));
         strictClient.setServerKeyVerifier(verifier);
         strictClient.start();
         return new Attempt(strictClient, verifier, strictClient);
@@ -328,7 +328,7 @@ public final class GitSshClientTransport implements GitClientTransport {
 
     /**
      * The key rejected by the configured verifier, bound to the requested host and port.
-     * This evidence does not authorize trusting the key or bypassing known-hosts file checks.
+     * This evidence does not authorize trusting the key or bypassing configured trust.
      */
     public static final class HostKeyRejectedException extends IOException {
         private final String host;

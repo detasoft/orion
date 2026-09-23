@@ -70,7 +70,9 @@ public class OrionV2 {
         private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
         private String secret;
         private String username;
-        private String knownHosts;
+        @XmlElementWrapper(name = "knownHosts")
+        @XmlElement(name = "key")
+        private List<String> knownHosts;
     }
 
     @Data

@@ -7,7 +7,7 @@ import pro.deta.orion.schema.orion.GitProxyBinding;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
+import java.util.Arrays;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -23,7 +23,7 @@ record BootstrapGitLocation(
         GitCredentialKind credentialKind,
         String credentialReference,
         String credentialUsername,
-        Path knownHosts,
+        Set<String> knownHosts,
         String proxyName) {
     static final String CACHE_PREFIX = "bootstrap/proxy-";
     private static final String PREFIX = "git+";
@@ -36,6 +36,7 @@ record BootstrapGitLocation(
         Objects.requireNonNull(refName, "refName");
         Objects.requireNonNull(credentialKind, "credentialKind");
         Objects.requireNonNull(proxyName, "proxyName");
+        knownHosts = GitProxyBinding.canonicalKnownHosts(knownHosts);
     }
 
     boolean isBindingCompatibleWith(BootstrapGitLocation other) {
@@ -95,7 +96,12 @@ record BootstrapGitLocation(
                 config.selectedRef());
         String refName = refName(selectedRef);
         URI remote = transportUri(source, scheme.substring(PREFIX.length()));
-        Path knownHosts = optionalFileReference(auth.get("knownHosts"), "Remote Git known-hosts file");
+        String configuredKeys = auth.get("knownHosts");
+        Set<String> knownHosts = configuredKeys == null || configuredKeys.isBlank() ? Set.of()
+                : GitProxyBinding.canonicalKnownHosts(Arrays.asList(configuredKeys.strip().split("\\R")));
+        if (!knownHosts.isEmpty() && !"ssh".equals(remote.getScheme())) {
+            throw new IllegalArgumentException("Remote Git trusted host keys require SSH");
+        }
         return new BootstrapGitLocation(
                 remote,
                 refName,
@@ -109,7 +115,7 @@ record BootstrapGitLocation(
     static BootstrapGitLocation persistent(GitProxyBinding binding) {
         return new BootstrapGitLocation(binding.upstream(), binding.ref(), binding.credentialKind(),
                 binding.secret().orElse(null), binding.username().orElse(null),
-                binding.knownHosts().map(Path::of).orElse(null),
+                binding.knownHosts(),
                 cacheName(binding.upstream(), binding.ref()));
     }
 
@@ -193,20 +199,6 @@ record BootstrapGitLocation(
             throw new IllegalArgumentException(name + " must use env: or file:");
         }
         return value;
-    }
-
-    private static Path optionalFileReference(String value, String name) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        if (!value.startsWith("file:")) {
-            throw new IllegalArgumentException(name + " must use file:");
-        }
-        try {
-            return Path.of(URI.create(value)).toAbsolutePath().normalize();
-        } catch (RuntimeException error) {
-            throw new IllegalArgumentException("Invalid " + name.toLowerCase(Locale.ROOT));
-        }
     }
 
     private static String refName(String selectedRef) {

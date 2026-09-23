@@ -1,5 +1,6 @@
 package pro.deta.orion.git.client;
 
+import java.util.Set;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.eclipse.jgit.api.Git;
@@ -128,7 +129,7 @@ class GitSmartHttpClientTransportTest {
             }
         })) {
             GitClientTransport transport = new GitRemoteClientTransport(null,
-                    new GitCredentials(GitCredentialKind.TOKEN, "", "secret".toCharArray()), null, true);
+                    new GitCredentials(GitCredentialKind.TOKEN, "", "secret".toCharArray()), Set.of(), true);
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
             GitClientResult<GitUploadPackResult> fetch =
                     new GitUploadPackClient(transport).fetch(

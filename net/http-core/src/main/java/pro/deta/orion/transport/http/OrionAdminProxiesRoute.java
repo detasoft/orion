@@ -175,10 +175,11 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         if (kind != GitCredentialKind.PASSWORD || "ssh".equalsIgnoreCase(upstream.getScheme())) {
             username = Optional.empty();
         }
-        Optional<URI> knownHosts = request.knownHosts() == null
-                ? (existing == null ? Optional.empty() : existing.knownHosts())
-                : request.knownHosts().isEmpty() ? Optional.empty() : Optional.of(URI.create(request.knownHosts()));
-        if (!"ssh".equalsIgnoreCase(upstream.getScheme())) knownHosts = Optional.empty();
+        Set<String> knownHosts = request.knownHosts() == null
+                ? (existing == null || !existing.upstream().equals(GitProxyBinding.canonicalUpstream(upstream))
+                        ? Set.of() : existing.knownHosts())
+                : request.knownHosts();
+        if (!"ssh".equalsIgnoreCase(upstream.getScheme())) knownHosts = Set.of();
         GitProxyBinding replacement = new GitProxyBinding(alias, upstream, ref, kind, secret, username, knownHosts);
         if (existing != null && provider.isBootstrapSource(existing, sources)
                 && (!existing.upstream().equals(replacement.upstream()) || !existing.ref().equals(replacement.ref()))) {
@@ -250,7 +251,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     }
 
     public record MutationRequest(String action, String scope, String revision, String alias,
-            String upstream, String ref, String credentialKind, String username, String knownHosts,
+            String upstream, String ref, String credentialKind, String username, Set<String> knownHosts,
             @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) char[] credential) {
         @Override public String toString() { return "ProxyMutation[redacted]"; }
     }

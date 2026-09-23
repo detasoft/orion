@@ -1,5 +1,6 @@
 package pro.deta.orion.git.client;
 
+import java.util.Set;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -56,7 +57,7 @@ class GitFileClientTransportTest {
     void remoteTransportDispatchesFileUris() throws Exception {
         Path bare = createRepository("dispatch");
         GitRemoteClientTransport transport = new GitRemoteClientTransport(
-                null, GitCredentials.none(), null, false);
+                null, GitCredentials.none(), Set.of(), false);
 
         GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
                 .discover(bare.toUri(), GitClientOptions.defaults());

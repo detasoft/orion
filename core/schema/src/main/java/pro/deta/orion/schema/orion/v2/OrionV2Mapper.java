@@ -356,7 +356,7 @@ public final class OrionV2Mapper {
             proxies.add(new GitProxyBinding(new RemoteAlias(proxy.getAlias()), safeProxyUri(proxy.getUpstream()),
                     proxy.getRef(), proxy.getCredentialKind(), Optional.ofNullable(proxy.getSecret()),
                     Optional.ofNullable(proxy.getUsername()),
-                    Optional.ofNullable(proxy.getKnownHosts()).map(OrionV2Mapper::safeProxyUri)));
+                    GitProxyBinding.canonicalKnownHosts(listOrEmpty(proxy.getKnownHosts()))));
         }
         return proxies;
     }
@@ -369,7 +369,7 @@ public final class OrionV2Mapper {
         for (GitProxyBinding proxy : source) {
             proxies.add(new OrionV2.GitProxy(proxy.alias().value(), proxy.upstream().toASCIIString(), proxy.ref(),
                     proxy.credentialKind(), proxy.secret().orElse(null), proxy.username().orElse(null),
-                    proxy.knownHosts().map(URI::toASCIIString).orElse(null)));
+                    new ArrayList<>(proxy.knownHosts())));
         }
         return proxies;
     }

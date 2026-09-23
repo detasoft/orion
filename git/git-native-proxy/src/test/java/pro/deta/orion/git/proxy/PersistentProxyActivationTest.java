@@ -75,7 +75,7 @@ class PersistentProxyActivationTest {
             GitProxyBinding previous = changed.system().proxies().getFirst();
             GitProxyBinding basic = new GitProxyBinding(previous.alias(), previous.upstream(), previous.ref(),
                     GitCredentialKind.PASSWORD, Optional.of("basic"), Optional.of("user"),
-                    Optional.empty());
+                    Set.of());
             fixture.current.set(withProxies(changed, List.of(basic)));
 
             provider.openForRead(name).valueOrFailure("reloaded proxy");

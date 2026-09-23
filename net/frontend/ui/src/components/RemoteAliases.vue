@@ -120,7 +120,9 @@ function submit() {
   if (!draft || busy.value) return
   const command = { action: draft.action, alias: draft.alias, ref: draft.ref }
   if (draft.upstream) command.upstream = draft.upstream
-  if (draft.knownHosts) command.knownHosts = draft.knownHosts
+  if (draft.knownHosts.trim()) {
+    command.knownHosts = [...new Set(draft.knownHosts.split(/\r?\n/).map((key) => key.trim()).filter(Boolean))]
+  }
   if (draft.action !== 'update') {
     if (draft.credentialKind) command.credentialKind = draft.credentialKind
     if (needsHttpUsername.value) command.username = draft.username
@@ -167,8 +169,8 @@ onBeforeUnmount(() => { attempt += 1; closeEditor() })
             placeholder="https://git.example/repository.git" />
         </label>
         <label>Selected ref<input v-model="editor.ref" name="ref" required /></label>
-        <label>SSH known-hosts file URI (optional)
-          <input v-model="editor.knownHosts" name="knownHosts" placeholder="file:///path/to/known_hosts" />
+        <label>SSH known_hosts keys (one public key per line)
+          <textarea v-model="editor.knownHosts" name="knownHosts" placeholder="ssh-ed25519 AAAA…" />
         </label>
         <template v-if="editor.action !== 'update'">
           <label>Authentication

@@ -1,11 +1,12 @@
 package pro.deta.orion.git.client;
 
 import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.GitProxyBinding;
 
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Selects the transport exclusively from the URI scheme. Credentials are interpreted by that transport;
@@ -14,14 +15,14 @@ import java.util.Objects;
 public final class GitRemoteClientTransport implements GitClientTransport {
     private final HttpClient httpClient;
     private final GitCredentials credentials;
-    private final Path knownHosts;
+    private final Set<String> knownHosts;
     private final boolean allowPlainHttp;
 
     public GitRemoteClientTransport(
-            HttpClient httpClient, GitCredentials credentials, Path knownHosts, boolean allowPlainHttp) {
+            HttpClient httpClient, GitCredentials credentials, Set<String> knownHosts, boolean allowPlainHttp) {
         this.httpClient = httpClient;
         this.credentials = Objects.requireNonNull(credentials, "credentials");
-        this.knownHosts = knownHosts;
+        this.knownHosts = GitProxyBinding.canonicalKnownHosts(knownHosts);
         this.allowPlainHttp = allowPlainHttp;
     }
 
@@ -41,18 +42,9 @@ public final class GitRemoteClientTransport implements GitClientTransport {
                 credentials.requireKind(GitCredentialKind.NONE);
                 yield new GitTcpClientTransport();
             }
-            case SSH -> {
-                if (knownHosts == null) {
-                    throw unsupported("Git SSH transport requires known-hosts configuration");
-                }
-                yield GitSshClientTransport.strictKnownHosts(knownHosts, credentials);
-            }
+            case SSH -> GitSshClientTransport.strictKnownHosts(knownHosts, credentials);
             case HTTP, HTTPS -> new GitSmartHttpClientTransport(httpClient, credentials, allowPlainHttp);
         };
         return transport.open(service, remoteUri, options);
-    }
-
-    private static GitClientTransportException unsupported(String message) {
-        return new GitClientTransportException(GitClientFailure.Kind.PROTOCOL_UNSUPPORTED, false, message);
     }
 }

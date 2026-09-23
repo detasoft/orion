@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,8 +42,7 @@ class GitSshClientTransportTest {
     void rejectsUnknownServerHostKeyWithVerificationFailure(
             @TempDir Path temporaryDirectory) throws Exception {
         TestRepository repository = createRepository(temporaryDirectory);
-        Path knownHosts = temporaryDirectory.resolve("known_hosts");
-        Files.writeString(knownHosts, "");
+        Set<String> knownHosts = Set.of();
         try (TestSshServer server = TestSshServer.start(
                 temporaryDirectory, repository.path())) {
             GitClientTransport transport = new GitRemoteClientTransport(null,
@@ -64,9 +64,11 @@ class GitSshClientTransportTest {
             assertThat(rejected.port()).isEqualTo(server.port());
             assertThat(PublicKeyEntry.toString(rejected.serverKey()))
                     .isEqualTo(PublicKeyEntry.toString(server.keyProvider.loadKeys(null).getFirst().getPublic()));
-            assertThat(Files.readString(knownHosts)).isEqualTo("");
+            assertThat(knownHosts).isEmpty();
 
-            Files.writeString(knownHosts, server.knownHostEntry());
+            knownHosts = Set.of(server.knownHostEntry());
+            transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()), knownHosts, false);
             assertThat(new GitUploadPackClient(transport).discover(
                     server.repositoryUri(), GitClientOptions.defaults()))
                     .isInstanceOf(GitClientResult.Success.class);
@@ -76,10 +78,10 @@ class GitSshClientTransportTest {
     @Test
     void acceptsKnownServerHostKey(@TempDir Path temporaryDirectory) throws Exception {
         TestRepository repository = createRepository(temporaryDirectory);
-        Path knownHosts = temporaryDirectory.resolve("known_hosts");
+        Set<String> knownHosts;
         try (TestSshServer server = TestSshServer.start(
                 temporaryDirectory, repository.path())) {
-            Files.writeString(knownHosts, server.knownHostEntry());
+            knownHosts = Set.of(server.knownHostEntry());
             GitClientTransport transport = new GitRemoteClientTransport(null,
                     new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
                     knownHosts, false);
@@ -95,16 +97,16 @@ class GitSshClientTransportTest {
     void rejectsChangedServerHostKeyWithVerificationFailure(
             @TempDir Path temporaryDirectory) throws Exception {
         TestRepository repository = createRepository(temporaryDirectory);
-        Path knownHosts = temporaryDirectory.resolve("known_hosts");
+        Set<String> knownHosts;
         int port;
         try (TestSshServer original = TestSshServer.start(
                 temporaryDirectory.resolve("original-key"), repository.path(), 0)) {
             port = original.port();
-            Files.writeString(knownHosts, original.knownHostEntry());
+            knownHosts = Set.of(original.knownHostEntry());
         }
         try (TestSshServer changed = TestSshServer.start(
                 temporaryDirectory.resolve("changed-key"), repository.path(), port)) {
-            String previous = Files.readString(knownHosts);
+            Set<String> previous = knownHosts;
             GitClientTransport transport = new GitRemoteClientTransport(null,
                     new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()),
                     knownHosts, false);
@@ -124,12 +126,49 @@ class GitSshClientTransportTest {
             assertThat(rejected.port()).isEqualTo(changed.port());
             assertThat(PublicKeyEntry.toString(rejected.serverKey()))
                     .isEqualTo(PublicKeyEntry.toString(changed.keyProvider.loadKeys(null).getFirst().getPublic()));
-            assertThat(Files.readString(knownHosts)).isEqualTo(previous);
+            assertThat(knownHosts).isEqualTo(previous);
 
-            Files.writeString(knownHosts, changed.knownHostEntry());
+            knownHosts = Set.of(changed.knownHostEntry());
+            transport = new GitRemoteClientTransport(null,
+                    new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()), knownHosts, false);
             assertThat(new GitUploadPackClient(transport).discover(
                     changed.repositoryUri(), GitClientOptions.defaults()))
                     .isInstanceOf(GitClientResult.Success.class);
+        }
+    }
+
+    @Test
+    void trustsEitherClusterKeyAtTheSameUrlButRejectsAThird(@TempDir Path directory) throws Exception {
+        TestRepository repository = createRepository(directory);
+        Path first = directory.resolve("node-one");
+        Path second = directory.resolve("node-two");
+        Path third = directory.resolve("node-three");
+        int port;
+        String firstKey;
+        String secondKey;
+        try (TestSshServer server = TestSshServer.start(first, repository.path(), 0)) {
+            port = server.port();
+            firstKey = server.knownHostEntry();
+        }
+        try (TestSshServer server = TestSshServer.start(second, repository.path(), port)) {
+            secondKey = server.knownHostEntry();
+        }
+        java.util.HashSet<String> configured = new java.util.HashSet<>(Set.of(firstKey, secondKey));
+        try (GitCredentials credentials = new GitCredentials(
+                GitCredentialKind.PASSWORD, "", "password".toCharArray())) {
+            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, configured, false);
+            configured.clear();
+            for (Path node : List.of(first, second, third)) {
+                try (TestSshServer server = TestSshServer.start(node, repository.path(), port)) {
+                    GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
+                            .discover(server.repositoryUri(), GitClientOptions.defaults());
+                    if (node.equals(third)) {
+                        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.VERIFICATION_FAILED);
+                    } else {
+                        assertThat(result).isInstanceOf(GitClientResult.Success.class);
+                    }
+                }
+            }
         }
     }
 
@@ -142,14 +181,14 @@ class GitSshClientTransportTest {
         String pem = "-----BEGIN PRIVATE KEY-----\n"
                 + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())
                 + "\n-----END PRIVATE KEY-----\n";
-        Path knownHosts = directory.resolve("known_hosts");
+        Set<String> knownHosts;
         try (TestSshServer server = TestSshServer.start(directory, repository.path());
              GitCredentials credentials = new GitCredentials(
                      GitCredentialKind.PRIVATE_KEY, "", pem.toCharArray())) {
             server.server.setPasswordAuthenticator((user, password, session) -> false);
             server.server.setPublickeyAuthenticator((user, supplied, session) ->
                     "git".equals(user) && key.getPublic().equals(supplied));
-            Files.writeString(knownHosts, server.knownHostEntry());
+            knownHosts = Set.of(server.knownHostEntry());
             GitClientTransport transport = new GitRemoteClientTransport(null, credentials, knownHosts, false);
 
             assertThat(new GitUploadPackClient(transport).discover(server.repositoryUri(), GitClientOptions.defaults()))
@@ -379,9 +418,7 @@ class GitSshClientTransportTest {
         }
 
         private String knownHostEntry() {
-            return "[127.0.0.1]:" + server.getPort() + " "
-                    + PublicKeyEntry.toString(keyProvider.loadKeys(null).getFirst().getPublic())
-                    + "\n";
+            return PublicKeyEntry.toString(keyProvider.loadKeys(null).getFirst().getPublic());
         }
 
         private int port() {

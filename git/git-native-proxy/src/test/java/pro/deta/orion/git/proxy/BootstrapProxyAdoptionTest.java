@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -138,7 +139,7 @@ class BootstrapProxyAdoptionTest {
 
     private static GitProxyBinding binding(String alias, String upstream, String secret) {
         return new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitCredentialKind.TOKEN, Optional.of(secret), Optional.empty(), Optional.empty());
+                GitCredentialKind.TOKEN, Optional.of(secret), Optional.empty(), Set.of());
     }
 
     private static BootstrapSourceConfig source(String upstream) {

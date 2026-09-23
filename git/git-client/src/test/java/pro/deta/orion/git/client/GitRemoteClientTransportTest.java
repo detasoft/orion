@@ -1,5 +1,6 @@
 package pro.deta.orion.git.client;
 
+import java.util.Set;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -55,7 +56,7 @@ class GitRemoteClientTransportTest {
         });
         server.start();
         try (GitCredentials credentials = new GitCredentials(kind, username, "secret".toCharArray())) {
-            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, null, true);
+            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, Set.of(), true);
             assertThatThrownBy(() -> transport.open(GitClientService.UPLOAD_PACK,
                     uri(server), GitClientOptions.defaults()))
                     .isInstanceOf(GitClientTransportException.class)
@@ -69,7 +70,7 @@ class GitRemoteClientTransportTest {
 
     @Test
     void rejectsUnknownOrMissingScheme() {
-        GitClientTransport transport = new GitRemoteClientTransport(null, GitCredentials.none(), null, false);
+        GitClientTransport transport = new GitRemoteClientTransport(null, GitCredentials.none(), Set.of(), false);
         for (String location : new String[]{"ftp://example.test/repository.git", "repository.git"}) {
             assertThatThrownBy(() -> transport.open(
                     GitClientService.UPLOAD_PACK, URI.create(location), GitClientOptions.defaults()))
@@ -90,7 +91,7 @@ class GitRemoteClientTransportTest {
         });
         server.start();
         try (GitCredentials credentials = new GitCredentials(kind, username, secret.toCharArray())) {
-            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, null, true);
+            GitClientTransport transport = new GitRemoteClientTransport(null, credentials, Set.of(), true);
             GitClientResult<GitRemoteAdvertisement> result = new GitUploadPackClient(transport)
                     .discover(uri(server), GitClientOptions.defaults());
             assertThat(result).isInstanceOf(GitClientResult.Failed.class);

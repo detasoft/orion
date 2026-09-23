@@ -2,7 +2,6 @@ package pro.deta.orion.git.proxy;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientService;
@@ -16,9 +15,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,7 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BootstrapGitTransportFactoryTest {
     @Test
@@ -106,42 +101,23 @@ class BootstrapGitTransportFactoryTest {
     }
 
     @Test
-    void rejectsGroupWritableKnownHosts(@TempDir Path temporaryDirectory) throws Exception {
-        assumeTrue(Files.getFileStore(temporaryDirectory).supportsFileAttributeView("posix"));
-        Path knownHosts = temporaryDirectory.toRealPath().resolve("known_hosts");
-        Files.writeString(knownHosts, "example.test ssh-rsa key");
-        Files.setPosixFilePermissions(knownHosts, PosixFilePermissions.fromString("rw-rw-r--"));
+    void carriesMultipleConfiguredKeysWithoutReadingAFilesystemTrustStore() throws Exception {
+        String first = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
+        String second = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC";
+        BootstrapGitLocation location = sshLocation("password", "env:SSH_PASSWORD",
+                first + "\n" + second + "\n" + first);
         BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
                 new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")));
-
-        assertThatThrownBy(() -> factory.withTransport(
-                sshLocation("password", "env:SSH_PASSWORD", knownHosts),
-                (selected, transport) -> transport.getClass()))
-                .isInstanceOf(BootstrapGitProxyException.class)
-                .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
-                .hasMessageNotContaining(knownHosts.toString());
+        factory.withTransport(location, (selected, transport) -> {
+            assertThat(selected.knownHosts()).containsExactlyInAnyOrder(first, second);
+            return null;
+        });
     }
 
     @Test
-    void rejectsKnownHostsInGroupWritableDirectory(@TempDir Path temporaryDirectory) throws Exception {
-        assumeTrue(Files.getFileStore(temporaryDirectory).supportsFileAttributeView("posix"));
-        Path knownHostsDirectory = temporaryDirectory.toRealPath().resolve("known-hosts");
-        Files.createDirectory(knownHostsDirectory);
-        Path knownHosts = knownHostsDirectory.resolve("known_hosts");
-        Files.writeString(knownHosts, "example.test ssh-rsa key");
-        Files.setPosixFilePermissions(knownHosts, PosixFilePermissions.fromString("rw-r--r--"));
-        Files.setPosixFilePermissions(
-                knownHostsDirectory,
-                PosixFilePermissions.fromString("rwxrwxr-x"));
-        BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
-                new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "password-value")));
-
-        assertThatThrownBy(() -> factory.withTransport(
-                sshLocation("password", "env:SSH_PASSWORD", knownHosts),
-                (selected, transport) -> transport.getClass()))
-                .isInstanceOf(BootstrapGitProxyException.class)
-                .hasMessage("Remote Git bootstrap failed during SSH host-key configuration")
-                .hasMessageNotContaining(knownHosts.toString());
+    void rejectsMalformedConfiguredKeys() {
+        assertThatThrownBy(() -> sshLocation("password", "env:SSH_PASSWORD", "ssh-ed25519 invalid!"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("host key");
     }
 
     private static void assertHttpAuthorization(
@@ -194,13 +170,13 @@ class BootstrapGitTransportFactoryTest {
     private static BootstrapGitLocation sshLocation(
             String credentialKind,
             String credential,
-            Path knownHosts) {
+            String knownHosts) {
         return location(
                 "git+ssh://git@example.test/repository.git?ref=main",
                 Map.of(
                         "credentialKind", credentialKind,
                         "credential", credential,
-                        "knownHosts", knownHosts.toUri().toString()));
+                        "knownHosts", knownHosts));
     }
 
     private static BootstrapGitLocation location(

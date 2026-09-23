@@ -3,6 +3,10 @@ package pro.deta.orion.schema.orion;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.TreeSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -15,7 +19,7 @@ public record GitProxyBinding(
         GitCredentialKind credentialKind,
         Optional<String> secret,
         Optional<String> username,
-        Optional<URI> knownHosts) {
+        Set<String> knownHosts) {
     public static final String REPOSITORY_PREFIX = "proxy/system/";
 
     public String publicRepositoryName() {
@@ -30,7 +34,7 @@ public record GitProxyBinding(
         secret = Objects.requireNonNull(secret, "proxy secret")
                 .map(value -> IdentifierRules.requireCanonical(value, "proxy secret"));
         username = Objects.requireNonNull(username, "proxy username");
-        knownHosts = Objects.requireNonNull(knownHosts, "proxy known-hosts file");
+        knownHosts = canonicalKnownHosts(knownHosts);
         credentialKind.requireTransport(upstream.getScheme());
         if ((credentialKind == GitCredentialKind.NONE) != secret.isEmpty()) {
             throw new IllegalArgumentException("Proxy secret does not match credential kind");
@@ -45,19 +49,30 @@ public record GitProxyBinding(
         } else if (username.isPresent()) {
             throw new IllegalArgumentException("Proxy username does not match credential kind");
         }
-        if (knownHosts.isPresent()) {
-            if (!"ssh".equals(upstream.getScheme())) {
-                throw new IllegalArgumentException("Proxy known-hosts file requires SSH");
-            }
-            if (!"file".equalsIgnoreCase(knownHosts.orElseThrow().getScheme())) {
-                throw new IllegalArgumentException("Proxy known-hosts file must use a local file URI");
-            }
-            try {
-                knownHosts = Optional.of(Path.of(knownHosts.orElseThrow()).toAbsolutePath().normalize().toUri());
-            } catch (RuntimeException failure) {
-                throw new IllegalArgumentException("Proxy known-hosts file must use a local file URI");
-            }
+        if (!knownHosts.isEmpty() && !"ssh".equals(upstream.getScheme())) {
+            throw new IllegalArgumentException("Proxy trusted host keys require SSH");
         }
+    }
+
+    public static Set<String> canonicalKnownHosts(Collection<String> keys) {
+        Set<String> canonical = new TreeSet<>();
+        for (String key : Objects.requireNonNull(keys, "trusted host keys")) {
+            String[] parts = Objects.requireNonNull(key, "trusted host key").strip().split("[ \t]+");
+            if (parts.length != 2 || !parts[0].matches("(?:ssh-|ecdsa-sha2-|sk-)[a-zA-Z0-9@._-]+")) {
+                throw new IllegalArgumentException("Invalid trusted host key; expected OpenSSH type and base64");
+            }
+            byte[] encoded;
+            try {
+                encoded = Base64.getDecoder().decode(parts[1]);
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("Invalid trusted host key base64");
+            }
+            if (encoded.length == 0) {
+                throw new IllegalArgumentException("Empty trusted host key");
+            }
+            canonical.add(parts[0] + " " + Base64.getEncoder().encodeToString(encoded));
+        }
+        return Collections.unmodifiableSet(canonical);
     }
 
     public static URI canonicalUpstream(URI value) {

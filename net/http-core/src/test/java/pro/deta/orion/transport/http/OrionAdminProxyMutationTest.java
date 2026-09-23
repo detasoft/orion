@@ -41,6 +41,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminProxyMutationTest {
     @Test
+    void savesKnownHostsAsKeysAndDoesNotTransferTrustToAnotherUrl() throws Exception {
+        try (var f = new Fixture()) {
+            int unusedPort;
+            try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+                unusedPort = socket.getLocalPort();
+            }
+            String firstKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
+            String secondKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC";
+            String upstream = "ssh://git@127.0.0.1:" + unusedPort + "/repo";
+            Map<String, Object> create = f.command("create", "cluster", upstream, "password");
+            create.put("credentialKind", "PASSWORD");
+            create.put("knownHosts", List.of(firstKey, secondKey, firstKey));
+            assertThat(f.post(create).status).isEqualTo(201);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts())
+                    .containsExactlyInAnyOrder(firstKey, secondKey);
+            assertThat(f.post(f.command("update", "cluster", null, null)).status).isEqualTo(200);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).hasSize(2);
+            Map<String, Object> update = f.command("update", "cluster", null, null);
+            update.put("upstream", upstream + "-other");
+            assertThat(f.post(update).status).isEqualTo(200);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+        }
+    }
+
+    @Test
     void savesAnEncryptedCredentialReplacesItExplicitlyAndAuditsWithoutSecrets() throws Exception {
         try (var f = new Fixture()) {
             byte[] secondary = f.storage.snapshot.files().get("secondary.xml");

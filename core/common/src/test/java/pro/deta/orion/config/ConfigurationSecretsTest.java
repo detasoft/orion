@@ -1,5 +1,6 @@
 package pro.deta.orion.config;
 
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -176,7 +177,7 @@ class ConfigurationSecretsTest {
         current.set(secrets.createSystem(current.get(), "bootstrap-token", "old-token".toCharArray()));
         GitProxyBinding proxy = new GitProxyBinding(new RemoteAlias("configuration"),
                 URI.create("https://git.example/config"), "main", GitCredentialKind.TOKEN,
-                Optional.of("bootstrap-token"), Optional.empty(), Optional.empty());
+                Optional.of("bootstrap-token"), Optional.empty(), Set.of());
         OrionDocument before = current.get();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(before.system().accessControl(),
                 before.system().https(), before.system().secrets(), List.of(proxy)), before.organizations()));

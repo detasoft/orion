@@ -16,6 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitProxyXmlTest {
+    private static final String FIRST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
+    private static final String SECOND_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC";
+
     @Test
     void roundTripsCanonicalSystemBindingAndPreservesItDuringAclUpdates() throws Exception {
         OrionDocument document = read(document(proxy("configuration", "HTTPS://GIT.EXAMPLE:443/a/../repo",
@@ -122,12 +125,18 @@ class GitProxyXmlTest {
     }
 
     @Test
-    void preservesSshTrustFileAndSystemSecretReference() throws Exception {
+    void preservesMultipleSshKeysAndSystemSecretReference() throws Exception {
         String binding = proxy("material", "ssh://git@git.example:22/repo", "main", "PRIVATE_KEY",
-                "<secret>bootstrap-token</secret><knownHosts>file:///etc/orion/known_hosts</knownHosts>");
-        String serialized = write(read(document(binding)));
-        assertThat(serialized).contains("ssh://git@git.example/repo", "PRIVATE_KEY", "known_hosts");
-        assertThat(read(serialized)).isEqualTo(read(document(binding)));
+                "<secret>bootstrap-token</secret><knownHosts><key>" + FIRST_KEY + "</key><key>"
+                        + SECOND_KEY + "</key><key>" + FIRST_KEY + "</key></knownHosts>");
+        OrionDocument parsed = read(document(binding));
+        assertThat(parsed.system().proxies().getFirst().knownHosts())
+                .containsExactlyInAnyOrder(FIRST_KEY, SECOND_KEY);
+        assertThatThrownBy(() -> parsed.system().proxies().getFirst().knownHosts().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        String serialized = write(parsed);
+        assertThat(serialized).contains("ssh://git@git.example/repo", "PRIVATE_KEY", FIRST_KEY, SECOND_KEY);
+        assertThat(read(serialized)).isEqualTo(parsed);
     }
 
     @Test
@@ -143,13 +152,12 @@ class GitProxyXmlTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"https://git.example/known_hosts", "relative/known_hosts",
-            "file://remote/known_hosts", "jar:file:/tmp/trust.zip!/known_hosts"})
-    void requiresALocalFileUriForSshTrust(String knownHosts) {
+    @ValueSource(strings = {"invalid", "ssh-ed25519 !not-base64", "host ssh-ed25519 AAAA", "ssh-ed25519"})
+    void rejectsMalformedSshTrust(String knownHosts) {
         String binding = proxy("material", "ssh://git@git.example/repo", "main", "PRIVATE_KEY",
-                "<secret>bootstrap-token</secret><knownHosts>" + knownHosts + "</knownHosts>");
+                "<secret>bootstrap-token</secret><knownHosts><key>" + knownHosts + "</key></knownHosts>");
         assertThatThrownBy(() -> read(document(binding)))
-                .isInstanceOf(IOException.class).hasMessageContaining("known-hosts file");
+                .isInstanceOf(IOException.class).hasMessageContaining("host key");
     }
 
     @Test
@@ -162,7 +170,8 @@ class GitProxyXmlTest {
     @ParameterizedTest
     @ValueSource(strings = {"", "<secret>bootstrap-token</secret>",
             "<secret>bootstrap-token</secret><username>bad:user</username>",
-            "<secret>bootstrap-token</secret><username>operator</username><knownHosts>file:/tmp/hosts</knownHosts>"})
+            "<secret>bootstrap-token</secret><username>operator</username>"
+                    + "<knownHosts><key>" + FIRST_KEY + "</key></knownHosts>"})
     void rejectsIncompleteOrInconsistentBasicAuth(String auth) {
         assertThatThrownBy(() -> read(document(proxy("configuration", "https://git.example/repo", "main",
                 "PASSWORD", auth)))).isInstanceOf(IOException.class);

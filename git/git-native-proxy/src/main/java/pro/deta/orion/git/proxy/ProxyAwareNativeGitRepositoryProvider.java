@@ -329,7 +329,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             }
             GitProxyBinding binding = new GitProxyBinding(alias, upstream, location.refName(),
                     location.credentialKind(), secret, Optional.ofNullable(location.credentialUsername()),
-                    Optional.ofNullable(location.knownHosts()).map(Path::toUri));
+                    location.knownHosts());
             identities.put(identity, binding);
             additions.put(binding, location);
         }

@@ -44,7 +44,7 @@ class OrionAdminProxiesRouteTest {
         var binding = new GitProxyBinding(new RemoteAlias("configuration"),
                 URI.create("ssh://private-user@git.example:2222/config.git"), "main",
                 GitCredentialKind.PRIVATE_KEY, Optional.of("private-key-id"),
-                Optional.empty(), Optional.of(URI.create("file:///private/known_hosts")));
+                Optional.empty(), Set.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"));
         desired.publish(document(List.of(binding)), Optional.of("configuration-revision"));
 
         var response = get(context(grant(AccessControl.GrantKey.ADMIN)));
@@ -57,7 +57,7 @@ class OrionAdminProxiesRouteTest {
                  "transport":"ssh","ref":"refs/heads/main","endpoint":"/r/proxy/system/configuration.git",
                  "status":"not-checked","observedAt":null}
                 """));
-        assertThat(response.body.toString()).doesNotContain("private-", "known_hosts", "ciphertext", "cache");
+        assertThat(response.body.toString()).doesNotContain("private-", "ssh-ed25519", "ciphertext", "cache");
         assertThat(backend.repositoryNames()).isEmpty();
     }
 
@@ -68,7 +68,7 @@ class OrionAdminProxiesRouteTest {
         assertThat(mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString())
                 .get("aliases").isEmpty()).isTrue();
         var binding = new GitProxyBinding(new RemoteAlias("archive"), URI.create("file:///upstream.git"), "main",
-                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Optional.empty());
+                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
         desired.publish(document(List.of(binding)), Optional.of("new-revision"));
 
         JsonNode body = mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString());

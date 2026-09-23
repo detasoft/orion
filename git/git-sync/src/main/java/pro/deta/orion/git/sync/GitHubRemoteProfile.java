@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import java.util.Set;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -28,7 +29,7 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
         this(
                 repository,
                 credentials,
-                credential -> new GitRemoteClientTransport(null, credential, null, false));
+                credential -> new GitRemoteClientTransport(null, credential, Set.of(), false));
     }
 
     GitHubRemoteProfile(

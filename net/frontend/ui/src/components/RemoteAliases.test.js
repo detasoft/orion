@@ -21,6 +21,21 @@ const alias = {
 }
 
 describe('Remote aliases', () => {
+  it('sends known_hosts as a deduplicated list of public keys', async () => {
+    const wrapper = await ready()
+    mutateRemoteAlias.mockResolvedValue({ status: 'saved', alias, revision: 'next' })
+    await button(wrapper, 'Add alias').trigger('click')
+    await wrapper.get('[name="alias"]').setValue('cluster')
+    await wrapper.get('[name="upstream"]').setValue('ssh://git@example.test/repository.git')
+    await wrapper.get('[name="credentialKind"]').setValue('PASSWORD')
+    await wrapper.get('[name="credential"]').setValue('password')
+    await wrapper.get('[name="knownHosts"]').setValue('ssh-ed25519 AAAA\n\nssh-rsa AQID\nssh-ed25519 AAAA')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mutateRemoteAlias.mock.lastCall[0].knownHosts).toEqual(['ssh-ed25519 AAAA', 'ssh-rsa AQID'])
+    wrapper.unmount()
+  })
+
   async function ready(selectedAlias = alias) {
     remoteAliases.mockResolvedValue({ aliases: [selectedAlias], revision: 'read-revision' })
     const wrapper = mount(RemoteAliases, { props: { token: 'admin-token' } })
