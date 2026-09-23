@@ -100,7 +100,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                 .map(GitRemoteAdvertisement.Ref::objectId)
                 .orElse(null);
         if (desiredId.equals(observed)) {
-            publishTrackingRef(checked, refName, desiredId);
+            publishTrackingRefs(checked, new GitHeads(Map.of(refName, desiredId)));
             return new GitPushOutcome(
                     GitPushOutcome.Status.ALREADY_CURRENT,
                     Optional.of(observed));
@@ -125,25 +125,9 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                 ? GitPushOutcome.Status.APPLIED
                 : GitPushOutcome.Status.REJECTED;
         if (status == GitPushOutcome.Status.APPLIED) {
-            publishTrackingRef(checked, refName, desiredId);
+            publishTrackingRefs(checked, new GitHeads(Map.of(refName, desiredId)));
         }
         return new GitPushOutcome(status, Optional.ofNullable(observed));
-    }
-
-    private static void publishTrackingRef(
-            NativeGitRepository repository,
-            String headRef,
-            String desiredId) throws GitRemoteException {
-        String trackingRef = TRACKING_PREFIX
-                + headRef.substring(HEAD_PREFIX.length());
-        String expected = repository.refs().getOrDefault(trackingRef, NULL_ID);
-        RefUpdateResult result = repository.updateRef(
-                trackingRef,
-                expected,
-                desiredId);
-        if (result.status() != RefUpdateResult.Status.APPLIED) {
-            throw GitRemoteException.local("tracking ref publication", true, null);
-        }
     }
 
     private static GitReceivePackRequest pushRequest(
