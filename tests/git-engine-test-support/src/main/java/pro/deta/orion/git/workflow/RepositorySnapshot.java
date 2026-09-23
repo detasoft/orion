@@ -48,11 +48,6 @@ public final class RepositorySnapshot {
         }
     }
 
-    @Deprecated
-    public static RepositorySnapshot capture(Path workTree, String ignoredHead) throws IOException {
-        return capture(workTree);
-    }
-
     public static RepositorySnapshot capture(Repository repository) throws IOException {
         Map<String, String> refs = refs(repository);
         return new RepositorySnapshot(headSymref(repository), refs, commits(repository));
