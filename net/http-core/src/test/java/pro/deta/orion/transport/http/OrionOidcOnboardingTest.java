@@ -13,6 +13,8 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.*;
@@ -38,11 +40,89 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
+    @Test
+    void renewalDoesNotExtendTheSevenDayDeadline() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Login login = f.start("acme", f.invite("acme"));
+            Reply complete = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
+            f.sessionCookie = complete.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
+            f.clock.now = f.clock.now.plusSeconds(6 * 24 * 60 * 60);
+            Reply refreshed = f.post("refresh", Map.of(), null);
+            assertThat(refreshed.status).isEqualTo(200);
+            assertThat(refreshed.headers).doesNotContainKey("Set-Cookie");
+            f.clock.now = f.clock.now.plusSeconds(24 * 60 * 60);
+            Reply expired = f.post("refresh", Map.of(), null);
+            assertThat(expired.status).isEqualTo(401);
+            assertThat(expired.headers.get("Set-Cookie")).contains("Max-Age=0");
+        }
+    }
+
+    @Test
+    void browserSessionRenewsTokensAndLogoutRevokesTheCookie() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Login login = f.start("acme", f.invite("acme"));
+            Reply complete = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
+            String header = complete.headers.get("Set-Cookie");
+            assertThat(header).startsWith("__Host-orion-session=")
+                    .contains("HttpOnly", "Secure", "SameSite=Strict", "Max-Age=604800");
+            f.sessionCookie = header.split(";", 2)[0].split("=", 2)[1];
+            Reply refreshed = f.post("refresh", Map.of(), null);
+            assertThat(refreshed.status).isEqualTo(200);
+            assertThat(refreshed.headers.get("Cache-Control")).isEqualTo("no-store");
+            assertThat(refreshed.json.path("token").asText()).isNotEqualTo(complete.json.path("token").asText());
+            TokenAuthenticationResult.Success authenticated = (TokenAuthenticationResult.Success)
+                    f.acl.verifyToken(refreshed.json.path("token").asText().getBytes(StandardCharsets.UTF_8));
+            assertThat(authenticated.userIdentity().getOrganizationId()).contains(new OrganizationId("acme"));
+            assertThat(refreshed.json.path("userId").asText()).isEqualTo(authenticated.userIdentity().getUserId());
+            assertThat(f.post("logout", Map.of(), null).status).isEqualTo(204);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "binding", "provider"})
+    void sessionRefreshRequiresTheBrowserOriginAndCurrentAccount(String removed) throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            Login login = f.start("acme", f.invite("acme"));
+            Reply complete = f.post("complete", Map.of("ticket", f.callback(login), "first", "Alice"), login.cookie);
+            f.sessionCookie = complete.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
+            f.origin = "https://attacker.test";
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(400);
+            assertThat(f.post("logout", Map.of(), null).status).isEqualTo(400);
+            f.origin = "https://orion.test";
+            assertThat(f.post("refresh", Map.of("organization", "default", "userId", "alice"), null).status)
+                    .isEqualTo(401);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
+            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+                List<OrionDocument.Organization> organizations = new ArrayList<>();
+                for (OrionDocument.Organization org : document.organizations()) {
+                    List<AccessControl.User> users = new ArrayList<>();
+                    for (AccessControl.User user : org.users()) {
+                        if (!removed.equals("user")) {
+                            users.add(new AccessControl.User(user.getId(), user.getFirst(), user.getLast(),
+                                    user.getEmail(), removed.equals("binding") ? List.of() : user.getCredentials(),
+                                    user.getRoles(), user.getGrants()));
+                        }
+                    }
+                    organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), users,
+                            org.grants(), org.roles(), org.teams(), org.secrets(),
+                            removed.equals("provider") ? List.of() : org.oidcProviders(), org.invitations()));
+                }
+                return new OrionDocument(document.system(), organizations);
+            }, new AccessControlSaveRequest("remove account", null));
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
     @Test
     void administratorInvitesIntoAnyOrganizationAndBrowserCreatesAnIsolatedPersistedUser() throws Exception {
         try (Fixture f = new Fixture()) {
@@ -287,6 +367,9 @@ class OrionOidcOnboardingTest {
                 List.of(new AccessControl.Grant("admin", List.of(
                         new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
         final OrionHttpRouteServlet servlet;
+        final MutableClock clock = new MutableClock();
+        String sessionCookie;
+        String origin = "https://orion.test";
         String email = "alice@example.test";
         String audience = "client";
         boolean emailVerified = true;
@@ -381,7 +464,7 @@ class OrionOidcOnboardingTest {
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired);
             acl.reload("fixture");
             accounts = new OrganizationAccounts(acl, desired);
-            OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper);
+            OrionOidcRoute oidc = new OrionOidcRoute(accounts, acl, desired, secrets, mapper, clock);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
                     new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
                     new OrionAdminOidcRoute(desired, acl, secrets, mapper))), new OrionHttpResponseWriter(mapper));
@@ -431,9 +514,14 @@ class OrionOidcOnboardingTest {
                 case "getAttribute" -> context;
                 case "getRemoteAddr" -> "127.0.0.1";
                 case "getContentType" -> "application/json";
-                case "getHeader" -> "Origin".equals(args[0]) ? "https://orion.test" : null;
+                case "getHeader" -> "Origin".equals(args[0]) ? origin : null;
                 case "getParameter" -> parameters.get(args[0]);
-                case "getCookies" -> cookie == null ? null : new Cookie[]{new Cookie("__Host-orion-oidc", cookie)};
+                case "getCookies" -> {
+                    List<Cookie> cookies = new ArrayList<>();
+                    if (cookie != null) cookies.add(new Cookie("__Host-orion-oidc", cookie));
+                    if (sessionCookie != null) cookies.add(new Cookie("__Host-orion-session", sessionCookie));
+                    yield cookies.toArray(Cookie[]::new);
+                }
                 case "getInputStream" -> new Body(bytes);
                 default -> throw new UnsupportedOperationException(called.toString());
             });
@@ -490,6 +578,12 @@ class OrionOidcOnboardingTest {
         @Override public boolean isFinished() { return input.available() == 0; }
         @Override public boolean isReady() { return true; }
         @Override public void setReadListener(ReadListener listener) { }
+    }
+    private static final class MutableClock extends Clock {
+        Instant now = Instant.now();
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
     }
     private record Login(String state, String cookie) { }
     private record Reply(int status, JsonNode json, Map<String, String> headers) { }

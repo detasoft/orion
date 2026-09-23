@@ -21,8 +21,11 @@ import pro.deta.orion.schema.orion.OrganizationId;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.time.Instant;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -30,10 +33,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Owns bounded browser-bound login attempts; persistent accounts and invitation consumption belong to the ACL. */
+/** Owns bounded browser login attempts and sessions; persistent accounts and invitations belong to the ACL. */
 @Singleton
 public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private static final String COOKIE = "__Host-orion-oidc";
+    private static final String SESSION_COOKIE = "__Host-orion-session";
+    private static final int SESSION_SECONDS = 7 * 24 * 60 * 60;
+    private final Map<String, Session> sessions = new HashMap<>();
+    private final Clock clock;
     private final Map<String, Attempt> attempts = new HashMap<>();
     private final Map<String, Verified> verified = new HashMap<>();
     private final SecureRandom random = new SecureRandom();
@@ -47,7 +54,13 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     @Inject
     public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
             OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper) {
+        this(accounts, acl, desired, secrets, mapper, Clock.systemUTC());
+    }
+
+    OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
+            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
+        this.clock = clock;
         this.accounts = accounts;
         this.acl = acl;
         this.desired = desired;
@@ -68,7 +81,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                         ? providers(request) : OrionHttpResponse.empty(405);
                 case "/api/auth/oidc/callback" -> exchange.method() == OrionHttpRouteDefinition.Method.GET
                         ? callback(request) : OrionHttpResponse.empty(405);
-                case "/api/auth/oidc/start", "/api/auth/oidc/profile", "/api/auth/oidc/complete" -> {
+                case "/api/auth/oidc/start", "/api/auth/oidc/profile", "/api/auth/oidc/complete",
+                        "/api/auth/oidc/refresh", "/api/auth/oidc/logout" -> {
                     if (exchange.method() != OrionHttpRouteDefinition.Method.POST) {
                         yield OrionHttpResponse.empty(405);
                     }
@@ -84,6 +98,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                     yield switch (exchange.path()) {
                         case "/api/auth/oidc/start" -> start(body);
                         case "/api/auth/oidc/profile" -> profile(request, body);
+                        case "/api/auth/oidc/refresh" -> refresh(request, body);
+                        case "/api/auth/oidc/logout" -> logout(request);
                         default -> complete(request, body);
                     };
                 }
@@ -129,7 +145,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         String browser = randomToken();
         Attempt attempt = new Attempt(organization, provider, metadata, invitation, browser,
                 randomToken(), randomToken(), publicOrigin().resolve("/api/auth/oidc/callback"),
-                Instant.now().plusSeconds(600).getEpochSecond());
+                clock.instant().plusSeconds(600).getEpochSecond());
         synchronized (this) {
             cleanup();
             if (attempts.size() + verified.size() >= 1024) {
@@ -182,7 +198,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         String ticket = randomToken();
         synchronized (this) {
             cleanup();
-            if (attempt.expiresAt() <= Instant.now().getEpochSecond() || verified.size() + attempts.size() >= 1024) {
+            if (attempt.expiresAt() <= clock.instant().getEpochSecond() || verified.size() + attempts.size() >= 1024) {
                 throw new IllegalArgumentException("Login expired");
             }
             verified.put(ticket, new Verified(attempt, identity));
@@ -203,6 +219,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private synchronized OrionHttpResponse complete(HttpServletRequest request, JsonNode body) {
         Verified login = verified(request, body);
         Attempt attempt = login.attempt();
+        String previousSession = sessionKey(cookieValue(request, SESSION_COOKIE));
+        if (sessions.size() >= 4096 && !sessions.containsKey(previousSession)) {
+            return OrionHttpResponse.text(503, "Too many browser sessions. Try again later.");
+        }
         String issuer = attempt.provider().issuer().toString();
         AccessControl.User linked = accounts.linkedUser(attempt.organization(), issuer, login.identity().subject());
         String userId = linked == null
@@ -215,9 +235,69 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             throw new IllegalStateException("Account is unavailable");
         }
         verified.remove(body.path("ticket").asText());
+        String sessionToken = randomToken();
+        Session session = new Session(attempt.organization(), attempt.provider(), userId, login.identity().subject(),
+                publicOrigin(), clock.instant().getEpochSecond() + SESSION_SECONDS);
+        sessions.remove(previousSession);
+        sessions.put(sessionKey(sessionToken), session);
+        return tokenResponse(token, session)
+                .withHeader("Set-Cookie", sessionCookie(sessionToken, SESSION_SECONDS));
+    }
+
+    private synchronized OrionHttpResponse refresh(HttpServletRequest request, JsonNode body) {
+        cleanup();
+        String key = sessionKey(cookieValue(request, SESSION_COOKIE));
+        Session session = sessions.get(key);
+        if (session == null) return expiredSession();
+        if ((body.has("organization") && !session.organization().value().equals(body.path("organization").asText()))
+                || (body.has("userId") && !session.userId().equals(body.path("userId").asText()))) {
+            return OrionHttpResponse.empty(401);
+        }
+        try {
+            if (!session.origin().equals(publicOrigin())
+                    || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
+                sessions.remove(key);
+                return expiredSession();
+            }
+        } catch (IllegalArgumentException unavailable) {
+            sessions.remove(key);
+            return expiredSession();
+        }
+        TokenIssueResult result = acl.issueOrganizationToken(session.organization(), session.userId(),
+                session.provider().issuer().toString(), session.subject());
+        if (!(result instanceof TokenIssueResult.Success token)) {
+            sessions.remove(key);
+            return expiredSession();
+        }
+        return tokenResponse(token, session);
+    }
+
+    private synchronized OrionHttpResponse logout(HttpServletRequest request) {
+        cleanup();
+        sessions.remove(sessionKey(cookieValue(request, SESSION_COOKIE)));
+        return OrionHttpResponse.empty(204).withHeader("Set-Cookie", sessionCookie("", 0));
+    }
+
+    private static OrionHttpResponse tokenResponse(TokenIssueResult.Success token, Session session) {
         return OrionHttpResponse.ok(Map.of("token", token.token(), "expiresAt", token.expiresAtEpochSecond(),
-                        "organization", attempt.organization().value()))
-                .withHeader("Set-Cookie", cookie("", 0));
+                "organization", session.organization().value(), "userId", session.userId()));
+    }
+
+    private static OrionHttpResponse expiredSession() {
+        return OrionHttpResponse.empty(401).withHeader("Set-Cookie", sessionCookie("", 0));
+    }
+
+    private static String sessionCookie(String value, int seconds) {
+        return SESSION_COOKIE + "=" + value + "; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=" + seconds;
+    }
+
+    private static String sessionKey(String value) {
+        try {
+            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     private Verified verified(HttpServletRequest request, JsonNode body) {
@@ -268,7 +348,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private void cleanup() {
-        long now = Instant.now().getEpochSecond();
+        long now = clock.instant().getEpochSecond();
+        sessions.values().removeIf(session -> session.expiresAt() <= now);
         attempts.values().removeIf(attempt -> attempt.expiresAt() <= now);
         verified.values().removeIf(login -> login.attempt().expiresAt() <= now);
     }
@@ -280,10 +361,14 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private static String browser(HttpServletRequest request) {
+        return cookieValue(request, COOKIE);
+    }
+
+    private static String cookieValue(HttpServletRequest request, String name) {
         String value = "";
         if (request.getCookies() != null) {
             for (Cookie cookie : request.getCookies()) {
-                if (cookie.getName().equals(COOKIE)) {
+                if (cookie.getName().equals(name)) {
                     if (!value.isEmpty()) {
                         return "";
                     }
@@ -304,5 +389,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private record Attempt(OrganizationId organization, OidcProvider provider, OidcClient.Metadata metadata,
             String invitation, String browser, String nonce, String verifier, URI callback, long expiresAt) { }
+    private record Session(OrganizationId organization, OidcProvider provider, String userId, String subject,
+            URI origin, long expiresAt) { }
     private record Verified(Attempt attempt, OidcClient.Identity identity) { }
 }

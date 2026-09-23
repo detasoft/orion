@@ -26,8 +26,56 @@ export function createOrionClient(options = {}) {
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '')
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   let token = options.token ?? ''
+  let oidc = options.oidc ?? null
+  let renewal = null
+  let retryAt = 0
+  let disposed = false
+  const controller = new AbortController()
+
+  async function refreshSession() {
+    if (disposed) throw new DOMException('Connection closed', 'AbortError')
+    if (!oidc || Date.now() / 1000 < oidc.expiresAt - 60) return
+    if (renewal) return renewal
+    if (Date.now() < retryAt && Date.now() / 1000 < oidc.expiresAt) return
+    renewal = (async () => {
+      try {
+        const response = await fetchImpl(`${baseUrl}/api/auth/oidc/refresh`, {
+          method: 'POST', credentials: 'same-origin', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ organization: oidc.organization, userId: oidc.userId }),
+        })
+        if (!response.ok) throw Object.assign(new Error('Session renewal failed'), { status: response.status })
+        const result = await response.json()
+        if (disposed) throw new DOMException('Connection closed', 'AbortError')
+        if (!result.token || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() / 1000
+          || result.organization !== oidc.organization || result.userId !== oidc.userId) {
+          throw Object.assign(new Error('Session changed. Sign in again.'), { status: 401 })
+        }
+        token = result.token
+        oidc = { expiresAt: result.expiresAt, organization: result.organization, userId: result.userId }
+        retryAt = 0
+        options.onToken?.(result)
+      } catch (error) {
+        if (disposed) throw error
+        if (error.status === 401 || error.status === 403) {
+          oidc = null
+          token = ''
+          options.onExpired?.()
+        } else {
+          retryAt = Date.now() + 30000
+          if (Date.now() / 1000 < oidc.expiresAt) return
+        }
+        throw error
+      } finally {
+        renewal = null
+      }
+    })()
+    return renewal
+  }
 
   async function openResponse(path, init = {}) {
+    await refreshSession()
+    if (disposed) throw new DOMException('Connection closed', 'AbortError')
     const headers = new Headers(init.headers)
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
@@ -56,6 +104,14 @@ export function createOrionClient(options = {}) {
   return {
     setToken(value) {
       token = value
+    },
+    refreshSession,
+    dispose() {
+      disposed = true
+      controller.abort()
+    },
+    logout() {
+      return request('/api/auth/oidc/logout', { method: 'POST', body: '{}' })
     },
     oidcSettings() { return request('/api/admin/oidc') },
     saveOidcProvider(input) {

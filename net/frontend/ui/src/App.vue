@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import AppIcon from './components/AppIcon.vue'
 import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
@@ -43,6 +43,7 @@ const settings = ref({ sshUsername: '', token: '' })
 const settingsDraft = ref({ sshUsername: '', token: '' })
 const draftConnectionState = ref('disconnected')
 
+let renewalTimer
 let toastTimer
 let api = createOrionClient()
 let connectionAttempt = 0
@@ -127,10 +128,50 @@ function clearExpiredCredentials() {
   connectionAttempt += 1
   draftConnectionAttempt += 1
   draftConnectionState.value = 'disconnected'
-  settings.value = { ...settings.value, token: '' }
+  settings.value = { sshUsername: settings.value.sshUsername, token: '' }
   saveConnectionSettings(settings.value)
+  api.dispose()
   api = createOrionClient()
   clearConnectedState()
+}
+
+function savedClient() {
+  return createOrionClient({
+    token: settings.value.token,
+    oidc: settings.value.oidc,
+    onToken(result) {
+      if (settingsDraft.value.token === settings.value.token) settingsDraft.value.token = result.token
+      settings.value = { ...settings.value, token: result.token,
+        oidc: { expiresAt: result.expiresAt, organization: result.organization, userId: result.userId } }
+      saveConnectionSettings(settings.value)
+    },
+    onExpired() {
+      clearExpiredCredentials()
+      showToast('Your session has ended. Sign in again.', 'error')
+    },
+  })
+}
+
+async function renewSession() {
+  try {
+    await api.refreshSession()
+  } catch {
+    // Authentication failures clear the session; temporary network failures retry on the next check.
+  }
+}
+
+async function signOut() {
+  const attempt = connectionAttempt
+  if (settings.value.oidc) {
+    try {
+      await createOrionClient().logout()
+    } catch {
+      if (attempt !== connectionAttempt) return
+      showToast('Could not sign out. Check your connection and try again.', 'error')
+      return
+    }
+  }
+  if (attempt === connectionAttempt) clearExpiredCredentials()
 }
 
 function isAuthorizationError(error) {
@@ -250,7 +291,7 @@ async function createRepository() {
     if (attempt !== connectionAttempt) return
     if (isAuthorizationError(error)) {
       clearExpiredCredentials()
-      showToast('Your Admin token is no longer valid. Connect again.', 'error')
+      showToast('Your access token is no longer valid. Sign in again.', 'error')
       return
     }
     showToast(error.message, 'error')
@@ -286,11 +327,14 @@ async function saveSettings() {
   connectionAttempt += 1
   draftConnectionAttempt += 1
   settings.value = {
+    ...(settingsDraft.value.token.trim() === settings.value.token && settings.value.oidc
+      ? { oidc: settings.value.oidc } : {}),
     sshUsername: settingsDraft.value.sshUsername.trim(),
     token: settingsDraft.value.token.trim(),
   }
   saveConnectionSettings(settings.value)
-  api = createOrionClient({ token: settings.value.token })
+  api.dispose()
+  api = savedClient()
   settingsOpen.value = false
   clearConnectedState()
   if (settings.value.token) {
@@ -332,7 +376,7 @@ async function connectSavedSettings() {
     if (attempt !== connectionAttempt) return
     if (isAuthorizationError(error)) {
       clearExpiredCredentials()
-      showToast('Your Admin token is no longer valid. Connect again.', 'error')
+      showToast('Your access token is no longer valid. Sign in again.', 'error')
       return
     }
     clearConnectedState('error')
@@ -346,15 +390,20 @@ function toggleTheme() {
 }
 
 async function signedIn(result) {
-  settings.value = { ...settings.value, token: result.token }
+  settings.value = { ...settings.value, token: result.token,
+    oidc: { expiresAt: result.expiresAt, organization: result.organization, userId: result.userId } }
   saveConnectionSettings(settings.value)
-  api = createOrionClient({ token: result.token })
+  api.dispose()
+  api = savedClient()
   signIn.value = null
   clearConnectedState()
   await connectSavedSettings()
 }
 
 onMounted(() => {
+  renewalTimer = setInterval(renewSession, 30000)
+  window.addEventListener('focus', renewSession)
+  document.addEventListener('visibilitychange', renewSession)
   const fragment = new URLSearchParams(window.location.hash.slice(1))
   if (fragment.has('invite') || fragment.has('onboarding')) {
     signIn.value = { invitation: fragment.get('invite') ?? '', ticket: fragment.get('onboarding') ?? '',
@@ -363,10 +412,18 @@ onMounted(() => {
   }
   darkMode.value = localStorage.getItem('orion.ui.theme') === 'dark'
   settings.value = loadConnectionSettings()
-  api = createOrionClient({ token: settings.value.token })
+  api.dispose()
+  api = savedClient()
   if (settings.value.token) {
     connectSavedSettings()
   }
+})
+onUnmounted(() => {
+  clearInterval(renewalTimer)
+  clearTimeout(toastTimer)
+  window.removeEventListener('focus', renewSession)
+  document.removeEventListener('visibilitychange', renewSession)
+  api.dispose()
 })
 </script>
 
@@ -397,7 +454,7 @@ onMounted(() => {
 
       <div class="sidebar-bottom">
         <button v-if="!isConnected" class="nav-item" @click="signIn = {}">Sign in with OIDC</button>
-        <button v-else class="nav-item" @click="clearExpiredCredentials">Sign out</button>
+        <button v-else class="nav-item" @click="signOut">Sign out</button>
         <button class="nav-item" @click="openSettings">
           <AppIcon name="settings" :size="19" />
           <span>Settings</span>

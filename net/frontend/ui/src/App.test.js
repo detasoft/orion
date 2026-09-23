@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const client = {
   me: vi.fn(),
+  refreshSession: vi.fn(),
+  dispose: vi.fn(),
+  logout: vi.fn(),
   oidcSettings: vi.fn(),
   invitations: vi.fn(),
   createRepository: vi.fn(),
@@ -22,6 +25,7 @@ vi.mock('./lib/orion-api.js', () => ({
 }))
 
 import App from './App.vue'
+import { createOrionClient } from './lib/orion-api.js'
 
 function mountApp() {
   return mount(App, { attachTo: document.body })
@@ -62,6 +66,8 @@ beforeEach(() => {
   sessionStorage.clear()
   vi.clearAllMocks()
   for (const method of Object.values(client)) method.mockReset()
+  client.refreshSession.mockResolvedValue()
+  client.logout.mockResolvedValue('')
   client.oidcSettings.mockResolvedValue({ revision: '1', organizations: [] })
   client.me.mockResolvedValue({ userId: 'admin', organization: '', admin: true })
   client.invitations.mockResolvedValue({ organizations: [] })
@@ -83,6 +89,72 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('checks session renewal in the background and stops after unmount', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountApp()
+    try {
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(client.refreshSession).toHaveBeenCalledOnce()
+      window.dispatchEvent(new Event('focus'))
+      await flushPromises()
+      expect(client.refreshSession).toHaveBeenCalledTimes(2)
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(60000)
+      expect(client.refreshSession).toHaveBeenCalledTimes(2)
+      expect(client.dispose).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('revokes the browser session when signing out of OIDC', async () => {
+    sessionStorage.setItem('orion.ui.token', 'oidc-token')
+    sessionStorage.setItem('orion.ui.oidc', JSON.stringify({ expiresAt: 100, organization: 'acme', userId: 'alice' }))
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    const wrapper = mountApp()
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Sign out').trigger('click')
+    await flushPromises()
+    expect(client.logout).toHaveBeenCalledOnce()
+    expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+    expect(sessionStorage.getItem('orion.ui.oidc')).toBeNull()
+    expect(wrapper.text()).toContain('Sign in with OIDC')
+    wrapper.unmount()
+  })
+
+  it('persists renewed credentials and clears them when the session expires', async () => {
+    sessionStorage.setItem('orion.ui.token', 'old')
+    sessionStorage.setItem('orion.ui.oidc', JSON.stringify({ expiresAt: 1, organization: 'acme', userId: 'alice' }))
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    const wrapper = mountApp()
+    await flushPromises()
+    const options = createOrionClient.mock.calls.at(-1)[0]
+    expect(options.oidc).toEqual({ expiresAt: 1, organization: 'acme', userId: 'alice' })
+    options.onToken({ token: 'new', expiresAt: 200, organization: 'acme', userId: 'alice' })
+    expect(sessionStorage.getItem('orion.ui.token')).toBe('new')
+    expect(JSON.parse(sessionStorage.getItem('orion.ui.oidc')).expiresAt).toBe(200)
+    options.onExpired()
+    await flushPromises()
+    expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+    expect(sessionStorage.getItem('orion.ui.oidc')).toBeNull()
+    expect(wrapper.text()).toContain('Your session has ended')
+    wrapper.unmount()
+  })
+
+  it('reports a failed logout without pretending that the session was revoked', async () => {
+    sessionStorage.setItem('orion.ui.token', 'oidc-token')
+    sessionStorage.setItem('orion.ui.oidc', JSON.stringify({ expiresAt: 100, organization: 'acme', userId: 'alice' }))
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    client.logout.mockRejectedValueOnce(new TypeError('Offline'))
+    const wrapper = mountApp()
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Sign out').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not sign out')
+    expect(sessionStorage.getItem('orion.ui.token')).toBe('oidc-token')
+    wrapper.unmount()
+  })
+
   it('connects organization users without requesting system administration data', async () => {
     client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
     client.repositories.mockResolvedValue({ repositories: [{ name: 'acme/team/project' }] })

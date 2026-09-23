@@ -24,6 +24,24 @@ describe('connection storage', () => {
     expect(local.getItem('orion.ui.token')).toBeNull()
   })
 
+  it('restores renewal metadata after a reload and removes it for manual credentials', () => {
+    const local = memoryStorage()
+    const session = memoryStorage()
+    const oidc = { expiresAt: 100, organization: 'acme', userId: 'alice' }
+    saveConnectionSettings({ sshUsername: '', token: 'oidc-token', oidc }, local, session)
+    expect(loadConnectionSettings(local, session)).toEqual({ sshUsername: '', token: 'oidc-token', oidc })
+    saveConnectionSettings({ sshUsername: '', token: 'manual-token' }, local, session)
+    expect(loadConnectionSettings(local, session)).toEqual({ sshUsername: '', token: 'manual-token' })
+    expect(session.getItem('orion.ui.oidc')).toBeNull()
+  })
+
+  it('ignores malformed renewal metadata', () => {
+    const local = memoryStorage()
+    const session = memoryStorage()
+    session.setItem('orion.ui.oidc', '{broken')
+    expect(loadConnectionSettings(local, session)).toEqual({ sshUsername: '', token: '' })
+  })
+
   it('clears previous values when the form is emptied', () => {
     const local = memoryStorage()
     const session = memoryStorage()

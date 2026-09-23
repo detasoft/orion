@@ -636,8 +636,25 @@ Organization users cannot access system administration.
 
 Login attempts expire after ten minutes and are bound to the initiating browser;
 a server restart requires restarting login, while unused invitations survive.
-The one-hour access token is stored in the browser's session storage. Removing
-the user, its OIDC binding, or the trusted issuer invalidates its tokens.
+The one-hour access token is stored in the browser's session storage. The UI
+renews it automatically shortly before expiry and before requests after the
+computer wakes up. Renewal uses a separate `Secure`, `HttpOnly`, `SameSite=Strict`
+cookie; JavaScript cannot read that credential. No additional provider settings
+or provider refresh tokens are needed.
+
+Browser sessions have a fixed seven-day renewal window measured from sign-in.
+Renewing an access token does not extend that window. Sessions are held in
+server memory, so restarting Orion requires signing in again once the current
+access token needs renewal. Reloading the same browser tab preserves renewal
+metadata; manually supplied Admin API tokens are not renewed.
+
+**Sign out** revokes the browser session and removes the local access token.
+Previously issued access tokens remain subject to their original one-hour
+expiry. Removing the user, its OIDC binding, or the trusted issuer invalidates
+its access tokens and prevents renewal. Changes to the session's provider
+configuration or public origin also prevent renewal. Temporary network failures
+retain a still-valid access token and retry renewal; an expired or revoked
+session requires signing in again.
 
 ### HTTPS and ACME
 

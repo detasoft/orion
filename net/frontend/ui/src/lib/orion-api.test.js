@@ -9,6 +9,94 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('renews an expired OIDC token once for simultaneous requests after sleep', async () => {
+    const onToken = vi.fn()
+    const renewed = { token: 'new-token', expiresAt: Date.now() / 1000 + 3600,
+      organization: 'acme', userId: 'alice' }
+    const fetchImpl = vi.fn(async (url) => new Response(JSON.stringify(
+      url.endsWith('/refresh') ? renewed : { repositories: [] }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ token: 'expired', fetchImpl, onToken,
+      oidc: { expiresAt: 1, organization: 'acme', userId: 'alice' } })
+    await Promise.all([client.repositories(), client.me()])
+    expect(fetchImpl.mock.calls.filter(([url]) => url.endsWith('/refresh'))).toHaveLength(1)
+    expect(onToken).toHaveBeenCalledWith(renewed)
+    for (const [url, init] of fetchImpl.mock.calls) {
+      if (!url.endsWith('/refresh')) expect(init.headers.get('Authorization')).toBe('Bearer new-token')
+    }
+  })
+
+  it('clears an expired session without sending the protected request', async () => {
+    const onExpired = vi.fn()
+    const fetchImpl = vi.fn(async () => new Response('', { status: 401 }))
+    const client = createOrionClient({ token: 'expired', fetchImpl, onExpired,
+      oidc: { expiresAt: 1, organization: 'acme', userId: 'alice' } })
+    await expect(client.repositories()).rejects.toMatchObject({ status: 401 })
+    expect(onExpired).toHaveBeenCalledOnce()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('never switches a tab to a different organization or user during renewal', async () => {
+    const onToken = vi.fn()
+    const onExpired = vi.fn()
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ token: 'another-user',
+      expiresAt: Date.now() / 1000 + 3600, organization: 'other', userId: 'bob' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ token: 'expired', fetchImpl, onToken, onExpired,
+      oidc: { expiresAt: 1, organization: 'acme', userId: 'alice' } })
+    await expect(client.repositories()).rejects.toMatchObject({ status: 401 })
+    expect(onToken).not.toHaveBeenCalled()
+    expect(onExpired).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a valid token during a network failure and retries after the backoff', async () => {
+    vi.useFakeTimers()
+    try {
+      const renewed = { token: 'new', expiresAt: Date.now() / 1000 + 3600,
+        organization: 'acme', userId: 'alice' }
+      const fetchImpl = vi.fn(async (url) => new Response(JSON.stringify(
+        url.endsWith('/refresh') ? renewed : {}), { headers: { 'Content-Type': 'application/json' } }))
+      fetchImpl.mockRejectedValueOnce(new TypeError('Offline'))
+      const client = createOrionClient({ token: 'still-valid', fetchImpl,
+        oidc: { expiresAt: Date.now() / 1000 + 45, organization: 'acme', userId: 'alice' } })
+      await client.me()
+      await client.me()
+      expect(fetchImpl).toHaveBeenCalledTimes(3)
+      expect(fetchImpl.mock.calls[1][1].headers.get('Authorization')).toBe('Bearer still-valid')
+      await vi.advanceTimersByTimeAsync(30000)
+      await client.me()
+      expect(fetchImpl).toHaveBeenCalledTimes(5)
+      expect(fetchImpl.mock.calls[4][1].headers.get('Authorization')).toBe('Bearer new')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not restore credentials when renewal finishes after sign out', async () => {
+    let finish
+    const fetchImpl = vi.fn(() => new Promise((resolve) => { finish = resolve }))
+    const onToken = vi.fn()
+    const client = createOrionClient({ token: 'expired', fetchImpl, onToken,
+      oidc: { expiresAt: 1, organization: 'acme', userId: 'alice' } })
+    const pending = client.repositories()
+    client.dispose()
+    finish(new Response(JSON.stringify({ token: 'new', expiresAt: Date.now() / 1000 + 3600,
+      organization: 'acme', userId: 'alice' }), { headers: { 'Content-Type': 'application/json' } }))
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(onToken).not.toHaveBeenCalled()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][1].signal.aborted).toBe(true)
+  })
+
+  it('does not renew manually supplied administrator tokens', async () => {
+    const fetchImpl = vi.fn(async () => new Response('Expired', { status: 401 }))
+    const client = createOrionClient({ token: 'manual-token', fetchImpl })
+    await expect(client.me()).rejects.toMatchObject({ status: 401 })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('loads pending decisions with the current token and cancellation signal', async () => {
     const result = { decisions: [{ id: 'decision-1', scope: 'acme/platform',
       title: 'Host key changed', description: 'Review the fingerprint', actions: { replace: 'Replace key' } }] }
