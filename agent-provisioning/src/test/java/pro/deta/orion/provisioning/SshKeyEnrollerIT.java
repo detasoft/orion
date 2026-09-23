@@ -35,7 +35,7 @@ class SshKeyEnrollerIT {
         rootLogger.addAppender(logs);
         try {
             try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
-                new SshKeyEnroller().enroll(
+                new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                         server.endpoint(), capability(client), Optional.of(password), options());
 
                 String expected = PublicKeyEntry.toString(client.getPublic()) + System.lineSeparator();
@@ -84,12 +84,12 @@ class SshKeyEnrollerIT {
         Files.setPosixFilePermissions(authorizedKeys, PosixFilePermissions.fromString("rw-r-----"));
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
             BootstrapPassword firstPassword = password("bootstrap-secret");
-            new SshKeyEnroller().enroll(
+            new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.of(firstPassword), options());
             String afterFirst = Files.readString(authorizedKeys, StandardCharsets.UTF_8);
             BootstrapPassword unusedPassword = password("must-not-be-used");
 
-            new SshKeyEnroller().enroll(
+            new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.of(unusedPassword), options());
 
             assertThat(afterFirst).isEqualTo(
@@ -123,7 +123,7 @@ class SshKeyEnrollerIT {
         BootstrapPassword password = password("bootstrap-secret");
 
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
-            new SshKeyEnroller().enroll(
+            new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.of(password), options());
 
             assertThat(new HashSet<>(server.publicKeySessions())).hasSize(2);
@@ -146,7 +146,7 @@ class SshKeyEnrollerIT {
                         + PublicKeyEntry.toString(client.getPublic()) + " retained comment\n",
                 StandardCharsets.UTF_8);
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "unused")) {
-            new SshKeyEnroller().enroll(
+            new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.empty(), options());
 
             assertThat(server.passwordAttempts()).isZero();
@@ -168,7 +168,7 @@ class SshKeyEnrollerIT {
 
         try (TestSshServer server = TestSshServer.startEnrollableRejectingFirstPublicKeySession(
                 root, host, "bootstrap-secret")) {
-            new SshKeyEnroller().enroll(
+            new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.of(password), options());
 
             assertThat(new HashSet<>(server.publicKeySessions())).hasSize(2);
@@ -183,7 +183,7 @@ class SshKeyEnrollerIT {
     void reportsMissingBootstrapPasswordWithoutMutatingRemoteState(@TempDir Path root) throws Exception {
         KeyPair host = keyPair();
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "unused")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()), Optional.empty(), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .extracting(error -> ((SshKeyEnrollmentException) error).failure())
@@ -201,7 +201,7 @@ class SshKeyEnrollerIT {
         KeyPair host = keyPair();
         BootstrapPassword password = password("wrong-secret");
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "expected-secret")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .satisfies(error -> {
@@ -227,7 +227,7 @@ class SshKeyEnrollerIT {
                     server.endpoint().host(), server.endpoint().port(),
                     server.endpoint().username(), keyPair().getPublic());
 
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     wrongEndpoint, capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .extracting(error -> ((SshKeyEnrollmentException) error).failure())
@@ -249,7 +249,7 @@ class SshKeyEnrollerIT {
                 Duration.ofSeconds(1), Duration.ofSeconds(5));
         try (TestSshServer server = TestSshServer.start(
                 root, host, keyPair(), Duration.ofMillis(250), Duration.ZERO)) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()),
                     Optional.of(password), shortAuthentication))
                     .isInstanceOf(SshKeyEnrollmentException.class)
@@ -269,7 +269,7 @@ class SshKeyEnrollerIT {
         KeyPair host = keyPair();
         BootstrapPassword password = password("bootstrap-secret");
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .extracting(error -> ((SshKeyEnrollmentException) error).failure())
@@ -291,7 +291,7 @@ class SshKeyEnrollerIT {
         KeyPair host = keyPair();
         BootstrapPassword password = password("bootstrap-secret");
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .satisfies(error -> {
@@ -312,6 +312,7 @@ class SshKeyEnrollerIT {
         BootstrapPassword password = password("bootstrap-secret");
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "bootstrap-secret")) {
             assertThatThrownBy(() -> SshKeyEnroller.withKeyFormatterForTest(
+                    TestSshServer.unavailableDecisions(),
                     key -> "malformed generated input").enroll(
                     server.endpoint(), capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
@@ -336,7 +337,7 @@ class SshKeyEnrollerIT {
         KeyPair host = keyPair();
         BootstrapPassword password = password("write-failure-secret");
         try (TestSshServer server = TestSshServer.startEnrollable(root, host, "write-failure-secret")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(keyPair()), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .satisfies(error -> {
@@ -365,7 +366,7 @@ class SshKeyEnrollerIT {
         BootstrapPassword password = password("bootstrap-secret");
         try (TestSshServer server = TestSshServer.startEnrollableRejectingVerification(
                 root, host, "bootstrap-secret")) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client), Optional.of(password), options()))
                     .isInstanceOf(SshKeyEnrollmentException.class)
                     .extracting(error -> ((SshKeyEnrollmentException) error).failure())
@@ -390,7 +391,7 @@ class SshKeyEnrollerIT {
                 Duration.ofSeconds(1), Duration.ofSeconds(5));
         try (TestSshServer server = TestSshServer.startEnrollableWithVerificationDelay(
                 root, host, "bootstrap-secret", Duration.ofMillis(1500))) {
-            assertThatThrownBy(() -> new SshKeyEnroller().enroll(
+            assertThatThrownBy(() -> new SshKeyEnroller(TestSshServer.unavailableDecisions()).enroll(
                     server.endpoint(), capability(client),
                     Optional.of(password), shortAuthentication))
                     .isInstanceOf(SshKeyEnrollmentException.class)

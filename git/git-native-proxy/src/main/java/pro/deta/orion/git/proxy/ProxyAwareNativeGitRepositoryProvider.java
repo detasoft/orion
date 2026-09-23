@@ -1,6 +1,11 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.decision.ConnectionFailureHandler;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.git.client.GitSshClientTransport.HostKeyRejectedException;
+import java.util.function.BiFunction;
+import pro.deta.orion.decision.DecisionRequiredException;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
@@ -32,6 +37,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Supplier;
 
 @Singleton
@@ -46,6 +52,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     private volatile Map<String, BootstrapGitRuntimeProxy> activeBindings = Map.of();
     private volatile Map<RemoteAlias, BootstrapGitRuntimeProxy> bootstrapOverrides = Map.of();
     private volatile boolean activePhase;
+    private ConnectionFailureHandler connectionFailures;
+    private BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions;
 
     @Inject
     public ProxyAwareNativeGitRepositoryProvider(
@@ -78,6 +86,13 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 this.secretResolver, this::bootstrapSections);
         this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
         this.pusher = Objects.requireNonNull(pusher, "pusher");
+    }
+
+    public synchronized void connectionFailures(ConnectionFailureHandler handler,
+            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
+        if (activePhase) throw new IllegalStateException("Connection failure handler must precede activation");
+        connectionFailures = Objects.requireNonNull(handler, "connection failure handler");
+        this.hostKeyDecisions = Objects.requireNonNull(hostKeyDecisions, "host key decisions");
     }
 
     public synchronized ResolvedBootstrapSource resolveProvisional(
@@ -215,7 +230,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             throw new IllegalArgumentException("Proxy alias is unavailable");
         }
         secrets.validate(document);
-        var persistent = BootstrapGitTransportFactory.persistent(current, secrets);
+        BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(
+                current, secrets, connectionFailures, hostKeyDecisions);
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding binding : document.system().proxies()) {
             BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
@@ -233,6 +249,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         try {
             runtime.refresh();
         } catch (BootstrapGitProxyException failure) {
+            if (failure.getCause() instanceof RejectedExecutionException) throw failure;
             return new Result.Failure<>(Result.FailureCode.GENERAL, failure.getMessage(), failure);
         }
         return Result.of(runtime.syncObservation());
@@ -278,7 +295,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 throw new IllegalStateException("Bootstrap proxy sources must be adopted before activation");
             }
         }
-        BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(current, secrets);
+        BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(
+                current, secrets, connectionFailures, hostKeyDecisions);
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding configured : document.system().proxies()) {
             BootstrapGitLocation location = BootstrapGitLocation.persistent(configured);
@@ -287,7 +305,11 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (runtime == null) {
                 runtime = new BootstrapGitRuntimeProxy(location,
                         findOrCreate(location.proxyName()), persistent, fetcher, pusher);
-                runtime.refresh();
+                try {
+                    runtime.refresh();
+                } catch (BootstrapGitProxyException failure) {
+                    if (!(failure.getCause() instanceof DecisionRequiredException)) throw failure;
+                }
             }
             addActiveBinding(candidate, configured, runtime);
         }

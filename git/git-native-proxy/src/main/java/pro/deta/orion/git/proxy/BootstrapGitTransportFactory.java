@@ -1,9 +1,17 @@
 package pro.deta.orion.git.proxy;
 
+import java.util.IdentityHashMap;
+import java.util.Collections;
+import pro.deta.orion.decision.Decisionable;
+import pro.deta.orion.decision.DecisionRequiredException;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.decision.ConnectionFailureHandler;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.git.client.GitSshClientTransport.HostKeyRejectedException;
+import java.util.function.BiFunction;
 import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -11,6 +19,7 @@ import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.git.client.GitRemoteClientTransport;
 import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
 
 import java.net.http.HttpClient;
@@ -30,30 +39,40 @@ final class BootstrapGitTransportFactory {
 
     private final Function<BootstrapGitLocation, Connection> connection;
     private final Function<BootstrapGitLocation, List<String>> bootstrapSections;
+    private final ConnectionFailureHandler connectionFailures;
+    private final BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions;
     private final Map<BootstrapGitLocation, Set<String>> acceptedKeys = new ConcurrentHashMap<>();
 
     BootstrapGitTransportFactory(BootstrapSecretResolver secretResolver,
             Function<BootstrapGitLocation, List<String>> bootstrapSections) {
         this.bootstrapSections = Objects.requireNonNull(bootstrapSections, "bootstrap sections");
+        connectionFailures = null;
+        hostKeyDecisions = null;
         Objects.requireNonNull(secretResolver, "secretResolver");
         connection = location -> {
             if (location.credentialKind() == GitCredentialKind.NONE) {
-                return new Connection(location, new char[0]);
+                return new Connection(location, new char[0], null);
             }
             try (BootstrapSecret secret = secretResolver.resolve(
                     "Remote Git credential", location.credentialReference())) {
-                return new Connection(location, secret.copy());
+                return new Connection(location, secret.copy(), null);
             }
         };
     }
 
-    private BootstrapGitTransportFactory(Function<BootstrapGitLocation, Connection> connection) {
+    private BootstrapGitTransportFactory(Function<BootstrapGitLocation, Connection> connection,
+            ConnectionFailureHandler connectionFailures,
+            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
         this.connection = connection;
+        this.connectionFailures = connectionFailures;
+        this.hostKeyDecisions = hostKeyDecisions;
         bootstrapSections = null;
     }
 
     static BootstrapGitTransportFactory persistent(
-            Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
+            Supplier<OrionDocument> current, ConfigurationSecrets secrets,
+            ConnectionFailureHandler connectionFailures,
+            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
         Objects.requireNonNull(current, "current configuration");
         Objects.requireNonNull(secrets, "configuration secrets");
         return new BootstrapGitTransportFactory(original -> {
@@ -63,11 +82,11 @@ final class BootstrapGitTransportFactory {
                 if (location.proxyName().equals(original.proxyName())) {
                     char[] credential = binding.secret().isPresent()
                             ? secrets.resolveSystem(snapshot, binding.secret().orElseThrow()) : new char[0];
-                    return new Connection(location, credential);
+                    return new Connection(location, credential, binding);
                 }
             }
             throw new BootstrapGitProxyException("persistent binding lookup");
-        });
+        }, connectionFailures, hostKeyDecisions);
     }
 
     <T> T withTransport(
@@ -94,6 +113,21 @@ final class BootstrapGitTransportFactory {
                 return operation.run(location, new GitRemoteClientTransport(
                         client, credentials, location.knownHosts(), scheme == GitTransportScheme.HTTP));
             }
+        } catch (Exception failure) {
+            if (selected.binding() == null || connectionFailures == null) throw failure;
+            Exception prepared = failure;
+            if (hostKeyDecisions != null) {
+                Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+                for (Throwable cause = failure; cause != null && visited.add(cause); cause = cause.getCause()) {
+                    if (cause instanceof Decisionable) break;
+                    if (cause instanceof HostKeyRejectedException rejected) {
+                        prepared = new DecisionRequiredException(
+                                hostKeyDecisions.apply(selected.binding(), rejected), failure);
+                        break;
+                    }
+                }
+            }
+            throw connectionFailures.handle(prepared);
         } finally {
             Arrays.fill(characters, '\0');
         }
@@ -131,7 +165,7 @@ final class BootstrapGitTransportFactory {
         return accept;
     }
 
-    private record Connection(BootstrapGitLocation location, char[] credential) {
+    private record Connection(BootstrapGitLocation location, char[] credential, GitProxyBinding binding) {
     }
 
     @FunctionalInterface

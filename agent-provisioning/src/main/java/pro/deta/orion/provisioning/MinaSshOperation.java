@@ -1,5 +1,10 @@
 package pro.deta.orion.provisioning;
 
+import java.util.concurrent.ExecutionException;
+import org.apache.sshd.common.config.keys.KeyUtils;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import pro.deta.orion.decision.DecisionAction;
+import pro.deta.orion.ssh.SshHostKeyDecision;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.UserAuthFactory;
 import org.apache.sshd.client.auth.password.PasswordIdentityProvider;
@@ -12,6 +17,12 @@ import org.apache.sshd.client.future.ConnectFuture;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider;
 import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.decision.ConnectionFailureHandler;
+import pro.deta.orion.decision.DecisionRequiredException;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.util.Result;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -30,6 +41,11 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
+/**
+ * Owns one SSH session and its transport deadlines. Host-key approval closes the failed session before waiting;
+ * confirmation retries connection establishment once with the approved key, without persisting trust.
+ * Waiting for a human decision is interruptible and outside the network operation timeout.
+ */
 public final class MinaSshOperation implements RemoteCommandExecutor, AutoCloseable {
     private static final int OUTPUT_LIMIT = 16 * 1024;
     private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(
@@ -56,14 +72,16 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
     }
 
     public static MinaSshOperation open(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             SshCredentials credentials,
             ProvisioningOptions options) throws ProvisioningException {
-        return open(endpoint, credentials, options, SshClient::setUpDefaultClient);
+        return open(failures, endpoint, credentials, options, SshClient::setUpDefaultClient);
     }
 
     @TestOnly
     static MinaSshOperation open(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             SshCredentials credentials,
             ProvisioningOptions options,
@@ -74,8 +92,8 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
         if (clientFactory == null) {
             throw new IllegalArgumentException("SSH client factory must not be null");
         }
-        return open(
-                endpoint,
+        return connect(
+                failures, endpoint,
                 options,
                 clientFactory,
                 List.of(UserAuthPublicKeyFactory.INSTANCE),
@@ -84,18 +102,20 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
                     public void configure(ClientSession session) {
                         session.addPublicKeyIdentity(credentials.keyPair());
                     }
-                });
+                }, true);
     }
 
     static MinaSshOperation openWithPassword(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             BootstrapPassword password,
             ProvisioningOptions options) throws ProvisioningException {
-        return openWithPassword(endpoint, password, options, SshClient::setUpDefaultClient);
+        return openWithPassword(failures, endpoint, password, options, SshClient::setUpDefaultClient);
     }
 
     @TestOnly
     static MinaSshOperation openWithPassword(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             BootstrapPassword password,
             ProvisioningOptions options,
@@ -104,8 +124,8 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
             throw new IllegalArgumentException("Bootstrap password must not be null");
         }
         try {
-            return password.useOnce(value -> open(
-                    endpoint,
+            return password.useOnce(value -> connect(
+                    failures, endpoint,
                     options,
                     clientFactory,
                     List.of(UserAuthPasswordFactory.INSTANCE),
@@ -125,7 +145,7 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
                             client.setPasswordIdentityProvider(
                                     PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
                         }
-                    }));
+                    }, true));
         } catch (ProvisioningException error) {
             throw error;
         } catch (RuntimeException error) {
@@ -138,20 +158,21 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
         }
     }
 
-    private static MinaSshOperation open(
+    private static MinaSshOperation connect(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             ProvisioningOptions options,
             Supplier<SshClient> clientFactory,
             List<UserAuthFactory> userAuthFactories,
-            AuthenticationSetup authentication) throws ProvisioningException {
-        if (endpoint == null || options == null) {
+            AuthenticationSetup authentication, boolean allowDecision) throws ProvisioningException {
+        if (failures == null || endpoint == null || options == null) {
             throw new IllegalArgumentException("SSH operation arguments must not be null");
         }
         if (clientFactory == null || authentication == null) {
             throw new IllegalArgumentException("SSH operation configuration must not be null");
         }
         SshClient client = clientFactory.get();
-        AtomicBoolean hostRejected = new AtomicBoolean();
+        AtomicReference<PublicKey> rejectedKey = new AtomicReference<>();
         AtomicBoolean timedOut = new AtomicBoolean();
         ClientSession session = null;
         ScheduledFuture<?> watchdog = null;
@@ -162,7 +183,7 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
             client.setUserAuthFactories(userAuthFactories);
             authentication.configure(client);
             client.setServerKeyVerifier((activeSession, address, key) -> verifyHostKey(
-                    endpoint.expectedHostKey(), key, hostRejected));
+                    endpoint.expectedHostKey(), key, rejectedKey));
             client.start();
             watchdog = WATCHDOG.schedule(() -> {
                 timedOut.set(true);
@@ -184,9 +205,31 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
                 throw new ProvisioningException(
                         ProvisioningFailure.TIMEOUT, "SSH provisioning operation timed out", error);
             }
-            if (hostRejected.get()) {
-                throw new ProvisioningException(
+            if (rejectedKey.get() != null) {
+                ProvisioningException rejected = new ProvisioningException(
                         ProvisioningFailure.HOST_IDENTITY, "SSH server host key was rejected", error);
+                if (!allowDecision) throw rejected;
+                PublicKey key = rejectedKey.get();
+                try {
+                    Decision prepared = SshHostKeyDecision.create(
+                            new HostKeyApproval(endpoint, PublicKeyEntry.toString(key)),
+                            Optional.empty(), endpoint.host(), endpoint.port(), key,
+                            new DecisionAction("Trust this attempt", actor -> Result.of(null)))
+                            .valueOrFailure("Could not prepare SSH host key decision");
+                    DecisionRequiredException registered = (DecisionRequiredException) failures.handle(
+                            new DecisionRequiredException(prepared, rejected));
+                    Result<?> answer = registered.decision().result().toCompletableFuture().get();
+                    if (answer.isFailure()) throw rejected;
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new ProvisioningException(ProvisioningFailure.HOST_IDENTITY,
+                            "SSH host key confirmation was interrupted", interrupted);
+                } catch (ExecutionException | RuntimeException confirmationFailure) {
+                    throw new ProvisioningException(ProvisioningFailure.HOST_IDENTITY,
+                            "SSH host key confirmation failed", confirmationFailure);
+                }
+                SshEndpoint approved = new SshEndpoint(endpoint.host(), endpoint.port(), endpoint.username(), key);
+                return connect(failures, approved, options, clientFactory, userAuthFactories, authentication, false);
             }
             ProvisioningFailure failure = session == null
                     ? ProvisioningFailure.CONNECTION
@@ -303,10 +346,12 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
         }
     }
 
-    private static boolean verifyHostKey(PublicKey expected, PublicKey actual, AtomicBoolean rejected) {
-        boolean accepted = org.apache.sshd.common.config.keys.KeyUtils.compareKeys(expected, actual);
+    private record HostKeyApproval(SshEndpoint endpoint, String key) { }
+
+    private static boolean verifyHostKey(PublicKey expected, PublicKey actual, AtomicReference<PublicKey> rejected) {
+        boolean accepted = KeyUtils.compareKeys(expected, actual);
         if (!accepted) {
-            rejected.set(true);
+            rejected.set(actual);
         }
         return accepted;
     }

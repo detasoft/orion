@@ -30,7 +30,8 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
  * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, Agent session server, then transports.
  * The executor is needed for lifecycle work. The event manager must be running before ACL registers and
  * publishes reload events. After ACL loads, adopt and activate bootstrap proxies before Agent authentication
- * or public transports start. Failure in either phase must stop startup. Transports are
+ * or public transports start. Failure in either phase must stop startup, except for registered connection
+ * decisions on persistent proxies: these proxies stay unavailable while management starts to resolve them. Transports are
  * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
  * authentication and durable registries, and the executor stops last. Cancel pending decisions before
  * stopping children so shutdown does not wait for human input and continuations can still use the executor.</p>

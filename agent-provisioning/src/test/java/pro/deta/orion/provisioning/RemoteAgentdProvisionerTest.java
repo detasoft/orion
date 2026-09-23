@@ -212,6 +212,7 @@ class RemoteAgentdProvisionerTest {
             Path installRoot,
             RuntimeBundleCatalog catalog) {
         return new RemoteAgentdProvisioner(
+                TestSshServer.unavailableDecisions(),
                 server.endpoint(), new SshCredentials(clientKey),
                 options(), installRoot.toString(), catalog);
     }

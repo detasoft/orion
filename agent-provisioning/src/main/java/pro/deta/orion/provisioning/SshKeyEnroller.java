@@ -1,5 +1,7 @@
 package pro.deta.orion.provisioning;
 
+import java.util.Objects;
+import pro.deta.orion.decision.ConnectionFailureHandler;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.keymaterial.SshClientKeyCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
@@ -12,6 +14,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 public final class SshKeyEnroller {
+    private final ConnectionFailureHandler failures;
     private static final int INVALID_KEY_INPUT_EXIT = 20;
     private static final int UNSAFE_SSH_DIRECTORY_EXIT = 30;
     private static final int UNSAFE_AUTHORIZED_KEYS_EXIT = 31;
@@ -97,20 +100,23 @@ public final class SshKeyEnroller {
             """;
     private final Function<PublicKey, String> keyFormatter;
 
-    public SshKeyEnroller() {
-        this(PublicKeyEntry::toString);
+    public SshKeyEnroller(ConnectionFailureHandler failures) {
+        this(failures, PublicKeyEntry::toString);
     }
 
-    private SshKeyEnroller(Function<PublicKey, String> keyFormatter) {
+    private SshKeyEnroller(ConnectionFailureHandler failures,
+            Function<PublicKey, String> keyFormatter) {
         if (keyFormatter == null) {
             throw new IllegalArgumentException("SSH public key formatter must not be null");
         }
+        this.failures = Objects.requireNonNull(failures, "failure handler");
         this.keyFormatter = keyFormatter;
     }
 
     @TestOnly
-    static SshKeyEnroller withKeyFormatterForTest(Function<PublicKey, String> keyFormatter) {
-        return new SshKeyEnroller(keyFormatter);
+    static SshKeyEnroller withKeyFormatterForTest(
+            ConnectionFailureHandler failures, Function<PublicKey, String> keyFormatter) {
+        return new SshKeyEnroller(failures, keyFormatter);
     }
 
     public void enroll(
@@ -155,12 +161,12 @@ public final class SshKeyEnroller {
         }
     }
 
-    private static boolean alreadyEnrolled(
+    private boolean alreadyEnrolled(
             SshEndpoint endpoint,
             KeyPair selectedKey,
             ProvisioningOptions options) throws SshKeyEnrollmentException {
         try (MinaSshOperation ignored = MinaSshOperation.open(
-                endpoint, new SshCredentials(selectedKey), options)) {
+                failures, endpoint, new SshCredentials(selectedKey), options)) {
             return true;
         } catch (ProvisioningException error) {
             if (error.failure() == ProvisioningFailure.AUTHENTICATION) {
@@ -177,7 +183,7 @@ public final class SshKeyEnroller {
             ProvisioningOptions options) throws SshKeyEnrollmentException {
         byte[] keyLine = (keyFormatter.apply(selectedKey.getPublic()) + "\n")
                 .getBytes(StandardCharsets.US_ASCII);
-        try (MinaSshOperation operation = MinaSshOperation.openWithPassword(endpoint, password, options)) {
+        try (MinaSshOperation operation = MinaSshOperation.openWithPassword(failures, endpoint, password, options)) {
             RemoteCommandResult result = operation.execute(ENROLLMENT_COMMAND, keyLine);
             requireEnrollmentSuccess(result.exitCode());
         } catch (ProvisioningException error) {
@@ -206,12 +212,12 @@ public final class SshKeyEnroller {
         }
     }
 
-    private static void verifyEnrollment(
+    private void verifyEnrollment(
             SshEndpoint endpoint,
             KeyPair selectedKey,
             ProvisioningOptions options) throws SshKeyEnrollmentException {
         try (MinaSshOperation ignored = MinaSshOperation.open(
-                endpoint, new SshCredentials(selectedKey), options)) {
+                failures, endpoint, new SshCredentials(selectedKey), options)) {
             // Successful authentication in this fresh session is the verification boundary.
         } catch (ProvisioningException error) {
             if (error.failure() == ProvisioningFailure.AUTHENTICATION) {

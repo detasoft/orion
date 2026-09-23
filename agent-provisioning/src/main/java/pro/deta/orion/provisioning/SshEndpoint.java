@@ -2,6 +2,7 @@ package pro.deta.orion.provisioning;
 
 import java.security.PublicKey;
 
+/** SSH destination; a null expected key requires confirmation before authentication. */
 public record SshEndpoint(String host, int port, String username, PublicKey expectedHostKey) {
     public SshEndpoint {
         host = requireToken(host, "SSH host", false);
@@ -9,9 +10,6 @@ public record SshEndpoint(String host, int port, String username, PublicKey expe
             throw new IllegalArgumentException("SSH port must be between 1 and 65535");
         }
         username = requireToken(username, "SSH username", true);
-        if (expectedHostKey == null) {
-            throw new IllegalArgumentException("Expected SSH host key must not be null");
-        }
     }
 
     private static String requireToken(String value, String name, boolean rejectWhitespace) {

@@ -208,6 +208,13 @@ final class TestSshServer implements AutoCloseable {
         }
     }
 
+    static pro.deta.orion.decision.ConnectionFailureHandler unavailableDecisions() {
+        pro.deta.orion.decision.DecisionRegistry registry = new pro.deta.orion.decision.DecisionRegistry(
+                1, Runnable::run, (actor, scope) -> true);
+        registry.close();
+        return new pro.deta.orion.decision.ConnectionFailureHandler(registry);
+    }
+
     SshEndpoint endpoint() {
         return new SshEndpoint("127.0.0.1", server.getPort(), "orion", hostKey.getPublic());
     }

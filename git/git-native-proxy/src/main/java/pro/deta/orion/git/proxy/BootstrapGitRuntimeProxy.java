@@ -63,7 +63,7 @@ final class BootstrapGitRuntimeProxy {
             throw error;
         } catch (Exception error) {
             observed(SyncStatus.UNAVAILABLE);
-            throw new BootstrapGitProxyException("upstream synchronization");
+            throw new BootstrapGitProxyException("upstream synchronization", error);
         }
     }
 
@@ -147,7 +147,7 @@ final class BootstrapGitRuntimeProxy {
         } catch (BootstrapGitProxyException error) {
             throw error;
         } catch (Exception error) {
-            throw new BootstrapGitProxyException("upstream ref publication");
+            throw new BootstrapGitProxyException("upstream ref publication", error);
         }
     }
 

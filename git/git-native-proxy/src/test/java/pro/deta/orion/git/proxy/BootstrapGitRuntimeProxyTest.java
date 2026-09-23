@@ -1,6 +1,20 @@
 package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAction;
+import pro.deta.orion.decision.DecisionRegistry;
+import pro.deta.orion.decision.DecisionRequiredException;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.util.Result;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -21,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapGitRuntimeProxyTest {
     @Test
@@ -56,6 +71,52 @@ class BootstrapGitRuntimeProxyTest {
         assertThat(refreshes).hasValue(1);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(repository.refs()).containsEntry(location.refName(), oldId);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void fetchAndPushFailuresReachTheSameDecisionHandlerWithoutChangingRefs(boolean failFetch) throws Exception {
+        BootstrapGitLocation location = fileLocation();
+        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create(location.proxyName()).valueOrFailure("create proxy");
+        repository.saveFiles(location.refName(), Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
+                "first", GitCommitAuthor.EMPTY);
+        String previous = repository.refs().get(location.refName());
+        NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
+                Map.of("file", GitFile.regular(new byte[]{2})), Set.of(), "second", GitCommitAuthor.EMPTY);
+        GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"), location.remoteUri(),
+                location.refName(), location.credentialKind(), Optional.empty(), Optional.empty(), Set.of());
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
+                Optional.empty(), List.of(), List.of(binding)), List.of());
+        ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, ConfigurationCipherCapability.unavailable());
+        IOException origin = new IOException("connection rejected");
+        PrincipalAddress actor = PrincipalAddress.parse("system/operator");
+        try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (principal, scope) -> true)) {
+            Decision decision = new Decision(binding.alias(), Optional.empty(), "Confirm connection", "",
+                    List.of(new DecisionAction("Trust", principal -> Result.of(null))));
+            DecisionRequiredException required = new DecisionRequiredException(decision, origin);
+            BootstrapGitTransportFactory factory = BootstrapGitTransportFactory.persistent(() -> document, secrets,
+                    new pro.deta.orion.decision.ConnectionFailureHandler(registry), null);
+            AtomicInteger publications = new AtomicInteger();
+            BootstrapGitRuntimeProxy runtime = new BootstrapGitRuntimeProxy(location, repository, factory,
+                    (selected, transport, target) -> { if (failFetch) throw required; },
+                    (selected, transport, target, received, updates, atomic) -> {
+                        publications.incrementAndGet();
+                        throw required;
+                    });
+            Optional<PackId> pack = ingest(repository, update);
+            assertThatThrownBy(() -> runtime.publish(pack, update.refUpdates(), true))
+                    .isInstanceOf(BootstrapGitProxyException.class)
+                    .satisfies(failure -> {
+                        assertThat(failure.getCause()).isInstanceOf(DecisionRequiredException.class);
+                        assertThat(failure.getCause().getCause()).isSameAs(required);
+                    });
+            assertThat(registry.list(actor)).containsExactly(decision.request());
+            assertThat(publications).hasValue(failFetch ? 0 : 1);
+            assertThat(repository.refs()).containsEntry(location.refName(), previous);
+            assertThat(runtime.syncObservation().status())
+                    .isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+        }
     }
 
     private static BootstrapGitLocation fileLocation() {

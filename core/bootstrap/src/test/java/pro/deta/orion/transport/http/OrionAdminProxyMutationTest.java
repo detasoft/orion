@@ -14,6 +14,7 @@ import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
 import org.apache.sshd.server.shell.ProcessShellFactory;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.component.OrionRuntimeModule;
 import pro.deta.orion.acl.storage.*;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -49,9 +50,63 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminProxyMutationTest {
     private static final PrincipalAddress OPERATOR = PrincipalAddress.parse("system/operator");
+
+    @Test
+    void repositoryReadCreatesADecisionWithoutAnHttpRetry() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
+            f.work.remove().run();
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
+            String repository = f.desired.current().document().system().proxies().getFirst().publicRepositoryName();
+
+            assertThatThrownBy(() -> f.provider.openForRead(repository)).isInstanceOf(IllegalStateException.class);
+
+            assertThat(f.decisions.list(OPERATOR)).hasSize(1);
+        }
+    }
+
+    @Test
+    void persistentProxyActivationKeepsManagementAvailableForItsDecision() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
+            f.work.remove().run();
+            f.provider.activate(() -> f.desired.current().document(), f.secrets);
+            assertThat(f.decisions.list(OPERATOR)).hasSize(1);
+            assertThat(f.provider.syncObservation(f.desired.current().document().system().proxies().getFirst())
+                    .status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+        }
+    }
+
+    @Test
+    void retryWhileAnAnswerIsExecutingReusesTheRegisteredDecision() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
+            assertThat(f.post(f.command("retry", "cluster", null, null)).status).isEqualTo(200);
+            assertThat(f.work).hasSize(1);
+        }
+    }
+
+    @Test
+    void activationDoesNotHideAConnectionFailureWhenTheDecisionQueueIsFull() throws Exception {
+        try (Fixture f = new Fixture()) {
+            assertThat(f.createSsh(Set.of()).status).isEqualTo(201);
+            f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
+            f.work.remove().run();
+            Decision unrelated = new Decision(UUID.randomUUID(), Optional.empty(), "Other operation", "",
+                    List.of(new DecisionAction("Confirm", actor -> Result.of(null))));
+            f.decisions.register(unrelated).valueOrFailure("fill queue");
+            assertThatThrownBy(() -> f.provider.activate(() -> f.desired.current().document(), f.secrets))
+                    .isInstanceOf(IllegalStateException.class).hasCauseInstanceOf(RejectedExecutionException.class);
+            assertThat(f.decisions.list(OPERATOR)).containsExactly(unrelated.request());
+        }
+    }
 
     @Test
     void repeatedRetriesReuseThePendingConnectionDecision() throws Exception {
@@ -422,6 +477,8 @@ class OrionAdminProxyMutationTest {
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired);
             acl.reload("fixture");
             secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
+            provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),
+                    OrionRuntimeModule.proxyHostKeyDecisions(desired, acl, audit::add));
             provider.activate(() -> desired.current().document(), secrets);
             routes(new BootstrapRepositorySources(List.of()));
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -434,8 +491,7 @@ class OrionAdminProxyMutationTest {
         }
 
         void routes(BootstrapRepositorySources sources) {
-            var route = new OrionAdminProxiesRoute(desired, provider, acl, secrets, sources, audit::add, mapper,
-                    decisions);
+            var route = new OrionAdminProxiesRoute(desired, provider, acl, secrets, sources, audit::add, mapper);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(
                     Set.of(route, new OrionAdminDecisionsRoute(decisions, mapper))),
                     new OrionHttpResponseWriter(mapper));

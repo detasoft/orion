@@ -30,6 +30,7 @@ class MinaSshOperationIT {
         KeyPair client = keyPair();
         try (TestSshServer server = TestSshServer.start(root, host, client);
              MinaSshOperation operation = MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                      server.endpoint(), new SshCredentials(client), options())) {
             RemoteCommandResult result = operation.execute(
                     "read value; printf 'out:%s' \"$value\"; printf 'warning' >&2",
@@ -51,6 +52,7 @@ class MinaSshOperationIT {
                     server.endpoint().username(), keyPair().getPublic());
 
             assertThatThrownBy(() -> MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                     wrong, new SshCredentials(client), options()))
                     .isInstanceOf(ProvisioningException.class)
                     .extracting(error -> ((ProvisioningException) error).failure())
@@ -63,6 +65,7 @@ class MinaSshOperationIT {
         KeyPair host = keyPair();
         try (TestSshServer server = TestSshServer.start(root, host, keyPair())) {
             assertThatThrownBy(() -> MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                     server.endpoint(), new SshCredentials(keyPair()), options()))
                     .isInstanceOf(ProvisioningException.class)
                     .extracting(error -> ((ProvisioningException) error).failure())
@@ -78,6 +81,7 @@ class MinaSshOperationIT {
         AtomicReference<SshClient> createdClient = new AtomicReference<>();
         try (TestSshServer server = TestSshServer.start(root, host, fallback)) {
             assertThatThrownBy(() -> MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                     server.endpoint(),
                     new SshCredentials(selected),
                     options(),
@@ -110,6 +114,7 @@ class MinaSshOperationIT {
         try (TestSshServer server = TestSshServer.startWithPassword(
                 root, host, keyPair(), "bootstrap-secret");
              MinaSshOperation operation = MinaSshOperation.openWithPassword(
+                    TestSshServer.unavailableDecisions(),
                      server.endpoint(), password, options(), () -> {
                          SshClient client = SshClient.setUpDefaultClient();
                          client.setKeyIdentityProvider(KeyIdentityProvider.wrapKeyPairs(fallback));
@@ -140,6 +145,7 @@ class MinaSshOperationIT {
         try (TestSshServer server = TestSshServer.startWithPassword(
                 root, host, keyPair(), "expected-secret")) {
             assertThatThrownBy(() -> MinaSshOperation.openWithPassword(
+                    TestSshServer.unavailableDecisions(),
                     server.endpoint(), password, options()))
                     .isInstanceOf(ProvisioningException.class)
                     .extracting(error -> ((ProvisioningException) error).failure())
@@ -163,7 +169,8 @@ class MinaSshOperationIT {
                     server.endpoint().username(),
                     keyPair().getPublic());
 
-            assertThatThrownBy(() -> MinaSshOperation.openWithPassword(wrong, password, options()))
+            assertThatThrownBy(() -> MinaSshOperation.openWithPassword(
+                    TestSshServer.unavailableDecisions(), wrong, password, options()))
                     .isInstanceOf(ProvisioningException.class)
                     .extracting(error -> ((ProvisioningException) error).failure())
                     .isEqualTo(ProvisioningFailure.HOST_IDENTITY);
@@ -198,6 +205,7 @@ class MinaSshOperationIT {
         BootstrapPassword password = BootstrapPassword.copyAndClear("bootstrap-secret".toCharArray());
 
         assertThatThrownBy(() -> MinaSshOperation.openWithPassword(
+                    TestSshServer.unavailableDecisions(),
                 new SshEndpoint("127.0.0.1", 22, "orion", keyPair().getPublic()),
                 password,
                 options(),
@@ -233,6 +241,7 @@ class MinaSshOperationIT {
         BootstrapPassword password = BootstrapPassword.copyAndClear("bootstrap-secret".toCharArray());
 
         assertThatThrownBy(() -> MinaSshOperation.openWithPassword(
+                    TestSshServer.unavailableDecisions(),
                 new SshEndpoint("127.0.0.1", 22, "orion", keyPair().getPublic()),
                 password,
                 options(),
@@ -254,6 +263,7 @@ class MinaSshOperationIT {
         KeyPair client = keyPair();
         try (TestSshServer server = TestSshServer.start(root, host, client);
              MinaSshOperation operation = MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                      server.endpoint(), new SshCredentials(client), options())) {
             RemoteCommandResult result = operation.execute(
                     "dd if=/dev/zero bs=20000 count=1 2>/dev/null | tr '\\000' x", new byte[0]);
@@ -272,6 +282,7 @@ class MinaSshOperationIT {
                 Duration.ofSeconds(5), Duration.ofSeconds(2));
         try (TestSshServer server = TestSshServer.start(root, host, client);
              MinaSshOperation operation = MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                      server.endpoint(), new SshCredentials(client), shortOperation)) {
             assertThatThrownBy(() -> operation.execute("sleep 5", new byte[0]))
                     .isInstanceOf(ProvisioningException.class)
@@ -290,6 +301,7 @@ class MinaSshOperationIT {
         try (TestSshServer server = TestSshServer.start(
                 root, host, client, Duration.ofMillis(250), Duration.ZERO)) {
             assertThatThrownBy(() -> MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                     server.endpoint(), new SshCredentials(client), nativeTimeout))
                     .isInstanceOf(ProvisioningException.class)
                     .extracting(error -> ((ProvisioningException) error).failure())
@@ -307,6 +319,7 @@ class MinaSshOperationIT {
         try (TestSshServer server = TestSshServer.start(
                 root, host, client, Duration.ZERO, Duration.ofMillis(250));
              MinaSshOperation operation = MinaSshOperation.open(
+                    TestSshServer.unavailableDecisions(),
                      server.endpoint(), new SshCredentials(client), nativeTimeout)) {
             assertThatThrownBy(() -> operation.execute("printf complete", new byte[0]))
                     .isInstanceOf(ProvisioningException.class)

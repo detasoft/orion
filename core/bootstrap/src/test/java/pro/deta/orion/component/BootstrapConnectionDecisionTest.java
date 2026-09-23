@@ -176,7 +176,9 @@ class BootstrapConnectionDecisionTest {
 
         void start() {
             OrionRuntimeModule.bootstrapProxies(storage, provider, material.configurationCipher(), secrets,
-                    desired, acl, decisions).run();
+                    desired, acl, decisions,
+                    OrionRuntimeModule.connectionFailures(decisions),
+                    OrionRuntimeModule.proxyHostKeyDecisions(desired, acl, record -> { })).run();
             assertThat(decisions.list(ACTOR)).hasSize(1);
         }
 

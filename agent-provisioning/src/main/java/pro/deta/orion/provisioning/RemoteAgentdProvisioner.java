@@ -1,6 +1,8 @@
 package pro.deta.orion.provisioning;
 
+import java.util.Objects;
 import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.decision.ConnectionFailureHandler;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 
 public final class RemoteAgentdProvisioner {
+    private final ConnectionFailureHandler failures;
     private final SshEndpoint endpoint;
     private final SshCredentials credentials;
     private final ProvisioningOptions options;
@@ -18,6 +21,7 @@ public final class RemoteAgentdProvisioner {
     private final RuntimeBundleCatalog catalog;
 
     private RemoteAgentdProvisioner(String installRoot) {
+        this.failures = null;
         this.endpoint = null;
         this.credentials = null;
         this.options = null;
@@ -34,6 +38,7 @@ public final class RemoteAgentdProvisioner {
     }
 
     public RemoteAgentdProvisioner(
+            ConnectionFailureHandler failures,
             SshEndpoint endpoint,
             SshCredentials credentials,
             ProvisioningOptions options,
@@ -45,6 +50,7 @@ public final class RemoteAgentdProvisioner {
         if (installRoot == null || !installRoot.startsWith("/") || containsControl(installRoot)) {
             throw new IllegalArgumentException("Remote AgentD install root must be an absolute path");
         }
+        this.failures = Objects.requireNonNull(failures, "failure handler");
         this.endpoint = endpoint;
         this.credentials = credentials;
         this.options = options;
@@ -57,7 +63,7 @@ public final class RemoteAgentdProvisioner {
         if (request == null) {
             throw new IllegalArgumentException("AgentD launch request must not be null");
         }
-        try (MinaSshOperation operation = MinaSshOperation.open(endpoint, credentials, options)) {
+        try (MinaSshOperation operation = MinaSshOperation.open(failures, endpoint, credentials, options)) {
             return install(operation, request);
         }
     }
@@ -72,7 +78,7 @@ public final class RemoteAgentdProvisioner {
         byte[] channelInput = Arrays.copyOf(permitBytes, permitBytes.length + 1);
         channelInput[channelInput.length - 1] = '\n';
         Arrays.fill(permitBytes, (byte) 0);
-        try (MinaSshOperation operation = MinaSshOperation.open(endpoint, credentials, options)) {
+        try (MinaSshOperation operation = MinaSshOperation.open(failures, endpoint, credentials, options)) {
             ProvisioningResult result = installRelease(operation, request);
             launch(operation, result, request, channelInput);
             switchCurrent(operation, result.version(), request, result.platform());
@@ -90,7 +96,7 @@ public final class RemoteAgentdProvisioner {
             throw new IllegalArgumentException("AgentD reconciliation arguments must not be null");
         }
         AgentdLaunchRequest request = attempt.request();
-        try (MinaSshOperation operation = MinaSshOperation.open(endpoint, credentials, options)) {
+        try (MinaSshOperation operation = MinaSshOperation.open(failures, endpoint, credentials, options)) {
             ProvisioningResult installed = installRelease(operation, request);
             requireReplacementPlatform(installed.platform());
             AgentdReplacementResult adopted = adoptAndCommit(operation, installed, request);
@@ -125,7 +131,7 @@ public final class RemoteAgentdProvisioner {
         }
         AgentdLaunchRequest request = attempt.request();
         requirePartialRequest(partial, request);
-        try (MinaSshOperation operation = MinaSshOperation.open(endpoint, credentials, options)) {
+        try (MinaSshOperation operation = MinaSshOperation.open(failures, endpoint, credentials, options)) {
             ProvisioningResult installed = installRelease(operation, request);
             requireReplacementPlatform(installed.platform());
             AgentdReplacementResult adopted = adoptAndCommit(operation, installed, request, partial);

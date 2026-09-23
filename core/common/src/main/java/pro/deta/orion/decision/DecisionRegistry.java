@@ -47,6 +47,9 @@ public final class DecisionRegistry implements AutoCloseable {
             }
             requests.values().removeIf(Decision::isDone);
             DecisionRequest request = pending.request();
+            if (requests.get(request.id()) == pending) {
+                return Result.of(pending);
+            }
             if (!pending.isPending()) {
                 return new Result.Failure<>(Result.FailureCode.CREATION_FAILED,
                         "Decision is no longer pending");
