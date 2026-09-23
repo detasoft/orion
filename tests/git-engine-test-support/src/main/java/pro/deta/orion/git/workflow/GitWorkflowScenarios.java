@@ -78,6 +78,8 @@ public final class GitWorkflowScenarios {
             scenario("delete-tags", WRITE, twoCommitState("updated\n"), GitWorkflowScenarios::deleteTags),
             scenario("force-push-unrelated-history", WRITE, forcePushState(),
                     GitWorkflowScenarios::forcePushUnrelatedHistory),
+            scenario("fetch-after-remote-rewind", FETCH, initialState(),
+                    GitWorkflowScenarios::fetchAfterRemoteRewind),
             scenario("fetch-after-history-rewrite", FETCH, forcePushState(),
                     GitWorkflowScenarios::fetchAfterHistoryRewrite),
             scenario("reject-stale-non-fast-forward", PULL, twoCommitState("winner\n"),
@@ -492,6 +494,32 @@ public final class GitWorkflowScenarios {
             Map<String, String> advertised = replacement.advertisedRefs("origin");
             require(execution.id("replacement").equals(advertised.get(MAIN)), "forced tip is not advertised");
             require(execution.id("initial").equals(advertised.get(FEATURE)), "force push changed another branch");
+        }
+    }
+
+    private static void fetchAfterRemoteRewind(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context)) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            execution.bind("second", commit(source, README, "updated\n", "second"));
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot before = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(before, clone.snapshot(), "clone before remote rewind");
+                source.updateRef(MAIN, execution.id("initial"));
+                source.pushRefs("origin", "+" + MAIN + ":" + MAIN);
+                RepositorySnapshot terminal = transferred(context, source);
+                execution.assertTerminal(terminal);
+
+                clone.fetch("origin", "main");
+                equivalent(before, clone.snapshot(), "fetch after rewind preserves local main and history");
+                clone.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                equivalent(RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("second"), "refs/heads/fetched", execution.id("initial")),
+                        before.commits()), clone.snapshot(), "fetch rewinds remote tracking ref to known ancestor");
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after rewind fetch");
+            }
         }
     }
 

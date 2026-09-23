@@ -31,6 +31,7 @@ class GitWorkflowScenariosTest {
             "delete-branch",
             "delete-tags",
             "force-push-unrelated-history",
+            "fetch-after-remote-rewind",
             "fetch-after-history-rewrite",
             "reject-stale-non-fast-forward",
             "incremental-fetch-with-common-commit",
