@@ -1,8 +1,14 @@
 package pro.deta.orion.git.proxy;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.ObjectInserter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.git.client.GitClientTransport;
+import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitFile;
@@ -11,13 +17,24 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -90,7 +107,12 @@ class NativeBootstrapGitFetcherTest {
                     .setRef(firstId).call();
             upstream.git().push().setRemote(upstream.bare().toUri().toString())
                     .setForce(true).call();
-            fetcher.fetch(location, new GitFileClientTransport(), repository);
+            AtomicInteger connections = new AtomicInteger();
+            GitClientTransport discoveryOnly = (service, uri, options) -> {
+                assertThat(connections.incrementAndGet()).as("only discover; no pack download").isEqualTo(1);
+                return new GitFileClientTransport().open(service, uri, options);
+            };
+            fetcher.fetch(location, discoveryOnly, repository);
 
             assertThat(repository.refs()).containsEntry(location.refName(), firstId);
             assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
@@ -100,24 +122,36 @@ class NativeBootstrapGitFetcherTest {
         }
     }
 
-    @Test
-    void rejectsIncompleteObjectClosureBeforeRefPublication() {
+    @ParameterizedTest
+    @ValueSource(strings = {"ffffffffffffffffffffffffffffffffffffffff", "invalid-private-tree"})
+    void rejectsInvalidDownloadedObjectGraphBeforeRefPublication(String tree) throws Exception {
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
-        ObjectId commit = repository.writeObject(
-                GitObjectType.COMMIT,
-                ("tree " + "f".repeat(40) + "\n\nmissing tree\n").getBytes());
+        byte[] content = ("tree " + tree + "\n\ninvalid tree\n").getBytes(StandardCharsets.UTF_8);
+        ObjectId commit;
+        try (ObjectInserter.Formatter formatter = new ObjectInserter.Formatter()) {
+            commit = new ObjectId(formatter.idFor(Constants.OBJ_COMMIT, content).name());
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
+            writer.writeObject(GitObjectType.COMMIT, content.length, input);
+            writer.finish();
+        }
+        GitClientTransport transport = packTransport(commit, bytes.toByteArray());
 
-        assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(
-                repository,
-                RefUpdate.fromWire("refs/heads/main", "0".repeat(40), commit.toHex())))
+        assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(
+                location(tempDir.resolve("upstream.git")), transport, repository))
                 .isInstanceOf(BootstrapGitProxyException.class)
                 .hasMessage("Remote Git bootstrap failed during complete object validation");
+        assertThat(repository.readObject(commit)).isPresent();
         assertThat(repository.refs()).isEmpty();
     }
 
     @Test
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
+        Upstream upstream = upstream("remote");
+        BootstrapGitLocation location = location(upstream.bare());
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
         repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
@@ -125,12 +159,56 @@ class NativeBootstrapGitFetcherTest {
         repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})), Set.of(),
                 "remote", GitCommitAuthor.EMPTY);
         Map<String, String> before = repository.refs();
+        String concurrent = before.get("refs/heads/incoming");
+        AtomicInteger connections = new AtomicInteger();
+        GitClientTransport transport = (service, uri, options) -> {
+            if (connections.incrementAndGet() == 2) {
+                repository.publishRefs(List.of(RefUpdate.fromWire(
+                        location.refName(), before.get(location.refName()), concurrent)), true);
+            }
+            return new GitFileClientTransport().open(service, uri, options);
+        };
 
-        assertThatThrownBy(() -> NativeFetchedRefPublisher.publish(repository,
-                RefUpdate.fromWire("refs/heads/main", "1".repeat(40), before.get("refs/heads/incoming"))))
-                .isInstanceOfSatisfying(BootstrapGitProxyException.class, failure ->
-                        assertThat(failure.status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT));
-        assertThat(repository.refs()).isEqualTo(before);
+        try {
+            assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(location, transport, repository))
+                    .isInstanceOfSatisfying(BootstrapGitProxyException.class, failure ->
+                            assertThat(failure.status())
+                                    .isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT));
+            assertThat(repository.refs()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                    "refs/heads/main", concurrent, "refs/heads/incoming", concurrent));
+        } finally {
+            upstream.git().close();
+        }
+    }
+
+    private static GitClientTransport packTransport(ObjectId commit, byte[] pack) throws IOException {
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        BufferedByteOutput output = new OutputStreamBufferedByteOutput(response);
+        new GitPktLine.Data((commit.toHex() + " refs/heads/main\n")
+                .getBytes(StandardCharsets.US_ASCII)).writeTo(output);
+        GitPktLine.Control.FLUSH.writeTo(output);
+        new GitPktLine.Data("NAK\n".getBytes(StandardCharsets.US_ASCII)).writeTo(output);
+        output.write(pack);
+        byte[] bytes = response.toByteArray();
+        return (service, uri, options) -> new GitClientTransportSession() {
+            private final BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
+            private final BufferedByteOutput sink = new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream());
+
+            @Override
+            public BufferedByteInputV2 input() {
+                return input;
+            }
+
+            @Override
+            public BufferedByteOutput output() {
+                return sink;
+            }
+
+            @Override
+            public void close() throws IOException {
+                input.close();
+            }
+        };
     }
 
     private Upstream upstream(String content) throws Exception {

@@ -9,6 +9,7 @@ import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.IOException;
@@ -34,14 +35,31 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
         if (oldId.equals(remoteRef.objectId())) {
             return;
         }
-        if (repository.hasCompleteObjectClosure(
-                new ObjectId(remoteRef.objectId()))) {
-            NativeFetchedRefPublisher.publish(
-                    repository,
-                    RefUpdate.fromWire(location.refName(), oldId, remoteRef.objectId()));
-            return;
+        ObjectId target = new ObjectId(remoteRef.objectId());
+        if (!hasCompleteObjectClosure(repository, target)) {
+            fetchPack(client, location, repository, oldId, remoteRef.objectId());
+            if (!hasCompleteObjectClosure(repository, target)) {
+                throw new BootstrapGitProxyException("complete object validation");
+            }
         }
-        fetchPack(client, location, repository, oldId, remoteRef.objectId());
+        RefUpdate update = RefUpdate.fromWire(location.refName(), oldId, remoteRef.objectId());
+        RefUpdateResult result = repository.publishRefs(List.of(update), true).getFirst();
+        if (result.status() != RefUpdateResult.Status.APPLIED) {
+            throw new BootstrapGitProxyException("local ref publication",
+                    result.status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH
+                            ? ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT
+                            : ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+        }
+    }
+
+    private static boolean hasCompleteObjectClosure(NativeGitRepository repository, ObjectId target) {
+        try {
+            return repository.hasCompleteObjectClosure(target);
+        } catch (BootstrapGitProxyException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw new BootstrapGitProxyException("complete object validation");
+        }
     }
 
     private static GitRemoteAdvertisement.Ref findRef(
@@ -69,9 +87,6 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
                     ignored -> { });
             success(client.fetch(location.remoteUri(), OPTIONS, request), "pack transfer");
             repository.storage().persist(output.complete());
-            NativeFetchedRefPublisher.publish(
-                    repository,
-                    RefUpdate.fromWire(location.refName(), oldId, newId));
         } catch (IOException failure) {
             throw new BootstrapGitProxyException("pack validation");
         }
