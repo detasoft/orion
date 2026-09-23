@@ -9,6 +9,65 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('loads pending decisions with the current token and cancellation signal', async () => {
+    const result = { decisions: [{ id: 'decision-1', scope: 'acme/platform',
+      title: 'Host key changed', description: 'Review the fingerprint', actions: { replace: 'Replace key' } }] }
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const signal = new AbortController().signal
+    const client = createOrionClient({ baseUrl: 'https://orion.example/', token: 'old-token', fetchImpl })
+    client.setToken('current-token')
+
+    expect(await client.decisions(signal)).toEqual(result)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('https://orion.example/api/admin/decisions')
+    expect(init.method).toBeUndefined()
+    expect(init.body).toBeUndefined()
+    expect(init.headers.get('Authorization')).toBe('Bearer current-token')
+    expect(init.signal).toBe(signal)
+  })
+
+  it('posts only the decision ID and action and accepts an empty 204 response', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    const signal = new AbortController().signal
+    const client = createOrionClient({ token: 'reviewer-token', fetchImpl })
+
+    expect(await client.resolveDecision('decision-1', 'replace', signal)).toBe('')
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/decisions')
+    expect(init.method).toBe('POST')
+    expect(init.headers.get('Authorization')).toBe('Bearer reviewer-token')
+    expect(init.headers.get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ id: 'decision-1', action: 'replace' })
+    expect(init.signal).toBe(signal)
+  })
+
+  it.each([403, 404])('preserves decision response status %s for the UI', async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('Decision request is unavailable', { status }))
+    const client = createOrionClient({ fetchImpl })
+
+    await expect(client.resolveDecision('decision-1', 'reject')).rejects.toMatchObject({
+      status, message: 'Decision request is unavailable',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['list', 'resolve'])('propagates cancellation of a decision %s request', async (operation) => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchImpl = vi.fn(async (_url, { signal }) => {
+      signal.throwIfAborted()
+      throw new Error('Expected an aborted signal')
+    })
+    const client = createOrionClient({ fetchImpl })
+    const result = operation === 'list' ? client.decisions(controller.signal)
+      : client.resolveDecision('decision-1', 'replace', controller.signal)
+
+    await expect(result).rejects.toBe(controller.signal.reason)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it('sends command identities and reads their existing server status', async () => {
     const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('{}', {
       headers: { 'Content-Type': 'application/json' },

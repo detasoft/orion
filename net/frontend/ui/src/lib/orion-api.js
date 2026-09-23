@@ -57,6 +57,14 @@ export function createOrionClient(options = {}) {
     setToken(value) {
       token = value
     },
+    decisions(signal) {
+      return request('/api/admin/decisions', { signal })
+    },
+    resolveDecision(id, action, signal) {
+      return request('/api/admin/decisions', {
+        method: 'POST', body: JSON.stringify({ id, action }), signal,
+      })
+    },
     sessionEvents(sessionId, after, signal, follow) {
       const query = new URLSearchParams({ follow: String(follow) })
       if (after !== null) query.set('after', after)
