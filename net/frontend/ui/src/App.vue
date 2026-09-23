@@ -8,7 +8,7 @@ const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAlia
 const PendingDecisions = defineAsyncComponent(() => import('./components/PendingDecisions.vue'))
 const SessionTerminal = defineAsyncComponent(() => import('./components/SessionTerminal.vue'))
 
-const navItems = [
+const allNavItems = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
   { id: 'repositories', label: 'Repositories', icon: 'repository' },
   { id: 'remote-aliases', label: 'Remote aliases', icon: 'git-branch' },
@@ -18,6 +18,12 @@ const navItems = [
   { id: 'terminal', label: 'Terminal', icon: 'terminal' },
 ]
 
+const identity = ref(null)
+const navItems = computed(() => identity.value?.organization
+  ? allNavItems.filter((item) => item.id === 'repositories') : allNavItems)
+const signIn = ref(null)
+const OrganizationInvitations = defineAsyncComponent(() => import('./components/OrganizationInvitations.vue'))
+const OrganizationSignIn = defineAsyncComponent(() => import('./components/OrganizationSignIn.vue'))
 const activeView = ref('overview')
 const search = ref('')
 const darkMode = ref(false)
@@ -107,6 +113,7 @@ function closeSettings() {
 }
 
 function clearConnectedState(nextState = 'disconnected') {
+  identity.value = null
   submitting.value = false
   serverSnapshot.value = { lifecycle: '', routes: [], transports: {} }
   repositories.value = []
@@ -295,13 +302,19 @@ async function connectSavedSettings() {
   const attempt = ++connectionAttempt
   connectionState.value = 'checking'
   try {
-    const [routes, lifecycle, transports, repositoryResponse] = await Promise.all([
-      api.routes(),
-      api.lifecycleState(),
-      api.transports(),
-      api.repositories(),
-    ])
+    const currentIdentity = await api.me()
+    if (attempt !== connectionAttempt) return
+    const [routes, lifecycle, transports, repositoryResponse] = currentIdentity.organization
+      ? [{ routes: [] }, '', {}, await api.repositories()]
+      : await Promise.all([
+        api.routes(),
+        api.lifecycleState(),
+        api.transports(),
+        api.repositories(),
+      ])
     if (attempt === connectionAttempt) {
+      identity.value = currentIdentity
+      if (currentIdentity.organization) activeView.value = 'repositories'
       serverSnapshot.value = { lifecycle, routes: routes.routes ?? [], transports }
       repositories.value = (repositoryResponse.repositories ?? []).map((repository) => ({
         name: repository.name,
@@ -330,7 +343,22 @@ function toggleTheme() {
   localStorage.setItem('orion.ui.theme', darkMode.value ? 'dark' : 'light')
 }
 
+async function signedIn(result) {
+  settings.value = { ...settings.value, token: result.token }
+  saveConnectionSettings(settings.value)
+  api = createOrionClient({ token: result.token })
+  signIn.value = null
+  clearConnectedState()
+  await connectSavedSettings()
+}
+
 onMounted(() => {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (fragment.has('invite') || fragment.has('onboarding')) {
+    signIn.value = { invitation: fragment.get('invite') ?? '', ticket: fragment.get('onboarding') ?? '',
+      organization: fragment.get('organization') ?? 'default' }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
   darkMode.value = localStorage.getItem('orion.ui.theme') === 'dark'
   settings.value = loadConnectionSettings()
   api = createOrionClient({ token: settings.value.token })
@@ -342,6 +370,7 @@ onMounted(() => {
 
 <template>
   <div class="app-shell" :class="{ 'dark-mode': darkMode }">
+    <OrganizationSignIn v-if="signIn" v-bind="signIn" @signed-in="signedIn" @close="signIn = null" />
     <div v-if="sidebarOpen" class="scrim" @click="sidebarOpen = false" />
 
     <aside class="sidebar" :class="{ open: sidebarOpen }">
@@ -365,6 +394,8 @@ onMounted(() => {
       </nav>
 
       <div class="sidebar-bottom">
+        <button v-if="!isConnected" class="nav-item" @click="signIn = {}">Sign in with OIDC</button>
+        <button v-else class="nav-item" @click="clearExpiredCredentials">Sign out</button>
         <button class="nav-item" @click="openSettings">
           <AppIcon name="settings" :size="19" />
           <span>Settings</span>
@@ -395,6 +426,7 @@ onMounted(() => {
           </button>
           <button
             class="primary-button compact"
+            v-if="!identity?.organization"
             aria-label="New repository"
             :disabled="!isConnected"
             @click="createOpen = true"
@@ -545,15 +577,9 @@ onMounted(() => {
         </template>
 
         <section v-else-if="activeView === 'people'" class="people-grid">
-          <div class="empty-state panel">
-            <AppIcon name="users" :size="28" />
-            <h3>{{ isConnected ? 'Member listing is unavailable' : 'Connect to Orion first' }}</h3>
-            <p>
-              {{ isConnected
-                ? 'The connected Admin API accepts user updates but does not expose a user list.'
-                : 'No member data is stored in the interface.' }}
-            </p>
-          </div>
+          <OrganizationInvitations v-if="isConnected && identity?.admin" :token="settings.token"
+            @authorization-error="clearExpiredCredentials" />
+          <div v-else class="empty-state panel"><h3>Connect as an administrator to invite users</h3></div>
         </section>
 
         <template v-else-if="activeView === 'terminal'">

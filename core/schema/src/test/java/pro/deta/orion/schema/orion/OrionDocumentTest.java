@@ -20,7 +20,7 @@ class OrionDocumentTest {
                 new TeamId("platform"), "Platform", List.of(), List.of(), List.of(repository));
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), List.of(team),
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
 
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl),
@@ -45,7 +45,7 @@ class OrionDocumentTest {
         List<OrionDocument.Team> teams = new ArrayList<>(List.of(team));
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), teams,
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
         List<OrionDocument.Organization> organizations = new ArrayList<>(List.of(organization));
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl()),
@@ -128,7 +128,7 @@ class OrionDocumentTest {
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OrionDocument.Organization(
                 new OrganizationId("acme"), null, List.of(), List.of(), List.of(), null,
-                List.of(), List.of()))
+                List.of(), List.of(), List.of()))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OrionDocument.Team(
                 new TeamId("platform"),
@@ -142,7 +142,7 @@ class OrionDocumentTest {
     private static OrionDocument.Organization organization(String id, List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
                 new OrganizationId(id), null, List.of(), List.of(), List.of(), teams,
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
     }
 
     private static OrionDocument.Team team(String id, List<OrionDocument.Repository> repositories) {

@@ -434,14 +434,10 @@ Organization identities are confined to repositories addressed as
 that boundary; wildcard grants never cross it. HTTP repository listings, SSH
 catalogs and pending decisions use the same organization boundary. System
 administration, system SSH credentials and system token issuance require a
-system identity, even when an organization user has the same user ID. These
-checks prepare the authorization context for the organization login flow;
-OIDC login and invitations are not yet connected.
+system identity, even when an organization user has the same user ID. OIDC access tokens carry the organization identity and use these same checks.
 
 OIDC providers are configured per organization, including the ordinary `default`
-organization created on first initialization. Provider settings are persisted
-now; browser login and invitations will be added separately. Organizations do
-not inherit providers from `default`. Each provider's `secret` names an encrypted
+organization created on first initialization. Organizations do not inherit providers from `default`. Each provider's `secret` names an encrypted
 entry in that same organization's `<secrets>` collection:
 
 ```xml
@@ -458,6 +454,34 @@ Place `<oidc>` after `<secrets>` within `<organization>`. Corporate providers us
 the same fields. The issuer is an HTTPS URL without credentials, a query or a
 fragment, following [OIDC Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata).
 The client secret itself belongs in an encrypted secret entry, not in this block.
+
+Set `system/https/publicUrl` to the public HTTPS origin, for example
+`https://orion.example.test`, and register
+`https://orion.example.test/api/auth/oidc/callback` with each provider.
+The provider must support authorization code flow with PKCE S256, client secret
+basic or post authentication, RS256-signed ID tokens, and include `email` and
+boolean `email_verified: true` in the ID token. The requested scopes are
+`openid email profile`.
+
+In the UI, a system administrator opens **People**, selects any organization
+with OIDC configured, and enters the invitee's email. Orion returns a link to
+copy and send; it does not send email. Invitations last seven days. Creating
+another invitation for the same organization and email invalidates the previous
+link. Only its SHA-256 digest is persisted under the organization's `<invitations>`.
+
+The invitee opens the link, signs in with the organization's provider, and sets
+first and last names. The verified email must match the invitation. Account
+creation and invitation consumption are saved together with a configuration
+revision check. The resulting `AccessControl.User` stores an `OIDC_SUBJECT`
+credential binding the issuer and subject; later sign-ins use that binding.
+New users receive read access to repositories in their own organization.
+Organization users cannot access system administration.
+
+Login attempts expire after ten minutes and are bound to the initiating browser;
+a server restart requires restarting login, while unused invitations survive.
+The one-hour access token is stored in the browser's session storage. Removing
+the user, its OIDC binding, or the trusted issuer invalidates its tokens.
+
 
 HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 

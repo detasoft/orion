@@ -48,6 +48,11 @@ final class JwtAccessTokenService {
             String subject,
             long expiresInSeconds,
             String authenticationGeneration) throws GeneralSecurityException {
+        return issue(subject, expiresInSeconds, authenticationGeneration, null);
+    }
+
+    IssuedToken issue(String subject, long expiresInSeconds, String authenticationGeneration,
+            String organization) throws GeneralSecurityException {
         if (subject == null || subject.isBlank()) {
             throw new IllegalArgumentException("Token subject is required");
         }
@@ -76,6 +81,10 @@ final class JwtAccessTokenService {
                 : ",\"%s\":%s".formatted(
                         AUTHENTICATION_GENERATION_CLAIM,
                         jsonString(authenticationGeneration));
+        if (organization != null) {
+            new pro.deta.orion.schema.orion.OrganizationId(organization);
+            generationClaim += ",\"orion_org\":" + jsonString(organization);
+        }
         String payload = ("{\"iss\":\"%s\",\"aud\":\"%s\",\"sub\":%s,\"purpose\":\"%s\","
                 + "\"jti\":%s,\"iat\":%d,\"nbf\":%d,\"exp\":%d%s}").formatted(
                 ISSUER,
@@ -187,7 +196,15 @@ final class JwtAccessTokenService {
                 || authenticationGeneration.length() > MAX_AUTHENTICATION_GENERATION_LENGTH)) {
             return VerificationResult.failure("JWT authentication generation is invalid");
         }
-        return VerificationResult.success(subject, authenticationGeneration, tokenId);
+        String organization = stringClaim(payload, "orion_org");
+        if (containsClaim(payload, "orion_org")) {
+            try {
+                new pro.deta.orion.schema.orion.OrganizationId(organization);
+            } catch (RuntimeException invalid) {
+                return VerificationResult.failure("JWT organization is invalid");
+            }
+        }
+        return new VerificationResult.Success(subject, authenticationGeneration, tokenId, organization);
     }
 
     private boolean isUuid(String value) {
@@ -320,7 +337,7 @@ final class JwtAccessTokenService {
         record Success(
                 String subject,
                 String authenticationGeneration,
-                String tokenId) implements VerificationResult {
+                String tokenId, String organization) implements VerificationResult {
         }
 
         record Failure(String reason) implements VerificationResult {
@@ -330,7 +347,7 @@ final class JwtAccessTokenService {
                 String subject,
                 String authenticationGeneration,
                 String tokenId) {
-            return new Success(subject, authenticationGeneration, tokenId);
+            return new Success(subject, authenticationGeneration, tokenId, null);
         }
 
         static VerificationResult failure(String reason) {

@@ -28,6 +28,25 @@ class OrionXmlTest {
     private final OrionXmlSchema xmlSchema = new OrionXmlSchema();
 
     @Test
+    void roundTripsInvitationsAndOidcUserBindings() throws Exception {
+        String xml = minimalV2("""
+                <organization id="acme">
+                  <users><user id="alice"><email>alice@example.test</email><credentials><credential>
+                    <type>OIDC_SUBJECT</type><keyId>https://accounts.google.com</keyId><value>subject-123</value>
+                  </credential></credentials><roles/><grants/></user></users>
+                  <teams/>
+                  <invitations><invitation tokenHash="%s">
+                    <email>Bob@Example.test</email><expiresAt>1800000000</expiresAt>
+                  </invitation></invitations>
+                </organization>
+                """.formatted("a".repeat(64)), "");
+        OrionDocument document = read(xml);
+        assertThat(document.organizations().getFirst().invitations().getFirst().email())
+                .isEqualTo("bob@example.test");
+        assertThat(read(write(document))).isEqualTo(document);
+    }
+
+    @Test
     void readsUnversionedAndExplicitLegacyAclDocuments() throws Exception {
         String unversioned = testResource("pro/deta/orion/schema/acl/legacy-orion.xml");
         String explicit = unversioned.replace("<AccessControl>", "<AccessControl schemaVersion=\"1\">");
@@ -669,7 +688,7 @@ class OrionXmlTest {
                 new OrionDocument.Team(new TeamId("team"), null, List.of(), List.of(), List.of(repository));
         return new OrionDocument.Organization(
                 new OrganizationId(id), null, List.of(), List.of(), List.of(), List.of(team),
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
     }
 
     private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
@@ -695,7 +714,7 @@ class OrionXmlTest {
                 List.of(),
                 List.of(),
                 List.of(team),
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
         return document(new AccessControl(), List.of(organization));
     }
 

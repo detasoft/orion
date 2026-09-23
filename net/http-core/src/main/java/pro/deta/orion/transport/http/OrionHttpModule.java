@@ -9,6 +9,18 @@ import jakarta.inject.Singleton;
 @Module
 public class OrionHttpModule {
     @Provides
+    @IntoSet
+    static OrionHttpRoute oidcRoute(OrionOidcRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
+    static OrionHttpRoute invitationsRoute(OrionAdminInvitationsRoute route) {
+        return route;
+    }
+
+    @Provides
     @Singleton
     static ObjectMapper objectMapper() {
         return new ObjectMapper();

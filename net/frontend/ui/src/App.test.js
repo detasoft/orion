@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const client = {
+  me: vi.fn(),
+  invitations: vi.fn(),
   createRepository: vi.fn(),
   createOrUpdateUser: vi.fn(),
   decisions: vi.fn(),
@@ -59,6 +61,8 @@ beforeEach(() => {
   sessionStorage.clear()
   vi.clearAllMocks()
   for (const method of Object.values(client)) method.mockReset()
+  client.me.mockResolvedValue({ userId: 'admin', organization: '', admin: true })
+  client.invitations.mockResolvedValue({ organizations: [] })
   client.routes.mockResolvedValue({
     routes: [{ urlPattern: '/api/admin/routes', methods: ['GET'], authorization: 'admin' }],
   })
@@ -77,6 +81,20 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('connects organization users without requesting system administration data', async () => {
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    client.repositories.mockResolvedValue({ repositories: [{ name: 'acme/team/project' }] })
+    const wrapper = mountApp()
+    await connect(wrapper)
+    expect(client.routes).not.toHaveBeenCalled()
+    expect(client.transports).not.toHaveBeenCalled()
+    expect(client.lifecycleState).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.primary-nav .nav-item').map((item) => item.text())).toEqual(['Repositories'])
+    expect(wrapper.text()).toContain('acme/team/project')
+    expect(wrapper.find('[aria-label="New repository"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('requires a connection before loading pending decisions', async () => {
     const wrapper = mountApp()
     const decisions = wrapper.findAll('.primary-nav .nav-item')

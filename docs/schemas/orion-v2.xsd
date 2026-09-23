@@ -259,6 +259,13 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="invitations" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="invitation" type="invitation" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
@@ -433,6 +440,14 @@
     <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
 
+  <xs:complexType name="invitation" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="email" type="xs:string"/>
+      <xs:element name="expiresAt" type="xs:long"/>
+    </xs:sequence>
+    <xs:attribute name="tokenHash" type="xs:string" use="required"/>
+  </xs:complexType>
+
   <xs:simpleType name="credentialType">
     <xs:restriction base="xs:string">
       <xs:enumeration value="SHA1"/>
@@ -442,6 +457,7 @@
       <xs:enumeration value="SHA3_256"/>
       <xs:enumeration value="ARGON2"/>
       <xs:enumeration value="JWT_SIGNING_PUBLIC_KEY"/>
+      <xs:enumeration value="OIDC_SUBJECT"/>
     </xs:restriction>
   </xs:simpleType>
 

@@ -57,6 +57,23 @@ export function createOrionClient(options = {}) {
     setToken(value) {
       token = value
     },
+    me() { return request('/api/auth/me') },
+    invitations() { return request('/api/admin/invitations') },
+    invite(input) {
+      return request('/api/admin/invitations', { method: 'POST', body: JSON.stringify(input) })
+    },
+    providers(organization) {
+      return request(`/api/auth/providers?${new URLSearchParams({ organization })}`)
+    },
+    beginOidc(input) {
+      return request('/api/auth/oidc/start', { method: 'POST', body: JSON.stringify(input) })
+    },
+    oidcProfile(ticket) {
+      return request('/api/auth/oidc/profile', { method: 'POST', body: JSON.stringify({ ticket }) })
+    },
+    completeOidc(input) {
+      return request('/api/auth/oidc/complete', { method: 'POST', body: JSON.stringify(input) })
+    },
     decisions(signal) {
       return request('/api/admin/decisions', { signal })
     },

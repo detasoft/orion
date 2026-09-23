@@ -25,6 +25,21 @@ class JwtAccessTokenServiceTest {
             Instant.parse("2026-09-02T21:00:00Z"), ZoneOffset.UTC);
 
     @Test
+    void preservesOrganizationScopeSeparatelyFromTheLocalUserId() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("key"), CLOCK);
+        String token = service.issue("root", 600, "oidc-binding", "acme").value();
+        assertThat(service.verify(token)).isInstanceOfSatisfying(
+                JwtAccessTokenService.VerificationResult.Success.class, result -> {
+                    assertThat(result.subject()).isEqualTo("root");
+                    assertThat(result.organization()).isEqualTo("acme");
+                    assertThat(result.authenticationGeneration()).isEqualTo("oidc-binding");
+                });
+        assertThat(service.verify(service.issue("root", 600).value())).isInstanceOfSatisfying(
+                JwtAccessTokenService.VerificationResult.Success.class,
+                result -> assertThat(result.organization()).isNull());
+    }
+
+    @Test
     void issuesPurposeBoundAccessTokenWithCompleteTimeAndIdentityClaims() throws Exception {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);

@@ -163,7 +163,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders"})
+    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders", "invitations"})
     public static final class Organization {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -186,6 +186,22 @@ public class OrionV2 {
         @XmlElementWrapper(name = "oidc")
         @XmlElement(name = "provider")
         private List<OidcProvider> oidcProviders;
+        @XmlElementWrapper(name = "invitations")
+        @XmlElement(name = "invitation")
+        private List<Invitation> invitations;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"email", "expiresAt"})
+    public static final class Invitation {
+        @XmlAttribute(required = true)
+        private String tokenHash;
+        @XmlElement(required = true)
+        private String email;
+        private long expiresAt;
     }
 
     @Data
@@ -472,7 +488,7 @@ public class OrionV2 {
         OPENSSH_PUBLIC_KEY,
         SHA3_256,
         ARGON2,
-        JWT_SIGNING_PUBLIC_KEY
+        JWT_SIGNING_PUBLIC_KEY, OIDC_SUBJECT
     }
 
     @XmlEnum(String.class)

@@ -84,7 +84,7 @@ class ConfigurationSecretsTest {
                 "google", URI.create("https://accounts.google.com"), "client-id", "oidc-client");
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
-                organization.roles(), organization.teams(), organization.secrets(), List.of(provider)))));
+                organization.roles(), organization.teams(), organization.secrets(), List.of(provider), List.of()))));
 
         current.set(secrets.replace(current.get(), organizationScope, "oidc-client", "replacement".toCharArray()));
         current.set(secrets.create(current.get(), ConfigurationScope.repository(REPOSITORY),
@@ -277,7 +277,7 @@ class ConfigurationSecretsTest {
         OrionDocument.Organization original = current.get().organizations().getFirst();
         OrionDocument.Organization other = new OrionDocument.Organization(new OrganizationId("other"),
                 original.displayName(), original.users(), original.grants(), original.roles(),
-                original.teams(), original.secrets(), List.of());
+                original.teams(), original.secrets(), List.of(), List.of());
         current.set(new OrionDocument(current.get().system(), List.of(original, other)));
 
         assertThat(secrets.resolve(REPOSITORY, REFERENCE)).isEqualTo("do-not-report".toCharArray());
@@ -361,7 +361,7 @@ class ConfigurationSecretsTest {
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
                 organization.roles(), List.of(new OrionDocument.Team(team.id(), team.displayName(),
-                team.grants(), team.roles(), List.of(changed))), organization.secrets(), List.of()))));
+                team.grants(), team.roles(), List.of(changed))), organization.secrets(), List.of(), List.of()))));
     }
 
     private static OrionDocument.Repository repository(OrionDocument document) {
@@ -375,7 +375,7 @@ class ConfigurationSecretsTest {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(),
                 List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("platform"), "Platform",
-                List.of(), List.of(), List.of(repository))), List.of(), List.of())));
+                List.of(), List.of(), List.of(repository))), List.of(), List.of(), List.of())));
     }
 
     private static KeyMaterialOptions options() {

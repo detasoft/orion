@@ -102,7 +102,7 @@ class OrionV2MapperTest {
     @Test
     void declaresCanonicalScopedIdentityXmlShape() throws NoSuchFieldException {
         assertThat(propOrder(OrionV2.Organization.class))
-                .containsExactly("displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders");
+                .containsExactly("displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders", "invitations");
         assertThat(propOrder(OrionV2.Team.class))
                 .containsExactly("displayName", "grants", "roles", "repositories");
         assertThat(propOrder(OrionV2.Repository.class))
@@ -740,7 +740,7 @@ class OrionV2MapperTest {
             List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
                 new OrganizationId(id), id + " name", users, grants, roles, teams,
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
     }
 
     private static OrionDocument.Team domainTeam(
@@ -800,7 +800,7 @@ class OrionV2MapperTest {
     private static OrionDocument.Organization organization(String id, List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
                 new OrganizationId(id), id + " name", List.of(), List.of(), List.of(), teams,
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
     }
 
     private static OrionDocument.Team team(String id, List<OrionDocument.Repository> repositories) {
@@ -840,7 +840,7 @@ class OrionV2MapperTest {
     }
 
     private static OrionV2.Organization wireOrganization(String id) {
-        return new OrionV2.Organization(id, null, null, null, null, List.of(), List.of(), List.of());
+        return new OrionV2.Organization(id, null, null, null, null, List.of(), List.of(), List.of(), List.of());
     }
 
     private static OrionV2.Team wireTeam(String id) {

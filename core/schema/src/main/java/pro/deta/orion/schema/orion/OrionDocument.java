@@ -83,7 +83,8 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<ScopedRole> roles,
             List<Team> teams,
             List<ConfigurationSecret> secrets,
-            List<OidcProvider> oidcProviders) {
+            List<OidcProvider> oidcProviders,
+            List<OrganizationInvitation> invitations) {
         public Organization {
             Objects.requireNonNull(id, "id");
             users = copyUnique(users, AccessControl.User::getId, "user");
@@ -92,6 +93,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             teams = copyTeams(teams);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
             oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
+            invitations = copyUnique(invitations, OrganizationInvitation::tokenHash, "invitation");
             Set<String> secretIds = new HashSet<>();
             for (ConfigurationSecret secret : secrets) {
                 secretIds.add(secret.id());

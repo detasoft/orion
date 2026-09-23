@@ -589,7 +589,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case JwtAccessTokenService.VerificationResult.Success(
                     var subject,
                     var authenticationGeneration,
-                    var tokenId) -> {
+                    var tokenId, var organization) -> {
+                if (organization != null) {
+                    yield verifyOrganizationToken(organization, subject, authenticationGeneration, tokenId);
+                }
                 AccessControl snapshot = accessControl.get();
                 Result<AccessControl.User> user = findSingleUser(snapshot, subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
@@ -612,6 +615,61 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 yield TokenAuthenticationResult.failure("authentication failed");
             }
         };
+    }
+
+    public TokenIssueResult issueOrganizationToken(OrganizationId organizationId, String userId,
+            String issuer, String subject) {
+        String generation = oidcGeneration(issuer, subject);
+        TokenAuthenticationResult authentication = verifyOrganizationToken(
+                organizationId.value(), userId, generation, "pending");
+        if (!(authentication instanceof TokenAuthenticationResult.Success)) {
+            return TokenIssueResult.failure("Organization account is unavailable");
+        }
+        try {
+            JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
+                    userId, 3600, generation, organizationId.value());
+            return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
+        } catch (GeneralSecurityException failure) {
+            return TokenIssueResult.failure("Token issue failed", failure);
+        }
+    }
+
+    private TokenAuthenticationResult verifyOrganizationToken(String organizationId, String userId,
+            String generation, String tokenId) {
+        for (OrionDocument.Organization organization : desiredState.current().document().organizations()) {
+            if (!organization.id().value().equals(organizationId)) {
+                continue;
+            }
+            for (AccessControl.User user : organization.users()) {
+                if (!user.getId().equals(userId)) {
+                    continue;
+                }
+                for (AccessControl.Credential credential : user.getCredentials()) {
+                    if (credential.getType() != AccessControl.CredentialType.OIDC_SUBJECT
+                            || !oidcGeneration(credential.getKeyId(), credential.getValue()).equals(generation)) {
+                        continue;
+                    }
+                    for (pro.deta.orion.schema.orion.OidcProvider provider : organization.oidcProviders()) {
+                        if (provider.issuer().toString().equals(credential.getKeyId())) {
+                            return TokenAuthenticationResult.success(new InternalUserImpl(userId,
+                                    user.getGrants(), Optional.of(organization.id())),
+                                    new AccessTokenIdentity(tokenId, organizationId + "/" + userId));
+                        }
+                    }
+                }
+            }
+        }
+        return TokenAuthenticationResult.failure("Organization account is unavailable");
+    }
+
+    private static String oidcGeneration(String issuer, String subject) {
+        try {
+            byte[] bytes = (issuer + "\n" + subject).getBytes(StandardCharsets.UTF_8);
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(bytes));
+        } catch (GeneralSecurityException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     @Override
@@ -741,7 +799,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private byte[] serializeInitialConfiguration(AccessControl accessControl) {
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("default"), "Default", List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
         return serializeOrionConfiguration(new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl), List.of(organization)));
     }
@@ -1369,7 +1427,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case ARGON2 -> {
                 yield orionPasswordHashingService.comparePassword(ARGON2, c.getValue(), provided);
             }
-            case JWT_SIGNING_PUBLIC_KEY -> false;
+            case JWT_SIGNING_PUBLIC_KEY, OIDC_SUBJECT -> false;
         };
     }
 

@@ -7,6 +7,7 @@ import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrganizationInvitation;
 import pro.deta.orion.schema.orion.OidcProvider;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -173,7 +174,8 @@ public final class OrionV2Mapper {
                     toCurrentScopedRoles(organization.getRoles()),
                     toCurrentTeams(organization.getTeams()),
                     toCurrentSecrets(organization.getSecrets()),
-                    toCurrentOidcProviders(organization.getOidcProviders())));
+                    toCurrentOidcProviders(organization.getOidcProviders()),
+                    toCurrentInvitations(organization.getInvitations())));
         }
         return organizations;
     }
@@ -216,6 +218,25 @@ public final class OrionV2Mapper {
                     toCurrentSecrets(repository.getSecrets())));
         }
         return repositories;
+    }
+
+    private static List<OrganizationInvitation> toCurrentInvitations(List<OrionV2.Invitation> source) {
+        List<OrganizationInvitation> result = new ArrayList<>();
+        for (OrionV2.Invitation invitation : sorted(source,
+                Comparator.comparing(OrionV2.Invitation::getTokenHash, NULL_SAFE_STRINGS))) {
+            result.add(new OrganizationInvitation(invitation.getTokenHash(), invitation.getEmail(),
+                    invitation.getExpiresAt()));
+        }
+        return result;
+    }
+
+    private static List<OrionV2.Invitation> fromCurrentInvitations(List<OrganizationInvitation> source) {
+        List<OrionV2.Invitation> result = new ArrayList<>();
+        for (OrganizationInvitation invitation : sorted(source,
+                Comparator.comparing(OrganizationInvitation::tokenHash))) {
+            result.add(new OrionV2.Invitation(invitation.tokenHash(), invitation.email(), invitation.expiresAt()));
+        }
+        return result;
     }
 
     private static List<OidcProvider> toCurrentOidcProviders(List<OrionV2.OidcProvider> source) {
@@ -528,7 +549,8 @@ public final class OrionV2Mapper {
                     fromCurrentScopedRoles(organization.roles()),
                     fromCurrentTeams(organization.teams()),
                     fromCurrentSecrets(organization.secrets()),
-                    fromCurrentOidcProviders(organization.oidcProviders())));
+                    fromCurrentOidcProviders(organization.oidcProviders()),
+                    fromCurrentInvitations(organization.invitations())));
         }
         return organizations;
     }

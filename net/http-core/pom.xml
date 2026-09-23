@@ -14,6 +14,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>oauth2-oidc-sdk</artifactId>
+            <version>11.38.2</version>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>frontend-ui</artifactId>
         </dependency>

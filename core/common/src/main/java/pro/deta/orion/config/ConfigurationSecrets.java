@@ -51,6 +51,11 @@ public final class ConfigurationSecrets {
         return resolve(document, Optional.of(owner), reference.reference());
     }
 
+    public char[] resolveOrganization(OrionDocument snapshot,
+            OrganizationId organization, String id) {
+        return resolve(snapshot, Optional.of(ConfigurationScope.organization(organization)), id);
+    }
+
     public char[] resolveSystem(String id) {
         return resolveSystem(current.get(), id);
     }
@@ -245,7 +250,7 @@ public final class ConfigurationSecrets {
             }
             organizations.add(new OrionDocument.Organization(organization.id(), organization.displayName(),
                     organization.users(), organization.grants(), organization.roles(), teams,
-                    scope.teamId().isEmpty() ? secrets : organization.secrets(), organization.oidcProviders()));
+                    scope.teamId().isEmpty() ? secrets : organization.secrets(), organization.oidcProviders(), organization.invitations()));
         }
         return new OrionDocument(document.system(), organizations);
     }

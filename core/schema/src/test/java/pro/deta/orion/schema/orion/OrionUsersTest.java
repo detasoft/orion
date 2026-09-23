@@ -61,6 +61,6 @@ class OrionUsersTest {
 
     private static OrionDocument.Organization organization(String id, List<AccessControl.User> users) {
         return new OrionDocument.Organization(
-                new OrganizationId(id), null, users, List.of(), List.of(), List.of(), List.of(), List.of());
+                new OrganizationId(id), null, users, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 }

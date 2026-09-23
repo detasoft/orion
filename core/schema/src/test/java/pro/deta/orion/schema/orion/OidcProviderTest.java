@@ -31,7 +31,7 @@ class OidcProviderTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("duplicate OIDC provider");
         assertThatThrownBy(() -> new OrionDocument.Organization(
                 new OrganizationId("default"), null, List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(google)))
+                List.of(), List.of(google), List.of()))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("OIDC secret is unavailable");
     }
 
@@ -57,6 +57,6 @@ class OidcProviderTest {
     private static OrionDocument.Organization organization(String id, List<OidcProvider> providers) {
         return new OrionDocument.Organization(new OrganizationId(id), null,
                 List.of(), List.of(), List.of(), List.of(),
-                List.of(new ConfigurationSecret("client-secret", "encrypted-value")), providers);
+                List.of(new ConfigurationSecret("client-secret", "encrypted-value")), providers, List.of());
     }
 }
