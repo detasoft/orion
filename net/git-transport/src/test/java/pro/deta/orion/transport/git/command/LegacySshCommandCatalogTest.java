@@ -98,8 +98,8 @@ class LegacySshCommandCatalogTest {
     void decisionCommandsResolveRequestsInTheSuppliedRegistry(String action) {
         Decision pending = decisions.register(new Decision(UUID.randomUUID(),
                 Optional.of(ConfigurationScope.parse("acme/platform/api")), "SSH host key changed", "Review the new fingerprint",
-                List.of(new DecisionAction("Replace key", actor -> Result.of(null)),
-                        new DecisionAction("Reject connection", actor -> Result.of(null)))))
+                List.of(new DecisionAction("Replace key", false, actor -> Result.of(null)),
+                        new DecisionAction("Reject connection", false, actor -> Result.of(null)))))
                 .valueOrFailure("register decision");
         String id = pending.request().id().toString();
         UserIdentity operator = user(List.of());
@@ -108,7 +108,7 @@ class LegacySshCommandCatalogTest {
                 rows -> assertThat(rows.values()).containsExactly(List.of(
                         CommandValue.text(id), CommandValue.text("acme/platform/api"),
                         CommandValue.text("SSH host key changed"),
-                        CommandValue.text(pending.request().createdAt().toString()))));
+                        CommandValue.text(pending.request().createdAt().toString()), CommandValue.text("PENDING"))));
         assertThat(dispatch("/decision/" + id + " show", operator))
                 .isInstanceOfSatisfying(CommandResult.ObjectValue.class, details ->
                         assertThat(details.fields()).containsEntry(
@@ -129,7 +129,7 @@ class LegacySshCommandCatalogTest {
     void decisionCommandsRejectAnonymousRequestsWithoutResolvingThem() {
         Decision pending = decisions.register(new Decision(UUID.randomUUID(),
                 Optional.empty(), "Confirm operation", "Details",
-                List.of(new DecisionAction("Accept", actor -> Result.of(null))))).valueOrFailure("register decision");
+                List.of(new DecisionAction("Accept", false, actor -> Result.of(null))))).valueOrFailure("register decision");
         String path = "/decision/" + pending.request().id();
 
         assertFailure(dispatch("/decision ls", SecurityContext.ANONYMOUS), CommandFailureCode.ACCESS_DENIED);

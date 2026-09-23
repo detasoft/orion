@@ -79,7 +79,7 @@ class DecisionRegistryTest {
     private static Decision resourceDecision(Object resource, String scope) {
         return new Decision(resource,
                 Optional.ofNullable(scope).map(ConfigurationScope::parse), "Confirm", "",
-                List.of(new DecisionAction("Accept", actor -> Result.of(null))));
+                List.of(new DecisionAction("Accept", false, actor -> Result.of(null))));
     }
 
     @Test
@@ -108,17 +108,17 @@ class DecisionRegistryTest {
     }
 
     @Test
-    void acceptedActionLeavesTheQueueAndSurvivesRegistryShutdown() {
+    void acceptedActionRemainsVisibleAndSurvivesRegistryShutdown() {
         java.util.ArrayDeque<Runnable> work = new java.util.ArrayDeque<>();
         java.util.concurrent.atomic.AtomicInteger executed = new java.util.concurrent.atomic.AtomicInteger();
-        try (DecisionRegistry registry = new DecisionRegistry(1, work::add, (actor, scope) -> true)) {
+        try (DecisionRegistry registry = new DecisionRegistry(2, work::add, (actor, scope) -> true)) {
             Decision pending = new Decision(UUID.randomUUID(),
                 Optional.empty(), "Resume", "",
-                List.of(new DecisionAction("Resume", actor -> { executed.incrementAndGet();
+                List.of(new DecisionAction("Resume", false, actor -> { executed.incrementAndGet();
                     return Result.of(null); })));
             registry.register(pending).valueOrFailure("register");
             registry.decide(pending.request().id(), new DecisionAnswer(0, ADMIN)).valueOrFailure("answer");
-            assertThat(registry.list(ADMIN)).isEmpty();
+            assertThat(registry.list(ADMIN)).containsExactly(pending.request());
             Decision next = register(registry, null);
             registry.close();
             assertThat(next.result().toCompletableFuture()).isCompletedExceptionally();
@@ -331,7 +331,7 @@ class DecisionRegistryTest {
     private static Result<Decision> submit(DecisionRegistry registry, String scope) {
         return registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scope).map(ConfigurationScope::parse), "Confirm operation", "",
-                List.of(new DecisionAction("Accept", actor -> Result.of(null)),
-                        new DecisionAction("Reject", actor -> Result.of(null)))));
+                List.of(new DecisionAction("Accept", false, actor -> Result.of(null)),
+                        new DecisionAction("Reject", false, actor -> Result.of(null)))));
     }
 }

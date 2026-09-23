@@ -100,7 +100,7 @@ class OrionAdminProxyMutationTest {
             f.answer(f.decisions.list(OPERATOR).getFirst(), "1");
             f.work.remove().run();
             Decision unrelated = new Decision(UUID.randomUUID(), Optional.empty(), "Other operation", "",
-                    List.of(new DecisionAction("Confirm", actor -> Result.of(null))));
+                    List.of(new DecisionAction("Confirm", false, actor -> Result.of(null))));
             f.decisions.register(unrelated).valueOrFailure("fill queue");
             assertThatThrownBy(() -> f.provider.activate(() -> f.desired.current().document(), f.secrets))
                     .isInstanceOf(IllegalStateException.class).hasCauseInstanceOf(RejectedExecutionException.class);
@@ -215,7 +215,7 @@ class OrionAdminProxyMutationTest {
     }
 
     @Test
-    void failedSaveDoesNotTrustOrRetry() throws Exception {
+    void failedSaveRemainsVisibleAndCanBeRetriedExplicitly() throws Exception {
         try (Fixture f = new Fixture()) {
             f.createSsh(Set.of());
             int saves = f.storage.saves;
@@ -226,6 +226,20 @@ class OrionAdminProxyMutationTest {
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("operation-failed");
+            DecisionRequest failed = f.decisions.list(OPERATOR).getFirst();
+            Reply visible = f.request("/api/admin/decisions", "GET", Map.of(), true);
+            assertThat(visible.json.at("/decisions/0/state").asText()).isEqualTo("FAILED");
+            assertThat(visible.json.at("/decisions/0/error").asText()).isEqualTo("Could not save SSH host key");
+            assertThat(visible.json.at("/decisions/0/retryable").asBoolean()).isTrue();
+            f.storage.failSave = false;
+            assertThat(f.answer(failed, "retry").status).isEqualTo(204);
+            assertThat(f.answer(failed, "retry").status).isEqualTo(404);
+            f.work.remove().run();
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
+            assertThat(f.storage.saves).isEqualTo(saves + 1);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts())
+                    .contains(f.hostKey());
+            assertThat(f.sshAuthentications).hasValue(0);
         }
     }
 
@@ -239,6 +253,11 @@ class OrionAdminProxyMutationTest {
             assertThat(f.work).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
+            DecisionRequest failed = f.decisions.list(OPERATOR).getFirst();
+            assertThat(failed.state()).isEqualTo(DecisionRequest.State.FAILED);
+            assertThat(failed.error()).isEqualTo("Decision execution failed");
+            assertThat(f.answer(failed, "close").status).isEqualTo(204);
+            assertThat(f.decisions.list(OPERATOR)).isEmpty();
         }
     }
 
@@ -247,7 +266,7 @@ class OrionAdminProxyMutationTest {
         try (Fixture f = new Fixture()) {
             f.decisions.register(new Decision(UUID.randomUUID(),
                 Optional.empty(), "occupied", "",
-                List.of(new DecisionAction("Reject", actor -> Result.of(null)))));
+                List.of(new DecisionAction("Reject", false, actor -> Result.of(null)))));
             assertThat(f.createSsh(Set.of()).status).isEqualTo(503);
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
             assertThat(f.work).isEmpty();

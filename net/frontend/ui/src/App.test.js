@@ -184,6 +184,7 @@ describe('Orion connection', () => {
     client.decisions.mockResolvedValue({ decisions: [{
       id: 'request-1', title: 'Review host key', description: 'Unknown host',
       scope: 'system', createdAt: '2026-09-23T12:00:00Z', actions: { accept: 'Accept key' },
+      state: 'PENDING', error: '', selectedAction: -1, retryable: false,
     }] })
     const wrapper = mountApp()
     await connect(wrapper)
@@ -194,10 +195,11 @@ describe('Orion connection', () => {
 
     expect(client.decisions).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('Review host key')
+    client.decisions.mockResolvedValueOnce({ decisions: [] })
     await wrapper.findAll('button').find((button) => button.text() === 'Accept key').trigger('click')
     await flushPromises()
     expect(client.resolveDecision).toHaveBeenCalledWith('request-1', 'accept', expect.any(AbortSignal))
-    expect(wrapper.text()).toContain('Decision recorded.')
+    expect(wrapper.text()).toContain('Decision submitted.')
     expect(wrapper.text()).not.toContain('Review host key')
     wrapper.unmount()
   })

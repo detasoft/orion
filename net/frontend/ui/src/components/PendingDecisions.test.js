@@ -10,6 +10,7 @@ vi.mock('../lib/orion-api.js', () => ({ createOrionClient }))
 const request = {
   id: 'decision-1', title: 'Host key changed', description: 'Old fingerprint\nNew fingerprint',
   scope: 'acme/platform/api', createdAt: '2026-09-23T00:00:00Z',
+  state: 'PENDING', error: '', selectedAction: -1, retryable: false,
   actions: { replace: 'Replace stored key', reject: 'Reject connection' },
 }
 let wrapper
@@ -43,6 +44,51 @@ async function open(token = 'reviewer-token') {
 }
 
 describe('Pending decisions', () => {
+  it('retains a failed action, shows its error and retries only when permitted', async () => {
+    decisions.mockResolvedValueOnce({ decisions: [{ ...request, state: 'FAILED', selectedAction: 'replace',
+      error: 'Storage unavailable', retryable: true }] })
+    await open()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Storage unavailable')
+    expect(wrapper.findAll('button').map((candidate) => candidate.text())).not.toContain('Replace stored key')
+    decisions.mockResolvedValueOnce({ decisions: [] })
+    await button('Retry action').trigger('click')
+    await flushPromises()
+    expect(resolveDecision).toHaveBeenCalledExactlyOnceWith(request.id, 'retry', expect.any(AbortSignal))
+    expect(wrapper.find('article').exists()).toBe(false)
+  })
+
+  it('allows closing a nonrepeatable failure without executing it again', async () => {
+    decisions.mockResolvedValueOnce({ decisions: [{ ...request, state: 'FAILED', selectedAction: 'replace',
+      error: '<script>failed</script>', retryable: false }] })
+    await open()
+    expect(wrapper.findAll('button').map((candidate) => candidate.text())).not.toContain('Retry action')
+    expect(wrapper.find('script').exists()).toBe(false)
+    decisions.mockResolvedValueOnce({ decisions: [] })
+    await button('Close decision').trigger('click')
+    await flushPromises()
+    expect(resolveDecision).toHaveBeenCalledExactlyOnceWith(request.id, 'close', expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('Decision closed.')
+  })
+
+  it('polls a running action and then displays its failure', async () => {
+    vi.useFakeTimers()
+    try {
+      decisions.mockResolvedValueOnce({ decisions: [{ ...request, state: 'RUNNING', selectedAction: 'replace' }] })
+      await open()
+      expect(wrapper.text()).toContain('Action is running')
+      expect(wrapper.findAll('button')).toHaveLength(1)
+      decisions.mockResolvedValueOnce({ decisions: [{ ...request, state: 'FAILED', selectedAction: 'replace',
+        error: 'Save failed', retryable: true }] })
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+      expect(wrapper.get('[role="alert"]').text()).toContain('Save failed')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(decisions).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('loads descriptions, scope, time and server-defined actions and refreshes the list', async () => {
     await open()
     expect(createOrionClient).toHaveBeenCalledWith({ token: 'reviewer-token' })
@@ -91,9 +137,10 @@ describe('Pending decisions', () => {
     expect(wrapper.findAll('button').every((candidate) => candidate.element.disabled)).toBe(true)
     expect(wrapper.findAll('article')).toHaveLength(2)
 
+    decisions.mockResolvedValueOnce({ decisions: [{ ...request, id: 'decision-2', title: 'Another request' }] })
     answer.resolve('')
     await flushPromises()
-    expect(wrapper.text()).toContain('Decision recorded.')
+    expect(wrapper.text()).toContain('Decision submitted.')
     expect(wrapper.text()).not.toContain(request.title)
     expect(wrapper.text()).toContain('Another request')
     expect(wrapper.findAll('article')).toHaveLength(1)
@@ -117,7 +164,7 @@ describe('Pending decisions', () => {
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('Refresh the list to check its current status.')
     expect(wrapper.text()).toContain(request.title)
-    expect(wrapper.text()).not.toContain('Decision recorded.')
+    expect(wrapper.text()).not.toContain('Decision submitted.')
     expect(resolveDecision).toHaveBeenCalledTimes(1)
   })
 

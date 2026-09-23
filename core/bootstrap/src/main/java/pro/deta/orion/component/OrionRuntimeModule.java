@@ -99,8 +99,8 @@ public class OrionRuntimeModule {
                 + "\nBootstrap knownHosts:\n" + String.join("\n", new TreeSet<>(replacement.knownHosts()));
         return new Decision(previous.alias(), Optional.empty(),
                 "Update bootstrap connection " + previous.alias().value(), description,
-                List.of(new DecisionAction("Update XML connection", save),
-                        new DecisionAction("Reject", actor -> Result.of(null))));
+                List.of(new DecisionAction("Update XML connection", true, save),
+                        new DecisionAction("Reject", false, actor -> Result.of(null))));
     }
 
     private static Result<Void> saveBootstrapConnection(OrionAccessControlServiceImpl acl,
@@ -147,8 +147,7 @@ public class OrionRuntimeModule {
             String key = PublicKeyEntry.toString(rejected.serverKey());
             return SshHostKeyDecision.create(connection.alias(), Optional.empty(),
                     rejected.host(), rejected.port(), rejected.serverKey(),
-                    new DecisionAction("Add and trust",
-                            actor -> trust(acl, audit, snapshot, connection, key, actor)))
+                    new DecisionAction("Add and trust", true, actor -> trust(acl, audit, snapshot, connection, key, actor)))
                     .valueOrFailure("Could not prepare SSH host key decision");
         };
     }

@@ -220,8 +220,8 @@ class OrionAdminDecisionsRouteTest {
     private static Decision register(DecisionRegistry registry, String scope) {
         return registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scope).map(ConfigurationScope::parse), "SSH host key changed", "Review the new fingerprint",
-                List.of(new DecisionAction("Replace key", actor -> Result.of(null)),
-                        new DecisionAction("Reject", actor -> Result.of(null))))).valueOrFailure("register decision");
+                List.of(new DecisionAction("Replace key", false, actor -> Result.of(null)),
+                        new DecisionAction("Reject", false, actor -> Result.of(null))))).valueOrFailure("register decision");
     }
     private static String answer(Decision pending, String action) throws IOException {
         return JSON.writeValueAsString(Map.of("id", pending.request().id().toString(), "action", action));

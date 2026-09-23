@@ -65,8 +65,8 @@ class OrionRuntimeModuleTest {
                 DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor)) {
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scopePath).map(ConfigurationScope::parse), "Confirm operation", "",
-                List.of(new DecisionAction("Replace", actor -> Result.of(null)),
-                        new DecisionAction("Reject", actor -> Result.of(null)))))
+                List.of(new DecisionAction("Replace", false, actor -> Result.of(null)),
+                        new DecisionAction("Reject", false, actor -> Result.of(null)))))
                     .valueOrFailure("register pending decision");
             PrincipalAddress foreign = PrincipalAddress.parse("other/reviewer");
             assertThat(registry.list(foreign)).isEmpty();

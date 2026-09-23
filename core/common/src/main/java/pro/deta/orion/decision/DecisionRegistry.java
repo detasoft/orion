@@ -19,8 +19,9 @@ import java.util.function.BiPredicate;
  * for each read or answer; callers supply authenticated principal addresses. Completion handlers execute
  * outside the registry lock. The registry schedules accepted actions on the supplied executor;
  * the runtime owns that executor's lifecycle. Closing rejects new requests and cancels outstanding waits.
- * Registration returns the existing decision for the same scope and resource until execution completes.
- * Callers must use the returned decision as the authoritative result. Capacity limits unanswered requests.
+ * Registration returns the existing decision for the same scope and resource until success or dismissal.
+ * Callers must use the returned decision as the authoritative result. Capacity limits all unresolved requests,
+ * including running and failed actions.
  */
 public final class DecisionRegistry implements AutoCloseable {
     private final int capacity;
@@ -54,22 +55,18 @@ public final class DecisionRegistry implements AutoCloseable {
                 return new Result.Failure<>(Result.FailureCode.CREATION_FAILED,
                         "Decision is no longer pending");
             }
-            int waiting = 0;
             for (Decision existing : requests.values()) {
                 if (existing.resource().equals(pending.resource())
                         && existing.request().scope().equals(request.scope())) {
                     return Result.of(existing);
                 }
-                if (existing.isPending()) waiting++;
             }
-            if (waiting >= capacity) {
+            if (requests.size() >= capacity) {
                 return new Result.Failure<>(Result.FailureCode.CREATION_FAILED, "Decision registry is full");
             }
             requests.put(request.id(), pending);
             pending.result().whenComplete((decision, failure) -> {
-                synchronized (requests) {
-                    requests.remove(request.id(), pending);
-                }
+                removeCompleted(pending);
             });
             return Result.of(pending);
         }
@@ -83,8 +80,9 @@ public final class DecisionRegistry implements AutoCloseable {
         }
         List<DecisionRequest> visible = new ArrayList<>();
         for (Decision pending : snapshot) {
-            if (authorized(actor, pending.request().scope()) && pending.isPending()) {
-                visible.add(pending.request());
+            DecisionRequest request = pending.request();
+            if (request.state() != DecisionRequest.State.CLOSED && authorized(actor, request.scope())) {
+                visible.add(request);
             }
         }
         return List.copyOf(visible);
@@ -96,6 +94,18 @@ public final class DecisionRegistry implements AutoCloseable {
     }
 
     public Result<DecisionAnswer> decide(UUID id, DecisionAnswer decision) {
+        return submit(id, decision, false);
+    }
+
+    public Result<DecisionAnswer> retry(UUID id, PrincipalAddress actor) {
+        Decision decision = accessible(id, actor);
+        if (decision == null) {
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Decision request is unavailable");
+        }
+        return submit(id, new DecisionAnswer(decision.request().selectedAction(), actor), true);
+    }
+
+    private Result<DecisionAnswer> submit(UUID id, DecisionAnswer decision, boolean retry) {
         Objects.requireNonNull(decision, "decision");
         Decision pending = accessible(id, decision.actor());
         if (pending == null) {
@@ -104,15 +114,31 @@ public final class DecisionRegistry implements AutoCloseable {
         if (decision.action() < 0 || decision.action() >= pending.actions().size()) {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Decision action is unavailable");
         }
-        if (!pending.accept(decision)) {
+        if (!pending.accept(decision, retry)) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Decision request is unavailable");
         }
+        pending.result().whenComplete((answer, failure) -> removeCompleted(pending));
         try {
             executor.execute(() -> pending.run(decision));
         } catch (RuntimeException failure) {
             pending.fail(failure);
         }
         return Result.of(decision);
+    }
+
+    public Result<Void> dismiss(UUID id, PrincipalAddress actor) {
+        Decision decision = accessible(id, actor);
+        if (decision == null || decision.request().state() != DecisionRequest.State.FAILED || !decision.cancel()) {
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Failed decision is unavailable");
+        }
+        removeCompleted(decision);
+        return Result.of(null);
+    }
+
+    private void removeCompleted(Decision decision) {
+        synchronized (requests) {
+            if (decision.isDone()) requests.remove(decision.request().id(), decision);
+        }
     }
 
     @Override
@@ -135,7 +161,7 @@ public final class DecisionRegistry implements AutoCloseable {
         synchronized (requests) {
             pending = requests.get(id);
         }
-        if (pending == null || !authorized(actor, pending.request().scope()) || !pending.isPending()) {
+        if (pending == null || !authorized(actor, pending.request().scope()) || pending.isDone()) {
             return null;
         }
         return pending;

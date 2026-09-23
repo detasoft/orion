@@ -20,6 +20,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import pro.deta.orion.decision.DecisionRequiredException;
 import pro.deta.orion.decision.Decision;
+import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.util.Result;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -214,12 +215,13 @@ public final class MinaSshOperation implements RemoteCommandExecutor, AutoClosea
                     Decision prepared = SshHostKeyDecision.create(
                             new HostKeyApproval(endpoint, PublicKeyEntry.toString(key)),
                             Optional.empty(), endpoint.host(), endpoint.port(), key,
-                            new DecisionAction("Trust this attempt", actor -> Result.of(null)))
+                            new DecisionAction("Trust this attempt", false, actor -> Result.of(null)))
                             .valueOrFailure("Could not prepare SSH host key decision");
                     DecisionRequiredException registered = (DecisionRequiredException) failures.handle(
                             new DecisionRequiredException(prepared, rejected));
-                    Result<?> answer = registered.decision().result().toCompletableFuture().get();
-                    if (answer.isFailure()) throw rejected;
+                    Result<DecisionAnswer> answer = registered.decision().result().toCompletableFuture().get();
+                    if (!(answer instanceof Result.Success<DecisionAnswer> accepted)
+                            || accepted.value().action() != 0) throw rejected;
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     throw new ProvisioningException(ProvisioningFailure.HOST_IDENTITY,

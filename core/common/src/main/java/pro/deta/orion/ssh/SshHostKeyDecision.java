@@ -22,8 +22,7 @@ public final class SshHostKeyDecision extends Decision {
     private SshHostKeyDecision(Object resource, Optional<ConfigurationScope> scope,
             String title, String description, DecisionAction trust) {
         super(resource, scope, title, description, List.of(trust,
-                new DecisionAction("Reject", actor ->
-                        new Result.Failure<>(Result.FailureCode.FALSE, "SSH host key was not trusted"))));
+                new DecisionAction("Reject", false, actor -> Result.of(null))));
     }
 
     public static Result<SshHostKeyDecision> create(Object resource, Optional<ConfigurationScope> scope,

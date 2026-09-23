@@ -35,7 +35,7 @@ class SshHostKeyDecisionTest {
         AtomicReference<PrincipalAddress> executedBy = new AtomicReference<>();
         try (DecisionRegistry registry = new DecisionRegistry(1, work::add, (actor, scope) -> true)) {
             SshHostKeyDecision decision = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "server.test", 2222, KEY,
-                    new DecisionAction("Add and trust", actor -> { executedBy.set(actor); return Result.of(null); }))
+                    new DecisionAction("Add and trust", false, actor -> { executedBy.set(actor); return Result.of(null); }))
                     .valueOrFailure("create");
             registry.register(decision).valueOrFailure("register");
             assertThat(decision.request().scope()).isEmpty();
@@ -48,7 +48,7 @@ class SshHostKeyDecisionTest {
             registry.decide(decision.request().id(), answer).valueOrFailure("approve");
             assertThat(executedBy).hasNullValue();
             assertThat(decision.result().toCompletableFuture()).isNotDone();
-            assertThat(registry.list(ADMIN)).isEmpty();
+            assertThat(registry.list(ADMIN)).containsExactly(decision.request());
             assertThat(decision.cancel()).isFalse();
             assertThat(work).hasSize(1);
             work.remove().run();
@@ -64,13 +64,12 @@ class SshHostKeyDecisionTest {
         AtomicInteger trusted = new AtomicInteger();
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (actor, scope) -> true)) {
             SshHostKeyDecision decision = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", 22, KEY,
-                    new DecisionAction("Add and trust", actor -> { trusted.incrementAndGet(); return Result.of(null); }))
+                    new DecisionAction("Add and trust", false, actor -> { trusted.incrementAndGet(); return Result.of(null); }))
                     .valueOrFailure("create");
             registry.register(decision).valueOrFailure("register");
             registry.decide(decision.request().id(), new DecisionAnswer(1, ADMIN)).valueOrFailure("answer");
             assertThat(decision.result().toCompletableFuture().join())
-                    .isInstanceOfSatisfying(Result.Failure.class,
-                            failure -> assertThat(failure.code()).isEqualTo(Result.FailureCode.FALSE));
+                    .isEqualTo(Result.of(new DecisionAnswer(1, ADMIN)));
             assertThat(trusted).hasValue(0);
             assertThat(registry.list(ADMIN)).isEmpty();
         }
@@ -80,7 +79,7 @@ class SshHostKeyDecisionTest {
         Result.Failure<Void> failed = new Result.Failure<>(Result.FailureCode.GENERAL, "save failed");
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (actor, scope) -> true)) {
             Decision decision = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", 22, KEY,
-                    new DecisionAction("Add and trust", actor -> failed)).valueOrFailure("create");
+                    new DecisionAction("Add and trust", false, actor -> failed)).valueOrFailure("create");
             registry.register(decision).valueOrFailure("register");
             registry.decide(decision.request().id(), new DecisionAnswer(0, ADMIN)).valueOrFailure("answer");
             assertThat(decision.result().toCompletableFuture().join()).isEqualTo(failed);
@@ -95,7 +94,7 @@ class SshHostKeyDecisionTest {
         AtomicReference<PrincipalAddress> trustedBy = new AtomicReference<>();
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (actor, selected) -> selected.equals(scope))) {
             Decision decision = SshHostKeyDecision.create("ssh-connection", scope, "server.test", 22, KEY,
-                    new DecisionAction("Add and trust", actor -> { trustedBy.set(actor); return Result.of(null); }))
+                    new DecisionAction("Add and trust", false, actor -> { trustedBy.set(actor); return Result.of(null); }))
                     .valueOrFailure("create");
             registry.register(decision).valueOrFailure("register");
             assertThat(decision.request().scope()).isEqualTo(scope);
@@ -115,7 +114,7 @@ class SshHostKeyDecisionTest {
         PublicKey sshKey = SecurityUtils.getKeyFactory(SecurityUtils.EDDSA)
                 .generatePublic(new X509EncodedKeySpec(jdkKey.getEncoded()));
         Decision decision = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "::1", 22, sshKey,
-                new DecisionAction("Add and trust", actor -> Result.of(null))).valueOrFailure("create");
+                new DecisionAction("Add and trust", false, actor -> Result.of(null))).valueOrFailure("create");
         assertThat(decision.request().description()).contains("Server: [::1]:22", "Key: ssh-ed25519 ",
                 PublicKeyEntry.toString(sshKey), KeyUtils.getFingerPrint(sshKey));
     }
@@ -124,14 +123,14 @@ class SshHostKeyDecisionTest {
         AtomicInteger executed = new AtomicInteger();
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (actor, scope) -> true)) {
             Decision cancelled = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", 22, KEY,
-                    new DecisionAction("Add and trust", actor -> { executed.incrementAndGet(); return Result.of(null); }))
+                    new DecisionAction("Add and trust", false, actor -> { executed.incrementAndGet(); return Result.of(null); }))
                     .valueOrFailure("create");
             registry.register(cancelled).valueOrFailure("register");
             assertThat(cancelled.cancel()).isTrue();
             assertThatThrownBy(() -> cancelled.result().toCompletableFuture().join())
                     .isInstanceOf(CompletionException.class).hasCauseInstanceOf(CancellationException.class);
             Decision stopped = SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", 22, KEY,
-                    new DecisionAction("Add and trust", actor -> { executed.incrementAndGet(); return Result.of(null); }))
+                    new DecisionAction("Add and trust", false, actor -> { executed.incrementAndGet(); return Result.of(null); }))
                     .valueOrFailure("create");
             registry.register(stopped).valueOrFailure("register");
             registry.close();
@@ -149,7 +148,7 @@ class SshHostKeyDecisionTest {
             @Override public byte[] getEncoded() { return new byte[]{1}; }
         };
         assertThat(SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", 22, unsupported,
-                new DecisionAction("Add and trust", actor -> Result.of(null))))
+                new DecisionAction("Add and trust", false, actor -> Result.of(null))))
                 .isInstanceOfSatisfying(Result.Failure.class,
                         failure -> assertThat(failure.code()).isEqualTo(Result.FailureCode.NOT_SUPPORTED));
     }
@@ -157,10 +156,12 @@ class SshHostKeyDecisionTest {
     @Test
     void invalidEndpointDoesNotProduceADecision() {
         assertThatThrownBy(() -> SshHostKeyDecision.create("ssh-connection", Optional.empty(), " ", 22, KEY,
-                new DecisionAction("Add and trust", actor -> Result.of(null)))).isInstanceOf(IllegalArgumentException.class);
+                new DecisionAction("Add and trust", false, actor -> Result.of(null))))
+                    .isInstanceOf(IllegalArgumentException.class);
         for (int port : new int[]{0, -1, 65536}) {
             assertThatThrownBy(() -> SshHostKeyDecision.create("ssh-connection", Optional.empty(), "host", port, KEY,
-                    new DecisionAction("Add and trust", actor -> Result.of(null)))).isInstanceOf(IllegalArgumentException.class);
+                    new DecisionAction("Add and trust", false, actor -> Result.of(null))))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 

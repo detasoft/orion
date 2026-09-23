@@ -21,7 +21,7 @@ class DecisionRequiredExceptionTest {
         AtomicInteger executed = new AtomicInteger();
         Decision decision = new Decision(UUID.randomUUID(),
                 Optional.empty(), "Trust key", "",
-                List.of(new DecisionAction("Add", actor -> { executed.incrementAndGet();
+                List.of(new DecisionAction("Add", false, actor -> { executed.incrementAndGet();
                 return Result.of(null); })));
         IOException original = new IOException("rejected key");
         RuntimeException outer = new RuntimeException(new DecisionRequiredException(decision, original));

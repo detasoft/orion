@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Immutable description of a pending decision for HTTP and SSH administration.
+ * Immutable snapshot of a decision and its current execution state for HTTP and SSH administration.
  * An empty scope identifies a system request; otherwise it belongs to an organization, team, or repository.
  * Actions map stringified list indices to display labels in presentation order. The producer supplies safe text;
  * authorization belongs to the registry and execution belongs to Decision, not this description.
@@ -22,9 +22,13 @@ public record DecisionRequest(
         Optional<ConfigurationScope> scope,
         String title,
         String description,
-        Map<String, String> actions) {
+        Map<String, String> actions,
+        State state, String error, int selectedAction, boolean retryable) {
+    public enum State { PENDING, RUNNING, FAILED, CLOSED }
     public DecisionRequest {
         Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(error, "error");
         Objects.requireNonNull(createdAt, "createdAt");
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(title, "title");

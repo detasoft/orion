@@ -53,6 +53,6 @@ class ConnectionFailureHandlerTest {
 
     private static Decision decision(String resource) {
         return new Decision(resource, Optional.empty(), "Confirm", "",
-                List.of(new DecisionAction("Accept", actor -> Result.of(null))));
+                List.of(new DecisionAction("Accept", false, actor -> Result.of(null))));
     }
 }

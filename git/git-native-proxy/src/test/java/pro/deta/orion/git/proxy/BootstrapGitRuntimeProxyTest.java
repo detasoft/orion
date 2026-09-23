@@ -93,7 +93,7 @@ class BootstrapGitRuntimeProxyTest {
         PrincipalAddress actor = PrincipalAddress.parse("system/operator");
         try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (principal, scope) -> true)) {
             Decision decision = new Decision(binding.alias(), Optional.empty(), "Confirm connection", "",
-                    List.of(new DecisionAction("Trust", principal -> Result.of(null))));
+                    List.of(new DecisionAction("Trust", false, principal -> Result.of(null))));
             DecisionRequiredException required = new DecisionRequiredException(decision, origin);
             BootstrapGitTransportFactory factory = BootstrapGitTransportFactory.persistent(() -> document, secrets,
                     new pro.deta.orion.decision.ConnectionFailureHandler(registry), null);

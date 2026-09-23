@@ -58,7 +58,11 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
                     "scope", pending.scope().map(ConfigurationScope::toString).orElse("system"),
                     "title", pending.title(),
                     "description", pending.description(),
-                    "actions", pending.actions()));
+                    "actions", pending.actions(),
+                    "state", pending.state().name(),
+                    "error", pending.error(),
+                    "selectedAction", pending.selectedAction(),
+                    "retryable", pending.retryable()));
         }
         return OrionHttpResponse.ok(Map.of("decisions", decisions)).withHeader("Cache-Control", "no-store");
     }
@@ -92,11 +96,18 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
         int action;
         try {
             id = UUID.fromString(answer.path("id").asText());
-            action = Integer.parseInt(answer.path("action").asText());
+            if (answer.path("action").asText().equals("close")) {
+                Result<Void> dismissed = registry.dismiss(id, actor);
+                return dismissed.isFailure() ? failure(404, "Failed decision is unavailable")
+                        : OrionHttpResponse.empty(204).withHeader("Cache-Control", "no-store");
+            }
+            action = answer.path("action").asText().equals("retry")
+                    ? -1 : Integer.parseInt(answer.path("action").asText());
         } catch (IllegalArgumentException exception) {
             return failure(400, "Invalid decision request ID or action index");
         }
-        Result<DecisionAnswer> result = registry.decide(id, new DecisionAnswer(action, actor));
+        Result<DecisionAnswer> result = answer.path("action").asText().equals("retry")
+                ? registry.retry(id, actor) : registry.decide(id, new DecisionAnswer(action, actor));
         return switch (result) {
             case Result.Success<DecisionAnswer> ignored ->
                     OrionHttpResponse.empty(204).withHeader("Cache-Control", "no-store");

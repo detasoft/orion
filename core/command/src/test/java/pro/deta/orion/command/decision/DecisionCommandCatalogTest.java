@@ -39,6 +39,35 @@ class DecisionCommandCatalogTest {
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/reviewer");
 
     @Test
+    void exposesFailedExecutionAndAllowsExplicitRetryOrDismissal() {
+        AtomicInteger attempts = new AtomicInteger();
+        try (DecisionRegistry registry = new DecisionRegistry(1, Runnable::run, (actor, scope) -> true)) {
+            Decision decision = new Decision("resource", Optional.empty(), "Save", "", List.of(
+                    new DecisionAction("Save", true, actor -> attempts.incrementAndGet() == 1
+                            ? new Result.Failure<>(Result.FailureCode.GENERAL, "Storage unavailable") : Result.of(null))));
+            registry.register(decision).valueOrFailure("register");
+            String path = "/decision/" + decision.request().id();
+            dispatch(registry, path + " resolve 0", REVIEWER);
+            CommandResult.ObjectValue failed = (CommandResult.ObjectValue) dispatch(registry, path + " show", REVIEWER);
+            assertThat(failed.fields()).containsEntry("state", CommandValue.text("FAILED"))
+                    .containsEntry("error", CommandValue.text("Storage unavailable"))
+                    .containsEntry("retryable", CommandValue.text("true"));
+            dispatch(registry, path + " retry", REVIEWER);
+            assertThat(attempts).hasValue(2);
+            assertThat(registry.list(ACTOR)).isEmpty();
+            Decision nonrepeatable = new Decision("other", Optional.empty(), "Fail", "", List.of(
+                    new DecisionAction("Fail", false, actor ->
+                            new Result.Failure<>(Result.FailureCode.GENERAL, "Operation failed"))));
+            registry.register(nonrepeatable).valueOrFailure("register");
+            path = "/decision/" + nonrepeatable.request().id();
+            dispatch(registry, path + " resolve 0", REVIEWER);
+            assertThat(dispatch(registry, path + " close", REVIEWER))
+                    .isEqualTo(new CommandResult.Message("Decision closed"));
+            assertThat(registry.list(ACTOR)).isEmpty();
+        }
+    }
+
+    @Test
     void usesOrganizationIdentityForListsAndAnswers() {
         UserIdentity user = new InternalUserImpl("reviewer", List.of(),
                 Optional.of(new OrganizationId("acme")));
@@ -65,7 +94,7 @@ class DecisionCommandCatalogTest {
             }
             CommandResult.Rows rows = (CommandResult.Rows) dispatch(registry, "/decision ls", REVIEWER);
             assertThat(rows.columns()).extracting(column -> column.name())
-                    .containsExactly("id", "scope", "title", "createdAt");
+                    .containsExactly("id", "scope", "title", "createdAt", "state");
             assertThat(rows.values()).extracting(row -> row.get(1).asText())
                     .containsExactly("system", "acme", "acme/platform", "acme/platform/api");
             assertThat(rows.values()).allSatisfy(row ->
@@ -80,6 +109,10 @@ class DecisionCommandCatalogTest {
                     Map.entry("title", CommandValue.text("SSH host key changed")),
                     Map.entry("createdAt", rows.values().getFirst().get(3)),
                     Map.entry("description", CommandValue.text("Old fingerprint -> new fingerprint")),
+                    Map.entry("state", CommandValue.text("PENDING")),
+                    Map.entry("error", CommandValue.text("")),
+                    Map.entry("selectedAction", CommandValue.text("-1")),
+                    Map.entry("retryable", CommandValue.text("false")),
                     Map.entry("action.0", CommandValue.text("Replace stored key")),
                     Map.entry("action.1", CommandValue.text("Reject connection")));
         }
@@ -189,8 +222,8 @@ class DecisionCommandCatalogTest {
         return registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scope).map(ConfigurationScope::parse),
                 "SSH host key changed", "Old fingerprint -> new fingerprint",
-                List.of(new DecisionAction("Replace stored key", actor -> Result.of(null)),
-                        new DecisionAction("Reject connection", actor -> Result.of(null)))))
+                List.of(new DecisionAction("Replace stored key", false, actor -> Result.of(null)),
+                        new DecisionAction("Reject connection", false, actor -> Result.of(null)))))
                 .valueOrFailure("register decision");
     }
 

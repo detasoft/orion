@@ -103,7 +103,7 @@ class OrionRuntimeStateMachineTest {
     private static Result<Decision> register(DecisionRegistry decisions) {
         return decisions.register(new Decision(UUID.randomUUID(),
                 Optional.empty(), "Confirm operation", "",
-                List.of(new DecisionAction("Accept", actor -> Result.of(null)))));
+                List.of(new DecisionAction("Accept", false, actor -> Result.of(null)))));
     }
 
     private static <T> T unstartedService() {

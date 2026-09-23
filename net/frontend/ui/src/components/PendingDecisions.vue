@@ -9,8 +9,10 @@ const operation = ref(null)
 const errorMessage = ref('')
 const message = ref('')
 let active = null
+let refreshTimer = null
 
 function begin(kind) {
+  clearTimeout(refreshTimer)
   const current = new AbortController()
   active = current
   operation.value = kind
@@ -23,9 +25,14 @@ function finish(current) {
   if (active !== current) return
   active = null
   operation.value = null
+  if (props.token && requests.value.some((request) => request.state === 'RUNNING')) {
+    refreshTimer = setTimeout(() => load(true), 1000)
+  }
 }
 
 function clear() {
+  clearTimeout(refreshTimer)
+  refreshTimer = null
   active?.abort()
   active = null
   operation.value = null
@@ -41,10 +48,11 @@ function reportAuthorizationError(error) {
   }
 }
 
-async function load() {
+async function load(poll = false) {
   if (operation.value || !props.token) return
-  const current = begin('loading')
-  requests.value = []
+  clearTimeout(refreshTimer)
+  const current = begin(poll ? 'polling' : 'loading')
+  if (!poll) requests.value = []
   try {
     const response = await createOrionClient({ token: props.token }).decisions(current.signal)
     if (active === current) requests.value = response.decisions
@@ -63,8 +71,10 @@ async function resolve(id, action) {
   try {
     await createOrionClient({ token: props.token }).resolveDecision(id, action, current.signal)
     if (active !== current) return
-    requests.value = requests.value.filter((request) => request.id !== id)
-    message.value = 'Decision recorded.'
+    const response = await createOrionClient({ token: props.token }).decisions(current.signal)
+    if (active !== current) return
+    requests.value = response.decisions
+    message.value = action === 'close' ? 'Decision closed.' : 'Decision submitted.'
   } catch (error) {
     if (active !== current) return
     if (error?.status === 404) {
@@ -89,8 +99,8 @@ onBeforeUnmount(clear)
 <template>
   <section class="panel content-panel" :aria-busy="operation !== null">
     <div class="content-toolbar">
-      <p>Pending decisions <span>Requests awaiting your response</span></p>
-      <button class="secondary-button" :disabled="!!operation || !token" @click="load">Refresh list</button>
+      <p>Pending decisions <span>Requests awaiting a response or action completion</span></p>
+      <button class="secondary-button" :disabled="!!operation || !token" @click="load()">Refresh list</button>
     </div>
     <p v-if="message" class="decision-message" role="status">{{ message }}</p>
     <p v-if="errorMessage" class="decision-message" role="alert">{{ errorMessage }}</p>
@@ -106,9 +116,21 @@ onBeforeUnmount(clear)
           <dt>Scope</dt><dd>{{ request.scope }}</dd>
           <dt>Requested at</dt><dd><time :datetime="request.createdAt">{{ request.createdAt }}</time></dd>
         </dl>
+        <p v-if="request.state === 'RUNNING'" role="status">Action is running…</p>
+        <p v-if="request.state === 'FAILED'" role="alert">
+          {{ request.actions[String(request.selectedAction)] }}: {{ request.error }}
+        </p>
         <div class="decision-actions">
-          <button v-for="(label, action) in request.actions" :key="action" class="secondary-button"
-            :disabled="!!operation" @click="resolve(request.id, action)">{{ label }}</button>
+          <template v-if="request.state === 'PENDING'">
+            <button v-for="(label, action) in request.actions" :key="action" class="secondary-button"
+              :disabled="!!operation" @click="resolve(request.id, action)">{{ label }}</button>
+          </template>
+          <template v-else-if="request.state === 'FAILED'">
+            <button v-if="request.retryable" class="secondary-button" :disabled="!!operation"
+              @click="resolve(request.id, 'retry')">Retry action</button>
+            <button class="secondary-button" :disabled="!!operation"
+              @click="resolve(request.id, 'close')">Close decision</button>
+          </template>
         </div>
       </article>
     </div>

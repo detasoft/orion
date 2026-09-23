@@ -51,9 +51,9 @@ class DecisionTest {
         registry.close();
         registry = new DecisionRegistry(2, work::add, (actor, scope) -> true);
         Decision pending = new Decision(UUID.randomUUID(), Optional.empty(), "Choose", "", List.of(
-                new DecisionAction("Add", actor -> { actions.add("add:" + actor); return Result.of(null); }),
-                new DecisionAction("Replace", actor -> { actions.add("replace:" + actor); return Result.of(null); }),
-                new DecisionAction("Skip", actor -> { actions.add("skip:" + actor); return Result.of(null); })));
+                new DecisionAction("Add", false, actor -> { actions.add("add:" + actor); return Result.of(null); }),
+                new DecisionAction("Replace", false, actor -> { actions.add("replace:" + actor); return Result.of(null); }),
+                new DecisionAction("Skip", false, actor -> { actions.add("skip:" + actor); return Result.of(null); })));
         registry.register(pending).valueOrFailure("register");
         DecisionAnswer replace = new DecisionAnswer(selected, ACCEPT.actor());
         assertThat(answer(pending, replace)).isTrue();
@@ -75,7 +75,7 @@ class DecisionTest {
         registry.close();
         registry = new DecisionRegistry(2, command -> { throw failure; }, (actor, scope) -> true);
         Decision pending = new Decision(UUID.randomUUID(), Optional.empty(), "Choose", "",
-                List.of(new DecisionAction("Accept", actor -> {
+                List.of(new DecisionAction("Accept", false, actor -> {
                     throw new AssertionError("Rejected work must not execute");
                 })));
         registry.register(pending).valueOrFailure("register");
@@ -89,7 +89,7 @@ class DecisionTest {
     void executionFailureCompletesWithItsOriginalCause() {
         IllegalStateException failure = new IllegalStateException("could not save");
         Decision pending = new Decision(UUID.randomUUID(), Optional.empty(), "Choose", "",
-                List.of(new DecisionAction("Accept", actor -> { throw failure; })));
+                List.of(new DecisionAction("Accept", false, actor -> { throw failure; })));
         registry.register(pending).valueOrFailure("register");
         assertThat(answer(pending, ACCEPT)).isTrue();
         assertThat(pending.result().toCompletableFuture().join()).isInstanceOfSatisfying(Result.Failure.class,
@@ -100,7 +100,7 @@ class DecisionTest {
     void anExceptionCanSupplyItsReadyDecisionWithoutAdditionalContext() {
         class ResolvableFailure extends RuntimeException implements Decisionable {
             private final Decision decision = new Decision(UUID.randomUUID(), Optional.empty(), "Choose", "",
-                    List.of(new DecisionAction("Accept", actor -> Result.of(null))));
+                    List.of(new DecisionAction("Accept", false, actor -> Result.of(null))));
             @Override public Decision decision() { return decision; }
         }
         Decisionable failure = new ResolvableFailure();
@@ -117,7 +117,7 @@ class DecisionTest {
     void retainsSystemOrOrganizationalScopeWhenDecisionCompletes(String scopePath) {
         Optional<ConfigurationScope> scope = Optional.ofNullable(scopePath).map(ConfigurationScope::parse);
         DecisionRequest request = new DecisionRequest(UUID.randomUUID(), Instant.now(), scope,
-                "Confirm operation", "", Map.of("accept", "Accept"));
+                "Confirm operation", "", Map.of("accept", "Accept"), DecisionRequest.State.PENDING, "", -1, false);
         Decision pending = decision(request);
         assertThat(pending.request().scope()).isEqualTo(scope);
         assertThat(answer(pending, ACCEPT)).isTrue();
@@ -191,12 +191,12 @@ class DecisionTest {
     @Test
     void availableActionsCannotChangeWhileWaiting() {
         List<DecisionAction> actions = new ArrayList<>();
-        actions.add(new DecisionAction("Accept", actor -> Result.of(null)));
-        actions.add(new DecisionAction("Reject", actor -> Result.of(null)));
+        actions.add(new DecisionAction("Accept", false, actor -> Result.of(null)));
+        actions.add(new DecisionAction("Reject", false, actor -> Result.of(null)));
         Decision pending = new Decision(UUID.randomUUID(), Optional.empty(), "Choose", "", actions);
         registry.register(pending).valueOrFailure("register");
         actions.clear();
-        actions.add(new DecisionAction("Replace", actor -> Result.of(null)));
+        actions.add(new DecisionAction("Replace", false, actor -> Result.of(null)));
         assertThat(pending.actions()).extracting(DecisionAction::title).containsExactly("Accept", "Reject");
         assertThat(pending.request().actions().keySet()).containsExactly("0", "1");
         assertThatThrownBy(() -> pending.actions().clear()).isInstanceOf(UnsupportedOperationException.class);
@@ -267,7 +267,7 @@ class DecisionTest {
     private Decision decision(DecisionRequest request) {
         List<DecisionAction> actions = new ArrayList<>();
         for (String title : new TreeMap<>(request.actions()).values()) {
-            actions.add(new DecisionAction(title, actor -> Result.of(null)));
+            actions.add(new DecisionAction(title, false, actor -> Result.of(null)));
         }
         return registry.register(new Decision(UUID.randomUUID(), request.scope(), request.title(),
                 request.description(), actions)).valueOrFailure("register");
@@ -277,6 +277,6 @@ class DecisionTest {
     }
     private static DecisionRequest request(Map<String, String> actions) {
         return new DecisionRequest(UUID.randomUUID(), Instant.now(), Optional.empty(),
-                "Confirm operation", "", actions);
+                "Confirm operation", "", actions, DecisionRequest.State.PENDING, "", -1, false);
     }
 }

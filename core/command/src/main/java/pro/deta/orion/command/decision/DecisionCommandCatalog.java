@@ -43,7 +43,7 @@ import java.util.UUID;
 public final class DecisionCommandCatalog {
     private static final List<CommandColumn> COLUMNS = List.of(
             CommandColumn.text("id"), CommandColumn.text("scope"),
-            CommandColumn.text("title"), CommandColumn.text("createdAt"));
+            CommandColumn.text("title"), CommandColumn.text("createdAt"), CommandColumn.text("state"));
 
     private final DecisionRegistry registry;
 
@@ -56,6 +56,8 @@ public final class DecisionCommandCatalog {
         CommandNode request = CommandNode.builder()
                 .action(definition("show", 0, this::show))
                 .action(definition("resolve", 1, this::resolve))
+                .action(definition("close", 0, this::dismiss))
+                .action(definition("retry", 0, this::retry))
                 .build();
         return CommandNode.builder()
                 .child("decision", CommandNode.builder()
@@ -91,7 +93,8 @@ public final class DecisionCommandCatalog {
         List<List<CommandValue>> rows = new ArrayList<>();
         for (DecisionRequest request : registry.list(actor(invocation.context().securityContext()))) {
             rows.add(List.of(CommandValue.text(request.id().toString()), CommandValue.text(scope(request)),
-                    CommandValue.text(request.title()), CommandValue.text(request.createdAt().toString())));
+                    CommandValue.text(request.title()), CommandValue.text(request.createdAt().toString()),
+                    CommandValue.text(request.state().name())));
         }
         return CommandResult.Rows.unqueried(COLUMNS, rows);
     }
@@ -109,6 +112,10 @@ public final class DecisionCommandCatalog {
         fields.put("title", CommandValue.text(request.title()));
         fields.put("createdAt", CommandValue.text(request.createdAt().toString()));
         fields.put("description", CommandValue.text(request.description()));
+        fields.put("state", CommandValue.text(request.state().name()));
+        fields.put("error", CommandValue.text(request.error()));
+        fields.put("selectedAction", CommandValue.text(Integer.toString(request.selectedAction())));
+        fields.put("retryable", CommandValue.text(Boolean.toString(request.retryable())));
         for (Map.Entry<String, String> action : request.actions().entrySet()) {
             fields.put("action." + action.getKey(), CommandValue.text(action.getValue()));
         }
@@ -126,6 +133,14 @@ public final class DecisionCommandCatalog {
         }
         Result<DecisionAnswer> result = registry.decide(requestId(invocation),
                 new DecisionAnswer(index, actor(invocation.context().securityContext())));
+        return answered(result);
+    }
+
+    private CommandResult retry(CommandInvocation invocation) {
+        return answered(registry.retry(requestId(invocation), actor(invocation.context().securityContext())));
+    }
+
+    private static CommandResult answered(Result<DecisionAnswer> result) {
         return switch (result) {
             case Result.Success<DecisionAnswer> ignored -> new CommandResult.Message("Decision recorded");
             case Result.Failure<DecisionAnswer> failure -> switch (failure.code()) {
@@ -136,6 +151,11 @@ public final class DecisionCommandCatalog {
                         "Could not record decision", List.of());
             };
         };
+    }
+
+    private CommandResult dismiss(CommandInvocation invocation) {
+        Result<Void> result = registry.dismiss(requestId(invocation), actor(invocation.context().securityContext()));
+        return result.isFailure() ? unavailable() : new CommandResult.Message("Decision closed");
     }
 
     private static UUID requestId(CommandInvocation invocation) {
