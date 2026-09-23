@@ -5,11 +5,11 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.TreeMap;
 
 public final class GitAttachment {
     private static final String NULL_ID = "0".repeat(40);
@@ -30,7 +30,7 @@ public final class GitAttachment {
     }
 
     public GitAttachmentResult attach() throws GitRemoteException {
-        Map<String, String> upstreamHeads = gateway.fetchHeads(repository).heads();
+        GitHeads upstreamHeads = gateway.fetchHeads(repository);
         while (true) {
             GitAttachPlan plan = planner.plan(
                     liveHeads(),
@@ -46,14 +46,14 @@ public final class GitAttachment {
         }
     }
 
-    private Map<String, String> liveHeads() {
-        Map<String, String> heads = new TreeMap<>();
+    private GitHeads liveHeads() {
+        Map<String, String> heads = new HashMap<>();
         for (Map.Entry<String, String> entry : repository.refs().entrySet()) {
             if (entry.getKey().startsWith(HEAD_PREFIX)) {
                 heads.put(entry.getKey(), entry.getValue());
             }
         }
-        return Map.copyOf(heads);
+        return new GitHeads(heads);
     }
 
     private boolean publishLocalChanges(GitAttachPlan plan) throws GitRemoteException {

@@ -3,7 +3,6 @@ package pro.deta.orion.git.sync;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -31,17 +30,17 @@ class GitAttachPlannerTest {
         relationships.mergeBase(E1, E2, E0);
 
         GitAttachPlan plan = planner.plan(
-                Map.of(
+                new GitHeads(Map.of(
                         head("fast-forward"), B1,
                         head("no-op"), C,
                         head("push"), D2,
-                        head("diverged"), E1),
-                Map.of(
+                        head("diverged"), E1)),
+                new GitHeads(Map.of(
                         head("create"), A,
                         head("fast-forward"), B2,
                         head("no-op"), C,
                         head("push"), D1,
-                        head("diverged"), E2),
+                        head("diverged"), E2)),
                 relationships);
 
         assertThat(plan.branches())
@@ -72,8 +71,8 @@ class GitAttachPlannerTest {
         relationships.mergeBase(C, D1, Optional.empty());
 
         GitAttachPlan plan = planner.plan(
-                Map.of(head("zulu"), C, head("alpha"), A),
-                Map.of(head("zulu"), D1, head("alpha"), B1),
+                new GitHeads(Map.of(head("zulu"), C, head("alpha"), A)),
+                new GitHeads(Map.of(head("zulu"), D1, head("alpha"), B1)),
                 relationships);
 
         assertThat(plan.conflicts())
@@ -85,24 +84,7 @@ class GitAttachPlannerTest {
     }
 
     @Test
-    void rejectsRefsOutsideTheAllBranchContract() {
-        assertThatThrownBy(() -> planner.plan(
-                Map.of("refs/tags/v1", A),
-                Map.of(),
-                relationships))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("refs/heads/");
-    }
-
-    @Test
-    void rejectsMalformedObjectIdsAtThePlanningBoundary() {
-        assertThatThrownBy(() -> planner.plan(
-                Map.of(head("main"), "not-an-object-id"),
-                Map.of(),
-                relationships))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("40 lowercase hexadecimal digits");
-
+    void rejectsMalformedObjectIdsInABranchPlan() {
         assertThatThrownBy(() -> new GitBranchPlan(
                 head("main"),
                 Optional.of("g".repeat(40)),

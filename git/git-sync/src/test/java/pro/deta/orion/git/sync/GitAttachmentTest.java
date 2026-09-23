@@ -200,9 +200,10 @@ class GitAttachmentTest {
         }
 
         @Override
-        public GitFetchedHeads fetchHeads(NativeGitRepository repository) {
+        public GitHeads fetchHeads(NativeGitRepository repository) {
+            GitHeads snapshot = listHeads();
             Map<String, String> refs = repository.refs();
-            for (Map.Entry<String, String> entry : heads.entrySet()) {
+            for (Map.Entry<String, String> entry : snapshot.heads().entrySet()) {
                 String branch = entry.getKey().substring("refs/heads/".length());
                 String trackingRef = tracking(branch);
                 repository.updateRef(
@@ -210,12 +211,12 @@ class GitAttachmentTest {
                         refs.getOrDefault(trackingRef, NULL_ID),
                         entry.getValue());
             }
-            return new GitFetchedHeads(heads);
+            return snapshot;
         }
 
         @Override
-        public Map<String, String> listHeads() {
-            return Map.copyOf(heads);
+        public GitHeads listHeads() {
+            return new GitHeads(heads);
         }
 
         @Override

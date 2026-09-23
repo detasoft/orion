@@ -57,8 +57,9 @@ class SmartHttpGitRemoteGatewayTest {
             NativeGitRepository local = nativeRepository(
                     temporaryDirectory.resolve("orion"));
             try (SmartHttpGitRemoteGateway gateway = gateway(remote)) {
-                GitFetchedHeads fetched = gateway.fetchHeads(local);
+                GitHeads fetched = gateway.fetchHeads(local);
 
+                assertThat(gateway.listHeads()).isEqualTo(fetched);
                 assertThat(fetched.heads()).containsExactlyInAnyOrderEntriesOf(Map.of(
                         "refs/heads/main", seed.main(),
                         "refs/heads/release", seed.release()));

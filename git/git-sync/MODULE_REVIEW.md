@@ -1,33 +1,5 @@
 # Module Review: `git/git-sync`
 
-## 1. Fetched heads add a wrapper and copy around an existing immutable map
-
-**Problem and evidence.** [GitFetchedHeads](src/main/java/pro/deta/orion/git/sync/GitFetchedHeads.java#L7)
-contains only a heads map
-and reconstructs/copies it.
-[fetchHeads](src/main/java/pro/deta/orion/git/sync/SmartHttpGitRemoteGateway.java#L41) wraps the immutable
-map already returned by `listHeads`; its sole production consumer,
-[GitAttachment.attach](src/main/java/pro/deta/orion/git/sync/GitAttachment.java#L33), immediately unwraps it.
-No additional fetched-result payload or outside consumer was found.
-
-**Contract.** Return immutable branch heads only after object ingestion and tracking-ref publication.
-Keep empty-remote behavior and valid, non-empty `refs/heads/` names.
-The unfinished primary-upstream design requires those operations, not this extra representation.
-
-**Minimal repair and validation.** Return the existing immutable map from `fetchHeads`, update the gateway,
-attachment and test consumers, and remove the wrapper. Keep its name validation at the existing gateway
-boundary rather than dropping it. Preserve empty/multiple-head
-[SmartHttpGitRemoteGatewayTest](src/test/java/pro/deta/orion/git/sync/SmartHttpGitRemoteGatewayTest.java) cases,
-[GitAttachmentTest](src/test/java/pro/deta/orion/git/sync/GitAttachmentTest.java) behavior and
-invalid-input/result-immutability
-coverage through the remaining API.
-
-**Alternatives and consequences.** Adding another result abstraction is unnecessary. No persistence,
-secret handling, remote CAS or tracking-publication change is required; the internal Java result type changes.
-
-**Confidence and priority.** High for actual consumers. P3 small structural cleanup; do not confuse it with
-removing the intentionally unfinished synchronization foundation.
-
 ## 2. Single and multi-head tracking publication duplicate one policy
 
 **Problem and evidence.**

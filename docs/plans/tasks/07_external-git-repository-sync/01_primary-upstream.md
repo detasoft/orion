@@ -357,11 +357,14 @@ Expected: compilation failure because the profile classes do not exist.
 client options. `GitHubRemoteProfile` remains the only provider-specific class. `GitRemoteGateway` exposes:
 
 ```java
-GitFetchedHeads fetchHeads(NativeGitRepository repository);
-Map<String, String> listHeads();
+GitHeads fetchHeads(NativeGitRepository repository);
+GitHeads listHeads();
 GitPushOutcome pushHead(NativeGitRepository repository, String refName,
         String expectedRemoteId, String desiredId);
 ```
+
+`GitHeads` is an immutable, validated snapshot of branch tips. Discovery, fetch and attachment planning
+pass the snapshot without rebuilding its map; fetch returns it after object and tracking-ref publication.
 
 The Smart HTTP implementation fetches every advertised `refs/heads/*` in one upload-pack, publishes fetched
 objects with `refs/remotes/upstream/*`, exports pushes through `NativePackProducer`, and never requests tags.

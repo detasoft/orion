@@ -6,16 +6,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 public final class GitAttachPlanner {
     public GitAttachPlan plan(
-            Map<String, String> localHeads,
-            Map<String, String> upstreamHeads,
+            GitHeads localHeads,
+            GitHeads upstreamHeads,
             GitCommitRelationships relationships) {
-        Map<String, String> local = validatedHeads(localHeads, "localHeads");
-        Map<String, String> upstream = validatedHeads(upstreamHeads, "upstreamHeads");
+        Map<String, String> local = Objects.requireNonNull(localHeads, "localHeads").heads();
+        Map<String, String> upstream = Objects.requireNonNull(upstreamHeads, "upstreamHeads").heads();
         Objects.requireNonNull(relationships, "relationships");
         Set<String> refNames = new TreeSet<>(local.keySet());
         refNames.addAll(upstream.keySet());
@@ -57,20 +56,5 @@ public final class GitAttachPlanner {
                 Optional.ofNullable(upstream),
                 action,
                 mergeBase);
-    }
-
-    private static Map<String, String> validatedHeads(
-            Map<String, String> heads,
-            String name) {
-        Map<String, String> sorted = new TreeMap<>();
-        for (Map.Entry<String, String> entry
-                : Objects.requireNonNull(heads, name).entrySet()) {
-            String refName = GitBranchPlan.requireHead(entry.getKey());
-            String objectId = GitBranchPlan.requireObjectId(
-                    entry.getValue(),
-                    name + " value");
-            sorted.put(refName, objectId);
-        }
-        return Map.copyOf(sorted);
     }
 }

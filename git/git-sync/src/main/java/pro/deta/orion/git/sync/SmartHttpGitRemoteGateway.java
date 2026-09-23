@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,6 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.TreeMap;
 
 public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
     private static final String NULL_ID = "0".repeat(40);
@@ -38,16 +38,16 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
     }
 
     @Override
-    public GitFetchedHeads fetchHeads(NativeGitRepository repository)
+    public GitHeads fetchHeads(NativeGitRepository repository)
             throws GitRemoteException {
         NativeGitRepository checked = Objects.requireNonNull(
                 repository,
                 "repository");
-        Map<String, String> heads = listHeads();
-        if (heads.isEmpty()) {
-            return new GitFetchedHeads(heads);
+        GitHeads heads = listHeads();
+        if (heads.heads().isEmpty()) {
+            return heads;
         }
-        Set<String> wants = new LinkedHashSet<>(heads.values());
+        Set<String> wants = new LinkedHashSet<>(heads.heads().values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try (PackIngestionOutput target = new PackIngestionOutput(
                 checked.storage())) {
@@ -64,14 +64,14 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                     "fetch");
             checked.storage().persist(target.complete());
             publishTrackingRefs(checked, heads);
-            return new GitFetchedHeads(heads);
+            return heads;
         } catch (IOException | RuntimeException error) {
             throw GitRemoteException.local("fetch publication", true, error);
         }
     }
 
     @Override
-    public Map<String, String> listHeads() throws GitRemoteException {
+    public GitHeads listHeads() throws GitRemoteException {
         GitRemoteAdvertisement advertisement = requireSuccess(
                 connection.uploadPack().discover(
                         connection.uri(),
@@ -173,10 +173,10 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
 
     private static void publishTrackingRefs(
             NativeGitRepository repository,
-            Map<String, String> heads) throws GitRemoteException {
+            GitHeads heads) throws GitRemoteException {
         Map<String, String> existing = repository.refs();
         List<RefUpdate> updates = new ArrayList<>();
-        for (Map.Entry<String, String> entry : heads.entrySet()) {
+        for (Map.Entry<String, String> entry : heads.heads().entrySet()) {
             String trackingRef = TRACKING_PREFIX
                     + entry.getKey().substring(HEAD_PREFIX.length());
             updates.add(RefUpdate.fromWire(
@@ -192,15 +192,15 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         }
     }
 
-    private static Map<String, String> advertisedHeads(
+    private static GitHeads advertisedHeads(
             GitRemoteAdvertisement advertisement) {
-        Map<String, String> heads = new TreeMap<>();
+        Map<String, String> heads = new HashMap<>();
         for (GitRemoteAdvertisement.Ref ref : advertisement.refs()) {
             if (ref.name().startsWith(HEAD_PREFIX)) {
                 heads.put(ref.name(), ref.objectId());
             }
         }
-        return Map.copyOf(heads);
+        return new GitHeads(heads);
     }
 
     private static <T> T requireSuccess(
