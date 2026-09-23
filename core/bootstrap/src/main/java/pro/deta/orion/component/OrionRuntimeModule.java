@@ -51,8 +51,7 @@ import java.util.TreeSet;
 import java.util.function.Function;
 
 /**
- * Provides runtime services. Decision authorization is a temporary permissive stub;
- * task 02/01 must replace it with current hierarchical access checks.
+ * Provides runtime services. Decision access is evaluated against current scoped administration rights.
  */
 @Module
 public class OrionRuntimeModule {
@@ -60,8 +59,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static DecisionRegistry decisionRegistry(OrionExecutor executor) {
-        return new DecisionRegistry(MAX_PENDING_DECISIONS, executor, (actor, scope) -> true);
+    static DecisionRegistry decisionRegistry(OrionExecutor executor, OrionAccessControlServiceImpl acl) {
+        return new DecisionRegistry(MAX_PENDING_DECISIONS, executor, acl::canAdminister);
     }
 
     @Provides

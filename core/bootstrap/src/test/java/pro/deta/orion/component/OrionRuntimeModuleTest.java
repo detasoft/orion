@@ -6,6 +6,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -61,8 +69,10 @@ class OrionRuntimeModuleTest {
     @NullSource
     @ValueSource(strings = {"acme", "acme/platform", "acme/platform/api"})
     void decisionAuthorizationPreservesOrganizationBoundary(String scopePath) {
+        OrionDesiredState desired = new OrionDesiredState();
+        desired.publish(decisionAccessDocument(true), Optional.empty());
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor)) {
+                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, decisionAcl(desired))) {
             Decision pending = registry.register(new Decision(UUID.randomUUID(),
                 Optional.ofNullable(scopePath).map(ConfigurationScope::parse), "Confirm operation", "",
                 List.of(new DecisionAction("Replace", false, actor -> Result.of(null)),
@@ -87,6 +97,119 @@ class OrionRuntimeModuleTest {
                 .isEqualTo(decision);
             assertThat(registry.list(actor)).isEmpty();
         }
+    }
+
+    @Test
+    void decisionAccessRevocationAppliesToReadsAnswersRetriesAndDismissal() {
+        OrionDesiredState desired = new OrionDesiredState();
+        desired.publish(decisionAccessDocument(true), Optional.empty());
+        PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
+        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, decisionAcl(desired))) {
+            Decision pending = registry.register(new Decision(UUID.randomUUID(),
+                    Optional.of(ConfigurationScope.parse("acme/platform/api")), "Trust", "",
+                    List.of(new DecisionAction("Save", true,
+                            ignored -> new Result.Failure<>(Result.FailureCode.CREATION_FAILED, "save failed")))))
+                    .valueOrFailure("register");
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, actor)).isFailure()).isFalse();
+            assertThat(pending.result().toCompletableFuture().join().isFailure()).isTrue();
+            desired.publish(decisionAccessDocument(false), Optional.empty());
+            assertThat(registry.list(actor)).isEmpty();
+            assertThat(registry.find(pending.request().id(), actor)).isEmpty();
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, actor)).isFailure()).isTrue();
+            assertThat(registry.retry(pending.request().id(), actor).isFailure()).isTrue();
+            assertThat(registry.dismiss(pending.request().id(), actor).isFailure()).isTrue();
+            assertThat(pending.request().state()).isEqualTo(
+                    pro.deta.orion.decision.DecisionRequest.State.FAILED);
+            desired.publish(decisionAccessDocument(true), Optional.empty());
+            assertThat(registry.find(pending.request().id(), actor)).isPresent();
+            assertThat(registry.dismiss(pending.request().id(), actor).isFailure()).isFalse();
+        }
+    }
+
+    private static OrionAccessControlServiceImpl decisionAcl(OrionDesiredState desired) {
+        return new OrionAccessControlServiceImpl(null, null, null, null,
+                ServerIdentityCapability.unavailable(), desired);
+    }
+
+    @Test
+    void revokedPendingDecisionCannotRunAndDeletedUserCannotAdminister() {
+        OrionDesiredState desired = new OrionDesiredState();
+        desired.publish(decisionAccessDocument(true), Optional.empty());
+        PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
+        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+                DecisionRegistry registry = OrionRuntimeModule.decisionRegistry(executor, decisionAcl(desired))) {
+            java.util.concurrent.atomic.AtomicInteger executions = new java.util.concurrent.atomic.AtomicInteger();
+            Decision pending = registry.register(new Decision(UUID.randomUUID(),
+                    Optional.of(ConfigurationScope.parse("acme/platform")), "Trust", "",
+                    List.of(new DecisionAction("Save", true, ignored -> {
+                        executions.incrementAndGet();
+                        return Result.of(null);
+                    })))).valueOrFailure("register");
+            assertThat(registry.find(pending.request().id(), actor)).isPresent();
+            desired.publish(decisionAccessDocument(false), Optional.empty());
+            assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, actor)).isFailure()).isTrue();
+            assertThat(executions).hasValue(0);
+            assertThat(pending.result().toCompletableFuture()).isNotDone();
+            desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.empty());
+            assertThat(registry.find(pending.request().id(), actor)).isEmpty();
+        }
+    }
+
+    @Test
+    void systemAdministrationUsesCurrentRolesAndPreservesPrincipalIsolation() {
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionDocument base = decisionAccessDocument(false);
+        desired.publish(base.replaceAccessControl(ACLUtil.generateDefaultAccessControl("hash")), Optional.empty());
+        OrionAccessControlServiceImpl acl = decisionAcl(desired);
+        PrincipalAddress root = PrincipalAddress.parse("system/root");
+        assertThat(acl.canAdminister(root, Optional.empty())).isTrue();
+        assertThat(acl.canAdminister(root, Optional.of(ConfigurationScope.parse("acme/platform")))).isTrue();
+        assertThat(acl.canAdminister(PrincipalAddress.parse("acme/root"),
+                Optional.of(ConfigurationScope.parse("acme")))).isFalse();
+        assertThat(acl.canAdminister(PrincipalAddress.parse("system/reviewer"), Optional.empty())).isFalse();
+        AccessControlDraft locked = ACLUtil.generateDefaultAccessControl("hash").toDraft();
+        locked.getUsers().getFirst().getCredentials().getFirst().setKeyId("root-auth-locked:test");
+        desired.publish(base.replaceAccessControl(locked.toAccessControl()), Optional.empty());
+        assertThat(acl.canAdminister(root, Optional.empty())).isFalse();
+        desired.publish(base, Optional.empty());
+        assertThat(acl.canAdminister(root, Optional.empty())).isFalse();
+    }
+
+    @Test
+    void repositoryQualifiedAdminGrantDoesNotAuthorizeOtherScopes() {
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionDocument base = decisionAccessDocument(false);
+        OrionDocument.Organization organization = base.organizations().getFirst();
+        AccessControl.User restricted = new AccessControl.User("reviewer", null, null, null, List.of(), List.of(),
+                List.of(new AccessControl.Grant("admin", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
+        desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
+                organization.id(), "", List.of(restricted), organization.grants(), organization.roles(),
+                organization.teams(), List.of(), List.of(), List.of()))), Optional.empty());
+        OrionAccessControlServiceImpl acl = decisionAcl(desired);
+        PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
+        assertThat(acl.canAdminister(actor, Optional.of(ConfigurationScope.parse("acme/platform/api")))).isTrue();
+        assertThat(acl.canAdminister(actor, Optional.of(ConfigurationScope.parse("acme/platform")))).isFalse();
+        assertThat(acl.canAdminister(actor, Optional.of(ConfigurationScope.parse("acme")))).isFalse();
+        assertThat(acl.canAdminister(actor, Optional.empty())).isFalse();
+    }
+
+    private static OrionDocument decisionAccessDocument(boolean allowed) {
+        List<AccessControl.Grant> grants = allowed ? List.of(new AccessControl.Grant("admin",
+                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")))) : List.of();
+        AccessControl.User user = new AccessControl.User("reviewer", null, null, null,
+                List.of(), List.of(), grants);
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("api"), "API",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("platform"), "Platform",
+                List.of(), List.of(), List.of(repository));
+        return new OrionDocument(new OrionDocument.SystemConfiguration(
+                new AccessControl(List.of(user), List.of(), List.of())),
+                List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(user),
+                        List.of(), List.of(), List.of(team), List.of(), List.of(), List.of())));
     }
 
     @Test

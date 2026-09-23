@@ -34,7 +34,7 @@ class OrionRuntimeStateMachineTest {
     @Test
     void stopBeforeStartCancelsDecisionsWithoutCreatingServices() {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry(executor)) {
+                DecisionRegistry decisions = new DecisionRegistry(16, executor, (actor, scope) -> false)) {
             OrionRuntimeStateMachine runtime = runtime(decisions,
                     new OrionExecutorStateMachine(OrionRuntimeStateMachineTest::unstartedService),
                     new OrionEventManagerStateMachine(OrionRuntimeStateMachineTest::unstartedService));
@@ -56,7 +56,7 @@ class OrionRuntimeStateMachineTest {
     @Test
     void stopAfterFailedStartupDispatchesCancellationBeforeExecutorShutdown() throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
-                DecisionRegistry decisions = OrionRuntimeModule.decisionRegistry(executor)) {
+                DecisionRegistry decisions = new DecisionRegistry(16, executor, (actor, scope) -> false)) {
             OrionEventManager events = new OrionEventManager() {
                 @Override
                 public void onStart() {

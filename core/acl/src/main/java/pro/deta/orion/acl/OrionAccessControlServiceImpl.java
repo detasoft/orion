@@ -2,6 +2,11 @@ package pro.deta.orion.acl;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.auth.check.ScopedAccess;
+import pro.deta.orion.auth.check.GrantMatcher;
+import pro.deta.orion.auth.check.MatcherUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.OrionAccessControlService;
@@ -186,6 +191,50 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void updateAccessControl(AccessControl accessControl) {
         this.accessControl.set(accessControl);
+    }
+
+    public boolean canAdminister(PrincipalAddress actor,
+            Optional<ConfigurationScope> scope) {
+        OrionDocument document = desiredState.current().document();
+        if (actor instanceof PrincipalAddress.OrganizationPrincipalAddress org) {
+            if (scope.isEmpty() || !scope.orElseThrow().organizationId().equals(org.organizationId())) return false;
+            for (OrionDocument.Organization organization : document.organizations()) {
+                if (organization.id().equals(org.organizationId())) {
+                    return ScopedAccess.allows(organization, org.userId(),
+                            scope.orElseThrow(), expressions -> matchesScopedAdministration(
+                                    expressions, scope.orElseThrow()));
+                }
+            }
+            return false;
+        }
+        AccessControl snapshot = document.system().accessControl();
+        if (!(findSingleUser(snapshot, actor.userId().value())
+                instanceof Result.Success<AccessControl.User>(var user)) || isLockedRoot(user)) return false;
+        Result<List<AccessControl.Grant>> grants = mergeGrants(snapshot, user);
+        if (!(grants instanceof Result.Success<List<AccessControl.Grant>>(var assigned))) return false;
+        return !MatcherUtils.filterGrants(assigned,
+                GrantMatcher.of(AccessControl.GrantKey.ADMIN)).isEmpty();
+    }
+
+    private static boolean matchesScopedAdministration(List<AccessControl.GrantExpression> expressions,
+            ConfigurationScope scope) {
+        if (!GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(expressions)) return false;
+        boolean repositoryRestricted = false;
+        boolean repositoryMatches = false;
+        for (AccessControl.GrantExpression expression : expressions) {
+            switch (expression.getKey()) {
+                case REPOSITORY -> {
+                    repositoryRestricted = true;
+                    repositoryMatches |= scope.repositoryId().isPresent()
+                            && MatcherUtils.matchExpressionValue(expression.getValue(), scope.toString());
+                }
+                case BRANCH, NETWORK_SOURCE, NETWORK_PORT -> {
+                    return false;
+                }
+                default -> { }
+            }
+        }
+        return !repositoryRestricted || repositoryMatches;
     }
 
 
