@@ -1,5 +1,8 @@
 package pro.deta.orion.git.workflow;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.MergeResult;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,6 +66,8 @@ public final class GitWorkflowScenarios {
                     GitWorkflowScenarios::rejectStaleNonFastForward),
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
                     GitWorkflowScenarios::incrementalFetchWithCommonCommit),
+            scenario("merge-history-clone-and-fetch", FETCH, mergedHistoryState(),
+                    GitWorkflowScenarios::mergeHistoryCloneAndFetch),
             scenario("annotated-tag-discovery-and-fetch", CLONE, annotatedTagState(),
                     GitWorkflowScenarios::annotatedTagDiscoveryAndFetch),
             scenario("unicode-refs-discovery-fetch-and-push", FETCH,
@@ -467,6 +472,47 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void mergeHistoryCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = GitClients.jgitAllowAllSsh().init(context.workTreeDirectory("source"))) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            try (GitWorkTree incremental = context.client().clone(
+                    context.remote(), context.workTreeDirectory("incremental"));
+                 Git seed = Git.open(source.directory().toFile())) {
+                equivalent(initial, incremental.snapshot(), "clone before merge history");
+                seed.checkout().setCreateBranch(true).setName("feature").call();
+                execution.bind("feature", commit(source, FEATURE_FILE, "feature\n", "feature"));
+                seed.checkout().setName("main").call();
+                execution.bind("main", commit(source, README, "main change\n", "main change"));
+                MergeResult merged = seed.merge().include(seed.getRepository().resolve(FEATURE))
+                        .setCommit(false).call();
+                require(merged.getMergeStatus() == MergeResult.MergeStatus.MERGED_NOT_COMMITTED,
+                        "seed history did not produce a merge");
+                source.commit("merge feature");
+                execution.bind("merge", source.head());
+                seed.branchDelete().setBranchNames("feature").call();
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                execution.assertTerminal(terminal);
+
+                incremental.fetch("origin", "main");
+                require(incremental.head().equals(execution.id("initial")), "fetch moved local main");
+                incremental.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                RepositorySnapshot fetched = RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("initial"), "refs/heads/fetched", execution.id("merge")),
+                        terminal.commits());
+                equivalent(fetched, incremental.snapshot(), "incremental fetch of merge history");
+                try (GitWorkTree clone = context.client().clone(
+                        context.remote(), context.workTreeDirectory("merged-clone"))) {
+                    equivalent(terminal, clone.snapshot(), "full clone of merge history");
+                }
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after merge fetches");
+            }
+        }
+    }
+
     private static void incrementalFetchWithCommonCommit(
             GitScenarioContext context,
             Execution execution) throws Exception {
@@ -664,6 +710,16 @@ public final class GitWorkflowScenarios {
                         README, text(INITIAL_CONTENT), "item/child.txt", text("child\n"))),
                 "third", expectedCommit(List.of("second"), Map.of(
                         README, text(INITIAL_CONTENT), "item", text("replacement\n")))));
+    }
+
+    private static ExpectedRepositoryState mergedHistoryState() {
+        return state(Map.of(MAIN, "merge"), Map.of(
+                "initial", expectedCommit(List.of(), Map.of(README, text(INITIAL_CONTENT))),
+                "feature", expectedCommit(List.of("initial"), Map.of(
+                        README, text(INITIAL_CONTENT), FEATURE_FILE, text("feature\n"))),
+                "main", expectedCommit(List.of("initial"), Map.of(README, text("main change\n"))),
+                "merge", expectedCommit(List.of("main", "feature"), Map.of(
+                        README, text("main change\n"), FEATURE_FILE, text("feature\n")))));
     }
 
     private static ExpectedRepositoryState complexFileState() {

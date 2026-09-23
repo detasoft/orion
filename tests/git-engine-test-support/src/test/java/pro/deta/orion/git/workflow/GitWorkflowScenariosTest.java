@@ -29,6 +29,7 @@ class GitWorkflowScenariosTest {
             "force-push-unrelated-history",
             "reject-stale-non-fast-forward",
             "incremental-fetch-with-common-commit",
+            "merge-history-clone-and-fetch",
             "annotated-tag-discovery-and-fetch",
             "unicode-refs-discovery-fetch-and-push");
 
