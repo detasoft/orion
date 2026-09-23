@@ -78,6 +78,8 @@ public final class GitWorkflowScenarios {
             scenario("delete-tags", WRITE, twoCommitState("updated\n"), GitWorkflowScenarios::deleteTags),
             scenario("force-push-unrelated-history", WRITE, forcePushState(),
                     GitWorkflowScenarios::forcePushUnrelatedHistory),
+            scenario("fetch-after-history-rewrite", FETCH, forcePushState(),
+                    GitWorkflowScenarios::fetchAfterHistoryRewrite),
             scenario("reject-stale-non-fast-forward", PULL, twoCommitState("winner\n"),
                     GitWorkflowScenarios::rejectStaleNonFastForward),
             scenario("incremental-fetch-with-common-commit", FETCH, twoCommitState("incremental\n"),
@@ -490,6 +492,36 @@ public final class GitWorkflowScenarios {
             Map<String, String> advertised = replacement.advertisedRefs("origin");
             require(execution.id("replacement").equals(advertised.get(MAIN)), "forced tip is not advertised");
             require(execution.id("initial").equals(advertised.get(FEATURE)), "force push changed another branch");
+        }
+    }
+
+    private static void fetchAfterHistoryRewrite(GitScenarioContext context, Execution execution) throws Exception {
+        try (GitWorkTree source = source(context);
+                GitWorkTree replacement = context.client().init(context.workTreeDirectory("replacement"))) {
+            execution.bind("initial", commit(source, README, INITIAL_CONTENT, "initial"));
+            source.updateRef(FEATURE, "HEAD");
+            source.addRemote("origin", context.remote());
+            source.pushRefs("origin", MAIN + ":" + MAIN, FEATURE + ":" + FEATURE);
+            RepositorySnapshot before = transferred(context, source);
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                clone.updateRef(FEATURE, execution.id("initial"));
+                equivalent(before, clone.snapshot(), "clone before history rewrite");
+                execution.bind("replacement", commit(replacement, README, "replacement\n", "replacement"));
+                replacement.addRemote("origin", context.remote());
+                replacement.pushRefs("origin", "+" + MAIN + ":" + MAIN);
+                RepositorySnapshot terminal = context.server().snapshot(context.remote());
+                execution.assertTerminal(terminal);
+
+                clone.fetch("origin", "main");
+                equivalent(before, clone.snapshot(), "fetch after force push preserves local branches");
+                clone.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                equivalent(RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("initial"), FEATURE, execution.id("initial"),
+                        "refs/heads/fetched", execution.id("replacement")), terminal.commits()),
+                        clone.snapshot(), "fetch receives replacement history");
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after forced-history fetch");
+            }
         }
     }
 
