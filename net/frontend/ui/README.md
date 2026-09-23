@@ -72,11 +72,12 @@ JAR. Frontend tests are temporarily excluded from Maven verification; run
 mvn verify -Pdev -T 4 -pl :frontend-ui -am
 ```
 
-The Maven frontend build requires Python 3 on macOS or Linux. It holds an OS
-lock on the UI source directory across `npm ci` and `npm run build`, so concurrent
+The Maven frontend build uses Maven's JDK to run `FrontendBuild.java`. It holds an
+OS lock on `.npm-build.lock` across `npm ci` and `npm run build`, so concurrent
 Maven builds in the same worktree wait instead of modifying `node_modules`
 simultaneously. Different worktrees build independently. The output directory
-remains shared. Direct npm commands bypass this lock; do not run them, or Maven
+remains shared. The ignored lock file stays outside `target` and must not be deleted
+while builds are running. Direct npm commands bypass this lock; do not run them, or Maven
 `clean`, concurrently with a Maven build in the same worktree.
 
 When Orion is running, the packaged console is available at `/` and `/ui`.

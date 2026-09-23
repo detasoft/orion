@@ -65,9 +65,10 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
-                            <executable>python3</executable>
+                            <executable>${java.home}/bin/java</executable>
                             <arguments>
-                                <argument>${project.basedir}/build.py</argument>
+                                <argument>${project.basedir}/FrontendBuild.java</argument>
+                                <argument>${project.basedir}</argument>
                                 <argument>${project.build.directory}/node/node</argument>
                                 <argument>${project.build.outputDirectory}/META-INF/orion/frontend</argument>
                             </arguments>
