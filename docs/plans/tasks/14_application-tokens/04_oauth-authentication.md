@@ -2,7 +2,7 @@
 
 - Owner: codex, session 01a0cd57-6e6e-7083-bffc-2f8231e97bc9, branch `codex/oidc-invitations-01a0cd57`,
   worktree `.worktrees/oidc-invitations-01a0cd57`, paused 2026-09-23 10:25 Europe/Amsterdam;
-  next: resolve prerequisite scope with user, then update governing inputs before implementation.
+  next: complete the authorized shared hierarchical authorization prerequisite, then resume OIDC.
 
 ## Required result
 
@@ -30,8 +30,8 @@ system accessControl; UserIdentity and GrantAccess consume flat grants.
 The agreed organization-based invitation rights therefore depend on
 ../02_hierarchical-orion-configuration/01_hierarchical-authorization.md.
 Do not implement an OIDC-only evaluator or mirror organizational users into
-the flat ACL. Await the user's choice between that canonical prerequisite and
-an explicitly reduced first version using existing flat ACL permissions.
+the flat ACL. The user authorized connecting canonical hierarchical
+authorization first.
 No implementation edits have been made in the task worktree.
 
 Application-token storage, rotation, and scoped automation tokens remain in
