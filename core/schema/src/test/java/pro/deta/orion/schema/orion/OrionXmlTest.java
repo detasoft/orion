@@ -44,6 +44,32 @@ class OrionXmlTest {
     }
 
     @Test
+    void readsTheSameUserShapeInSystemAndOrganizationScopes() throws Exception {
+        String user = """
+                <user id="alice">
+                  <first>Alice</first><email>alice@example.test</email>
+                  <credentials><credential><type>ARGON2</type><value>verifier</value></credential></credentials>
+                  <roles/>
+                  <grants><grant id="read"><info>
+                    <expression><key>REPOSITORY</key><value>acme/platform/api</value></expression>
+                  </info></grant></grants>
+                </user>
+                """;
+        String xml = """
+                <orion schemaVersion="2">
+                  <system><accessControl><users>%s</users><roles/><grants/></accessControl></system>
+                  <organizations><organization id="acme"><users>%s</users><teams/></organization></organizations>
+                </orion>
+                """.formatted(user, user);
+
+        OrionDocument document = read(xml);
+
+        assertThat(document.organizations().getFirst().users().getFirst())
+                .isEqualTo(document.system().accessControl().getUsers().getFirst());
+        assertThat(read(write(document))).isEqualTo(document);
+    }
+
+    @Test
     void roundTripsAVersionTwoDocument() throws Exception {
         String xml = testResource("pro/deta/orion/schema/orion/orion-v2.xml");
 
@@ -57,16 +83,9 @@ class OrionXmlTest {
         assertThat(serialized).contains("<team id=\"platform\">");
         assertThat(serialized).contains("<repository id=\"api\">");
         OrionDocument.Organization organization = document.organizations().getFirst();
-        assertThat(organization.users()).extracting(user -> user.id().value())
+        assertThat(organization.users()).extracting(AccessControl.User::getId)
                 .containsExactly("alice", "blocked");
-        assertThat(organization.users()).extracting(OrganizationUser::enabled)
-                .containsExactly(true, false);
-        assertThat(organization.users().getFirst().teamMemberships())
-                .extracting(TeamId::value)
-                .containsExactly("platform");
-        assertThat(organization.users().getFirst().roleAssignments())
-                .extracting(RoleAddress::toString)
-                .containsExactly("acme/member");
+        assertThat(organization.users().getFirst().getRoles()).containsExactly("acme/member");
         assertThat(organization.grants()).extracting(grant -> grant.id().value())
                 .containsExactly("read");
         assertThat(organization.roles()).extracting(role -> role.id().value())
@@ -283,8 +302,6 @@ class OrionXmlTest {
         assertThat(schema).contains("name=\"remote\"");
         assertThat(schema).contains("name=\"refMappings\"");
         assertThat(schema).contains("name=\"users\"");
-        assertThat(schema).contains("name=\"memberships\"");
-        assertThat(schema).contains("name=\"team\" type=\"xs:string\"");
         assertThat(schema).contains("name=\"roles\"");
         assertThat(schema).contains("name=\"roleReferences\"");
         assertThat(schema).contains("name=\"roleReference\" type=\"xs:string\"");
@@ -293,7 +310,6 @@ class OrionXmlTest {
         assertThat(schema).contains("name=\"grantReference\" type=\"xs:string\"");
         assertThat(schema).contains("name=\"expressions\"");
         assertThat(schema).contains("name=\"effect\" type=\"scopedGrantEffect\" use=\"required\"");
-        assertThat(schema).contains("name=\"enabled\" type=\"xs:boolean\" use=\"required\"");
         assertSchemaWrapper(schemaDocument, "organization", "users", "user");
         assertSchemaWrapper(schemaDocument, "organization", "grants", "grant");
         assertSchemaWrapper(schemaDocument, "organization", "roles", "role");
@@ -301,19 +317,17 @@ class OrionXmlTest {
         assertSchemaWrapper(schemaDocument, "team", "roles", "role");
         assertSchemaWrapper(schemaDocument, "repository", "grants", "grant");
         assertSchemaWrapper(schemaDocument, "repository", "roles", "role");
-        assertSchemaWrapper(schemaDocument, "organizationUser", "credentials", "credential");
-        assertSchemaWrapper(schemaDocument, "organizationUser", "memberships", "team");
-        assertSchemaWrapper(schemaDocument, "organizationUser", "roles", "role");
+        assertSchemaWrapper(schemaDocument, "user", "credentials", "credential");
+        assertSchemaWrapper(schemaDocument, "user", "roles", "role");
         assertSchemaWrapper(schemaDocument, "scopedRole", "roleReferences", "roleReference");
         assertSchemaWrapper(schemaDocument, "scopedRole", "grantReferences", "grantReference");
         assertSchemaWrapper(schemaDocument, "scopedGrant", "expressions", "expression");
-        assertRequiredSchemaAttribute(schemaDocument, "organizationUser", "id");
-        assertRequiredSchemaAttribute(schemaDocument, "organizationUser", "enabled");
+        assertRequiredSchemaAttribute(schemaDocument, "user", "id");
         assertRequiredSchemaAttribute(schemaDocument, "scopedRole", "id");
         assertRequiredSchemaAttribute(schemaDocument, "scopedGrant", "id");
         assertRequiredSchemaAttribute(schemaDocument, "scopedGrant", "effect");
-        assertRequiredSchemaElement(schemaDocument, "organizationCredential", "type");
-        assertRequiredSchemaElement(schemaDocument, "organizationCredential", "value");
+        assertRequiredSchemaElement(schemaDocument, "credential", "type");
+        assertRequiredSchemaElement(schemaDocument, "credential", "value");
         assertRequiredSchemaElement(schemaDocument, "scopedGrantExpression", "key");
         assertRequiredSchemaElement(schemaDocument, "scopedGrantExpression", "value");
     }
@@ -404,7 +418,7 @@ class OrionXmlTest {
         String unknownOrganizationUserField = minimalV2(
                 """
                 <organization id="acme">
-                  <users><user id="alice" enabled="true"><nickname>ally</nickname></user></users>
+                  <users><user id="alice"><nickname>ally</nickname></user></users>
                   <teams/>
                 </organization>
                 """,

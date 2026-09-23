@@ -8,7 +8,6 @@ import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
-import pro.deta.orion.schema.orion.OrganizationUser;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
@@ -26,8 +25,6 @@ import pro.deta.orion.schema.orion.RoleId;
 import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.ScopedRole;
 import pro.deta.orion.schema.orion.TeamId;
-import pro.deta.orion.schema.orion.UserCredential;
-import pro.deta.orion.schema.orion.UserId;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -170,7 +167,7 @@ public final class OrionV2Mapper {
             organizations.add(new OrionDocument.Organization(
                     new OrganizationId(organization.getId()),
                     organization.getDisplayName(),
-                    toCurrentOrganizationUsers(organization.getUsers()),
+                    toCurrentUsers(organization.getUsers()),
                     toCurrentScopedGrants(organization.getGrants()),
                     toCurrentScopedRoles(organization.getRoles()),
                     toCurrentTeams(organization.getTeams()),
@@ -219,65 +216,13 @@ public final class OrionV2Mapper {
         return repositories;
     }
 
-    private static List<OrganizationUser> toCurrentOrganizationUsers(
-            List<OrionV2.OrganizationUser> source) {
-        requireUniqueIds(source, OrionV2.OrganizationUser::getId, "user");
-        List<OrionV2.OrganizationUser> sortedUsers = sorted(
-                source,
-                Comparator.comparing(OrionV2.OrganizationUser::getId, NULL_SAFE_STRINGS));
-        List<OrganizationUser> users = new ArrayList<>();
-        for (OrionV2.OrganizationUser user : sortedUsers) {
-            Objects.requireNonNull(user, "organization user");
-            users.add(new OrganizationUser(
-                    new UserId(user.getId()),
-                    user.getFirst(),
-                    user.getLast(),
-                    user.getEmail(),
-                    user.isEnabled(),
-                    toCurrentOrganizationCredentials(user.getCredentials()),
-                    toCurrentTeamIds(user.getMemberships()),
-                    toCurrentRoleAddresses(user.getRoles())));
+    private static List<AccessControl.User> toCurrentUsers(List<OrionV2.User> source) {
+        requireUniqueIds(source, OrionV2.User::getId, "user");
+        List<AccessControl.User> users = new ArrayList<>();
+        for (OrionV2.User user : sorted(source, Comparator.comparing(OrionV2.User::getId, NULL_SAFE_STRINGS))) {
+            users.add(toCurrent(Objects.requireNonNull(user, "user")));
         }
         return users;
-    }
-
-    private static List<UserCredential> toCurrentOrganizationCredentials(
-            List<OrionV2.OrganizationCredential> source) {
-        List<OrionV2.OrganizationCredential> sortedCredentials = sorted(
-                source,
-                Comparator.comparing(
-                                (OrionV2.OrganizationCredential credential) -> enumName(credential.getType()),
-                                NULL_SAFE_STRINGS)
-                        .thenComparing(OrionV2.OrganizationCredential::getKeyId, NULL_SAFE_STRINGS)
-                        .thenComparing(OrionV2.OrganizationCredential::getValue, NULL_SAFE_STRINGS));
-        List<UserCredential> credentials = new ArrayList<>();
-        for (OrionV2.OrganizationCredential credential : sortedCredentials) {
-            Objects.requireNonNull(credential, "organization credential");
-            UserCredential.Type type = enumValue(UserCredential.Type.class, credential.getType());
-            credentials.add(switch (Objects.requireNonNull(type, "credential type")) {
-                case ARGON2, SHA1 -> toCurrentPasswordCredential(credential, type);
-                case OPENSSH_PUBLIC_KEY -> UserCredential.publicKey(
-                        credential.getKeyId(), credential.getValue());
-            });
-        }
-        return credentials;
-    }
-
-    private static UserCredential toCurrentPasswordCredential(
-            OrionV2.OrganizationCredential source,
-            UserCredential.Type type) {
-        if (source.getKeyId() != null) {
-            throw new IllegalArgumentException("password credential key id must be absent");
-        }
-        return UserCredential.passwordVerifier(type, source.getValue());
-    }
-
-    private static List<TeamId> toCurrentTeamIds(List<String> source) {
-        List<TeamId> ids = new ArrayList<>();
-        for (String value : sorted(source, NULL_SAFE_STRINGS)) {
-            ids.add(new TeamId(value));
-        }
-        return ids;
     }
 
     private static List<RoleAddress> toCurrentRoleAddresses(List<String> source) {
@@ -470,14 +415,7 @@ public final class OrionV2Mapper {
         requireUniqueIds(source.getRoles(), OrionV2.Role::getId, "ACL role");
         requireUniqueIds(source.getGrants(), OrionV2.Grant::getId, "ACL grant");
 
-        List<OrionV2.User> sortedUsers = sorted(
-                source.getUsers(),
-                Comparator.comparing(OrionV2.User::getId, NULL_SAFE_STRINGS));
-        List<AccessControl.User> users = new ArrayList<>();
-        for (OrionV2.User user : sortedUsers) {
-            Objects.requireNonNull(user, "ACL user");
-            users.add(toCurrent(user));
-        }
+        List<AccessControl.User> users = toCurrentUsers(source.getUsers());
 
         List<OrionV2.Role> sortedRoles = sorted(
                 source.getRoles(),
@@ -564,7 +502,7 @@ public final class OrionV2Mapper {
             organizations.add(new OrionV2.Organization(
                     organization.id().value(),
                     organization.displayName(),
-                    fromCurrentOrganizationUsers(organization.users()),
+                    fromCurrentUsers(organization.users()),
                     fromCurrentScopedGrants(organization.grants()),
                     fromCurrentScopedRoles(organization.roles()),
                     fromCurrentTeams(organization.teams()),
@@ -609,50 +547,12 @@ public final class OrionV2Mapper {
         return repositories;
     }
 
-    private static List<OrionV2.OrganizationUser> fromCurrentOrganizationUsers(
-            List<OrganizationUser> source) {
-        List<OrganizationUser> sortedUsers = sorted(
-                source,
-                Comparator.comparing(user -> user.id().value()));
-        List<OrionV2.OrganizationUser> users = new ArrayList<>();
-        for (OrganizationUser user : sortedUsers) {
-            users.add(new OrionV2.OrganizationUser(
-                    user.id().value(),
-                    user.enabled(),
-                    user.first(),
-                    user.last(),
-                    user.email(),
-                    fromCurrentOrganizationCredentials(user.credentials()),
-                    fromCurrentTeamIds(user.teamMemberships()),
-                    fromCurrentRoleAddresses(user.roleAssignments())));
+    private static List<OrionV2.User> fromCurrentUsers(List<AccessControl.User> source) {
+        List<OrionV2.User> users = new ArrayList<>();
+        for (AccessControl.User user : sorted(source, Comparator.comparing(AccessControl.User::getId))) {
+            users.add(fromCurrent(user));
         }
         return users;
-    }
-
-    private static List<OrionV2.OrganizationCredential> fromCurrentOrganizationCredentials(
-            List<UserCredential> source) {
-        List<UserCredential> sortedCredentials = sorted(
-                source,
-                Comparator.comparing(UserCredential::type)
-                        .thenComparing(UserCredential::keyId, NULL_SAFE_STRINGS)
-                        .thenComparing(UserCredential::value));
-        List<OrionV2.OrganizationCredential> credentials = new ArrayList<>();
-        for (UserCredential credential : sortedCredentials) {
-            credentials.add(new OrionV2.OrganizationCredential(
-                    enumValue(OrionV2.OrganizationCredentialType.class, credential.type()),
-                    credential.keyId(),
-                    credential.value()));
-        }
-        return credentials;
-    }
-
-    private static List<String> fromCurrentTeamIds(List<TeamId> source) {
-        List<TeamId> sortedIds = sorted(source, Comparator.comparing(TeamId::value));
-        List<String> ids = new ArrayList<>();
-        for (TeamId id : sortedIds) {
-            ids.add(id.value());
-        }
-        return ids;
     }
 
     private static List<String> fromCurrentRoleAddresses(List<RoleAddress> source) {
@@ -785,13 +685,7 @@ public final class OrionV2Mapper {
         requireUniqueIds(source.getRoles(), AccessControl.Role::getId, "ACL role");
         requireUniqueIds(source.getGrants(), AccessControl.Grant::getId, "ACL grant");
 
-        List<AccessControl.User> sortedUsers = sorted(
-                source.getUsers(),
-                Comparator.comparing(AccessControl.User::getId, NULL_SAFE_STRINGS));
-        List<OrionV2.User> users = new ArrayList<>();
-        for (AccessControl.User user : sortedUsers) {
-            users.add(fromCurrent(user));
-        }
+        List<OrionV2.User> users = fromCurrentUsers(source.getUsers());
 
         List<AccessControl.Role> sortedRoles = sorted(
                 source.getRoles(),

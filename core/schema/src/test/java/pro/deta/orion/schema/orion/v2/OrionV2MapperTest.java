@@ -12,7 +12,6 @@ import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrganizationUser;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.schema.orion.RemoteProvider;
@@ -28,8 +27,6 @@ import pro.deta.orion.schema.orion.RoleId;
 import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.ScopedRole;
 import pro.deta.orion.schema.orion.TeamId;
-import pro.deta.orion.schema.orion.UserCredential;
-import pro.deta.orion.schema.orion.UserId;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -53,18 +50,16 @@ class OrionV2MapperTest {
     }
 
     @Test
-    void retainsOrganizationUsersAndScopedDefinitionsOnTheVersionedDtoBoundary() {
-        OrionV2.OrganizationCredential credential = new OrionV2.OrganizationCredential();
-        credential.setType(OrionV2.OrganizationCredentialType.ARGON2);
+    void retainsUsersAndScopedDefinitionsOnTheVersionedDtoBoundary() {
+        OrionV2.Credential credential = new OrionV2.Credential();
+        credential.setType(OrionV2.CredentialType.ARGON2);
         credential.setValue("password-verifier");
-        OrionV2.OrganizationUser user = new OrionV2.OrganizationUser();
+        OrionV2.User user = new OrionV2.User();
         user.setId("alice");
-        user.setEnabled(true);
         user.setFirst("Alice");
         user.setLast("Example");
         user.setEmail("alice@example.test");
         user.setCredentials(List.of(credential));
-        user.setMemberships(List.of("platform"));
         user.setRoles(List.of("acme/developer"));
 
         OrionV2.Organization organization = wireOrganization("acme");
@@ -94,7 +89,6 @@ class OrionV2MapperTest {
         assertThat(repository.getRoles()).extracting(OrionV2.ScopedRole::getId)
                 .containsExactly("maintainer");
         assertThat(user.getCredentials()).containsExactly(credential);
-        assertThat(user.getMemberships()).containsExactly("platform");
         assertThat(user.getRoles()).containsExactly("acme/developer");
         assertThat(organization.getRoles().getFirst().getRoleReferences())
                 .containsExactly("acme/base");
@@ -113,14 +107,13 @@ class OrionV2MapperTest {
                 .containsExactly("displayName", "grants", "roles", "repositories");
         assertThat(propOrder(OrionV2.Repository.class))
                 .containsExactly("displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets");
-        assertThat(propOrder(OrionV2.OrganizationUser.class))
-                .containsExactly("first", "last", "email", "credentials", "memberships", "roles");
+        assertThat(propOrder(OrionV2.User.class))
+                .containsExactly("first", "last", "email", "credentials", "roles", "grants");
         assertThat(propOrder(OrionV2.ScopedRole.class))
                 .containsExactly("roleReferences", "grantReferences");
         assertThat(propOrder(OrionV2.ScopedGrant.class)).containsExactly("expressions");
 
-        assertRequiredAttribute(OrionV2.OrganizationUser.class, "id");
-        assertRequiredAttribute(OrionV2.OrganizationUser.class, "enabled");
+        assertRequiredAttribute(OrionV2.User.class, "id");
         assertRequiredAttribute(OrionV2.ScopedRole.class, "id");
         assertRequiredAttribute(OrionV2.ScopedGrant.class, "id");
         assertRequiredAttribute(OrionV2.ScopedGrant.class, "effect");
@@ -131,19 +124,12 @@ class OrionV2MapperTest {
         assertOptionalWrapper(OrionV2.Team.class, "roles");
         assertOptionalWrapper(OrionV2.Repository.class, "grants");
         assertOptionalWrapper(OrionV2.Repository.class, "roles");
-        assertOptionalWrapper(OrionV2.OrganizationUser.class, "credentials");
-        assertOptionalWrapper(OrionV2.OrganizationUser.class, "memberships");
-        assertElementName(OrionV2.OrganizationUser.class, "memberships", "team");
-        assertOptionalWrapper(OrionV2.OrganizationUser.class, "roles");
+        assertElementName(OrionV2.User.class, "credentials", "credential");
+        assertElementName(OrionV2.User.class, "roles", "role");
         assertOptionalWrapper(OrionV2.ScopedRole.class, "roleReferences");
         assertOptionalWrapper(OrionV2.ScopedRole.class, "grantReferences");
         assertOptionalWrapper(OrionV2.ScopedGrant.class, "expressions");
 
-        assertThat(OrionV2.OrganizationCredentialType.values())
-                .containsExactly(
-                        OrionV2.OrganizationCredentialType.ARGON2,
-                        OrionV2.OrganizationCredentialType.SHA1,
-                        OrionV2.OrganizationCredentialType.OPENSSH_PUBLIC_KEY);
         assertThat(OrionV2.ScopedGrantEffect.values())
                 .containsExactly(OrionV2.ScopedGrantEffect.ALLOW, OrionV2.ScopedGrantEffect.DENY);
     }
@@ -170,7 +156,7 @@ class OrionV2MapperTest {
     }
 
     @Test
-    void roundTripsOrganizationUsersAndDefinitionsAtEveryScope() {
+    void roundTripsUsersAndDefinitionsAtEveryScope() {
         OrionDocument document = scopedIdentityDocument();
 
         OrionV2 wire = OrionV2Mapper.fromCurrent(document);
@@ -182,7 +168,7 @@ class OrionV2MapperTest {
         assertThat(wire.getOrganizations()).extracting(OrionV2.Organization::getId)
                 .containsExactly("acme", "beta");
         assertThat(wire.getOrganizations()).allSatisfy(organization -> {
-            assertThat(organization.getUsers()).extracting(OrionV2.OrganizationUser::getId)
+            assertThat(organization.getUsers()).extracting(OrionV2.User::getId)
                     .contains("alex");
             assertThat(organization.getRoles()).extracting(OrionV2.ScopedRole::getId)
                     .contains("member");
@@ -196,21 +182,20 @@ class OrionV2MapperTest {
 
         assertThat(first).isEqualTo(second);
         OrionV2.Organization organization = first.getOrganizations().getFirst();
-        assertThat(organization.getUsers()).extracting(OrionV2.OrganizationUser::getId)
+        assertThat(organization.getUsers()).extracting(OrionV2.User::getId)
                 .containsExactly("a-user", "z-user");
-        OrionV2.OrganizationUser user = organization.getUsers().getFirst();
+        OrionV2.User user = organization.getUsers().getFirst();
         assertThat(user.getCredentials())
                 .extracting(
                         credential -> credential.getType().name(),
-                        OrionV2.OrganizationCredential::getKeyId,
-                        OrionV2.OrganizationCredential::getValue)
+                        OrionV2.Credential::getKeyId,
+                        OrionV2.Credential::getValue)
                 .containsExactly(
                         tuple("ARGON2", null, "a-verifier"),
                         tuple("ARGON2", null, "z-verifier"),
-                        tuple("SHA1", null, "a-verifier"),
                         tuple("OPENSSH_PUBLIC_KEY", null, "ssh-ed25519 AQID"),
-                        tuple("OPENSSH_PUBLIC_KEY", "z-key", "ssh-ed25519 BAUG"));
-        assertThat(user.getMemberships()).containsExactly("a-team", "z-team");
+                        tuple("OPENSSH_PUBLIC_KEY", "z-key", "ssh-ed25519 BAUG"),
+                        tuple("SHA1", null, "a-verifier"));
         assertThat(user.getRoles()).containsExactly("acme/a-role", "acme/z-role");
         assertCanonicalScopedDefinitions(organization.getGrants(), organization.getRoles(), "acme");
 
@@ -229,7 +214,7 @@ class OrionV2MapperTest {
     @Test
     void rejectsDuplicateScopedIdentityIdsFromTheWire() {
         OrionV2.Organization duplicateUsers = wireOrganization("acme");
-        duplicateUsers.setUsers(List.of(wireOrganizationUser("alice"), wireOrganizationUser("alice")));
+        duplicateUsers.setUsers(List.of(wireUser("alice"), wireUser("alice")));
         assertWireFailure(duplicateUsers, "duplicate user id: alice");
 
         OrionV2.Organization duplicateRoles = wireOrganization("acme");
@@ -242,45 +227,9 @@ class OrionV2MapperTest {
     }
 
     @Test
-    void rejectsInvalidOrganizationCredentialsFromTheWire() {
-        OrionV2.OrganizationCredential blankVerifier = wireCredential(
-                OrionV2.OrganizationCredentialType.ARGON2, null, " ");
-        assertCredentialFailure(blankVerifier, "credential value must not be blank");
-
-        OrionV2.OrganizationCredential malformedPublicKey = wireCredential(
-                OrionV2.OrganizationCredentialType.OPENSSH_PUBLIC_KEY, "laptop", "ssh-ed25519 invalid!");
-        assertCredentialFailure(
-                malformedPublicKey, "credential value must be a canonical OpenSSH public key");
-
-        OrionV2.OrganizationCredential blankKeyId = wireCredential(
-                OrionV2.OrganizationCredentialType.OPENSSH_PUBLIC_KEY, " ", "ssh-ed25519 AQID");
-        assertCredentialFailure(blankKeyId, "credential key id must not be blank");
-
-        OrionV2.OrganizationCredential passwordKeyId = wireCredential(
-                OrionV2.OrganizationCredentialType.ARGON2, "legacy", "argon2-verifier");
-        assertCredentialFailure(passwordKeyId, "password credential key id must be absent");
-
-        OrionV2.OrganizationCredential duplicate = wireCredential(
-                OrionV2.OrganizationCredentialType.SHA1, null, "sha1-verifier");
-        OrionV2.Organization organization = wireOrganization("acme");
-        OrionV2.OrganizationUser user = wireOrganizationUser("alice");
-        user.setCredentials(List.of(duplicate, duplicate));
-        organization.setUsers(List.of(user));
-        assertThatThrownBy(() -> OrionV2Mapper.toCurrent(dto(List.of(organization))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageStartingWith("duplicate credential:");
-    }
-
-    @Test
     void rejectsMissingScopedIdentityTargetsFromTheWire() {
-        OrionV2.Organization missingTeam = wireOrganization("acme");
-        OrionV2.OrganizationUser member = wireOrganizationUser("alice");
-        member.setMemberships(List.of("missing"));
-        missingTeam.setUsers(List.of(member));
-        assertWireFailure(missingTeam, "missing team membership: acme/missing");
-
         OrionV2.Organization missingAssignment = wireOrganization("acme");
-        OrionV2.OrganizationUser assigned = wireOrganizationUser("alice");
+        OrionV2.User assigned = wireUser("alice");
         assigned.setRoles(List.of("acme/missing"));
         missingAssignment.setUsers(List.of(assigned));
         assertWireFailure(missingAssignment, "missing assigned role: acme/missing");
@@ -332,9 +281,8 @@ class OrionV2MapperTest {
 
     @Test
     void mapsMissingNestedScopedIdentityWrappersToEmptyCollections() {
-        OrionV2.OrganizationUser user = wireOrganizationUser("alice");
+        OrionV2.User user = wireUser("alice");
         user.setCredentials(null);
-        user.setMemberships(null);
         user.setRoles(null);
         OrionV2.ScopedRole role = new OrionV2.ScopedRole("member", null, null);
         OrionV2.ScopedGrant grant = new OrionV2.ScopedGrant(
@@ -347,9 +295,8 @@ class OrionV2MapperTest {
         OrionDocument.Organization mapped = OrionV2Mapper.toCurrent(dto(List.of(organization)))
                 .organizations().getFirst();
 
-        assertThat(mapped.users().getFirst().credentials()).isEmpty();
-        assertThat(mapped.users().getFirst().teamMemberships()).isEmpty();
-        assertThat(mapped.users().getFirst().roleAssignments()).isEmpty();
+        assertThat(mapped.users().getFirst().getCredentials()).isEmpty();
+        assertThat(mapped.users().getFirst().getRoles()).isEmpty();
         assertThat(mapped.roles().getFirst().roleReferences()).isEmpty();
         assertThat(mapped.roles().getFirst().grantReferences()).isEmpty();
         assertThat(mapped.grants().getFirst().expressions()).isEmpty();
@@ -615,16 +562,15 @@ class OrionV2MapperTest {
                 "api", List.of(repositoryGrant), List.of(repositoryRole));
         OrionDocument.Team team = domainTeam(
                 "platform", List.of(teamGrant), List.of(teamRole), List.of(repository));
-        OrganizationUser alex = domainUser(
+        AccessControl.User alex = domainUser(
                 "alex",
-                true,
                 List.of(
-                        UserCredential.passwordVerifier(UserCredential.Type.ARGON2, "argon2-verifier"),
-                        UserCredential.passwordVerifier(UserCredential.Type.SHA1, "sha1-verifier"),
-                        UserCredential.publicKey("workstation", "ssh-ed25519 AQID")),
-                List.of("platform"),
+                        new AccessControl.Credential(AccessControl.CredentialType.ARGON2, "argon2-verifier"),
+                        new AccessControl.Credential(
+                                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "workstation", "ssh-ed25519 AQID"),
+                        new AccessControl.Credential(AccessControl.CredentialType.SHA1, "sha1-verifier")),
                 List.of("acme/member", "acme/platform/api/member", "acme/platform/member"));
-        OrganizationUser blocked = domainUser("blocked", false, List.of(), List.of(), List.of());
+        AccessControl.User blocked = domainUser("blocked", List.of(), List.of());
         OrionDocument.Organization acme = domainOrganization(
                 "acme",
                 List.of(alex, blocked),
@@ -635,8 +581,8 @@ class OrionV2MapperTest {
         ScopedGrant betaGrant = domainGrant(
                 "access", ScopedGrant.Effect.DENY, expression(AccessControl.GrantKey.READ, "true"));
         ScopedRole betaRole = domainRole("member", List.of(), List.of("beta/access"));
-        OrganizationUser betaAlex = domainUser(
-                "alex", false, List.of(), List.of(), List.of("beta/member"));
+        AccessControl.User betaAlex = domainUser(
+                "alex", List.of(), List.of("beta/member"));
         OrionDocument.Organization beta = domainOrganization(
                 "beta",
                 List.of(betaAlex),
@@ -658,8 +604,8 @@ class OrionV2MapperTest {
 
         OrionDocument.Team aTeam = orderingTeam("a-team", reversed);
         OrionDocument.Team zTeam = domainTeam("z-team", List.of(), List.of(), List.of());
-        OrganizationUser aUser = orderingUser("a-user", reversed);
-        OrganizationUser zUser = orderingUser("z-user", reversed);
+        AccessControl.User aUser = orderingUser("a-user", reversed);
+        AccessControl.User zUser = orderingUser("z-user", reversed);
         OrionDocument.Organization acme = domainOrganization(
                 "acme",
                 reversed ? List.of(zUser, aUser) : List.of(aUser, zUser),
@@ -716,20 +662,23 @@ class OrionV2MapperTest {
                 reversed ? List.of(zRole, root, aRole) : List.of(aRole, root, zRole));
     }
 
-    private static OrganizationUser orderingUser(String id, boolean reversed) {
-        UserCredential aArgon2 = UserCredential.passwordVerifier(UserCredential.Type.ARGON2, "a-verifier");
-        UserCredential zArgon2 = UserCredential.passwordVerifier(UserCredential.Type.ARGON2, "z-verifier");
-        UserCredential sha1 = UserCredential.passwordVerifier(UserCredential.Type.SHA1, "a-verifier");
-        UserCredential anonymousKey = UserCredential.publicKey("ssh-ed25519 AQID");
-        UserCredential namedKey = UserCredential.publicKey("z-key", "ssh-ed25519 BAUG");
-        List<UserCredential> credentials = reversed
+    private static AccessControl.User orderingUser(String id, boolean reversed) {
+        AccessControl.Credential aArgon2 = new AccessControl.Credential(
+                AccessControl.CredentialType.ARGON2, "a-verifier");
+        AccessControl.Credential zArgon2 = new AccessControl.Credential(
+                AccessControl.CredentialType.ARGON2, "z-verifier");
+        AccessControl.Credential sha1 = new AccessControl.Credential(
+                AccessControl.CredentialType.SHA1, "a-verifier");
+        AccessControl.Credential anonymousKey = new AccessControl.Credential(
+                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "ssh-ed25519 AQID");
+        AccessControl.Credential namedKey = new AccessControl.Credential(
+                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "z-key", "ssh-ed25519 BAUG");
+        List<AccessControl.Credential> credentials = reversed
                 ? List.of(namedKey, anonymousKey, sha1, zArgon2, aArgon2)
                 : List.of(aArgon2, zArgon2, sha1, anonymousKey, namedKey);
         return domainUser(
                 id,
-                true,
                 credentials,
-                reversed ? List.of("z-team", "a-team") : List.of("a-team", "z-team"),
                 addresses(reversed, "acme/a-role", "acme/z-role"));
     }
 
@@ -765,14 +714,6 @@ class OrionV2MapperTest {
                 .containsExactly(scope + "/a-grant", scope + "/z-grant");
     }
 
-    private static void assertCredentialFailure(OrionV2.OrganizationCredential credential, String message) {
-        OrionV2.Organization organization = wireOrganization("acme");
-        OrionV2.OrganizationUser user = wireOrganizationUser("alice");
-        user.setCredentials(List.of(credential));
-        organization.setUsers(List.of(user));
-        assertWireFailure(organization, message);
-    }
-
     private static void assertWireFailure(OrionV2.Organization organization, String message) {
         assertWireFailure(List.of(organization), message);
     }
@@ -783,28 +724,17 @@ class OrionV2MapperTest {
                 .hasMessage(message);
     }
 
-    private static OrganizationUser domainUser(
+    private static AccessControl.User domainUser(
             String id,
-            boolean enabled,
-            List<UserCredential> credentials,
-            List<String> memberships,
+            List<AccessControl.Credential> credentials,
             List<String> roles) {
-        List<TeamId> teamIds = new ArrayList<>();
-        for (String membership : memberships) {
-            teamIds.add(new TeamId(membership));
-        }
-        List<RoleAddress> roleAddresses = new ArrayList<>();
-        for (String role : roles) {
-            roleAddresses.add(RoleAddress.parse(role));
-        }
-        return new OrganizationUser(
-                new UserId(id), id + " first", id + " last", id + "@example.test", enabled,
-                credentials, teamIds, roleAddresses);
+        return new AccessControl.User(
+                id, id + " first", id + " last", id + "@example.test", credentials, roles, List.of());
     }
 
     private static OrionDocument.Organization domainOrganization(
             String id,
-            List<OrganizationUser> users,
+            List<AccessControl.User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
@@ -911,18 +841,6 @@ class OrionV2MapperTest {
 
     private static OrionV2.Organization wireOrganization(String id) {
         return new OrionV2.Organization(id, null, null, null, null, List.of(), List.of());
-    }
-
-    private static OrionV2.OrganizationUser wireOrganizationUser(String id) {
-        return new OrionV2.OrganizationUser(
-                id, true, null, null, null, List.of(), List.of(), List.of());
-    }
-
-    private static OrionV2.OrganizationCredential wireCredential(
-            OrionV2.OrganizationCredentialType type,
-            String keyId,
-            String value) {
-        return new OrionV2.OrganizationCredential(type, keyId, value);
     }
 
     private static OrionV2.Team wireTeam(String id) {

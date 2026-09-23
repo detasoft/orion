@@ -168,7 +168,7 @@ public class OrionV2 {
         private String displayName;
         @XmlElementWrapper(name = "users")
         @XmlElement(name = "user")
-        private List<OrganizationUser> users;
+        private List<User> users;
         @XmlElementWrapper(name = "grants")
         @XmlElement(name = "grant")
         private List<ScopedGrant> grants;
@@ -181,43 +181,6 @@ public class OrionV2 {
         @XmlElementWrapper(name = "secrets")
         @XmlElement(name = "secret")
         private List<Secret> secrets;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"first", "last", "email", "credentials", "memberships", "roles"})
-    public static final class OrganizationUser {
-        @XmlAttribute(name = "id", required = true)
-        private String id;
-        @XmlAttribute(name = "enabled", required = true)
-        private boolean enabled;
-        private String first;
-        private String last;
-        private String email;
-        @XmlElementWrapper(name = "credentials")
-        @XmlElement(name = "credential")
-        private List<OrganizationCredential> credentials;
-        @XmlElementWrapper(name = "memberships")
-        @XmlElement(name = "team")
-        private List<String> memberships;
-        @XmlElementWrapper(name = "roles")
-        @XmlElement(name = "role")
-        private List<String> roles;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"type", "keyId", "value"})
-    public static final class OrganizationCredential {
-        @XmlElement(required = true)
-        private OrganizationCredentialType type;
-        private String keyId;
-        @XmlElement(required = true)
-        private String value;
     }
 
     @Data
@@ -489,16 +452,6 @@ public class OrionV2 {
         SHA3_256,
         ARGON2,
         JWT_SIGNING_PUBLIC_KEY
-    }
-
-    @XmlEnum(String.class)
-    public enum OrganizationCredentialType {
-        @XmlEnumValue("ARGON2")
-        ARGON2,
-        @XmlEnumValue("SHA1")
-        SHA1,
-        @XmlEnumValue("OPENSSH_PUBLIC_KEY")
-        OPENSSH_PUBLIC_KEY
     }
 
     @XmlEnum(String.class)

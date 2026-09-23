@@ -78,7 +78,7 @@ class OrionAuthorizationModelTest {
 
     @Test
     void ownersCopyDefinitionsAndRejectDuplicateLocalIdentifiers() {
-        List<OrganizationUser> users = new ArrayList<>(List.of(user("alice", List.of(), List.of())));
+        List<AccessControl.User> users = new ArrayList<>(List.of(user("alice", List.of())));
         List<ScopedGrant> grants = new ArrayList<>(List.of(allow("read")));
         List<ScopedRole> roles = new ArrayList<>(List.of(roleDefinition("developer")));
         OrionDocument.Organization organization = organization("acme", users, grants, roles, List.of());
@@ -92,7 +92,7 @@ class OrionAuthorizationModelTest {
         assertThat(organization.roles()).hasSize(1);
         assertThatThrownBy(() -> organization(
                 "acme",
-                List.of(user("alice", List.of(), List.of()), user("alice", List.of(), List.of())),
+                List.of(user("alice", List.of()), user("alice", List.of())),
                 List.of(),
                 List.of(),
                 List.of()))
@@ -115,7 +115,7 @@ class OrionAuthorizationModelTest {
 
     @Test
     void localIdentifiersCanRepeatInDifferentScopesAndOrganizationsOwnUserIdentity() {
-        OrganizationUser alice = user("alice", List.of(), List.of());
+        AccessControl.User alice = user("alice", List.of());
         OrionDocument document = document(
                 organization(
                         "acme",
@@ -143,24 +143,10 @@ class OrionAuthorizationModelTest {
     }
 
     @Test
-    void rejectsMissingTeamMembership() {
-        OrionDocument.Organization organization = organization(
-                "acme",
-                List.of(user("alice", List.of(new TeamId("missing")), List.of())),
-                List.of(),
-                List.of(),
-                List.of());
-
-        assertThatThrownBy(() -> document(organization))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("missing team membership: acme/missing");
-    }
-
-    @Test
     void rejectsUserRoleAssignmentsOutsideTheirOrganization() {
         OrionDocument.Organization acme = organization(
                 "acme",
-                List.of(user("alice", List.of(), List.of(role("other/developer")))),
+                List.of(user("alice", List.of(role("other/developer")))),
                 List.of(),
                 List.of(),
                 List.of());
@@ -176,7 +162,7 @@ class OrionAuthorizationModelTest {
     void rejectsMissingAssignedRoles() {
         OrionDocument.Organization organization = organization(
                 "acme",
-                List.of(user("alice", List.of(), List.of(role("acme/missing")))),
+                List.of(user("alice", List.of(role("acme/missing")))),
                 List.of(),
                 List.of(),
                 List.of());
@@ -203,7 +189,6 @@ class OrionAuthorizationModelTest {
                 "acme",
                 List.of(user(
                         "alice",
-                        List.of(),
                         List.of(role("acme/platform/api/maintainer")))),
                 List.of(allow("read")),
                 List.of(organizationRole),
@@ -338,9 +323,9 @@ class OrionAuthorizationModelTest {
                 List.of(),
                 List.of(roleDefinition("developer")),
                 List.of());
-        OrganizationUser memberWithoutRole = user("member", List.of(new TeamId("platform")), List.of());
-        OrganizationUser assignedWithoutMembership = user(
-                "assigned", List.of(), List.of(role("acme/platform/developer")));
+        AccessControl.User memberWithoutRole = user("member", List.of());
+        AccessControl.User assignedWithoutMembership = user(
+                "assigned", List.of(role("acme/platform/developer")));
 
         OrionDocument document = document(organization(
                 "acme",
@@ -377,7 +362,7 @@ class OrionAuthorizationModelTest {
 
     private static OrionDocument.Organization organization(
             String id,
-            List<OrganizationUser> users,
+            List<AccessControl.User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
@@ -405,10 +390,13 @@ class OrionAuthorizationModelTest {
                 List.of());
     }
 
-    private static OrganizationUser user(
-            String id, List<TeamId> memberships, List<RoleAddress> assignments) {
-        return new OrganizationUser(
-                new UserId(id), null, null, null, true, List.of(), memberships, assignments);
+    private static AccessControl.User user(
+            String id, List<RoleAddress> assignments) {
+        List<String> roles = new ArrayList<>();
+        for (RoleAddress assignment : assignments) {
+            roles.add(assignment.toString());
+        }
+        return new AccessControl.User(id, null, null, null, List.of(), roles, List.of());
     }
 
     private static ScopedGrant allow(String id) {

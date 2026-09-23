@@ -74,7 +74,7 @@
     <organization id="acme">
       <displayName>Acme</displayName>
       <users>
-        <user id="alice" enabled="true">
+        <user id="alice">
           <first>Alice</first>
           <last>Example</last>
           <email>alice@acme.example</email>
@@ -84,17 +84,15 @@
               <value>alice-password-hash</value>
             </credential>
           </credentials>
-          <memberships>
-            <team>platform</team>
-          </memberships>
           <roles>
             <role>acme/member</role>
           </roles>
+          <grants/>
         </user>
-        <user id="blocked" enabled="false">
+        <user id="blocked">
           <credentials/>
-          <memberships/>
           <roles/>
+          <grants/>
         </user>
       </users>
       <grants>

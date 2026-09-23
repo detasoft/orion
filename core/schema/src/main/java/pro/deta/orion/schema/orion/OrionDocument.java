@@ -78,14 +78,14 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
     public record Organization(
             OrganizationId id,
             String displayName,
-            List<OrganizationUser> users,
+            List<AccessControl.User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<Team> teams,
             List<ConfigurationSecret> secrets) {
         public Organization {
             Objects.requireNonNull(id, "id");
-            users = copyUnique(users, OrganizationUser::id, "user");
+            users = copyUnique(users, AccessControl.User::getId, "user");
             grants = copyUnique(grants, ScopedGrant::id, "grant");
             roles = copyUnique(roles, ScopedRole::id, "role");
             teams = copyTeams(teams);
@@ -231,36 +231,17 @@ final class OrionDocumentGraphValidator {
 
     private void validateUsers(List<OrionDocument.Organization> organizations) {
         for (OrionDocument.Organization organization : organizations) {
-            Set<TeamId> teamIds = new HashSet<>();
-            for (OrionDocument.Team team : organization.teams()) {
-                teamIds.add(team.id());
-            }
-            for (OrganizationUser user : organization.users()) {
-                validateMemberships(organization.id(), teamIds, user);
-                validateAssignments(organization.id(), user);
-            }
-        }
-    }
-
-    private static void validateMemberships(
-            OrganizationId organizationId,
-            Set<TeamId> teamIds,
-            OrganizationUser user) {
-        for (TeamId membership : user.teamMemberships()) {
-            if (!teamIds.contains(membership)) {
-                throw new IllegalArgumentException(
-                        "missing team membership: " + organizationId + "/" + membership);
-            }
-        }
-    }
-
-    private void validateAssignments(OrganizationId organizationId, OrganizationUser user) {
-        for (RoleAddress assignment : user.roleAssignments()) {
-            if (!organizationId.equals(assignment.scope().organizationId())) {
-                throw new IllegalArgumentException("role assignment outside organization: " + assignment);
-            }
-            if (!roles.containsKey(assignment)) {
-                throw new IllegalArgumentException("missing assigned role: " + assignment);
+            for (AccessControl.User user : organization.users()) {
+                new UserId(user.getId());
+                for (String reference : user.getRoles()) {
+                    RoleAddress assignment = RoleAddress.parse(reference);
+                    if (!organization.id().equals(assignment.scope().organizationId())) {
+                        throw new IllegalArgumentException("role assignment outside organization: " + assignment);
+                    }
+                    if (!roles.containsKey(assignment)) {
+                        throw new IllegalArgumentException("missing assigned role: " + assignment);
+                    }
+                }
             }
         }
     }
