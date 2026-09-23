@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
+import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -55,23 +56,11 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     }
 
     @Override
-    public void checkFetchAccess(FetchRequest request) throws IOException {
-        RefsSnapshot snapshot = storage().snapshotRefs();
-        Set<ObjectId> wants = new LinkedHashSet<>(request.wants());
-        for (String ref : request.wantRefs()) {
-            ObjectId id = ref.equals("HEAD") ? switch (snapshot.head()) {
-                case Head.Symbolic head -> snapshot.refs().get(head.target());
-                case Head.Detached head -> new ObjectId(head.target().toHex());
-            } : snapshot.refs().get(new RefId(ref));
-            if (id == null) {
-                accessHook.beforeFetch(name, List.of());
-            } else {
-                wants.add(id);
-            }
-        }
+    public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
+        Set<ObjectId> wants = context.wantedObjects();
         GitObjectGraph graph = new GitObjectGraph(storage());
         Set<ObjectId> unresolvedLegacyWants = new LinkedHashSet<>();
-        if (request.mode() != FetchRequest.Mode.PROTOCOL_V2) {
+        if (context.request().mode() != FetchRequest.Mode.PROTOCOL_V2) {
             unresolvedLegacyWants.addAll(wants);
             unresolvedLegacyWants.removeAll(snapshot.refs().values());
             if (snapshot.head() instanceof Head.Detached head) {

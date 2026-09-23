@@ -2,7 +2,8 @@ package pro.deta.orion.git.parser.v2;
 
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
+import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
@@ -13,6 +14,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * Repository hooks used by Git commands. Fetch access receives already resolved wants and the same
+ * refs snapshot used to resolve them. Checks must not mutate negotiation state or resolve names again;
+ * the authorized object IDs remain the targets used to prepare the fetch response.
+ */
 public class GitRepositoryContext {
     private final GitStorageApi storage;
 
@@ -28,7 +34,7 @@ public class GitRepositoryContext {
         return Optional.empty();
     }
 
-    public void checkFetchAccess(FetchRequest request) throws IOException {
+    public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
     }
 
     public List<RefUpdateResult> publish(Optional<IndexedPack> pack, List<RefUpdate> updates, boolean atomic)

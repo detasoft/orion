@@ -2,11 +2,13 @@ package pro.deta.orion.git.parser.v2.command;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
+import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
@@ -122,19 +124,25 @@ class FetchCommandTest {
     }
 
     @Test
-    void accessHookCanRejectBeforeReadingRefsOrObjects() throws Exception {
-        var request = new FetchRequest();
+    void accessHookCanRejectResolvedWantsBeforeCheckingObjectExistence() throws Exception {
+        FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add(MAIN.value());
-        var storage = storage(Set.of(FIRST));
-        var denied = new IOException("Fetch access denied");
-        var command = new FetchCommand(storage, capabilities(GitCapability.REF_IN_WANT)) {
+        request.wants().add(SECOND);
+        GitStorageApi storage = storage(Set.of(FIRST));
+        storage.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
+        IOException denied = new IOException("Fetch access denied");
+        GitRepositoryContext repository = new GitRepositoryContext(storage) {
             @Override
-            protected void checkFetchAccess(FetchRequest received) throws IOException {
-                assertThat(received).isSameAs(request);
+            public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
+                assertThat(context.request()).isSameAs(request);
+                assertThat(context.wantedObjects()).containsExactly(SECOND, FIRST);
+                assertThat(context.wantedRefs()).containsExactly(Map.entry(MAIN, FIRST));
+                assertThat(snapshot.refs()).containsEntry(MAIN, FIRST);
                 throw denied;
             }
         };
+        FetchCommand command = new FetchCommand(repository, capabilities(GitCapability.REF_IN_WANT));
         assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP)).isSameAs(denied);
     }
 

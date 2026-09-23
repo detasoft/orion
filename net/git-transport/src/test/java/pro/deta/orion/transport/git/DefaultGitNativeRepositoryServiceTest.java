@@ -13,14 +13,23 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.command.FetchCommand;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
+import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
+import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
+import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -36,6 +45,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
@@ -235,7 +245,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         request.setMode(v2 ? FetchRequest.Mode.PROTOCOL_V2 : FetchRequest.Mode.SINGLE_ACK);
         request.wants().add(new ObjectId(MAIN_ID));
         request.wants().add(new ObjectId(TAG_ID));
-        service.open(request("demo"), this).checkFetchAccess(request);
+        prepareFetch(service.open(request("demo"), this), request);
         assertThat(calls).containsExactly("read demo", "fetch demo [feature, main]", "fetch demo [tag]");
     }
 
@@ -247,13 +257,65 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("HEAD");
         GitRepositoryContext context = service.open(request("demo"), this);
-        context.checkFetchAccess(request);
+        prepareFetch(context, request);
         assertThat(calls).contains("fetch demo [main]");
         request.wantRefs().clear();
         request.wants().add(new ObjectId("f".repeat(40)));
         rejectUnresolvedFetch = true;
-        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
         assertThat(calls).contains("fetch demo []");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"refs/tags/release,false", "HEAD,false", "HEAD,true"})
+    void keepsAuthorizedTargetWhenWantedRefMovesDuringAccessCheck(String wantedRef, boolean detached)
+            throws Exception {
+        NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
+        repository.saveFiles("main", Map.of("a", new byte[]{1}), "allowed", GitCommitAuthor.EMPTY);
+        repository.saveFiles("secret", Map.of("a", new byte[]{2}), "denied", GitCommitAuthor.EMPTY);
+        ObjectId allowed = new ObjectId(repository.refs().get("refs/heads/main"));
+        ObjectId denied = new ObjectId(repository.refs().get("refs/heads/secret"));
+        if (!wantedRef.equals("HEAD")) {
+            assertThat(repository.updateRef(wantedRef, NULL_ID, allowed.toHex()).status()).isEqualTo(APPLIED);
+        } else if (detached) {
+            repository.storage().updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
+        }
+        List<List<String>> checkedBranches = new ArrayList<>();
+        GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
+            @Override
+            public void beforeFetch(String name, List<String> branches) {
+                checkedBranches.add(branches);
+                if (!branches.equals(List.of("main"))) {
+                    throw new AccessDeniedException("denied branch", null);
+                }
+                if (wantedRef.equals("HEAD")) {
+                    Head next = detached ? new Head.Detached(new CommitId(denied.toBytes()))
+                            : new Head.Symbolic(new RefId("refs/heads/secret"));
+                    assertThatCode(() -> repository.storage().updateHead(next)).doesNotThrowAnyException();
+                } else {
+                    assertThat(repository.updateRef(wantedRef, allowed.toHex(), denied.toHex()).status())
+                            .isEqualTo(APPLIED);
+                }
+            }
+        };
+        GitRepositoryContext context = service.open(request("demo"), hook);
+        GitCapabilities capabilities = new GitCapabilities(List.of(
+                GitCapabilityValue.value(GitCapability.REF_IN_WANT)));
+        FetchCommand command = new FetchCommand(context, capabilities);
+        FetchRequest request = new FetchRequest();
+        request.setMode(FetchRequest.Mode.PROTOCOL_V2);
+        request.wantRefs().add(wantedRef);
+
+        FetchNegotiatorIterator iterator = command.prepareNegotiation(request, GitTransport.HTTP);
+        iterator.next(NegotiationMessage.Control.DONE);
+        FetchPlan plan = command.prepareResponse(iterator.getContext()).orElseThrow();
+
+        assertThat(checkedBranches).containsExactly(List.of("main"));
+        assertThat(plan.wantedObjects()).containsExactly(allowed);
+        assertThat(plan.wantedRefs()).containsExactly(Map.entry(new RefId(wantedRef), allowed));
+        assertThatThrownBy(() -> command.prepareNegotiation(request, GitTransport.HTTP))
+                .isInstanceOf(AccessDeniedException.class).hasMessageContaining("denied branch");
+        assertThat(checkedBranches).containsExactly(List.of("main"), List.of("secret"));
     }
 
     @ParameterizedTest
@@ -277,16 +339,16 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             request.wants().clear();
             request.wants().add(tag);
             calls.clear();
-            context.checkFetchAccess(request);
+            prepareFetch(context, request);
             assertThat(calls).containsExactly("fetch demo [main]");
             rejectFetch = true;
-            assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+            assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
             rejectFetch = false;
         }
         repository.updateRef("refs/heads/main", target, NULL_ID);
         rejectUnresolvedFetch = true;
         calls.clear();
-        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
         assertThat(calls).containsExactly("fetch demo []");
     }
 
@@ -296,7 +358,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         GitRepositoryContext context = service.open(request("demo"), this);
         FetchRequest request = new FetchRequest();
         request.wants().add(new ObjectId(MAIN_ID));
-        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(IOException.class)
+        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(IOException.class)
                 .hasMessageContaining("not an advertised object");
     }
 
@@ -321,12 +383,19 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         GitRepositoryContext context = service.open(request("demo"), this);
         String expected = ref.equals("main") ? "fetch demo [main]" : "fetch demo []";
         calls.clear();
-        context.checkFetchAccess(request);
+        prepareFetch(context, request);
         assertThat(calls).containsExactly(expected);
         rejectFetch = true;
         calls.clear();
-        assertThatThrownBy(() -> context.checkFetchAccess(request)).isInstanceOf(AccessDeniedException.class);
+        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
         assertThat(calls).containsExactly(expected);
+    }
+
+    private static FetchNegotiatorIterator prepareFetch(GitRepositoryContext context, FetchRequest request)
+            throws IOException {
+        GitCapabilities capabilities = new GitCapabilities(List.of(
+                GitCapabilityValue.value(GitCapability.REF_IN_WANT)));
+        return new FetchCommand(context, capabilities).prepareNegotiation(request, GitTransport.HTTP);
     }
 
     private static IndexedPack ingest(NativeGitRepository repository, byte[] bytes) throws IOException {

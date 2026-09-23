@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
+import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
@@ -87,20 +88,17 @@ public class FetchCommand implements GitCommand {
             throws IOException {
         NegotiationContext context = new NegotiationContext(request, storage, advertisedCapabilities);
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, transport);
-        checkFetchAccess(request);
+        RefsSnapshot snapshot = storage.snapshotRefs();
         if (!request.wantRefs().isEmpty()) {
-            context.resolveWantedRefs(storage.snapshotRefs());
+            context.resolveWantedRefs(snapshot);
         }
+        repository.checkFetchAccess(context, snapshot);
         for (ObjectId objectId : context.wantedObjects()) {
             if (!storage.exists(objectId)) {
                 throw new IOException("Wanted object does not exist: " + objectId.toHex());
             }
         }
         return iterator;
-    }
-
-    protected void checkFetchAccess(FetchRequest request) throws IOException {
-        repository.checkFetchAccess(request);
     }
 
     public Optional<FetchPlan> prepareResponse(NegotiationContext context) {
