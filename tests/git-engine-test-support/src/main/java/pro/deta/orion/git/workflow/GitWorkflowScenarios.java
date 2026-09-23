@@ -2,6 +2,11 @@ package pro.deta.orion.git.workflow;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeResult;
+import org.eclipse.jgit.dircache.DirCache;
+import org.eclipse.jgit.dircache.DirCacheEditor;
+import org.eclipse.jgit.dircache.DirCacheEntry;
+import org.eclipse.jgit.lib.FileMode;
+import org.eclipse.jgit.lib.ObjectId;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -56,6 +61,8 @@ public final class GitWorkflowScenarios {
                     renamedFileState(), GitWorkflowScenarios::renameFileAndPull),
             scenario("file-directory-replacement-and-pull", PULL,
                     fileDirectoryReplacementState(), GitWorkflowScenarios::fileDirectoryReplacementAndPull),
+            scenario("gitlink-clone-and-fetch", FETCH, gitlinkState(),
+                    GitWorkflowScenarios::gitlinkCloneAndFetch),
             scenario("large-binary-clone-and-fetch", FETCH, largeBinaryState(),
                     GitWorkflowScenarios::largeBinaryCloneAndFetch),
             scenario("file-modes-clone-and-fetch", FETCH, fileModesState(),
@@ -518,6 +525,62 @@ public final class GitWorkflowScenarios {
         }
     }
 
+    private static void gitlinkCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
+        String initialTarget = "1".repeat(40);
+        String updatedTarget = "2".repeat(40);
+        try (GitWorkTree source = GitClients.jgitAllowAllSsh().init(context.workTreeDirectory("source"))) {
+            source.writeFile(README, INITIAL_CONTENT);
+            source.add(README);
+            stageGitlink(source, initialTarget);
+            source.commit("initial gitlink");
+            execution.bind("initial", source.head());
+            source.addRemote("origin", context.remote());
+            source.push("origin", "main");
+            RepositorySnapshot initial = transferred(context, source);
+            require(initial.commits().get(source.head()).entries().get("submodule").objectId()
+                    .equals(initialTarget), "initial gitlink target changed");
+            try (GitWorkTree clone = context.client().clone(
+                    context.remote(), context.workTreeDirectory("clone"))) {
+                equivalent(initial, clone.snapshot(), "clone with missing submodule object");
+                stageGitlink(source, updatedTarget);
+                source.commit("change gitlink target");
+                execution.bind("second", source.head());
+                source.push("origin", "main");
+                RepositorySnapshot terminal = transferred(context, source);
+                execution.assertTerminal(terminal);
+                require(terminal.commits().get(source.head()).entries().get("submodule").objectId()
+                        .equals(updatedTarget), "updated gitlink target changed");
+                clone.fetch("origin", "main");
+                clone.updateRef("refs/heads/fetched", "refs/remotes/origin/main");
+                equivalent(RepositorySnapshot.of(MAIN, Map.of(
+                        MAIN, execution.id("initial"), "refs/heads/fetched", execution.id("second")),
+                        terminal.commits()), clone.snapshot(), "fetch updated gitlink without submodule object");
+                equivalent(terminal, context.server().snapshot(context.remote()), "remote after gitlink fetch");
+            }
+        }
+    }
+
+    private static void stageGitlink(GitWorkTree source, String target) throws Exception {
+        try (Git seed = Git.open(source.directory().toFile())) {
+            ObjectId objectId = ObjectId.fromString(target);
+            require(!seed.getRepository().getObjectDatabase().has(objectId), "submodule object unexpectedly exists");
+            DirCache index = seed.getRepository().lockDirCache();
+            try {
+                DirCacheEditor editor = index.editor();
+                editor.add(new DirCacheEditor.PathEdit("submodule") {
+                    @Override
+                    public void apply(DirCacheEntry entry) {
+                        entry.setFileMode(FileMode.GITLINK);
+                        entry.setObjectId(objectId);
+                    }
+                });
+                require(editor.commit(), "cannot stage gitlink");
+            } finally {
+                index.unlock();
+            }
+        }
+    }
+
     private static void largeBinaryCloneAndFetch(GitScenarioContext context, Execution execution) throws Exception {
         try (GitWorkTree source = source(context)) {
             source.writeFile(README, INITIAL_CONTENT);
@@ -792,6 +855,15 @@ public final class GitWorkflowScenarios {
                         README, text(INITIAL_CONTENT), "item/child.txt", text("child\n"))),
                 "third", expectedCommit(List.of("second"), Map.of(
                         README, text(INITIAL_CONTENT), "item", text("replacement\n")))));
+    }
+
+    private static ExpectedRepositoryState gitlinkState() {
+        Map<String, ExpectedRepositoryState.ExpectedFile> files = Map.of(
+                README, text(INITIAL_CONTENT),
+                "submodule", new ExpectedRepositoryState.ExpectedFile(0160000, ""));
+        return state(Map.of(MAIN, "second"), Map.of(
+                "initial", expectedCommit(List.of(), files),
+                "second", expectedCommit(List.of("initial"), files)));
     }
 
     private static ExpectedRepositoryState largeBinaryState() {
