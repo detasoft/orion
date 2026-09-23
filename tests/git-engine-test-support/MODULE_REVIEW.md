@@ -1,37 +1,5 @@
 # Module Review: `tests/git-engine-test-support`
 
-## 2. The Git command runner loses process ownership on interruption
-
-**Problem and evidence.**
-[runResult](src/main/java/pro/deta/orion/git/workflow/GitCommandRunner.java#L50) terminates its child only
-when the ordinary command timeout expires. An interruption instead throws from
-[waitFor](src/main/java/pro/deta/orion/git/workflow/GitCommandRunner.java#L107), restores the interrupt flag,
-and reaches a finally block that only deletes the output log. The Git process can remain running.
-The configured [60-second JUnit deadline](../../pom.xml#L68), passed to the test providers at lines 293
-and 313, can interrupt a multi-operation scenario during a command with its own 30-second timeout.
-The [harness](src/main/java/pro/deta/orion/git/workflow/GitInteroperabilityHarness.java#L23) then closes
-the server and removes the worktree without the runner having stopped its child.
-
-**Contract.** The runner owns the process it starts. Cancellation must release that resource as well as
-the temporary log. Preserve successful results, bounded normal timeout handling, command diagnostics,
-the original failure and the caller's interrupted status. No contract allowing detached commands was found.
-
-**Minimal repair and validation.** Keep the process in its owning scope and use one bounded termination
-path on exceptional exit. Cleanup must still run when the interrupted flag is already set; preserve the
-flag afterwards and suppress cleanup failures onto the original failure rather than replacing it.
-Add behavioral coverage beside
-[GitCliWorkflowClientTest](src/test/java/pro/deta/orion/git/workflow/GitCliWorkflowClientTest.java)
-for an interrupted blocking child, ordinary command timeout and successful completion.
-Assert child termination and the interruption/error contract, not private implementation structure.
-
-**Alternatives and consequences.** Merely invoking the current interruptible termination helper from
-finally can abort cleanup again. Do not allocate a thread per process wait.
-Fix this before consolidating the HTTP test helper onto this runner: that helper currently attempts
-termination in finally.
-
-**Confidence and priority.** High from the explicit interruption path and test deadline wiring;
-no runtime reproduction executed. P2 test isolation/resource ownership, small local lifecycle repair.
-
 ## 3. GitEngine wraps a name that every consumer immediately unwraps
 
 **Problem and evidence.** [GitEngine](src/main/java/pro/deta/orion/git/workflow/GitEngine.java#L5)

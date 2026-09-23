@@ -11,6 +11,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Runs synchronous Git commands and owns their process and temporary output until completion.
+ * Cancellation still performs bounded process shutdown, retaining the caller's interruption and original failure.
+ */
 final class GitCommandRunner {
     private static final Duration TERMINATION_GRACE = Duration.ofSeconds(2);
     private static final List<String> CONFIGURATION = List.of(
@@ -50,6 +54,8 @@ final class GitCommandRunner {
     Result runResult(Path directory, Map<String, String> environment, String... arguments) throws IOException {
         List<String> command = command(arguments);
         Path outputFile = Files.createTempFile("orion-git-command-", ".log");
+        Process process = null;
+        Throwable failure = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .redirectErrorStream(true)
@@ -60,7 +66,6 @@ final class GitCommandRunner {
             builder.environment().putAll(ENVIRONMENT);
             builder.environment().putAll(environment);
 
-            Process process;
             try {
                 process = builder.start();
             } catch (IOException error) {
@@ -68,15 +73,17 @@ final class GitCommandRunner {
                         + ": " + error.getMessage(), error);
             }
             if (!waitFor(process, timeout)) {
-                terminate(process);
                 throw new IOException("Timed out after " + timeout + " running canonical Git command "
                         + format(command) + output(outputFile));
             }
 
             String output = Files.readString(outputFile, StandardCharsets.UTF_8);
             return new Result(process.exitValue(), output, format(command));
+        } catch (IOException | RuntimeException | Error error) {
+            failure = error;
+            throw error;
         } finally {
-            Files.deleteIfExists(outputFile);
+            cleanup(process, outputFile, failure);
         }
     }
 
@@ -115,10 +122,53 @@ final class GitCommandRunner {
 
     private static void terminate(Process process) throws IOException {
         process.destroy();
-        if (!waitFor(process, TERMINATION_GRACE)) {
+        if (!waitForTermination(process)) {
             process.destroyForcibly();
-            if (!waitFor(process, TERMINATION_GRACE)) {
+            if (!waitForTermination(process)) {
                 throw new IOException("Canonical Git process did not terminate after forced shutdown");
+            }
+        }
+    }
+
+    private static boolean waitForTermination(Process process) {
+        long deadline = System.nanoTime() + TERMINATION_GRACE.toNanos();
+        boolean interrupted = false;
+        try {
+            long remaining;
+            while ((remaining = deadline - System.nanoTime()) > 0) {
+                try {
+                    return process.waitFor(remaining, TimeUnit.NANOSECONDS);
+                } catch (InterruptedException error) {
+                    interrupted = true;
+                }
+            }
+            return !process.isAlive();
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static void cleanup(Process process, Path outputFile, Throwable failure) throws IOException {
+        try {
+            if (process != null && process.isAlive()) {
+                terminate(process);
+            }
+        } catch (IOException | RuntimeException | Error error) {
+            if (failure == null) {
+                failure = error;
+                throw error;
+            }
+            failure.addSuppressed(error);
+        } finally {
+            try {
+                Files.deleteIfExists(outputFile);
+            } catch (IOException | RuntimeException | Error error) {
+                if (failure == null) {
+                    throw error;
+                }
+                failure.addSuppressed(error);
             }
         }
     }

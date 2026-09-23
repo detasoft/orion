@@ -22,10 +22,8 @@ Preserve stdout assertions: the common runner merges diagnostic streams, so succ
 must remain unambiguous under its controlled environment.
 
 **Alternatives and consequences.** Do not add a public runner or generic test framework, or replace the
-instrumented servlet. Preserve interruption cleanup when consolidating: the local helper attempts it in
-finally, whereas the common runner currently needs its
-[process cleanup](../git-engine-test-support/MODULE_REVIEW.md#2-the-git-command-runner-loses-process-ownership-on-interruption)
-fixed first.
+instrumented servlet. Preserve the common runner's bounded process cleanup and caller interruption contract,
+covered by [GitCommandRunnerTest](../git-engine-test-support/src/test/java/pro/deta/orion/git/workflow/GitCommandRunnerTest.java).
 
 **Confidence and priority.** High from both live helpers and existing runner consumers.
-P2 duplicated test infrastructure; consolidate after shared-runner cleanup, without merging distinct scenarios.
+P2 duplicated test infrastructure; shared-runner cleanup is fixed, so consolidation can preserve the distinct scenarios.
