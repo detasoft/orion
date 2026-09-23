@@ -20,7 +20,9 @@ inheritance, allow/deny precedence, and team-level permission design. Those
 remain in ../02_hierarchical-orion-configuration/01_hierarchical-authorization.md
 and are NOT prerequisites for this minimal organization boundary. Do not
 implement them in this change or create temporary role/evaluator frameworks.
-All enabled members have the same basic organization access; do not grant global
+All enabled members have the same basic read access to organization resources;
+repository create/write/force and administrative mutations remain denied until
+separately authorized scope is defined. Do not grant global
 administration, global secrets/configuration, or access to another organization.
 Existing system ACL, admin/root recovery, SSH, Basic/Bearer behavior is preserved.
 OIDC is the new login method; existing paths must enforce the same organization
@@ -44,10 +46,19 @@ trip XML and survive every existing document-copy/update consumer.
 
 ## Design
 
-- Store trusted OIDC provider configuration within each organization: id/name,
+- Support OIDC configuration at root/system and within each organization: id/name,
   issuer, client id, encrypted secret reference, configured redirect URI.
-  Support at least one provider per organization; use a small provider list if
-  required to allow both Google and corporate SSO. No provider plugin registry.
+  Root providers are shared defaults. An organization's explicitly configured
+  provider list replaces the defaults for that organization; an absent override
+  inherits root providers. An explicit empty override disables OIDC there.
+  Preserve this distinction in XML and UI, with simple visible controls.
+  Provider secret references resolve in the scope owning that configuration;
+  never allow a similarly named organization secret to shadow root material.
+  Effective configuration changes invalidate pending sign-in and sessions as
+  appropriate. Root OIDC config does not confer root/system-user authority or
+  bypass invitations; organization selection remains required for member login.
+  Support Google and corporate providers through the same small provider list.
+  No provider plugin registry.
   Use discovery and a maintained existing/new OIDC/JWT library as needed.
   Configuration and invitations are managed by existing system administrators
   in the minimal version; no new organization-admin role machinery.
@@ -102,7 +113,7 @@ trip XML and survive every existing document-copy/update consumer.
 4. Implement generic OIDC browser flow, sessions/CSRF and registered routes.
    Use a local controlled OIDC provider fixture for protocol behavior tests.
 5. Add browser login/provider selection, invitation onboarding, member view,
-   logout, administrator provider settings and invitation controls. Document
+   logout, administrator root/organization provider settings and invitation controls. Document
    Google/corporate configuration and secret provisioning in appropriate docs.
 6. Verify normal onboarding/repeat login, wrong email, expired/revoked invite,
    callback/state/nonce/signature/audience/issuer failures, replay/concurrency,
@@ -112,7 +123,9 @@ trip XML and survive every existing document-copy/update consumer.
 
 ## Acceptance
 
-Administrator can configure organization OIDC and issue/revoke invitations.
+Administrator can configure root defaults and organization OIDC overrides and
+issue/revoke invitations. Test inherited defaults, organization override and
+explicit disable, including same provider ids/secret ids across organizations.
 Recipient signs in, completes profile once, and sees their organization's
 repositories/resources. Direct requests cannot reach another organization or
 global administration. Both Google-shaped and corporate OIDC configurations use
