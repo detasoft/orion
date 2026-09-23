@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git.command;
 
+import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -45,6 +47,30 @@ class ReadOnlyDomainCommandCatalogTest {
                     new CommandLineParser(),
                     tree,
                     new pro.deta.orion.command.CommandRowQuery());
+
+    @Test
+    void organizationIdentityFiltersListsLookupsAndCompletionDespiteMatchingUserIds() {
+        UserIdentity identity = new InternalUserImpl("operator",
+                ACLUtil.generateDefaultAccessControl("unused").getGrants(),
+                Optional.of(new OrganizationId("acme")));
+        source.repositories = available(List.of(repository("own", "own", "acme/team/repo"),
+                repository("foreign", "foreign", "other/team/repo")));
+        source.organizations = available(List.of(
+                new OperatorDomainViews.OrganizationView("acme", Optional.of("own")),
+                new OperatorDomainViews.OrganizationView("other", Optional.of("foreign"))));
+        source.sessions = available(List.of(session("foreign", "foreign", "operator", Optional.empty()),
+                session("own", "own", "operator", Optional.of("acme/team/repo"))));
+        assertThat(((CommandResult.Rows) dispatch("/repository ls", identity)).values()).hasSize(1);
+        assertThat(((CommandResult.Rows) dispatch("/organization ls", identity)).values()).hasSize(1);
+        assertThat(((CommandResult.Rows) dispatch("/session ls", identity)).values()).hasSize(1);
+        for (String path : List.of("/repository/foreign", "/organization/foreign", "/session/foreign")) {
+            String action = path.startsWith("/organization") ? " user ls" : " show";
+            assertFailure(dispatch(path + action, identity), CommandFailureCode.MISSING_RESOURCE);
+        }
+        assertThat(new CommandNavigator(tree).complete(context(identity), CommandPath.root(),
+                "/repository/f", 13).candidates()).isEmpty();
+        assertFailure(dispatch("/system resource", identity), CommandFailureCode.ACCESS_DENIED);
+    }
 
     @Test
     void rejectsUnnamedIdentitiesBeforeConsultingStaticOrDynamicSources() {

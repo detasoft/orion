@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.schema.orion.OrganizationId;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -41,6 +42,29 @@ class OrionAdminDecisionsRouteTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/reviewer");
     private static final Map<String, String> ACTIONS = Map.of("replace", "Replace key", "reject", "Reject");
+
+    @Test
+    void organizationIdentityOnlySeesAndAnswersOwnDecisions() throws Exception {
+        try (DecisionRegistry registry = new DecisionRegistry(4, (actor, scope) -> true);
+             Peer peer = new Peer(registry, Optional.of(new OrganizationId("acme")))) {
+            PendingDecision own = register(registry, "acme/team/repo");
+            PendingDecision other = register(registry, "other/team/repo");
+            PendingDecision system = register(registry, null);
+            JsonNode decisions = JSON.readTree(peer.request("GET", null, "reviewer", null).body())
+                    .path("decisions");
+            assertThat(decisions.size()).isEqualTo(1);
+            assertThat(decisions.get(0).path("id").asText()).isEqualTo(own.request().id().toString());
+            for (PendingDecision hidden : List.of(other, system)) {
+                assertThat(peer.request("POST", answer(hidden, "replace"), "reviewer", "application/json")
+                        .statusCode()).isEqualTo(404);
+                assertThat(hidden.result().toCompletableFuture()).isNotDone();
+            }
+            assertThat(peer.request("POST", answer(own, "replace"), "reviewer", "application/json")
+                    .statusCode()).isEqualTo(204);
+            assertThat(own.result().toCompletableFuture())
+                    .isCompletedWithValue(new Decision("replace", PrincipalAddress.parse("acme/reviewer")));
+        }
+    }
 
     @Test
     void listsSystemOrganizationTeamAndRepositoryRequestsAsJson() throws Exception {
@@ -198,6 +222,11 @@ class OrionAdminDecisionsRouteTest {
         private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
         private Peer(DecisionRegistry registry) throws Exception {
+            this(registry, Optional.empty());
+        }
+
+        private Peer(DecisionRegistry registry,
+                Optional<OrganizationId> organization) throws Exception {
             connector.setHost("127.0.0.1");
             connector.setPort(0);
             http.addConnector(connector);
@@ -212,7 +241,7 @@ class OrionAdminDecisionsRouteTest {
                     if (identity != null) {
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()
-                                        .withUserIdentity(new InternalUserImpl(identity, List.of())));
+                                        .withUserIdentity(new InternalUserImpl(identity, List.of(), organization)));
                     }
                     super.service(request, response);
                 }

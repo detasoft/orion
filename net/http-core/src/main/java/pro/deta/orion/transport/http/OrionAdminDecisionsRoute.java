@@ -28,9 +28,9 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST;
 
 /**
- * Lists and answers pending decisions in the shared registry. The authenticated flat user ID identifies
- * a system principal; scoped access belongs to the registry. A successful answer records the decision,
- * without claiming that the waiting operation has finished. Responses expose only request display data.
+ * Lists and answers pending decisions in the shared registry. The authenticated identity identifies
+ * a system or organization principal; scoped access belongs to the registry. A successful answer records
+ * the decision without claiming that the waiting operation has finished. Responses expose only request display data.
  */
 public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
     private static final int MAX_BODY_BYTES = 64 * 1024;
@@ -48,7 +48,7 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
     protected OrionHttpResponse doGet(HttpServletRequest request) {
         PrincipalAddress actor = actor(request);
         if (actor == null) {
-            return failure(403, "Authenticated system user is required");
+            return failure(403, "Authenticated user is required");
         }
         List<Map<String, Object>> decisions = new ArrayList<>();
         for (DecisionRequest pending : registry.list(actor)) {
@@ -67,7 +67,7 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
     protected OrionHttpResponse doPost(HttpServletRequest request) throws IOException {
         PrincipalAddress actor = actor(request);
         if (actor == null) {
-            return failure(403, "Authenticated system user is required");
+            return failure(403, "Authenticated user is required");
         }
         String contentType = request.getContentType();
         if (contentType == null || !contentType.split(";", 2)[0].trim().equalsIgnoreCase("application/json")) {
@@ -116,7 +116,12 @@ public final class OrionAdminDecisionsRoute extends AbstractOrionHttpRoute {
             return null;
         }
         try {
-            return new PrincipalAddress.SystemPrincipalAddress(new UserId(identity.getUserId()));
+            UserId userId = new UserId(identity.getUserId());
+            if (identity.getOrganizationId().isPresent()) {
+                return new PrincipalAddress.OrganizationPrincipalAddress(
+                        identity.getOrganizationId().orElseThrow(), userId);
+            }
+            return new PrincipalAddress.SystemPrincipalAddress(userId);
         } catch (IllegalArgumentException exception) {
             return null;
         }

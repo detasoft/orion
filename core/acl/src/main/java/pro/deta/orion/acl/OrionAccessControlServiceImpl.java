@@ -645,6 +645,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 || userIdentity.getUserId().isBlank()) {
             return TokenIssueResult.failure("authenticated user is required");
         }
+        if (userIdentity.getOrganizationId().isPresent()) {
+            return TokenIssueResult.failure("system identity is required for system token issue");
+        }
         Result<AccessControl.User> user = findSingleUser(accessControl.get(), userIdentity.getUserId());
         if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
             return TokenIssueResult.failure("user is not available for token issue", throwable);

@@ -429,6 +429,15 @@ as scoped role references, role cycles and HTTPS configuration constraints
 are checked separately by Orion when reading the document. Orion uses its own
 schema for validation and does not fetch the document's schema hint.
 
+Organization identities are confined to repositories addressed as
+`organization/team/repository`. Repository and branch grants still apply inside
+that boundary; wildcard grants never cross it. HTTP repository listings, SSH
+catalogs and pending decisions use the same organization boundary. System
+administration, system SSH credentials and system token issuance require a
+system identity, even when an organization user has the same user ID. These
+checks prepare the authorization context for the organization login flow;
+OIDC login and invitations are not yet connected.
+
 OIDC providers are configured per organization, including the ordinary `default`
 organization created on first initialization. Provider settings are persisted
 now; browser login and invitations will be added separately. Organizations do

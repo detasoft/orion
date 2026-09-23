@@ -1,5 +1,11 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Optional;
+import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.schema.orion.OrganizationId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -30,7 +36,7 @@ class OrionAdminCreateRepositoryRouteTest {
         provider.create("zeta").valueOrFailure("repository");
         provider.create("internal/configuration").valueOrFailure("repository");
 
-        OrionHttpResponse response = route.doGet(null);
+        OrionHttpResponse response = route.doGet(request(""));
 
         assertThat(response.status()).isEqualTo(SC_OK);
         assertThat(response.body()).isEqualTo(Map.of(
@@ -64,7 +70,7 @@ class OrionAdminCreateRepositoryRouteTest {
 
         assertThat(response.status()).isEqualTo(SC_CREATED);
         assertThat(provider.repositoryNames()).containsExactly("team/repo");
-        assertThat(route.doGet(null).body()).isEqualTo(Map.of(
+        assertThat(route.doGet(request("")).body()).isEqualTo(Map.of(
                 "repositories",
                 List.of(new OrionAdminCreateRepositoryRoute.RepositoryResponse("team/repo"))));
     }
@@ -81,12 +87,43 @@ class OrionAdminCreateRepositoryRouteTest {
         assertThat(provider.repositoryNames()).isEmpty();
     }
 
+    @Test
+    void filtersOrganizationRepositoriesAndRejectsCrossOrganizationCreation() throws Exception {
+        provider.create("acme/team/visible").valueOrFailure("repository");
+        provider.create("other/team/hidden").valueOrFailure("repository");
+        provider.create("orion").valueOrFailure("repository");
+        InternalUserImpl identity = new InternalUserImpl("root",
+                ACLUtil.generateDefaultAccessControl("unused").getGrants(),
+                Optional.of(new OrganizationId("acme")));
+        assertThat(route.doGet(request("", identity)).body()).isEqualTo(Map.of("repositories",
+                List.of(new OrionAdminCreateRepositoryRoute.RepositoryResponse("acme/team/visible"))));
+        assertThat(route.doPost(request("other/team/new", identity)).status()).isEqualTo(403);
+        assertThat(route.doPost(request("acme/team/new", identity)).status()).isEqualTo(201);
+        assertThat(provider.repositoryNames()).doesNotContain("other/team/new");
+    }
+
+    @Test
+    void rejectsSystemNonAdminAndAnonymousRequests() throws Exception {
+        for (UserIdentity identity : List.of(SecurityContext.ANONYMOUS,
+                new InternalUserImpl("reader", List.of()))) {
+            assertThat(route.doGet(request("", identity)).status()).isEqualTo(403);
+            assertThat(route.doPost(request("acme/team/new", identity)).status()).isEqualTo(403);
+        }
+        assertThat(provider.repositoryNames()).isEmpty();
+    }
+
     private static HttpServletRequest request(String name) {
+        return request(name, new InternalUserImpl("root",
+                ACLUtil.generateDefaultAccessControl("unused").getGrants()));
+    }
+
+    private static HttpServletRequest request(String name, UserIdentity identity) {
         byte[] body = ("{\"name\":\"" + name + "\"}").getBytes(StandardCharsets.UTF_8);
         return HttpServletRequest.class.cast(Proxy.newProxyInstance(
                 HttpServletRequest.class.getClassLoader(),
                 new Class<?>[]{HttpServletRequest.class},
                 (proxy, method, args) -> switch (method.getName()) {
+                    case "getAttribute" -> SecurityContext.createContext().withUserIdentity(identity);
                     case "getInputStream" -> new ByteArrayServletInputStream(body);
                     case "toString" -> "repository request";
                     case "hashCode" -> System.identityHashCode(proxy);

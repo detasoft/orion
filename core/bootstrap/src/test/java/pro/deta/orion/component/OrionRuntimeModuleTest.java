@@ -57,13 +57,20 @@ class OrionRuntimeModuleTest {
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"acme", "acme/platform", "acme/platform/api"})
-    void decisionAuthorizationStubAllowsSuppliedPrincipalAtEveryScope(String scopePath) {
+    void decisionAuthorizationPreservesOrganizationBoundary(String scopePath) {
         try (DecisionRegistry registry = OrionRuntimeModule.decisionRegistry()) {
             PendingDecision pending = registry.register(
                     Optional.ofNullable(scopePath).map(ConfigurationScope::parse),
                     "Confirm operation", "", Map.of("replace", "Replace", "reject", "Reject"))
                     .valueOrFailure("register pending decision");
-            PrincipalAddress actor = PrincipalAddress.parse("other/reviewer");
+            PrincipalAddress foreign = PrincipalAddress.parse("other/reviewer");
+            assertThat(registry.list(foreign)).isEmpty();
+            assertThat(registry.find(pending.request().id(), foreign)).isEmpty();
+            assertThat(registry.decide(pending.request().id(), new Decision("replace", foreign)).isFailure())
+                    .isTrue();
+            assertThat(pending.result().toCompletableFuture()).isNotDone();
+            PrincipalAddress actor = PrincipalAddress.parse(
+                    scopePath == null ? "system/reviewer" : "acme/reviewer");
             Decision decision = new Decision("replace", actor);
 
             assertThat(registry.list(actor)).containsExactly(pending.request());

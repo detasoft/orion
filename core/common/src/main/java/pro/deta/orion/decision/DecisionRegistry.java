@@ -65,7 +65,7 @@ public final class DecisionRegistry implements AutoCloseable {
         }
         List<DecisionRequest> visible = new ArrayList<>();
         for (PendingDecision pending : snapshot) {
-            if (authorization.test(actor, pending.request().scope()) && pending.isPending()) {
+            if (authorized(actor, pending.request().scope()) && pending.isPending()) {
                 visible.add(pending.request());
             }
         }
@@ -112,9 +112,18 @@ public final class DecisionRegistry implements AutoCloseable {
         synchronized (requests) {
             pending = requests.get(id);
         }
-        if (pending == null || !authorization.test(actor, pending.request().scope()) || !pending.isPending()) {
+        if (pending == null || !authorized(actor, pending.request().scope()) || !pending.isPending()) {
             return null;
         }
         return pending;
+    }
+
+    private boolean authorized(PrincipalAddress actor, Optional<ConfigurationScope> scope) {
+        if (actor instanceof PrincipalAddress.OrganizationPrincipalAddress organization) {
+            if (scope.isEmpty() || !scope.orElseThrow().organizationId().equals(organization.organizationId())) {
+                return false;
+            }
+        }
+        return authorization.test(actor, scope);
     }
 }

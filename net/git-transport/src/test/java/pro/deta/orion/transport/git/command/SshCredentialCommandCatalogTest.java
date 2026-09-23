@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git.command;
 
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,14 @@ class SshCredentialCommandCatalogTest {
             new CommandLineParser(),
             new SshCredentialCommandCatalog(service).commandTree(),
             new pro.deta.orion.command.CommandRowQuery());
+
+    @Test
+    void organizationUserCannotReadSystemUsersKeysWithTheSameId() {
+        SecurityContext context = SecurityContext.createContext().withUserIdentity(new InternalUserImpl(
+                "alice", List.of(), Optional.of(new OrganizationId("acme"))));
+        assertFailure(dispatch("/auth/key ls", context), CommandFailureCode.ACCESS_DENIED);
+        assertThat(service.listUsers).isEmpty();
+    }
 
     @Test
     void listsOnlyAuthenticatedUsersSafeCredentialDescriptors() {

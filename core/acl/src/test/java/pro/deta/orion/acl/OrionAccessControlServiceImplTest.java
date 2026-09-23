@@ -1,5 +1,7 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -66,6 +68,18 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
+
+    @Test
+    void organizationIdentityCannotIssueTokenAsSystemUserWithSameId() {
+        AccessControlDraft primary = new AccessControlDraft();
+        primary.getUsers().add(user("alice"));
+        try (ServiceFixture fixture = fixture(primary, new AccessControlDraft())) {
+            InternalUserImpl identity = new InternalUserImpl("alice", List.of(),
+                    Optional.of(new OrganizationId("acme")));
+            assertThat(fixture.service.refreshToken(new AuthenticationResult.Success(identity), 60))
+                    .isInstanceOf(TokenRefreshResult.Failure.class);
+        }
+    }
 
     @Test
     void authenticationKeepsRoleGrantsFromItsUserSnapshotDuringReload() {

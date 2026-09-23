@@ -6,6 +6,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
+import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
+import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -13,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
+public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
     private final ObjectMapper objectMapper;
     private final NativeGitRepositoryProvider gitRepositoryProvider;
 
@@ -23,6 +28,7 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
             ObjectMapper objectMapper) {
         super(
                 OrionAdminPaths.REPOSITORIES,
+                OrionHttpRouteDefinition.Authorization.AUTHENTICATED,
                 OrionHttpRouteDefinition.Method.GET,
                 OrionHttpRouteDefinition.Method.POST);
         this.gitRepositoryProvider = gitRepositoryProvider;
@@ -31,15 +37,27 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
+        SecurityContext context = context(req);
+        boolean admin = isAdmin(context);
+        if (!admin && context.getUserIdentity().getOrganizationId().isEmpty()) {
+            return OrionHttpResponse.empty(403);
+        }
         List<RepositoryResponse> repositories = new ArrayList<>();
         for (String name : gitRepositoryProvider.repositoryNames()) {
-            repositories.add(new RepositoryResponse(name));
+            if (admin || RepositoryAccessRules.read().evaluate(context, RepositoryResource.of(name)).allowed()) {
+                repositories.add(new RepositoryResponse(name));
+            }
         }
         return OrionHttpResponse.ok(Map.of("repositories", repositories));
     }
 
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
+        SecurityContext context = context(req);
+        boolean admin = isAdmin(context);
+        if (!admin && context.getUserIdentity().getOrganizationId().isEmpty()) {
+            return OrionHttpResponse.empty(403);
+        }
         AdminRepositoryRequest request = objectMapper.readValue(
                 req.getInputStream(),
                 AdminRepositoryRequest.class);
@@ -52,6 +70,10 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         } catch (IllegalArgumentException failure) {
             throw new HttpRequestValidationException("Invalid repository name");
         }
+        if (!admin && !RepositoryAccessRules.create()
+                .evaluate(context, RepositoryResource.of(repositoryName)).allowed()) {
+            return OrionHttpResponse.empty(403);
+        }
         Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
         boolean repositoryCreated = true;
         if (created instanceof Result.Failure<NativeGitRepository> failure
@@ -62,6 +84,15 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         }
         Map<String, Object> body = Map.of("status", "ok", "created", repositoryCreated);
         return repositoryCreated ? OrionHttpResponse.created(body) : OrionHttpResponse.ok(body);
+    }
+
+    private static SecurityContext context(HttpServletRequest request) {
+        Object attribute = request.getAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        return attribute instanceof SecurityContext context ? context : SecurityContext.createContext();
+    }
+
+    private static boolean isAdmin(SecurityContext context) {
+        return ApplicationAccessRules.admin().evaluate(context, ApplicationAdminResource.applicationAdmin()).allowed();
     }
 
     public record AdminRepositoryRequest(String name) {

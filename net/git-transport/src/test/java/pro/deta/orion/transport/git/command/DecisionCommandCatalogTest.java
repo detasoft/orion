@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git.command;
 
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -34,6 +35,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DecisionCommandCatalogTest {
     private static final UserIdentity REVIEWER = new InternalUserImpl("reviewer", List.of());
     private static final PrincipalAddress ACTOR = PrincipalAddress.parse("system/reviewer");
+
+    @Test
+    void usesOrganizationIdentityForListsAndAnswers() {
+        UserIdentity user = new InternalUserImpl("reviewer", List.of(),
+                Optional.of(new OrganizationId("acme")));
+        try (DecisionRegistry registry = new DecisionRegistry(4, (actor, scope) -> true)) {
+            PendingDecision own = register(registry, "acme");
+            PendingDecision system = register(registry, null);
+            assertThat(((CommandResult.Rows) dispatch(registry, "/decision ls", user)).values()).hasSize(1);
+            assertFailure(dispatch(registry, "/decision/" + system.request().id() + " show", user),
+                    CommandFailureCode.MISSING_RESOURCE);
+            assertThat(dispatch(registry, "/decision/" + own.request().id() + " resolve replace", user))
+                    .isEqualTo(new CommandResult.Message("Decision recorded"));
+            assertThat(own.result().toCompletableFuture())
+                    .isCompletedWithValue(new Decision("replace", PrincipalAddress.parse("acme/reviewer")));
+        }
+    }
 
     @Test
     void listsScopesAndShowsDescriptionAndAvailableActions() {

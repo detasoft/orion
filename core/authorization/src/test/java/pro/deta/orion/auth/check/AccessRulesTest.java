@@ -1,5 +1,7 @@
 package pro.deta.orion.auth.check;
 
+import java.util.Optional;
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -30,6 +32,36 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 
 public class AccessRulesTest {
+    @Test
+    void organizationMembershipDoesNotReplaceRepositoryGrants() {
+        SecurityContext scoped = securityContext(new InternalUserImpl("reader", List.of(),
+                Optional.of(new OrganizationId("acme"))));
+        assertThat(RepositoryAccessRules.read()
+                .evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isFalse();
+        assertThat(RepositoryAccessRules.create()
+                .evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isFalse();
+    }
+
+    @Test
+    void confinesOrganizationUsersEvenWithWildcardAndSystemGrants() {
+        AccessControl acl = ACLUtil.generateDefaultAccessControl("unused");
+        SecurityContext scoped = securityContext(new InternalUserImpl("root", acl.getGrants(),
+                Optional.of(new OrganizationId("acme"))));
+        for (AccessRule<RepositoryResource> rule : List.of(RepositoryAccessRules.read(),
+                RepositoryAccessRules.write(), RepositoryAccessRules.create(), RepositoryAccessRules.force())) {
+            assertThat(rule.evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isTrue();
+            for (String name : List.of("other/team/repo", "acme-other/team/repo", "acme/repo", "orion")) {
+                assertThat(rule.evaluate(scoped, RepositoryResource.of(name)).allowed()).as(name).isFalse();
+            }
+        }
+        assertThat(BranchAccessRules.fetch().evaluate(scoped,
+                BranchResource.of(RepositoryResource.of("other/team/repo"), "main")).allowed()).isFalse();
+        assertThat(ApplicationAccessRules.admin().evaluate(scoped,
+                ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
+        assertThat(ApplicationAccessRules.shutdown().evaluate(scoped,
+                ApplicationShutdownResource.applicationShutdown()).allowed()).isFalse();
+    }
+
     @Test
     public void matchInternalAsteriskSyntax() {
         // '*/orion', 'orion/*', '*/*', 'pre*/some'

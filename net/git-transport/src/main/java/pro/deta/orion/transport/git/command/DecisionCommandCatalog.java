@@ -69,15 +69,15 @@ public final class DecisionCommandCatalog {
         return new CommandDefinition(action, arguments, arguments, Set.of(), Set.of(),
                 context -> actor(context.securityContext()) != null,
                 invocation -> actor(invocation.context().securityContext()) == null
-                        ? AccessDecision.deny("Authenticated system user is required")
-                        : AccessDecision.allow("Authenticated system user"),
+                        ? AccessDecision.deny("Authenticated user is required")
+                        : AccessDecision.allow("Authenticated user"),
                 handler, CommandCompletion.none(), CommandQuery.none());
     }
 
     private ScopedResourceCatalogResult<UUID> candidates(CommandContext context, List<Object> parents) {
         PrincipalAddress actor = actor(context.securityContext());
         if (actor == null) {
-            return new ScopedResourceCatalogResult.AccessDenied<>("Authenticated system user is required");
+            return new ScopedResourceCatalogResult.AccessDenied<>("Authenticated user is required");
         }
         List<ScopedResourceCandidate<UUID>> candidates = new ArrayList<>();
         for (DecisionRequest request : registry.list(actor)) {
@@ -149,7 +149,12 @@ public final class DecisionCommandCatalog {
             return null;
         }
         try {
-            return new PrincipalAddress.SystemPrincipalAddress(new UserId(identity.getUserId()));
+            UserId userId = new UserId(identity.getUserId());
+            if (identity.getOrganizationId().isPresent()) {
+                return new PrincipalAddress.OrganizationPrincipalAddress(
+                        identity.getOrganizationId().orElseThrow(), userId);
+            }
+            return new PrincipalAddress.SystemPrincipalAddress(userId);
         } catch (IllegalArgumentException exception) {
             return null;
         }

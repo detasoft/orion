@@ -2,8 +2,10 @@ package pro.deta.orion.auth;
 
 import lombok.ToString;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.OrganizationId;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Objects;
 
 /**
@@ -21,6 +23,11 @@ public class SecurityContext {
         @Override
         public String getUserId() {
             return "";
+        }
+
+        @Override
+        public Optional<OrganizationId> getOrganizationId() {
+            return Optional.empty();
         }
 
         @Override

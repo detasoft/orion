@@ -1,5 +1,6 @@
 package pro.deta.orion.command;
 
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
@@ -184,6 +185,11 @@ class CommandModelTest {
             @Override
             public String getUserId() {
                 return "operator";
+            }
+
+            @Override
+            public Optional<OrganizationId> getOrganizationId() {
+                return Optional.empty();
             }
 
             @Override

@@ -28,6 +28,23 @@ class DecisionRegistryTest {
     private static final PrincipalAddress BOB = PrincipalAddress.parse("acme/bob");
 
     @Test
+    void organizationBoundaryCannotBeBypassedByPermissiveAuthorization() {
+        try (DecisionRegistry registry = new DecisionRegistry(4, (actor, scope) -> true)) {
+            PrincipalAddress actor = PrincipalAddress.parse("acme/root");
+            PendingDecision own = register(registry, "acme/team/repo");
+            PendingDecision other = register(registry, "other/team/repo");
+            PendingDecision system = register(registry, null);
+            assertThat(registry.list(actor)).containsExactly(own.request());
+            for (PendingDecision hidden : List.of(other, system)) {
+                assertThat(registry.find(hidden.request().id(), actor)).isEmpty();
+                assertThat(registry.decide(hidden.request().id(), new Decision("accept", actor)).isFailure()).isTrue();
+                assertThat(hidden.result().toCompletableFuture()).isNotDone();
+            }
+            assertThat(registry.decide(own.request().id(), new Decision("accept", actor)).isFailure()).isFalse();
+        }
+    }
+
+    @Test
     void registersListsAndResolvesRequest() throws Exception {
         try (DecisionRegistry registry = registry(2)) {
             PendingDecision first = register(registry, null);

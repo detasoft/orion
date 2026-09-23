@@ -82,6 +82,9 @@ public final class SshCredentialCommandCatalog {
         if (!decision.allowed()) {
             return decision;
         }
+        if (context.getUserIdentity().getOrganizationId().isPresent()) {
+            return AccessDecision.deny("system identity is required for system SSH credentials");
+        }
         return context.getUserIdentity().getUserId().isBlank()
                 ? AccessDecision.deny("named user is required")
                 : decision;

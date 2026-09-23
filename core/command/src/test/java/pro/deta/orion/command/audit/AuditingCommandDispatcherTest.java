@@ -1,5 +1,7 @@
 package pro.deta.orion.command.audit;
 
+import java.util.Optional;
+import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
@@ -242,6 +244,11 @@ class AuditingCommandDispatcherTest {
             @Override
             public String getUserId() {
                 return userId;
+            }
+
+            @Override
+            public Optional<OrganizationId> getOrganizationId() {
+                return Optional.empty();
             }
 
             @Override

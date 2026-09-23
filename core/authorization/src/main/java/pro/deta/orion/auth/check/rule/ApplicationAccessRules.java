@@ -29,6 +29,9 @@ public final class ApplicationAccessRules {
     }
 
     private static AccessDecision evaluateShutdown(SecurityContext securityContext, ApplicationShutdownResource resource) {
+        if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
+            return AccessDecision.deny("system identity is required");
+        }
         boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
         if (allowed) {
             return AccessDecision.allow("shutdown grant matched");
@@ -37,6 +40,9 @@ public final class ApplicationAccessRules {
     }
 
     private static AccessDecision evaluateAdmin(SecurityContext securityContext, ApplicationAdminResource resource) {
+        if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
+            return AccessDecision.deny("system identity is required");
+        }
         boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(AccessControl.GrantKey.ADMIN));
         if (allowed) {
             return AccessDecision.allow("admin grant matched");

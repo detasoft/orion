@@ -1,6 +1,7 @@
 package pro.deta.orion.auth.check.rule;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.RepositoryAddress;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.AccessDecision;
@@ -37,8 +38,23 @@ public final class RepositoryAccessRules {
         return FORCE;
     }
 
+    private static boolean withinOrganization(UserIdentity identity, RepositoryResource resource) {
+        if (identity.getOrganizationId().isEmpty()) {
+            return true;
+        }
+        try {
+            return identity.getOrganizationId().orElseThrow().equals(
+                    RepositoryAddress.parse(resource.repositoryName()).organizationId());
+        } catch (IllegalArgumentException invalidAddress) {
+            return false;
+        }
+    }
+
     private static AccessDecision evaluateCreate(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
+        if (!withinOrganization(userIdentity, resource)) {
+            return AccessDecision.deny("repository belongs to another scope");
+        }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
@@ -51,6 +67,9 @@ public final class RepositoryAccessRules {
 
     private static AccessDecision evaluateRead(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
+        if (!withinOrganization(userIdentity, resource)) {
+            return AccessDecision.deny("repository belongs to another scope");
+        }
         boolean allowed = GrantAccess.hasGrant(userIdentity, GrantAccess.repositoryGrant(resource.repositoryName()));
         if (allowed) {
             return AccessDecision.allow("repository grant matched");
@@ -60,6 +79,9 @@ public final class RepositoryAccessRules {
 
     private static AccessDecision evaluateWrite(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
+        if (!withinOrganization(userIdentity, resource)) {
+            return AccessDecision.deny("repository belongs to another scope");
+        }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
@@ -72,6 +94,9 @@ public final class RepositoryAccessRules {
 
     private static AccessDecision evaluateForce(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
+        if (!withinOrganization(userIdentity, resource)) {
+            return AccessDecision.deny("repository belongs to another scope");
+        }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),

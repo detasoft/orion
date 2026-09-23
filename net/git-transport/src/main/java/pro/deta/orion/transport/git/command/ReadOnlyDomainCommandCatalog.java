@@ -404,6 +404,13 @@ public final class ReadOnlyDomainCommandCatalog {
         OperatorQueryResult.AvailableSnapshot<OperatorDomainViews.OrganizationView> available =
                 (OperatorQueryResult.AvailableSnapshot<OperatorDomainViews.OrganizationView>) result;
         for (OperatorDomainViews.OrganizationView organization : available.value()) {
+            if (security.getUserIdentity().getOrganizationId().isPresent()) {
+                boolean own = security.getUserIdentity().getOrganizationId().orElseThrow().value()
+                        .equals(organization.id());
+                candidates.add(new ScopedResourceCandidate<>(organization.id(), organization.name(),
+                        organization, decision(own, "organization access")));
+                continue;
+            }
             if (admin) {
                 candidates.add(new ScopedResourceCandidate<>(
                         organization.id(),
@@ -490,7 +497,8 @@ public final class ReadOnlyDomainCommandCatalog {
         }
         return candidates(source.sessions(), session -> {
             boolean allowed = isAdmin(context.securityContext())
-                    || session.ownerId().equals(userId)
+                    || context.securityContext().getUserIdentity().getOrganizationId().isEmpty()
+                            && session.ownerId().equals(userId)
                     || session.repositoryName()
                             .filter(name -> canRead(context.securityContext(), name))
                             .isPresent();
