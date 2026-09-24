@@ -6,6 +6,7 @@ import dagger.Component;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -18,6 +19,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
@@ -26,6 +28,7 @@ import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.OrionTransportModule;
 
 import java.util.List;
+import java.util.Optional;
 
 @Singleton
 @Component(modules = {OrionRuntimeModule.class, OrionTransportModule.class})
@@ -51,6 +54,8 @@ public interface OrionComponent {
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
+        @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
+        @BindsInstance Builder initialConfiguration(Optional<AccessControlSnapshot> snapshot);
         @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
@@ -69,6 +74,8 @@ public interface OrionComponent {
                     .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                    .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
+                    .initialConfiguration(Optional.empty())
                     .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                     .tlsCapability(TlsCapability.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())

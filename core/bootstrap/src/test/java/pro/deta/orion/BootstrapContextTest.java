@@ -16,9 +16,13 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitFile;
+import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -32,11 +36,17 @@ import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
@@ -50,6 +60,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
@@ -87,12 +100,93 @@ class BootstrapContextTest {
             assertThat(configurationRepository).isEqualTo("orion");
             assertThat(materialRepository).isEqualTo(configurationRepository);
             assertThat(context.repositoryProvider().repositoryNames()).containsExactly("orion");
+            assertThat(context.initialConfiguration().orElseThrow().version())
+                    .contains(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                            .revision().orElseThrow());
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
             assertThat(context.acmeKeyMaterial()).isNotNull();
             assertThat(context.tlsKeyMaterial()).isNotNull();
             assertThat(context.sshHostKeys().descriptors())
                     .extracting(descriptor -> descriptor.alias().value())
                     .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"configuration", "material"})
+    void joinsBothBootstrapInputsAndPinsTheConfigurationCommitWhenTheRefMoves(String delayedInput)
+            throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration, Map.of(
+                "orion.xml", GitFile.regular(bytes("first configuration")),
+                "material.p12", GitFile.regular(materialBytes(configuration))));
+        NativeGitRepository repository = backend.find("orion").valueOrFailure("seeded repository");
+        String firstCommit = repository.refs().get("refs/heads/main");
+        CountDownLatch bothInputsEntered = new CountDownLatch(2);
+        CountDownLatch firstInputFinished = new CountDownLatch(1);
+        AtomicInteger configurationReads = new AtomicInteger();
+        AtomicInteger materialReads = new AtomicInteger();
+        NativeGitRepository observed = new NativeGitRepository(
+                "orion", repository.storage(), "refs/heads/main") {
+            @Override
+            public GitRepositoryFileSnapshot loadFiles(String ref, List<String> paths)
+                    throws GitOperationException {
+                String input = paths.equals(List.of("orion.xml")) ? "configuration" : "material";
+                AtomicInteger reads = "configuration".equals(input) ? configurationReads : materialReads;
+                int read = reads.incrementAndGet();
+                if (read == 2) {
+                    bothInputsEntered.countDown();
+                    await(bothInputsEntered);
+                    if (input.equals(delayedInput)) {
+                        await(firstInputFinished);
+                    }
+                }
+                GitRepositoryFileSnapshot snapshot = repository.loadFiles(ref, paths);
+                if (read == 2) {
+                    if ("configuration".equals(input)) {
+                        repository.saveFiles(ref,
+                                Map.of("orion.xml", GitFile.regular(bytes("later configuration"))), Set.of(),
+                                "advance configuration after pinned read", GitCommitAuthor.EMPTY);
+                    }
+                    firstInputFinished.countDown();
+                }
+                return snapshot;
+            }
+        };
+        NativeGitRepositoryProvider observedBackend = new NativeGitRepositoryProvider() {
+            @Override
+            public boolean exists(String name) {
+                return backend.exists(name);
+            }
+
+            @Override
+            public Result<NativeGitRepository> find(String name) {
+                return backend.exists(name) ? new Result.Success<>(observed) : backend.find(name);
+            }
+
+            @Override
+            public Result<NativeGitRepository> create(String name) {
+                return backend.create(name);
+            }
+        };
+
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, observedBackend)) {
+            AccessControlSnapshot pinned = context.initialConfiguration().orElseThrow();
+            assertThat(pinned.version()).contains(firstCommit);
+            assertThat(pinned.files().get("orion.xml")).isEqualTo(bytes("first configuration"));
+            assertThat(repository.refs().get("refs/heads/main")).isNotEqualTo(firstCommit);
+            assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Bootstrap inputs did not overlap");
+            }
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while loading bootstrap inputs", error);
         }
     }
 
@@ -587,12 +681,12 @@ class BootstrapContextTest {
     }
 
     @Test
-    void retriesAgainstANewerRevisionAndPreservesConcurrentFileEdits() throws Exception {
+    void defersAdoptionOfANewerRevisionAndPreservesConcurrentFileEdits() throws Exception {
         exerciseAdoptionSave(AdoptionStorage.Mode.CONCURRENT_EDIT, true);
     }
 
     @Test
-    void boundsAdoptionRetriesWhenTheConfigurationKeepsChanging() throws Exception {
+    void stopsAdoptionWhenTheConfigurationRevisionChanges() throws Exception {
         exerciseAdoptionSave(AdoptionStorage.Mode.REPEATED_CONFLICT, false);
     }
 
@@ -616,16 +710,26 @@ class BootstrapContextTest {
         storage.mode = mode;
         try (var ignored = upstream.git();
              BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
-            if (success) {
-                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
-                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
-                assertThat(storage.saves).isEqualTo(mode == AdoptionStorage.Mode.CONCURRENT_EDIT ? 2 : 1);
+            OrionDesiredState.Snapshot approved = approved(storage);
+            if (mode == AdoptionStorage.Mode.CONCURRENT_WINNER
+                    || mode == AdoptionStorage.Mode.LOST_RESPONSE
+                    || mode == AdoptionStorage.Mode.CONCURRENT_EDIT
+                    || mode == AdoptionStorage.Mode.REPEATED_CONFLICT) {
+                assertThat(adoptApproved(context, storage, approved)).isEmpty();
+                assertThat(storage.saves).isEqualTo(1);
                 if (mode == AdoptionStorage.Mode.CONCURRENT_EDIT) {
                     assertThat(storage.files.get("concurrent.xml")).isEqualTo(xml());
                 }
+                storage.mode = AdoptionStorage.Mode.NORMAL;
+                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
+                assertThat(storage.saves).isEqualTo(mode == AdoptionStorage.Mode.CONCURRENT_EDIT
+                        || mode == AdoptionStorage.Mode.REPEATED_CONFLICT ? 2 : 1);
+            } else if (success) {
+                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
+                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
+                assertThat(storage.saves).isEqualTo(1);
             } else {
                 String message = switch (mode) {
-                    case REPEATED_CONFLICT -> "kept changing";
                     case UNVERSIONED -> "requires a configuration revision";
                     case INVALID_SECONDARY -> "Cannot validate proxy configuration";
                     default -> "save failed";
@@ -636,7 +740,6 @@ class BootstrapContextTest {
                         .system().proxies()).isEmpty();
                 int expectedSaves = switch (mode) {
                     case UNVERSIONED, INVALID_SECONDARY -> 0;
-                    case REPEATED_CONFLICT -> 3;
                     default -> 1;
                 };
                 assertThat(storage.saves).isEqualTo(expectedSaves);
@@ -746,6 +849,128 @@ class BootstrapContextTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"invalid-xml", "missing-primary", "deleted-ref"})
+    void activatesPinnedSnapshotWhenHeadBecomesInvalid(String change) throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration, Map.of(
+                "orion.xml", GitFile.regular(xml()),
+                "material.p12", GitFile.regular(materialBytes(configuration))));
+        NativeGitRepository repository = backend.find("orion").valueOrFailure("configuration repository");
+
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            String approvedCommit = context.initialConfiguration().orElseThrow().version().orElseThrow();
+            switch (change) {
+                case "invalid-xml" -> repository.saveFiles("refs/heads/main",
+                        Map.of("orion.xml", GitFile.regular(bytes("<not-valid-xml"))), Set.of(),
+                        "invalid update after bootstrap input load", GitCommitAuthor.EMPTY);
+                case "missing-primary" -> repository.saveFiles("refs/heads/main", Map.of(), Set.of("orion.xml"),
+                        "remove primary configuration after bootstrap input load", GitCommitAuthor.EMPTY);
+                case "deleted-ref" -> assertThat(repository.publishRefs(List.of(RefUpdate.fromWire(
+                        "refs/heads/main", repository.refs().get("refs/heads/main"), "0".repeat(40))), true))
+                        .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
+                default -> throw new AssertionError(change);
+            }
+            String invalidCommit = repository.refs().get("refs/heads/main");
+            assertThat(invalidCommit).isNotEqualTo(approvedCommit);
+
+            OrionComponent component = runtimeComponent(configuration, context);
+            var lifecycle = component.orionApplicationLifecycle();
+            try {
+                assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                assertThat(component.orionAccessControlService().isRunning()).isTrue();
+                assertThat(repository.refs().get("refs/heads/main")).isEqualTo(invalidCommit);
+            } finally {
+                lifecycle.shutdownApplication();
+            }
+        }
+    }
+
+    @Test
+    void catchesUpToAValidConfigurationCommitAfterThePinnedBootstrapRead() throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration, Map.of(
+                "orion.xml", GitFile.regular(xml()),
+                "material.p12", GitFile.regular(materialBytes(configuration))));
+        NativeGitRepository repository = backend.find("orion").valueOrFailure("configuration repository");
+
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            AccessControlDraft draft = new AccessControlDraft();
+            draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            OrionXml.write(OrionDocument.withAccessControl(draft.toAccessControl()), output);
+            repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
+                    Set.of(), "valid update after bootstrap input load", GitCommitAuthor.EMPTY);
+
+            OrionComponent component = runtimeComponent(configuration, context);
+            var lifecycle = component.orionApplicationLifecycle();
+            try {
+                assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                assertThat(component.orionAccessControlService().userExists("later-user")).isTrue();
+            } finally {
+                lifecycle.shutdownApplication();
+            }
+        }
+    }
+
+    @Test
+    void remoteBootstrapKeepsPinnedAThroughInvalidBThenActivatesValidC() throws Exception {
+        OrionConfiguration configuration = configuration();
+        Upstream unrelatedUpstream = upstream("unrelated-proxy", Map.of("README", bytes("unrelated")));
+        GitProxyBinding unrelated = new GitProxyBinding(new RemoteAlias("unrelated"),
+                unrelatedUpstream.bare().toUri(), "main", GitCredentialKind.NONE,
+                Optional.empty(), Optional.empty(), Set.of());
+        OrionDocument first = new OrionDocument(new OrionDocument.SystemConfiguration(
+                new AccessControl(), Optional.empty(), List.of(), List.of(unrelated)), List.of());
+        ByteArrayOutputStream firstXml = new ByteArrayOutputStream();
+        OrionXml.write(first, firstXml);
+        Upstream upstream = upstream("deferred-bootstrap", Map.of(
+                "orion.xml", firstXml.toByteArray(), "material.p12", materialBytes(configuration)));
+        String location = "git+" + upstream.bare().toUri();
+        configuration.getBootstrap().getAccessControl().setLocation(location);
+        configuration.getBootstrap().getKeyMaterial().setLocation(location);
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+
+        try (Git ignored = upstream.git();
+             Git ignoredUnrelated = unrelatedUpstream.git();
+             BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                    .repositoryName().orElseThrow();
+            NativeGitRepository source = context.repositoryProvider().openForWrite(cache)
+                    .valueOrFailure("remote configuration source");
+            source.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(bytes("<not-valid-xml"))),
+                    Set.of(), "invalid B after pinning A", GitCommitAuthor.EMPTY);
+            String invalidB = source.refs().get("refs/heads/main");
+
+            OrionComponent component = runtimeComponent(configuration, context);
+            var lifecycle = component.orionApplicationLifecycle();
+            try {
+                assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
+                assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
+
+                assertThat(context.repositoryProvider().retry(
+                        unrelated.alias(), () -> first, component.configurationSecrets()).isFailure()).isFalse();
+                assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
+
+                AccessControlDraft draft = new AccessControlDraft();
+                draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
+                        draft.toAccessControl(), Optional.empty(), List.of(), List.of(unrelated)), List.of());
+                OrionXml.write(valid, output);
+                source.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
+                        Set.of(), "valid C after invalid B", GitCommitAuthor.EMPTY);
+                String validC = source.refs().get("refs/heads/main");
+                assertThat(validC).isNotEqualTo(invalidB);
+                assertThat(component.orionAccessControlService().userExists("later-user")).isTrue();
+                assertThat(source.refs().get("refs/heads/main")).isEqualTo(validC);
+            } finally {
+                lifecycle.shutdownApplication();
+            }
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void runtimeKeepsAPlainConfigurationDirectoryUsable(boolean remoteMaterial) throws Exception {
         OrionConfiguration configuration = configuration();
@@ -805,7 +1030,24 @@ class BootstrapContextTest {
     }
 
     private static OrionDocument adopt(BootstrapContext context, AccessControlStorage storage) {
-        return BootstrapContext.adoptProxies(storage, context.repositoryProvider(), context.configurationCipher());
+        return adoptApproved(context, storage, approved(storage)).orElseThrow();
+    }
+
+    private static Optional<OrionDocument> adoptApproved(BootstrapContext context, AccessControlStorage storage,
+            OrionDesiredState.Snapshot approved) {
+        return BootstrapContext.adoptProxies(
+                storage, context.repositoryProvider(), context.configurationCipher(), approved);
+    }
+
+    private static OrionDesiredState.Snapshot approved(AccessControlStorage storage) {
+        AccessControlSnapshot snapshot = storage.load().valueOrFailure("configuration for adoption");
+        try {
+            OrionDocument document = OrionXml.read(new ByteArrayInputStream(
+                    snapshot.files().get(storage.primaryPath())));
+            return new OrionDesiredState.Snapshot(document, snapshot.version());
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException("Cannot parse approved configuration", failure);
+        }
     }
 
     private static OrionComponent runtimeComponent(
@@ -815,6 +1057,8 @@ class BootstrapContextTest {
                 .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
+                .configurationMaterialCapability(context.configurationMaterial())
+                .initialConfiguration(context.initialConfiguration())
                 .tlsCapability(context.tlsKeyMaterial())
                 .sshHostKeyCapability(context.sshHostKeys())
                 .configurationCipherCapability(context.configurationCipher())

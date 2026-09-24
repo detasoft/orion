@@ -73,9 +73,12 @@ public class OrionRuntimeModule {
             BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
         return () -> {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
-            BootstrapContext.adoptProxies(storage, provider, cipher);
-            acl.reload("bootstrap proxy adoption");
-            provider.activate(() -> desiredState.current().document(), secrets);
+            Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
+                    storage, provider, cipher, desiredState.current());
+            if (adopted.isPresent() && !adopted.orElseThrow().equals(desiredState.current().document())) {
+                acl.reload("bootstrap proxy adoption");
+            }
+            provider.activate(() -> desiredState.current().document(), secrets, adopted.isEmpty());
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             for (Map.Entry<GitProxyBinding, GitProxyBinding> change
                     : provider.bootstrapChanges(snapshot.document()).entrySet()) {

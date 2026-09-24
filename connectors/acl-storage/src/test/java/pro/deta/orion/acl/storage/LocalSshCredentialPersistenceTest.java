@@ -96,6 +96,10 @@ class LocalSshCredentialPersistenceTest {
     ) {
         return new OrionAccessControlServiceImpl(new LocalAccessControlStorage(configuration),
                 new OrionPasswordHashingService(), new OrionProvider(() -> null, () -> events, () -> null),
-                OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(), new OrionDesiredState());
+                OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(), new OrionDesiredState(),
+                new pro.deta.orion.schema.config.OrionConfiguration(),
+                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                java.util.Optional.empty());
     }
 }

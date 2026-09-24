@@ -24,6 +24,10 @@ public final class OrionDesiredState {
         return snapshot;
     }
 
+    public boolean isPublished() {
+        return current.get() != null;
+    }
+
     public void publish(OrionDocument document, Optional<String> revision) {
         current.set(new Snapshot(document, revision));
     }

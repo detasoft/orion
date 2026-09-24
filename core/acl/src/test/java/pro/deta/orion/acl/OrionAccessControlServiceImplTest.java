@@ -40,10 +40,20 @@ import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationSecretContext;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
+import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
@@ -104,7 +114,8 @@ class OrionAccessControlServiceImplTest {
                 List.of("acme/reader"), List.of());
         desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null, null,
-                testServerIdentity(), desired);
+                testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
+                Optional.empty());
         TokenIssueResult issued = service.issueOrganizationToken(organization, "alice", issuer, "alice", 60);
         assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
         byte[] token = ((TokenIssueResult.Success) issued).token().getBytes(StandardCharsets.UTF_8);
@@ -222,7 +233,7 @@ class OrionAccessControlServiceImplTest {
             var result = fixture.service.updatePrimaryConfiguration("version-one", document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
-                            "credential", "opaque-envelope")), document.system().proxies()), document.organizations()),
+                            "credential", testEnvelope())), document.system().proxies()), document.organizations()),
                     new AccessControlSaveRequest("update proxy", null));
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
@@ -274,7 +285,7 @@ class OrionAccessControlServiceImplTest {
                 provider,
                 OrionRuntimeOptions.defaults(),
                 testServerIdentity(),
-                desiredState);
+                desiredState, new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
         eventManager.onStart();
         service.onStart();
         try {
@@ -292,6 +303,109 @@ class OrionAccessControlServiceImplTest {
                     Map.of(ACL_PATH, "not xml".getBytes(StandardCharsets.UTF_8)),
                     Optional.of("broken-version"));
             eventManager.publishAndWait(new RequestToAclUpdate("malformed desired state"));
+
+            assertThat(desiredState.current()).isSameAs(lastValid);
+        } finally {
+            service.onStop();
+            eventManager.onStop();
+        }
+    }
+
+    @Test
+    void missingHttpsMaterialRetainsTheLastPublishedDocumentAndAcl() throws Exception {
+        AccessControl initialAcl = new AccessControl();
+        OrionDocument initial = OrionDocument.withAccessControl(initialAcl);
+        InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
+                Map.of(ACL_PATH, serialize(initial)), Optional.of("valid-commit")));
+        OrionDesiredState desiredState = new OrionDesiredState();
+        OrionEventManager eventManager = new OrionEventManager();
+        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(),
+                ConfigurationMaterialCapability.unavailable(), Optional.empty());
+        eventManager.onStart();
+        service.onStart();
+        try {
+            OrionDesiredState.Snapshot lastValid = desiredState.current();
+            OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "localhost", 8443,
+                    URI.create("https://localhost:8443"),
+                    Optional.of(new OrionMaterialReference("missing-identity", 1)), Optional.empty(),
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
+            OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
+                    initialAcl, Optional.of(https), List.of(), List.of()), List.of());
+            storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
+                    Optional.of("invalid-commit"));
+
+            eventManager.publishAndWait(new RequestToAclUpdate("missing material"));
+
+            assertThat(desiredState.current()).isSameAs(lastValid);
+            assertThat(service.isRunning()).isTrue();
+        } finally {
+            service.onStop();
+            eventManager.onStop();
+        }
+    }
+
+    @Test
+    void changedConfigurationPublishesItsRevisionWithoutReloadingUnchangedAcl() throws Exception {
+        AccessControl acl = new AccessControl();
+        OrionDocument initial = OrionDocument.withAccessControl(acl);
+        InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
+                Map.of(ACL_PATH, serialize(initial)), Optional.of("first-commit")));
+        OrionDesiredState desiredState = new OrionDesiredState();
+        OrionEventManager eventManager = new OrionEventManager();
+        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(), testMaterial(),
+                Optional.empty());
+        eventManager.onStart();
+        service.onStart();
+        try {
+            AccessControl publishedAcl = desiredState.current().document().system().accessControl();
+            OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 8443,
+                    URI.create("https://localhost:8443"), Optional.empty(), Optional.empty(),
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
+            OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
+                    acl, Optional.of(https), List.of(), List.of()), List.of());
+            storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(changed)),
+                    Optional.of("second-commit"));
+
+            eventManager.publishAndWait(new RequestToAclUpdate("configuration changed"));
+
+            assertThat(desiredState.current().revision()).contains("second-commit");
+            assertThat(desiredState.current().document().system().https()).contains(https);
+            assertThat(desiredState.current().document().system().accessControl()).isSameAs(publishedAcl);
+        } finally {
+            service.onStop();
+            eventManager.onStop();
+        }
+    }
+
+    @Test
+    void invalidSecretEnvelopeRetainsTheLastPublishedSnapshot() throws Exception {
+        OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
+        InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
+                Map.of(ACL_PATH, serialize(initial)), Optional.of("valid-commit")));
+        OrionDesiredState desiredState = new OrionDesiredState();
+        OrionEventManager eventManager = new OrionEventManager();
+        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(), testMaterial(),
+                Optional.empty());
+        eventManager.onStart();
+        service.onStart();
+        try {
+            OrionDesiredState.Snapshot lastValid = desiredState.current();
+            OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
+                    new AccessControl(), Optional.empty(),
+                    List.of(new ConfigurationSecret("invalid", "not-an-envelope")), List.of()), List.of());
+            storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
+                    Optional.of("invalid-commit"));
+
+            eventManager.publishAndWait(new RequestToAclUpdate("invalid secret"));
 
             assertThat(desiredState.current()).isSameAs(lastValid);
         } finally {
@@ -731,7 +845,8 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage, new OrionPasswordHashingService(), provider, new OrionRuntimeOptions(resetRoot),
-                testServerIdentity(), desired);
+                testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
+                Optional.empty());
         PrintStream originalOut = System.out;
         events.onStart();
         try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
@@ -746,7 +861,8 @@ class OrionAccessControlServiceImplTest {
             byte[] beforeRestart = persisted.get().files().get(ACL_PATH);
             OrionAccessControlServiceImpl restarted = new OrionAccessControlServiceImpl(
                     storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
-                    testServerIdentity(), desired);
+                    testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
+                    Optional.empty());
             try {
                 restarted.onStart();
                 assertThat(persisted.get().files().get(ACL_PATH)).isEqualTo(beforeRestart);
@@ -790,7 +906,7 @@ class OrionAccessControlServiceImplTest {
                 provider,
                 runtimeOptions,
                 testServerIdentity(),
-                new OrionDesiredState());
+                new OrionDesiredState(), new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         eventManager.onStart();
@@ -881,7 +997,7 @@ class OrionAccessControlServiceImplTest {
                 provider,
                 OrionRuntimeOptions.defaults(),
                 serverIdentity,
-                new OrionDesiredState());
+                new OrionDesiredState(), new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
         eventManager.onStart();
         service.onStart();
         return new ServiceFixture(service, storage, eventManager);
@@ -984,6 +1100,48 @@ class OrionAccessControlServiceImplTest {
 
     private static ServerIdentityCapability testServerIdentity() {
         return testServerIdentity(List.of());
+    }
+
+    private static String testEnvelope() {
+        try {
+            return new ConfigurationSecretEnvelopeCodec().serialize(new ConfigurationSecretEnvelope(1,
+                    new KeyMaterialAlias("configuration-v1"), new KeyMaterialVersion(1),
+                    ConfigurationSecretEnvelopeCodec.AES_WRAP, ConfigurationSecretEnvelopeCodec.AES_GCM,
+                    ConfigurationSecretEnvelopeCodec.BASE64_URL, new byte[]{1}, new byte[]{2}, new byte[]{3}));
+        } catch (Exception failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static ConfigurationCipherCapability testCipher() {
+        return new ConfigurationCipherCapability() {
+            @Override
+            public KeyMaterialDescriptor descriptor() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context) {
+                return new byte[]{'x'};
+            }
+        };
+    }
+
+    private static ConfigurationMaterialCapability testMaterial() {
+        return new ConfigurationMaterialCapability() {
+            @Override
+            public void require(KeyMaterialDescriptor descriptor) {
+            }
+
+            @Override
+            public void require(TrustedCertificateDescriptor descriptor) {
+            }
+        };
     }
 
     private static ServerIdentityCapability testServerIdentity(List<PublicKey> publicKeys) {

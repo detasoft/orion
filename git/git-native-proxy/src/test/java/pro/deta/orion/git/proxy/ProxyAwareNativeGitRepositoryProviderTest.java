@@ -555,6 +555,24 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void retryPreservesADeferredInternalBootstrapSource() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
+        String source = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        OrionDocument document = proxyDocument("unrelated", "file:///other.git");
+
+        provider.activate(() -> document, secrets(document), true);
+        assertThat(provider.openForRead(source)).isInstanceOf(Result.Success.class);
+
+        provider.retry(new RemoteAlias("unrelated"), () -> document, secrets(document));
+
+        assertThat(provider.openForRead(source)).isInstanceOf(Result.Success.class);
+        provider.activate(() -> document, secrets(document), true);
+        assertThat(provider.openForRead(source)).isInstanceOf(Result.Success.class);
+        assertThat(provider.repositoryNames()).doesNotContain(source);
+        assertThat(provider.isPublicRepositoryName(source)).isFalse();
+    }
+
+    @Test
     void removingAnAdoptedBindingMakesItsCacheUnavailable() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, new AtomicInteger());

@@ -78,6 +78,8 @@ public class App {
                         .runtimeOptions(options.runtimeOptions())
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
+                        .configurationMaterialCapability(bootstrap.configurationMaterial())
+                        .initialConfiguration(bootstrap.initialConfiguration())
                         .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
                         .sshHostKeyCapability(bootstrap.sshHostKeys())

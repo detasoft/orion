@@ -33,6 +33,8 @@ final class RemoteBootstrapTestSupport {
                 .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
+                .configurationMaterialCapability(context.configurationMaterial())
+                .initialConfiguration(context.initialConfiguration())
                 .tlsCapability(context.tlsKeyMaterial())
                 .sshHostKeyCapability(context.sshHostKeys())
                 .configurationCipherCapability(context.configurationCipher())

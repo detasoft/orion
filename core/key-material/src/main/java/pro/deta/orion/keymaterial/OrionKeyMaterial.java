@@ -88,6 +88,22 @@ public final class OrionKeyMaterial implements AutoCloseable {
         return tls;
     }
 
+    public ConfigurationMaterialCapability configurationMaterial() {
+        return new ConfigurationMaterialCapability() {
+            @Override
+            public void require(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+                requireOwnerScope(descriptor.scope());
+                owner.validateExisting(descriptor);
+            }
+
+            @Override
+            public void require(TrustedCertificateDescriptor descriptor) throws GeneralSecurityException {
+                requireOwnerScope(descriptor.scope());
+                owner.validateExisting(descriptor);
+            }
+        };
+    }
+
     public ConfigurationCipherCapability configurationCipher() {
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES,

@@ -493,7 +493,9 @@ class OrionAdminProxyMutationTest {
                         new SigningMaterialSet(signing, List.of()), 2048, true);
             }
             acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(), null,
-                    OrionRuntimeOptions.defaults(), material.serverIdentity(), desired);
+                    OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
+                    new pro.deta.orion.schema.config.OrionConfiguration(),
+                    material.configurationCipher(), material.configurationMaterial(), java.util.Optional.empty());
             acl.reload("fixture");
             secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
             provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),

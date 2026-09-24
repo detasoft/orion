@@ -4,8 +4,10 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -15,6 +17,7 @@ import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
@@ -30,6 +33,7 @@ import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -44,6 +48,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class BootstrapContext implements AutoCloseable {
     private static final String FAILURE_MESSAGE = "Bootstrap inputs are unavailable or invalid";
@@ -52,16 +61,19 @@ public final class BootstrapContext implements AutoCloseable {
     private final BootstrapRepositorySources repositorySources;
     private final OrionKeyMaterial keyMaterial;
     private final SshHostKeyCapability sshHostKeys;
+    private final Optional<AccessControlSnapshot> initialConfiguration;
 
     private BootstrapContext(
             ProxyAwareNativeGitRepositoryProvider repositoryProvider,
             BootstrapRepositorySources repositorySources,
             OrionKeyMaterial keyMaterial,
-            SshHostKeyCapability sshHostKeys) {
+            SshHostKeyCapability sshHostKeys,
+            Optional<AccessControlSnapshot> initialConfiguration) {
         this.repositoryProvider = repositoryProvider;
         this.repositorySources = repositorySources;
         this.keyMaterial = keyMaterial;
         this.sshHostKeys = sshHostKeys;
+        this.initialConfiguration = initialConfiguration;
     }
 
     public static BootstrapContext open(
@@ -121,18 +133,36 @@ public final class BootstrapContext implements AutoCloseable {
                     BootstrapRepositorySources.MATERIAL,
                     configuredMaterial,
                     createIfMissing);
-            keyMaterial = openKeyMaterial(
-                    configuration,
-                    environment,
-                    provider,
-                    materialSource,
-                    createIfMissing);
+            BootstrapRepositorySources sources = new BootstrapRepositorySources(
+                    List.of(configurationSource, materialSource));
+            Optional<AccessControlSnapshot> initialConfiguration;
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                ResolvedBootstrapSource selectedMaterial = materialSource;
+                CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return openKeyMaterial(configuration, environment, provider, selectedMaterial,
+                                createIfMissing);
+                    } catch (IOException | GeneralSecurityException error) {
+                        throw new CompletionException(error);
+                    }
+                }, executor);
+                try {
+                    initialConfiguration = loadInitialConfiguration(sources, provider);
+                    keyMaterial = awaitMaterial(materialInput);
+                } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                    materialInput.handle((opened, error) -> {
+                        if (opened != null) {
+                            opened.close();
+                        }
+                        return null;
+                    }).join();
+                    throw failure;
+                }
+            }
             SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
                     keyMaterial.sshHostKeyMaterial(),
                     sshHostKeyReferences(configuration));
-            BootstrapRepositorySources sources = new BootstrapRepositorySources(
-                    List.of(configurationSource, materialSource));
-            return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys);
+            return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys, initialConfiguration);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             if (keyMaterial != null) {
                 keyMaterial.close();
@@ -149,12 +179,62 @@ public final class BootstrapContext implements AutoCloseable {
         return repositorySources;
     }
 
-    public static OrionDocument adoptProxies(AccessControlStorage storage,
-            ProxyAwareNativeGitRepositoryProvider repositoryProvider, ConfigurationCipherCapability cipher) {
+    public Optional<AccessControlSnapshot> initialConfiguration() {
+        return initialConfiguration;
+    }
+
+    private static OrionKeyMaterial awaitMaterial(CompletableFuture<OrionKeyMaterial> materialInput)
+            throws IOException, GeneralSecurityException {
+        try {
+            return materialInput.join();
+        } catch (CompletionException failure) {
+            Throwable cause = failure.getCause();
+            while (cause instanceof CompletionException nested) {
+                cause = nested.getCause();
+            }
+            if (cause instanceof IOException error) {
+                throw error;
+            }
+            if (cause instanceof GeneralSecurityException error) {
+                throw error;
+            }
+            if (cause instanceof RuntimeException error) {
+                throw error;
+            }
+            throw failure;
+        }
+    }
+
+    private static Optional<AccessControlSnapshot> loadInitialConfiguration(
+            BootstrapRepositorySources sources,
+            ProxyAwareNativeGitRepositoryProvider provider) {
+        AccessControlStorage storage = new AccessControlStorageResolver(sources, provider).resolve();
+        return switch (storage.load()) {
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> Optional.of(snapshot);
+            case Result.Failure<AccessControlSnapshot> failure -> {
+                if (failure.code() == Result.FailureCode.NOT_FOUND && storage.createIfMissing()) {
+                    yield Optional.empty();
+                }
+                throw new IllegalStateException("Configuration snapshot is unavailable", failure.throwable());
+            }
+        };
+    }
+
+    public static Optional<OrionDocument> adoptProxies(AccessControlStorage storage,
+            ProxyAwareNativeGitRepositoryProvider repositoryProvider, ConfigurationCipherCapability cipher,
+            OrionDesiredState.Snapshot approved) {
         Objects.requireNonNull(storage, "configuration storage");
+        Objects.requireNonNull(approved, "approved configuration");
         RuntimeException lastSaveFailure = null;
         for (int attempt = 0; attempt <= 3; attempt++) {
-            AccessControlSnapshot snapshot = storage.load().valueOrFailure("Cannot load proxy configuration");
+            Result<AccessControlSnapshot> loaded = storage.load();
+            if (!(loaded instanceof Result.Success<AccessControlSnapshot> success)) {
+                return Optional.empty();
+            }
+            AccessControlSnapshot snapshot = success.value();
+            if (!snapshot.version().equals(approved.revision())) {
+                return Optional.empty();
+            }
             OrionDocument current = proxyConfiguration(snapshot, storage.primaryPath());
             if (snapshot.version().isEmpty()) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
@@ -162,7 +242,7 @@ public final class BootstrapContext implements AutoCloseable {
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
             OrionDocument candidate = repositoryProvider.adoptProvisional(current, secrets);
             if (candidate == current) {
-                return current;
+                return Optional.of(current);
             }
             if (lastSaveFailure != null && !(lastSaveFailure instanceof AccessControlConcurrentUpdateException)) {
                 throw lastSaveFailure;
@@ -180,7 +260,7 @@ public final class BootstrapContext implements AutoCloseable {
             try {
                 storage.save(new AccessControlSnapshot(updatedFiles, snapshot.version()),
                         new AccessControlSaveRequest("Adopt bootstrap Git proxies", UserEmail.EMPTY));
-                lastSaveFailure = null;
+                return Optional.of(candidate);
             } catch (RuntimeException failure) {
                 lastSaveFailure = failure;
             }
@@ -208,6 +288,10 @@ public final class BootstrapContext implements AutoCloseable {
 
     public ConfigurationCipherCapability configurationCipher() {
         return keyMaterial.configurationCipher();
+    }
+
+    public ConfigurationMaterialCapability configurationMaterial() {
+        return keyMaterial.configurationMaterial();
     }
 
     public ServerIdentityCapability serverIdentity() {

@@ -28,6 +28,7 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
@@ -579,13 +580,14 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void reloadsReceivePackPublicationsAndRetainsLastValidAcl() throws Exception {
-        OrionComponent component = component(configuration());
+        OrionConfiguration configuration = configuration();
+        OrionComponent component = component(configuration);
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
         try {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
             NativeGitRepository repository = repository(component);
 
-            publishCandidate(repository, "push", aclBytes("push-user", "push-password"));
+            String validCommit = publishCandidate(repository, "push", aclBytes("push-user", "push-password"));
             assertAuthenticated(component, "push-user", "push-password");
 
             publishCandidate(repository, "invalid", "<not-valid-xml".getBytes(StandardCharsets.UTF_8));
@@ -593,8 +595,21 @@ class InternalConfigurationRepositoryLifecycleIT {
 
             publishCandidate(repository, "recovery", aclBytes("recovery-user", "recovery-password"));
             assertAuthenticated(component, "recovery-user", "recovery-password");
+
+            assertThat(publish(repository, repository.refs().get(CONFIGURATION_REF), validCommit))
+                    .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
+            assertAuthenticated(component, "push-user", "push-password");
         } finally {
             assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent restarted = component(configuration);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertAuthenticated(restarted, "push-user", "push-password");
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
     }
 
@@ -839,6 +854,8 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
+                .initialConfiguration(java.util.Optional.empty())
                 .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
@@ -852,7 +869,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .valueOrFailure("internal configuration repository");
     }
 
-    private static void publishCandidate(
+    private static String publishCandidate(
             NativeGitRepository repository,
             String candidateName,
             byte[] content) throws Exception {
@@ -860,6 +877,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String expectedOldId = repository.refs().get(CONFIGURATION_REF);
         assertThat(publish(repository, expectedOldId, candidateId))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
+        return candidateId;
     }
 
     private static String saveCandidate(

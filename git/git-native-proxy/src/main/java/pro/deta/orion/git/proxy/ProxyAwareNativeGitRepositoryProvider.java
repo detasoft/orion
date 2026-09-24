@@ -232,18 +232,20 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         secrets.validate(document);
         BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(
                 current, secrets, connectionFailures, hostKeyDecisions);
+        Map<String, BootstrapGitRuntimeProxy> previousBindings = activeBindings;
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding binding : document.system().proxies()) {
             BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
             BootstrapGitRuntimeProxy runtime = bootstrapOverrides.get(binding.alias());
             if (runtime == null) runtime = candidate.get(location.proxyName());
-            if (runtime == null) runtime = activeBindings.get(location.proxyName());
+            if (runtime == null) runtime = previousBindings.get(location.proxyName());
             if (runtime == null) {
                 runtime = new BootstrapGitRuntimeProxy(location, findOrCreate(location.proxyName()),
                         persistent, fetcher, pusher);
             }
             addActiveBinding(candidate, binding, runtime);
         }
+        retainDeferredInternalSources(previousBindings, candidate);
         activeBindings = Map.copyOf(candidate);
         BootstrapGitRuntimeProxy runtime = candidate.get(selected.publicRepositoryName());
         try {
@@ -262,11 +264,17 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
+        activate(current, secrets, false);
+    }
+
+    public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets,
+            boolean retainInternalBootstrapSources) {
         Objects.requireNonNull(current, "current configuration");
         Objects.requireNonNull(secrets, "configuration secrets");
         OrionDocument document = Objects.requireNonNull(current.get(), "configuration");
         secrets.validate(document);
         Map<RemoteAlias, BootstrapGitRuntimeProxy> overrides = new LinkedHashMap<>();
+        Map<String, BootstrapGitRuntimeProxy> retainedSources = new LinkedHashMap<>();
         if (activePhase) {
             for (GitProxyBinding binding : document.system().proxies()) {
                 BootstrapGitRuntimeProxy runtime = bootstrapOverrides.get(binding.alias());
@@ -292,7 +300,14 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 }
             }
             if (!adopted.containsAll(provisionalBindings.keySet())) {
-                throw new IllegalStateException("Bootstrap proxy sources must be adopted before activation");
+                if (!retainInternalBootstrapSources) {
+                    throw new IllegalStateException("Bootstrap proxy sources must be adopted before activation");
+                }
+                for (Map.Entry<String, BootstrapGitRuntimeProxy> entry : provisionalBindings.entrySet()) {
+                    if (!adopted.contains(entry.getKey())) {
+                        retainedSources.put(entry.getKey(), entry.getValue());
+                    }
+                }
             }
         }
         BootstrapGitTransportFactory persistent = BootstrapGitTransportFactory.persistent(
@@ -313,6 +328,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             }
             addActiveBinding(candidate, configured, runtime);
         }
+        for (Map.Entry<String, BootstrapGitRuntimeProxy> entry : retainedSources.entrySet()) {
+            BootstrapGitRuntimeProxy previous = candidate.putIfAbsent(entry.getKey(), entry.getValue());
+            if (previous != null && previous != entry.getValue()) {
+                throw new IllegalStateException("Bootstrap cache has conflicting proxy bindings");
+            }
+        }
+        if (activePhase && retainInternalBootstrapSources) {
+            retainDeferredInternalSources(activeBindings, candidate);
+        }
         activeBindings = Map.copyOf(candidate);
         bootstrapOverrides = Map.copyOf(overrides);
         activePhase = true;
@@ -328,6 +352,28 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
         candidate.put(runtime.repositoryName(), runtime);
         candidate.put(configured.publicRepositoryName(), runtime);
+    }
+
+    private void retainDeferredInternalSources(Map<String, BootstrapGitRuntimeProxy> previousBindings,
+            Map<String, BootstrapGitRuntimeProxy> candidate) {
+        for (Map.Entry<String, BootstrapGitRuntimeProxy> source : provisionalBindings.entrySet()) {
+            if (previousBindings.get(source.getKey()) != source.getValue()) {
+                continue;
+            }
+            boolean publicBinding = false;
+            for (Map.Entry<String, BootstrapGitRuntimeProxy> active : previousBindings.entrySet()) {
+                if (isProxyEndpoint(active.getKey()) && active.getValue() == source.getValue()) {
+                    publicBinding = true;
+                    break;
+                }
+            }
+            if (!publicBinding) {
+                BootstrapGitRuntimeProxy existing = candidate.putIfAbsent(source.getKey(), source.getValue());
+                if (existing != null && existing != source.getValue()) {
+                    throw new IllegalStateException("Bootstrap cache has conflicting proxy bindings");
+                }
+            }
+        }
     }
 
     public synchronized OrionDocument adoptProvisional(OrionDocument document, ConfigurationSecrets secrets) {

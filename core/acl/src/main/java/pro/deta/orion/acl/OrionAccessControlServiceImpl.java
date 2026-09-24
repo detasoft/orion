@@ -36,6 +36,17 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
@@ -44,6 +55,8 @@ import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
@@ -79,8 +92,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionRuntimeOptions runtimeOptions;
     private final ServerIdentityCapability serverIdentity;
     private final OrionDesiredState desiredState;
+    private final ConfigurationCipherCapability configurationCipher;
+    private final ConfigurationMaterialCapability configurationMaterial;
+    private final KeyMaterialScope materialScope;
+    private final Optional<AccessControlSnapshot> initialConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
-    private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private final Object reloadLock = new Object();
     private volatile AccessControlStorage.ChangeSubscription changeSubscription;
@@ -92,13 +108,22 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionProvider orionProvider,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity,
-            OrionDesiredState desiredState) {
+            OrionDesiredState desiredState,
+            OrionConfiguration configuration,
+            ConfigurationCipherCapability configurationCipher,
+            ConfigurationMaterialCapability configurationMaterial,
+            Optional<AccessControlSnapshot> initialConfiguration) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.orionProvider = orionProvider;
         this.runtimeOptions = runtimeOptions;
         this.serverIdentity = serverIdentity;
         this.desiredState = desiredState;
+        this.configurationCipher = configurationCipher;
+        this.configurationMaterial = configurationMaterial;
+        this.materialScope = KeyMaterialScope.cluster(
+                configuration.getBootstrap().getKeyMaterial().getClusterId());
+        this.initialConfiguration = Objects.requireNonNull(initialConfiguration, "initial configuration");
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
 
@@ -109,29 +134,43 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         });
         changeSubscription = accessControlStorage.onChange(initiator -> requestToUpdate());
         try {
-            switch (loadValidatedAccessControlSnapshot()) {
-                case Result.Success<AccessControlSnapshot>(var snapshot) -> {
-                    if (runtimeOptions.resetRootPassword()) {
-                        resetRootPassword(snapshot);
-                    } else {
-                        requestAclUpdateAndWait("access-control start");
+            synchronized (reloadLock) {
+                Result<AccessControlSnapshot> initial = initialConfiguration
+                        .<Result<AccessControlSnapshot>>map(this::validateSnapshot)
+                        .orElseGet(this::loadValidatedAccessControlSnapshot);
+                switch (initial) {
+                    case Result.Success<AccessControlSnapshot>(var snapshot) -> {
+                        if (runtimeOptions.resetRootPassword()) {
+                            resetRootPassword(snapshot);
+                        } else {
+                            prepareAndUpdateAccessControl(snapshot);
+                        }
+                    }
+                    case Result.Failure<AccessControlSnapshot> f -> {
+                        if (f.code() == Result.FailureCode.NOT_FOUND) {
+                            if (!accessControlStorage.createIfMissing()) {
+                                throw new IllegalStateException(
+                                        "ACL not found and default ACL creation is disabled.");
+                            }
+                            if (runtimeOptions.resetRootPassword()) {
+                                resetRootPassword(AccessControlSnapshot.singleFile(
+                                        accessControlStorage.primaryPath(),
+                                        serializeInitialConfiguration(new AccessControl())));
+                            } else {
+                                createDefaultAccessControlAndRequestUpdate();
+                            }
+                        } else {
+                            log.error("Error while preparing configuration repository.", f.throwable());
+                            throw new IllegalStateException(
+                                    "Configuration repository not initialized.", f.throwable());
+                        }
                     }
                 }
-                case Result.Failure<AccessControlSnapshot> f -> {
-                    if (f.code() == Result.FailureCode.NOT_FOUND) {
-                        if (!accessControlStorage.createIfMissing()) {
-                            throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
-                        }
-                        if (runtimeOptions.resetRootPassword()) {
-                            resetRootPassword(AccessControlSnapshot.singleFile(
-                                    accessControlStorage.primaryPath(),
-                                    serializeInitialConfiguration(new AccessControl())));
-                        } else {
-                            createDefaultAccessControlAndRequestUpdate();
-                        }
-                    } else {
-                        log.error("Error while preparing configuration repository.", f.throwable());
-                        throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
+                if (initialConfiguration.isPresent()) {
+                    Result<AccessControlSnapshot> latest = accessControlStorage.load();
+                    if (latest instanceof Result.Success<AccessControlSnapshot> success
+                            && !success.value().version().equals(desiredState.current().revision())) {
+                        requestToUpdate();
                     }
                 }
             }
@@ -163,7 +202,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public boolean isRunning() {
-        return accessControl.get() != null;
+        return desiredState.isPublished();
     }
 
     private void printAndClearPlainTextPasswordMessage(PrintStream out, char[] secureChars) {
@@ -189,8 +228,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return token.clone();
     }
 
-    private void updateAccessControl(AccessControl accessControl) {
-        this.accessControl.set(accessControl);
+    private AccessControl currentAccessControl() {
+        return desiredState.current().document().system().accessControl();
     }
 
     public boolean canAdminister(PrincipalAddress actor,
@@ -485,12 +524,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public boolean userExists(String userName) {
-        return findSingleUser(accessControl.get(), userName) instanceof Result.Success<?>;
+        return findSingleUser(currentAccessControl(), userName) instanceof Result.Success<?>;
     }
 
     @Override
     public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
-        AccessControl snapshot = accessControl.get();
+        AccessControl snapshot = currentAccessControl();
         Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
             if (isLockedRoot(u)) {
@@ -511,7 +550,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public SshKeyEnrollmentAuthentication authenticateSshKeyEnrollment(
             String userName,
             byte[] credential) {
-        AccessControl snapshot = accessControl.get();
+        AccessControl snapshot = currentAccessControl();
         Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
@@ -600,7 +639,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
-        AccessControl snapshot = accessControl.get();
+        AccessControl snapshot = currentAccessControl();
         Result<AccessControl.User> user = findSingleUser(snapshot, userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
@@ -614,7 +653,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public AuthenticationResult authenticateGitSshKey(byte[] encodedPublicKey) {
         List<AccessControl.User> matchingUsers = new ArrayList<>();
-        AccessControl currentAccessControl = accessControl.get();
+        AccessControl currentAccessControl = currentAccessControl();
         if (currentAccessControl != null) {
             for (AccessControl.User user : currentAccessControl.getUsers()) {
                 if (!isLockedRoot(user) && performPublicKeyAuthentication(user, encodedPublicKey)) {
@@ -642,7 +681,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 if (organization != null) {
                     yield verifyOrganizationToken(organization, subject, authenticationGeneration, tokenId);
                 }
-                AccessControl snapshot = accessControl.get();
+                AccessControl snapshot = currentAccessControl();
                 Result<AccessControl.User> user = findSingleUser(snapshot, subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
                     if (isLockedRoot(u)) {
@@ -758,7 +797,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (userIdentity.getOrganizationId().isPresent()) {
             return TokenIssueResult.failure("system identity is required for system token issue");
         }
-        Result<AccessControl.User> user = findSingleUser(accessControl.get(), userIdentity.getUserId());
+        Result<AccessControl.User> user = findSingleUser(currentAccessControl(), userIdentity.getUserId());
         if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
             return TokenIssueResult.failure("user is not available for token issue", throwable);
         }
@@ -1059,8 +1098,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             };
         }
         OrionDocument document = documentFrom(preparedSnapshot).valueOrFailure("prepared desired state");
+        if (desiredState.isPublished()) {
+            AccessControl publishedAcl = currentAccessControl();
+            if (publishedAcl.equals(document.system().accessControl())) {
+                document = document.replaceAccessControl(publishedAcl);
+            }
+        }
         desiredState.publish(document, preparedSnapshot.version());
-        updateAccessControl(document.system().accessControl());
     }
 
     private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft draft) {
@@ -1620,11 +1664,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private Result<AccessControlSnapshot> loadValidatedAccessControlSnapshot() {
         return switch (accessControlStorage.load()) {
-            case Result.Success<AccessControlSnapshot>(var snapshot) -> switch (documentFrom(snapshot)) {
-                case Result.Success<OrionDocument> ignored -> new Result.Success<>(snapshot);
-                case Result.Failure<OrionDocument> failure -> new Result.Failure<>(failure);
-            };
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> validateSnapshot(snapshot);
             case Result.Failure<AccessControlSnapshot> failure -> new Result.Failure<>(failure);
+        };
+    }
+
+    private Result<AccessControlSnapshot> validateSnapshot(AccessControlSnapshot snapshot) {
+        return switch (documentFrom(snapshot)) {
+            case Result.Success<OrionDocument> ignored -> new Result.Success<>(snapshot);
+            case Result.Failure<OrionDocument> failure -> new Result.Failure<>(failure);
         };
     }
 
@@ -1649,11 +1697,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 mergeAccessControl(result, document.system().accessControl());
                 if (entry.getKey().equals(accessControlStorage.primaryPath())) {
                     primary = document;
+                } else {
+                    validateConfiguration(document);
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 return new Result.Failure<>(
                         Result.FailureCode.GENERAL,
-                        "Cannot parse ACL file " + entry.getKey(),
+                        "Cannot validate configuration file " + entry.getKey(),
                         e);
             }
         }
@@ -1662,7 +1712,51 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     Result.FailureCode.NOT_FOUND,
                     "Primary ACL configuration file is missing: " + accessControlStorage.primaryPath());
         }
-        return new Result.Success<>(primary.replaceAccessControl(result.toAccessControl()));
+        try {
+            OrionDocument document = primary.replaceAccessControl(result.toAccessControl());
+            validateConfiguration(document);
+            return new Result.Success<>(document);
+        } catch (RuntimeException failure) {
+            return new Result.Failure<>(Result.FailureCode.GENERAL,
+                    "Configuration material or secrets are invalid", failure);
+        }
+    }
+
+    private void validateConfiguration(OrionDocument document) {
+        try {
+            if (document.system().https().isPresent()) {
+                OrionHttpsConfiguration https = document.system().https().orElseThrow();
+                if (https.identity().isPresent()) {
+                    requireKey(https.identity().orElseThrow(), KeyMaterialPurpose.TLS_IDENTITY);
+                }
+                if (https.serverIssuerTrustAnchor().isPresent()) {
+                    requireTrust(https.serverIssuerTrustAnchor().orElseThrow());
+                }
+                for (OrionMaterialReference anchor : https.clientTrustAnchors()) {
+                    requireTrust(anchor);
+                }
+                if (https.acme().isPresent() && https.acme().orElseThrow().accountMaterial().isPresent()) {
+                    requireKey(https.acme().orElseThrow().accountMaterial().orElseThrow(),
+                            KeyMaterialPurpose.ACME_ACCOUNT);
+                }
+            }
+            new ConfigurationSecrets(() -> document, configurationCipher).validate(document);
+        } catch (GeneralSecurityException error) {
+            throw new IllegalStateException(
+                    "Configuration material reference is unavailable or invalid", error);
+        }
+    }
+
+    private void requireKey(OrionMaterialReference reference, KeyMaterialPurpose purpose)
+            throws GeneralSecurityException {
+        configurationMaterial.require(new KeyMaterialDescriptor(
+                new KeyMaterialAlias(reference.alias()), purpose, KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(reference.version()), materialScope));
+    }
+
+    private void requireTrust(OrionMaterialReference reference) throws GeneralSecurityException {
+        configurationMaterial.require(new TrustedCertificateDescriptor(new KeyMaterialAlias(reference.alias()),
+                KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version()), materialScope));
     }
 
     private static void mergeAccessControl(AccessControlDraft target, AccessControl source) {
