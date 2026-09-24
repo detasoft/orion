@@ -4,8 +4,14 @@
        xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.4.0
                            https://maven.apache.org/xsd/build-cache-config-1.4.0.xsd">
     <configuration>
-        <enabled>false</enabled>
+        <enabled>true</enabled>
         <hashAlgorithm>SHA-256</hashAlgorithm>
+        <attachedOutputs>
+            <dirNames>
+                <dirName>classes</dirName>
+                <dirName>test-classes</dirName>
+            </dirNames>
+        </attachedOutputs>
     </configuration>
     <input>
         <plugins>
@@ -26,6 +32,37 @@
         </plugins>
     </input>
     <executionControl>
+        <reconcile>
+            <plugins>
+                <plugin artifactId="maven-surefire-plugin" goal="test">
+                    <reconciles>
+                        <reconcile propertyName="test"/>
+                        <reconcile propertyName="skip"/>
+                        <reconcile propertyName="skipExec"/>
+                        <reconcile propertyName="skipTests"/>
+                        <reconcile propertyName="testFailureIgnore"/>
+                        <reconcile propertyName="failIfNoTests"/>
+                        <reconcile propertyName="failIfNoSpecifiedTests"/>
+                        <reconcile propertyName="groups"/>
+                        <reconcile propertyName="excludedGroups"/>
+                    </reconciles>
+                </plugin>
+                <plugin artifactId="maven-failsafe-plugin" goal="integration-test">
+                    <reconciles>
+                        <reconcile propertyName="test"/>
+                        <reconcile propertyName="skip"/>
+                        <reconcile propertyName="skipExec"/>
+                        <reconcile propertyName="skipTests"/>
+                        <reconcile propertyName="skipITs"/>
+                        <reconcile propertyName="testFailureIgnore"/>
+                        <reconcile propertyName="failIfNoTests"/>
+                        <reconcile propertyName="failIfNoSpecifiedTests"/>
+                        <reconcile propertyName="groups"/>
+                        <reconcile propertyName="excludedGroups"/>
+                    </reconciles>
+                </plugin>
+            </plugins>
+        </reconcile>
         <runAlways>
             <executions>
                 <execution groupId="pro.deta.maven" artifactId="rust-maven-plugin">

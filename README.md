@@ -843,7 +843,7 @@ the allowed set, and a `BRANCH=*` grant permits all branches.
 Run routine local tests with the `dev` Maven profile:
 
 ```sh
-mvn test -Pdev
+mvn package -Pdev
 ```
 
 Run the standard development verification:
@@ -852,17 +852,33 @@ Run the standard development verification:
 mvn verify -Pdev
 ```
 
+Build caching is enabled for Maven package builds. The Make test goals run through
+`package` so cached reactor dependencies are available as JARs. Unchanged modules can reuse a
+successful test result; changing sources, resources, or dependencies invalidates
+the affected cache entries. Test selectors, skip flags, and the matrix control
+switch are also checked.
+
+To force fresh verification, including after changing external Git/SSH tools or
+the JDK, bypass the cache:
+
+```sh
+make test MAVEN='mvn -Dmaven.build.cache.enabled=false'
+```
+
+The same override works with `make run-test`. To try the installed Maven daemon,
+pass `MAVEN='mvnd --batch-mode'`; Maven remains the default.
+
 Unit tests use normal log levels by default. Enable project DEBUG logging for a
 local test run with:
 
 ```sh
-mvn test -Pdev -Dorion.test.debug=true
+mvn package -Pdev -Dorion.test.debug=true
 ```
 
 Tune the test log level and categories when needed:
 
 ```sh
-mvn test -Pdev \
+mvn package -Pdev \
   -Dorion.test.debug=true \
   -Dorion.test.log.level=TRACE \
   -Dorion.test.log.categories=pro.deta.orion.git,org.eclipse.jgit=WARN

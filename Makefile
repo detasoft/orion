@@ -68,7 +68,7 @@ dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 test: ## Run the Maven/JVM test suite with the dev profile
-	$(MAVEN) test -Pdev -T 4 -q
+	$(MAVEN) package -Pdev -T 4 -q
 
 xml-schema: ## Generate and compile the XML schema model
 	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
@@ -145,14 +145,14 @@ run-test: ## Run focused Maven tests; set MODULE and TEST, optionally LOG for Ma
 		printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
 		exit 2; \
 	fi
-	$(MAVEN) test -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
+	$(MAVEN) package -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
 		-Dtest='$(RUN_TEST_LOCATOR)' \
 		-Dsurefire.failIfNoSpecifiedTests=false $(if $(strip $(value LOG)),-l '$(value LOG)')
 
 test-jfr: ## Run Maven tests with JFR analytics
 	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
 	@status=0; \
-	$(MAVEN) test -Pdev,test-jfr -T 4 -fae \
+	$(MAVEN) package -Pdev,test-jfr -T 4 -fae \
 		-Dorion.test.analytics.runId="$(TEST_ANALYTICS_RUN_ID)" \
 		-Dorion.test.analytics.dir="$(TEST_ANALYTICS_ROOT)" \
 		-Dorion.test.jfr.directory="$(TEST_ANALYTICS_DIR)/jfr" \

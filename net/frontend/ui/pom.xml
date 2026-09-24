@@ -16,6 +16,8 @@
     <properties>
         <frontend-maven-plugin.version>2.0.1</frontend-maven-plugin.version>
         <frontend-node.version>v22.22.2</frontend-node.version>
+        <maven.build.cache.input.1>src</maven.build.cache.input.1>
+        <maven.build.cache.input.2>public</maven.build.cache.input.2>
     </properties>
 
     <build>
