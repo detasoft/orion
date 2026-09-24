@@ -1,7 +1,10 @@
 package pro.deta.orion.auth.check;
 
-import java.util.Optional;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
+import pro.deta.orion.schema.orion.TeamId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -34,8 +37,7 @@ import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 public class AccessRulesTest {
     @Test
     void organizationMembershipDoesNotReplaceRepositoryGrants() {
-        SecurityContext scoped = securityContext(new InternalUserImpl("reader", List.of(),
-                Optional.of(new OrganizationId("acme"))));
+        SecurityContext scoped = organizationContext("reader", List.of());
         assertThat(RepositoryAccessRules.read()
                 .evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isFalse();
         assertThat(RepositoryAccessRules.create()
@@ -45,8 +47,7 @@ public class AccessRulesTest {
     @Test
     void confinesOrganizationUsersEvenWithWildcardAndSystemGrants() {
         AccessControl acl = ACLUtil.generateDefaultAccessControl("unused");
-        SecurityContext scoped = securityContext(new InternalUserImpl("root", acl.getGrants(),
-                Optional.of(new OrganizationId("acme"))));
+        SecurityContext scoped = organizationContext("root", acl.getGrants());
         for (AccessRule<RepositoryResource> rule : List.of(RepositoryAccessRules.read(),
                 RepositoryAccessRules.write(), RepositoryAccessRules.create(), RepositoryAccessRules.force())) {
             assertThat(rule.evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isTrue();
@@ -60,6 +61,20 @@ public class AccessRulesTest {
                 ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
         assertThat(ApplicationAccessRules.shutdown().evaluate(scoped,
                 ApplicationShutdownResource.applicationShutdown()).allowed()).isFalse();
+    }
+
+    private static SecurityContext organizationContext(String userId, List<AccessControl.Grant> grants) {
+        AccessControl.User user = new AccessControl.User(userId, null, null, null, List.of(), List.of(), grants);
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"),
+                "", List.of(user), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of());
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
+                List.of(organization));
+        return securityContext(new InternalUserImpl(userId, organization.id(), () -> document));
     }
 
     @Test

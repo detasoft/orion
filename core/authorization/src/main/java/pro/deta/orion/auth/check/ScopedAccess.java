@@ -10,6 +10,7 @@ import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.ScopedRole;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -29,12 +30,30 @@ public final class ScopedAccess {
 
     public static boolean allows(OrionDocument.Organization organization, UserId userId,
             ConfigurationScope target, Predicate<List<AccessControl.GrantExpression>> matches) {
-        if (!organization.id().equals(target.organizationId())) return false;
+        boolean allowed = false;
+        for (AssignedGrant grant : assignedGrants(organization, userId, target, false)) {
+            if (matches.test(grant.expressions())) {
+                if (grant.effect() == ScopedGrant.Effect.DENY) return false;
+                allowed = true;
+            }
+        }
+        return allowed;
+    }
+
+    public record AssignedGrant(ScopedGrant.Effect effect, List<AccessControl.GrantExpression> expressions) {
+        public AssignedGrant {
+            expressions = List.copyOf(expressions);
+        }
+    }
+
+    public static List<AssignedGrant> assignedGrants(OrionDocument.Organization organization, UserId userId,
+            ConfigurationScope target, boolean allowMissingRepository) {
+        if (!organization.id().equals(target.organizationId())) return List.of();
         AccessControl.User user = null;
         for (AccessControl.User candidate : organization.users()) {
             if (candidate.getId().equals(userId.value())) user = candidate;
         }
-        if (user == null) return false;
+        if (user == null) return List.of();
 
         Map<RoleAddress, ScopedRole> roles = new HashMap<>();
         Map<GrantAddress, ScopedGrant> grants = new HashMap<>();
@@ -45,21 +64,24 @@ public final class ScopedAccess {
             for (OrionDocument.Team candidate : organization.teams()) {
                 if (candidate.id().equals(target.teamId().orElseThrow())) team = candidate;
             }
-            if (team == null) return false;
+            if (team == null) return List.of();
             index(ConfigurationScope.team(organization.id(), team.id()), team.roles(), team.grants(), roles, grants);
             if (target.repositoryId().isPresent()) {
                 OrionDocument.Repository repository = null;
                 for (OrionDocument.Repository candidate : team.repositories()) {
                     if (candidate.id().equals(target.repositoryId().orElseThrow())) repository = candidate;
                 }
-                if (repository == null) return false;
-                index(target, repository.roles(), repository.grants(), roles, grants);
+                if (repository == null) {
+                    if (!allowMissingRepository) return List.of();
+                } else {
+                    index(target, repository.roles(), repository.grants(), roles, grants);
+                }
             }
         }
 
-        boolean allowed = false;
+        List<AssignedGrant> assigned = new ArrayList<>();
         for (AccessControl.Grant direct : user.getGrants()) {
-            allowed |= matches.test(direct.getInfo());
+            assigned.add(new AssignedGrant(ScopedGrant.Effect.ALLOW, direct.getInfo()));
         }
         ArrayDeque<RoleAddress> pending = new ArrayDeque<>();
         for (String assignment : user.getRoles()) {
@@ -71,18 +93,15 @@ public final class ScopedAccess {
             RoleAddress address = pending.removeFirst();
             if (!visited.add(address)) continue;
             ScopedRole role = roles.get(address);
-            if (role == null) return false;
+            if (role == null) return List.of();
             for (GrantAddress reference : role.grantReferences()) {
                 ScopedGrant grant = grants.get(reference);
-                if (grant == null) return false;
-                if (matches.test(grant.expressions())) {
-                    if (grant.effect() == ScopedGrant.Effect.DENY) return false;
-                    allowed = true;
-                }
+                if (grant == null) return List.of();
+                assigned.add(new AssignedGrant(grant.effect(), grant.expressions()));
             }
             pending.addAll(role.roleReferences());
         }
-        return allowed;
+        return List.copyOf(assigned);
     }
 
     private static void index(ConfigurationScope scope, List<ScopedRole> scopedRoles,

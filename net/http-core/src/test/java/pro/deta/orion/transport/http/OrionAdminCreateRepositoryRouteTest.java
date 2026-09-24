@@ -1,11 +1,15 @@
 package pro.deta.orion.transport.http;
 
-import java.util.Optional;
 import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -30,6 +34,19 @@ class OrionAdminCreateRepositoryRouteTest {
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
             provider,
             new ObjectMapper());
+
+    private static OrionDocument organizationDocument() {
+        AccessControl.User user = new AccessControl.User("root", null, null, null, List.of(), List.of(),
+                ACLUtil.generateDefaultAccessControl("unused").getGrants());
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("visible"), "",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                List.of(user), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of());
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
+    }
 
     @Test
     void listsExistingRepositoriesInStableOrder() {
@@ -92,9 +109,8 @@ class OrionAdminCreateRepositoryRouteTest {
         provider.create("acme/team/visible").valueOrFailure("repository");
         provider.create("other/team/hidden").valueOrFailure("repository");
         provider.create("orion").valueOrFailure("repository");
-        InternalUserImpl identity = new InternalUserImpl("root",
-                ACLUtil.generateDefaultAccessControl("unused").getGrants(),
-                Optional.of(new OrganizationId("acme")));
+        InternalUserImpl identity = new InternalUserImpl("root", new OrganizationId("acme"),
+                () -> organizationDocument());
         assertThat(route.doGet(request("", identity)).body()).isEqualTo(Map.of("repositories",
                 List.of(new OrionAdminCreateRepositoryRoute.RepositoryResponse("acme/team/visible"))));
         assertThat(route.doPost(request("other/team/new", identity)).status()).isEqualTo(403);

@@ -704,7 +704,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     for (pro.deta.orion.schema.orion.OidcProvider provider : organization.oidcProviders()) {
                         if (provider.issuer().toString().equals(credential.getKeyId())) {
                             return TokenAuthenticationResult.success(new InternalUserImpl(userId,
-                                    user.getGrants(), Optional.of(organization.id())),
+                                    organization.id(), () -> desiredState.current().document()),
                                     new AccessTokenIdentity(tokenId, organizationId + "/" + userId));
                         }
                     }

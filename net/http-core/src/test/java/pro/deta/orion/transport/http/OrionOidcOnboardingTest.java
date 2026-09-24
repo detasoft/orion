@@ -542,7 +542,7 @@ class OrionOidcOnboardingTest {
                     "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
                     "revision", f.desired.current().revision().orElseThrow());
             SecurityContext scoped = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
-                    f.admin.getUserIdentity().getGrants(), Optional.of(new OrganizationId("acme"))));
+                    new OrganizationId("acme"), () -> f.desired.current().document()));
             assertThat(f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, scoped).status).isEqualTo(403);
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, scoped).status).isEqualTo(403);
             f.storage.conflict = true;
@@ -665,10 +665,15 @@ class OrionOidcOnboardingTest {
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(false, "localhost", 443,
                     URI.create("https://orion.test"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
+            OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repository"), "",
+                    OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                    List.of(), List.of(), List.of(), List.of());
+            OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                    List.of(repository));
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             for (String id : List.of("default", "acme")) {
                 organizations.add(new OrionDocument.Organization(new OrganizationId(id), id, List.of(), List.of(),
-                        List.of(), List.of(), List.of(new ConfigurationSecret("oidc", "placeholder")),
+                        List.of(), List.of(team), List.of(new ConfigurationSecret("oidc", "placeholder")),
                         List.of(new OidcProvider("corporate", issuer, "client", "oidc",
                 OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0)), List.of()));
             }

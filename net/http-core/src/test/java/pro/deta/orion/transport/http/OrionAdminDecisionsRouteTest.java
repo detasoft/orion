@@ -20,6 +20,8 @@ import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
@@ -250,9 +252,11 @@ class OrionAdminDecisionsRouteTest {
                         throws IOException, ServletException {
                     String identity = request.getHeader("Test-Identity");
                     if (identity != null) {
+                        InternalUserImpl user = organization.isEmpty() ? new InternalUserImpl(identity, List.of())
+                                : new InternalUserImpl(identity, organization.orElseThrow(),
+                                        () -> OrionDocument.withAccessControl(new AccessControl()));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
-                                SecurityContext.createContext()
-                                        .withUserIdentity(new InternalUserImpl(identity, List.of(), organization)));
+                                SecurityContext.createContext().withUserIdentity(user));
                     }
                     super.service(request, response);
                 }

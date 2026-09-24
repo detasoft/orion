@@ -23,6 +23,8 @@ import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 
@@ -69,8 +71,8 @@ class DecisionCommandCatalogTest {
 
     @Test
     void usesOrganizationIdentityForListsAndAnswers() {
-        UserIdentity user = new InternalUserImpl("reviewer", List.of(),
-                Optional.of(new OrganizationId("acme")));
+        UserIdentity user = new InternalUserImpl("reviewer", new OrganizationId("acme"),
+                () -> OrionDocument.withAccessControl(new AccessControl()));
         try (DecisionRegistry registry = new DecisionRegistry(4, Runnable::run, (actor, scope) -> true)) {
             Decision own = register(registry, "acme");
             Decision system = register(registry, null);

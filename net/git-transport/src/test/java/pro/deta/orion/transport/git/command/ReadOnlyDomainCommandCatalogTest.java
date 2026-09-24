@@ -2,6 +2,10 @@ package pro.deta.orion.transport.git.command;
 
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -48,11 +52,23 @@ class ReadOnlyDomainCommandCatalogTest {
                     tree,
                     new pro.deta.orion.command.CommandRowQuery());
 
+    private static OrionDocument organizationDocument() {
+        AccessControl.User user = new AccessControl.User("operator", null, null, null, List.of(), List.of(),
+                ACLUtil.generateDefaultAccessControl("unused").getGrants());
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                List.of(user), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of());
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
+    }
+
     @Test
     void organizationIdentityFiltersListsLookupsAndCompletionDespiteMatchingUserIds() {
-        UserIdentity identity = new InternalUserImpl("operator",
-                ACLUtil.generateDefaultAccessControl("unused").getGrants(),
-                Optional.of(new OrganizationId("acme")));
+        UserIdentity identity = new InternalUserImpl("operator", new OrganizationId("acme"),
+                () -> organizationDocument());
         source.repositories = available(List.of(repository("own", "own", "acme/team/repo"),
                 repository("foreign", "foreign", "other/team/repo")));
         source.organizations = available(List.of(

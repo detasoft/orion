@@ -1,6 +1,19 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
+import pro.deta.orion.schema.orion.OidcProvider;
+import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.GrantId;
+import pro.deta.orion.schema.orion.GrantAddress;
+import pro.deta.orion.schema.orion.RoleId;
+import pro.deta.orion.schema.orion.ScopedGrant;
+import pro.deta.orion.schema.orion.ScopedRole;
+import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
 import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -74,11 +87,60 @@ class OrionAccessControlServiceImplTest {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("alice"));
         try (ServiceFixture fixture = fixture(primary, new AccessControlDraft())) {
-            InternalUserImpl identity = new InternalUserImpl("alice", List.of(),
-                    Optional.of(new OrganizationId("acme")));
+            InternalUserImpl identity = new InternalUserImpl("alice", new OrganizationId("acme"),
+                    () -> OrionDocument.withAccessControl(new AccessControl()));
             assertThat(fixture.service.refreshToken(new AuthenticationResult.Success(identity), 60))
                     .isInstanceOf(TokenRefreshResult.Failure.class);
         }
+    }
+
+    @Test
+    void verifiedOrganizationTokenUsesCurrentScopedRolesAndUserPresence() {
+        OrionDesiredState desired = new OrionDesiredState();
+        OrganizationId organization = new OrganizationId("acme");
+        String issuer = "https://login.example.test";
+        AccessControl.User assigned = new AccessControl.User("alice", null, null, null,
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+                List.of("acme/reader"), List.of());
+        desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null, null,
+                testServerIdentity(), desired);
+        TokenIssueResult issued = service.issueOrganizationToken(organization, "alice", issuer, "alice", 60);
+        assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
+        byte[] token = ((TokenIssueResult.Success) issued).token().getBytes(StandardCharsets.UTF_8);
+        TokenAuthenticationResult authenticated = service.verifyToken(token);
+        assertThat(authenticated).isInstanceOf(TokenAuthenticationResult.Success.class);
+        SecurityContext context = SecurityContext.createContext().withUserIdentity(
+                ((TokenAuthenticationResult.Success) authenticated).userIdentity());
+        RepositoryResource repository = RepositoryResource.of("acme/team/repo");
+        assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isTrue();
+        AccessControl.User revoked = new AccessControl.User("alice", null, null, null,
+                assigned.getCredentials(), List.of(), List.of());
+        desired.publish(organizationTokenDocument(List.of(revoked)), Optional.empty());
+        assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isFalse();
+        desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
+        assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isTrue();
+        desired.publish(organizationTokenDocument(List.of()), Optional.empty());
+        assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isFalse();
+        assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+    }
+
+    private static OrionDocument organizationTokenDocument(List<AccessControl.User> users) {
+        ScopedGrant grant = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
+                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true")));
+        ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(),
+                List.of(GrantAddress.parse("acme/read")));
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+                OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
+                List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OidcProvider provider = new OidcProvider("oidc", URI.create("https://login.example.test"), "client",
+                "secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+        OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                users, List.of(grant), List.of(role), List.of(team),
+                List.of(new ConfigurationSecret("secret", "opaque-test-envelope")), List.of(provider), List.of());
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
     @Test

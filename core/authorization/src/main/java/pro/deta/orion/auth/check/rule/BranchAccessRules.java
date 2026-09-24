@@ -59,6 +59,11 @@ public final class BranchAccessRules {
             boolean requireReadWrite,
             String parentDeniedReason) {
         RepositoryResource repository = resource.parentResource();
+        if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
+            return GrantAccess.scopedRepositoryAccess(securityContext.getUserIdentity(), repository,
+                    requireReadWrite ? AccessControl.GrantKey.READ_WRITE : AccessControl.GrantKey.READ,
+                    resource.branchName());
+        }
         AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
         if (!parentDecision.allowed()) {
             return AccessDecision.deny(parentDeniedReason + ": " + parentDecision.reason());
