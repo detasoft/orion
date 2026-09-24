@@ -2,7 +2,8 @@
 
 Status: todo
 - Owner: codex, session 01a0d010-05d8-7b91-a154-45200daf87f0, branch `codex/hierarchical-authorization-01a0d010`,
-  worktree `.worktrees/hierarchical-authorization-01a0d010`, started 2026-09-24 10:03 Europe/Amsterdam.
+  worktree `.worktrees/hierarchical-authorization-01a0d010`, paused 2026-09-24 10:39 Europe/Amsterdam;
+  next: integrate reviewed commit 6c2ff298 after unrelated staged changes on main are cleared.
 Depends on: completed organization-users (748088a4),
 completed scoped-roles-and-grants (748088a4)
 
