@@ -1,6 +1,8 @@
 # Load and Activate Native Git Configuration Snapshots
 
 Status: todo
+- Owner: codex, session 01a0d010-05d8-7b91-a154-45200daf87f0, branch `codex/native-git-config-snapshots-01a0d010`,
+  worktree `.worktrees/native-git-config-snapshots-01a0d010`, started 2026-09-24 17:26 Europe/Amsterdam.
 
 Extend the restored internal configuration repository by loading `orion.xml`
 from its configured commit and publishing it as one immutable, revisioned
