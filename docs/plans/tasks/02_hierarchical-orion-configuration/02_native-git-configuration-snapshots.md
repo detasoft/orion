@@ -2,8 +2,7 @@
 
 Status: todo
 - Owner: codex, session 01a0d010-05d8-7b91-a154-45200daf87f0, branch `codex/native-git-config-snapshots-01a0d010`,
-  worktree `.worktrees/native-git-config-snapshots-01a0d010`, paused 2026-09-24 23:24 Europe/Amsterdam;
-  next: resolve first-start remote bootstrap behavior when an unadopted binding meets an invalid newer ref.
+  worktree `.worktrees/native-git-config-snapshots-01a0d010`, started 2026-09-24 23:54 Europe/Amsterdam.
 
 Extend the restored internal configuration repository by loading `orion.xml`
 from its configured commit and publishing it as one immutable, revisioned
@@ -27,6 +26,10 @@ desired-state snapshot.
   separately designed selective reload mechanism.
 - Reload on accepted configuration ref updates without depending on public Git
   transports.
+- If the ref moves from validated commit A to invalid B during the first remote
+  bootstrap, keep A active using the already opened internal bootstrap source;
+  never overwrite B to force adoption. When valid C follows, activate C directly
+  without requiring B to become active.
 - Test both bootstrap completion orders, missing referenced material, invalid
   commits, rollback, and restart.
 
@@ -48,6 +51,11 @@ desired-state snapshot.
   per operation need no reload. Do not call lifecycle or proxy activation hooks
   without a safe selective apply and rollback path. The user confirmed on
   2026-09-24 that unsupported live reloads stay outside this task.
+- A provisional remote bootstrap connection is internal access to configuration,
+  not a public proxy binding. Keep that internal access available across an
+  invalid ref without publishing an uncommitted document under A's revision.
+  Defer configuration writes while the current ref differs from the approved
+  revision. This behavior was clarified by the user on 2026-09-24.
 
 ## Implementation plan
 
@@ -69,6 +77,9 @@ desired-state snapshot.
   snapshot and ACL active. Initial activation fails if no valid pair exists.
 - A ref update, rollback, or restart loads the intended commit independently of
   public Git transport. Default creation still yields a committed first snapshot.
+- During first remote bootstrap, valid A remains active across invalid B and a
+  later valid C replaces A directly. B remains untouched and cannot supply a
+  public proxy binding or any other active setting.
 - Equivalent unchanged sections cause no unnecessary runtime reload. Read-through
   consumers see the new snapshot; live proxy and transport/TLS instances are not
   restarted by this task.
