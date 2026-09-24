@@ -1,7 +1,7 @@
 # Add Configuration Administration and Acceptance Coverage
 
 Status: todo
-Depends on: 01_hierarchical-authorization.md,
+Depends on: completed hierarchical-authorization (1f09d248),
 completed repository-and-mirror-configuration (146b9e76),
 02_native-git-configuration-snapshots.md
 

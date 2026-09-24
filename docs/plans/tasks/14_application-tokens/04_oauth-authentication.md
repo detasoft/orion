@@ -17,8 +17,7 @@ link; automatic email sending is not required.
 
 The user explicitly narrowed away full hierarchical authorization, role
 inheritance, allow/deny precedence, and team-level permission design. Those
-remain in ../02_hierarchical-orion-configuration/01_hierarchical-authorization.md
-and are NOT prerequisites for this minimal organization boundary. Do not
+were completed separately in 1f09d248 and are outside this minimal OIDC scope. Do not
 implement them in this change or create temporary role/evaluator frameworks.
 All enabled members have the same basic read access to organization resources;
 repository create/write/force and administrative mutations remain denied until
