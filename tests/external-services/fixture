@@ -1,0 +1,147 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+engine=${CONTAINER_ENGINE:-docker}
+name=orion-external-services
+state=$(pwd)/.state
+
+prepare() {
+    arch=$(uname -m)
+    case "$arch" in
+        arm64|aarch64)
+            arch=arm64
+            step_sha=43f79d1b0b8cab9895dbadd46b0a014006f682a6b1341e1fadf0be31d4b9f4b4
+            weed_sha=ba5c9def9ff98f78becdf309a50a9f906922f6383a7c4c772d01ede3cc012e16
+            ;;
+        x86_64|amd64)
+            arch=amd64
+            step_sha=126615795bafe3f2d3f890e2d628fa6e2857315fb48d0671d34b23047cc37d73
+            weed_sha=31fb804858885f9e7f18b6d3b1da09e824baac3e6a55b5a62c3c4c77e6ed6d7d
+            ;;
+        *) echo "Unsupported architecture: $arch" >&2; exit 1;;
+    esac
+    mkdir -p ".cache/$arch"
+    if [ ! -x ".cache/$arch/step-ca" ]; then
+        step_url="https://github.com/smallstep/certificates/releases/download/v0.30.2"
+        curl -fLSs --retry 3 -o ".cache/$arch/step-ca.tar.gz" \
+            "$step_url/step-ca_linux_0.30.2_${arch}.tar.gz"
+        actual=$(openssl dgst -sha256 ".cache/$arch/step-ca.tar.gz" | awk '{print $NF}')
+        [ "$actual" = "$step_sha" ]
+        tar -xzf ".cache/$arch/step-ca.tar.gz" -C ".cache/$arch" step-ca
+        chmod +x ".cache/$arch/step-ca"
+    fi
+    if [ ! -x ".cache/$arch/weed" ]; then
+        curl -fLSs --retry 3 -o ".cache/$arch/weed.tar.gz" \
+            "https://github.com/seaweedfs/seaweedfs/releases/download/4.47/linux_${arch}.tar.gz"
+        actual=$(openssl dgst -sha256 ".cache/$arch/weed.tar.gz" | awk '{print $NF}')
+        [ "$actual" = "$weed_sha" ]
+        tar -xzf ".cache/$arch/weed.tar.gz" -C ".cache/$arch" weed
+        chmod +x ".cache/$arch/weed"
+    fi
+}
+
+case "${1:-}" in
+    build)
+        prepare
+        "$engine" build -t orion-external-services:dev .
+        ;;
+    up)
+        if [ "$engine" = podman ] && [ "$(uname -s)" = Darwin ]; then
+            podman machine start 2>/dev/null || true
+        fi
+        mkdir -p "$state"
+        if [ ! -f "$state/credentials.env" ]; then
+            umask 077
+            printf 'SSH_PASSWORD=%s\nGITEA_PASSWORD=%s\nS3_ACCESS_KEY=fixture\nS3_SECRET_KEY=%s\n' \
+                "$(openssl rand -hex 16)" "$(openssl rand -hex 16)" "$(openssl rand -hex 24)" \
+                > "$state/credentials.env"
+        fi
+        if ! "$engine" image inspect orion-external-services:dev >/dev/null 2>&1; then ./fixture build; fi
+        if "$engine" container inspect "$name" >/dev/null 2>&1 && \
+            [ "$("$engine" container inspect --format '{{.Image}}' "$name")" != \
+              "$("$engine" image inspect --format '{{.Id}}' orion-external-services:dev)" ]; then
+            "$engine" stop "$name" >/dev/null 2>&1 || true
+            "$engine" rm "$name" >/dev/null
+        fi
+        if "$engine" container inspect "$name" >/dev/null 2>&1; then
+            "$engine" start "$name" >/dev/null
+        else
+            "$engine" run -d --name "$name" --env-file "$state/credentials.env" \
+                --add-host orion.test:127.0.0.1 \
+                --add-host fixture.orion.test:127.0.0.1 \
+                --add-host host.docker.internal:host-gateway \
+                -v "$state:/state" -p 127.0.0.1:8080:80 -p 127.0.0.1:8443:8443 \
+                -p 127.0.0.1:8333:8333 -p 127.0.0.1:9000:9000 \
+                -p 127.0.0.1:2222:2222 -p 127.0.0.1:2223:2223 \
+                -p 127.0.0.1:6080:6080 orion-external-services:dev >/dev/null
+        fi
+        attempt=0
+        until curl -fsS --cacert "$state/step/certs/root_ca.crt" \
+            --resolve fixture.orion.test:8443:127.0.0.1 \
+            https://fixture.orion.test:8443/api/v1/version >/dev/null 2>&1; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 60 ]; then "$engine" logs --tail 100 "$name"; exit 1; fi
+            sleep 2
+        done
+        . "$state/credentials.env"
+        if ! curl -fsS --cacert "$state/step/certs/root_ca.crt" \
+            --resolve fixture.orion.test:8443:127.0.0.1 \
+            https://fixture.orion.test:8443/api/v1/users/fixture >/dev/null 2>&1; then
+            "$engine" exec -u git -e GITEA_WORK_DIR=/state/gitea "$name" gitea admin user create \
+                --admin --must-change-password=false --username fixture --password "$GITEA_PASSWORD" \
+                --email fixture@example.test --config /state/gitea/app.ini
+        fi
+        echo "Fixture ready; run ./fixture check"
+        ;;
+    check)
+        "$engine" exec "$name" /usr/local/bin/external-check
+        ;;
+    check-orion)
+        curl -sS --cacert "$state/step/certs/root_ca.crt" \
+            --resolve orion.test:9443:127.0.0.1 \
+            -o /dev/null https://orion.test:9443/
+        echo 'Orion HTTPS certificate trusted for orion.test'
+        ;;
+    down)
+        "$engine" stop "$name"
+        if [ "$engine" = podman ] && [ "$(uname -s)" = Darwin ]; then podman machine stop; fi
+        ;;
+    ca)
+        cat "$state/step/certs/root_ca.crt"
+        ;;
+    hosts)
+        echo '127.0.0.1 fixture.orion.test orion.test # orion-external-services'
+        ;;
+    hosts-install)
+        [ "$(uname -s)" = Darwin ] || { echo 'macOS only' >&2; exit 1; }
+        line=$(./fixture hosts)
+        if grep -Fq '# orion-external-services' /etc/hosts; then
+            grep -Fxq "$line" /etc/hosts || {
+                echo 'Conflicting orion-external-services entry in /etc/hosts' >&2
+                exit 1
+            }
+        else
+            printf '%s\n' "$line" | sudo tee -a /etc/hosts >/dev/null
+        fi
+        ;;
+    chrome)
+        command -v open >/dev/null
+        open -Ra 'Google Chrome' >/dev/null 2>&1 || {
+            echo 'Google Chrome is not installed on this Mac' >&2
+            exit 1
+        }
+        open -na 'Google Chrome' --args --user-data-dir="$state/chrome-mac" \
+            --window-size=1440,900 \
+            --host-resolver-rules='MAP fixture.orion.test 127.0.0.1, MAP orion.test 127.0.0.1' \
+            --new-window https://fixture.orion.test:8443
+        ;;
+    trust-mac)
+        [ "$(uname -s)" = Darwin ] || { echo 'macOS only' >&2; exit 1; }
+        security add-trusted-cert -r trustRoot \
+            -k "$HOME/Library/Keychains/login.keychain-db" "$state/step/certs/root_ca.crt"
+        ;;
+    *)
+        echo 'Usage: ./fixture build|up|check|check-orion|down|ca|hosts|hosts-install|chrome|trust-mac' >&2
+        exit 2
+        ;;
+esac

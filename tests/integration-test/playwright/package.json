@@ -1,0 +1,12 @@
+{
+  "name": "orion-external-integration-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:acme": "playwright test acme.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
