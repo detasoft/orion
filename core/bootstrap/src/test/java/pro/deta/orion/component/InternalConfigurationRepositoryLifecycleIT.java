@@ -136,7 +136,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .plainRootToken(PlainRootTokenAccessForTests.create());
             assertRecoveryPasswordOnly(component, new String(rootPassword));
             AccessControl acl = new XmlService().deserialize(new ByteArrayInputStream(
-                    component.orionAccessControlService().accessControlConfigurationFile()));
+                    component.orionAccessControlService().accessControlConfigurationFile().content()));
             assertThat(acl.getUsers().getFirst().getCredentials())
                     .singleElement()
                     .satisfies(credential -> assertThat(credential.getKeyId())
@@ -176,7 +176,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
             AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile())).toDraft();
+                    first.orionAccessControlService().accessControlConfigurationFile().content())).toDraft();
             AccessControlDraft.User root = draft.getUsers().stream()
                     .filter(candidate -> "root".equalsIgnoreCase(candidate.getId()))
                     .findFirst()
@@ -196,9 +196,10 @@ class InternalConfigurationRepositoryLifecycleIT {
             root.addGrant("ROOT_DIRECT")
                     .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
             first.orionAccessControlService().saveAccessControlConfigurationFile(
-                    accessControlBytes(draft.toAccessControl()));
+                    accessControlBytes(draft.toAccessControl()),
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow());
             beforeReset = new XmlService().deserialize(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile()));
+                    first.orionAccessControlService().accessControlConfigurationFile().content()));
             versionBeforeReset = repository(first)
                     .loadFiles(CONFIGURATION_REF, List.of(ACL_PATH))
                     .version()
@@ -345,7 +346,8 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            first.orionAccessControlService().saveAccessControlConfigurationFile(missingRootAclBytes());
+            first.orionAccessControlService().saveAccessControlConfigurationFile(missingRootAclBytes(),
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow());
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {
@@ -366,7 +368,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertAuthenticated(reset, "alice", "alice-password");
 
             AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile()));
+                    reset.orionAccessControlService().accessControlConfigurationFile().content()));
             assertThat(recovered.getUsers())
                     .extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
@@ -538,7 +540,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(repository(reset).loadFiles(CONFIGURATION_REF, List.of(ACL_PATH)).version())
                     .hasValueSatisfying(version -> assertThat(version).isNotEqualTo(versionBeforeReset));
             AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile()));
+                    reset.orionAccessControlService().accessControlConfigurationFile().content()));
             assertThat(recovered.getUsers())
                     .filteredOn(user -> "root".equalsIgnoreCase(user.getId()))
                     .hasSize(1);
@@ -1084,7 +1086,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             String userId,
             String... expectedKeys) throws Exception {
         AccessControl accessControl = new XmlService().deserialize(new ByteArrayInputStream(
-                component.orionAccessControlService().accessControlConfigurationFile()));
+                component.orionAccessControlService().accessControlConfigurationFile().content()));
         AccessControl.User user = accessControl.getUsers().stream()
                 .filter(candidate -> userId.equals(candidate.getId()))
                 .findFirst()

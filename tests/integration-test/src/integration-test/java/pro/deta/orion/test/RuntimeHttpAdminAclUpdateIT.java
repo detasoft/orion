@@ -62,7 +62,8 @@ class RuntimeHttpAdminAclUpdateIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(token),
                     "application/xml",
-                    updatedAcl);
+                    updatedAcl,
+                    initialAcl.etag());
 
             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
             assertUserAuthenticates(orion, "http-updated-user");
@@ -105,7 +106,8 @@ class RuntimeHttpAdminAclUpdateIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(token),
                     "application/xml",
-                    "<AccessControl><users>".getBytes(StandardCharsets.UTF_8));
+                    "<AccessControl><users>".getBytes(StandardCharsets.UTF_8),
+                    activeBefore.etag());
 
             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
             assertThat(readFileFromAclRepository(orion)).containsExactly(storedBefore);
@@ -121,11 +123,49 @@ class RuntimeHttpAdminAclUpdateIT {
         }
     }
 
+    @Test
+    void staleAccessControlPostCannotReplaceANewerCommit() throws Exception {
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-stale"));
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token));
+            assertThat(initial.etag()).isNotBlank();
+
+            RuntimeHttpTestSupport.HttpResponse missingRevision = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
+                    "application/xml", withPasswordUser(initial.body(), "missing"));
+            assertThat(missingRevision.status()).isEqualTo(428);
+
+            RuntimeHttpTestSupport.HttpResponse first = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
+                    "application/xml", withPasswordUser(initial.body(), "first"), initial.etag());
+            assertThat(first.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            byte[] storedAfterFirst = readFileFromAclRepository(orion);
+
+            RuntimeHttpTestSupport.HttpResponse stale = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
+                    "application/xml", withPasswordUser(initial.body(), "second"), initial.etag());
+            assertThat(stale.status()).isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            assertThat(readFileFromAclRepository(orion)).containsExactly(storedAfterFirst);
+            assertUserAuthenticates(orion, "first");
+        }
+    }
+
     private static AccessControl accessControlWithPasswordUser(String userId) {
         AccessControlDraft draft = new AccessControlDraft();
         draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
                 .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
         return draft.toAccessControl();
+    }
+
+    private static byte[] withPasswordUser(String originalXml, String userId) throws IOException {
+        AccessControlDraft draft = new XmlService().deserialize(
+                new ByteArrayInputStream(originalXml.getBytes(StandardCharsets.UTF_8))).toDraft();
+        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
+                .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
+        return serialize(draft.toAccessControl());
     }
 
     private static byte[] serialize(AccessControl accessControl) throws IOException {

@@ -81,7 +81,7 @@ class BootstrapProxyEndpointIT {
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("bootstrap upstream");
             var document = OrionXml.read(new ByteArrayInputStream(
-                    upstream.accessControlService().accessControlConfigurationFile()));
+                    upstream.accessControlService().accessControlConfigurationFile().content()));
             var aclDraft = document.system().accessControl().toDraft();
             var rootDraft = aclDraft.getUsers().getFirst();
             for (String name : List.of("proxy/system/*", "bootstrap/*")) {

@@ -299,6 +299,7 @@ class OrionHttpRouteServletRoutingTest {
             case "getMethod" -> method;
             case "getPathInfo" -> pathInfo;
             case "getInputStream" -> new ByteArrayServletInputStream(body.getBytes(StandardCharsets.UTF_8));
+            case "getHeader" -> "If-Match".equals(args[0]) ? "\"revision\"" : null;
             case "getAttribute" -> OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE.equals(args[0]) ? context : null;
             case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
             case "hashCode" -> System.identityHashCode(proxy);

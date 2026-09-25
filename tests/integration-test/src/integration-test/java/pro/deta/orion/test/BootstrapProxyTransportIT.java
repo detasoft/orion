@@ -67,7 +67,7 @@ class BootstrapProxyTransportIT {
             Map<String, String> environment = configureSources(tempDir, configuration, upstream, transport);
             NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("upstream repository");
-            byte[] originalConfiguration = upstream.accessControlService().accessControlConfigurationFile();
+            byte[] originalConfiguration = upstream.accessControlService().accessControlConfigurationFile().content();
             repository.saveFiles(REF, Map.of(
                     "orion.xml", GitFile.regular(originalConfiguration),
                     "material.p12", GitFile.regular(materialBytes(configuration, environment))), Set.of(),

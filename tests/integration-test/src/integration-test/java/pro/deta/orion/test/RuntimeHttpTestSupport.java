@@ -63,8 +63,17 @@ final class RuntimeHttpTestSupport {
         return request(method, url, authorization, null, new byte[0]);
     }
 
+    static String aclEtag(StartedOrion orion, String token) throws IOException {
+        return request("GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token)).etag();
+    }
+
     static HttpResponse request(String method, URL url, String authorization, String contentType, byte[] body)
             throws IOException {
+        return request(method, url, authorization, contentType, body, null);
+    }
+
+    static HttpResponse request(String method, URL url, String authorization, String contentType, byte[] body,
+            String ifMatch) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod(method);
         if (authorization != null) {
@@ -72,6 +81,9 @@ final class RuntimeHttpTestSupport {
         }
         if (contentType != null) {
             connection.setRequestProperty("Content-Type", contentType);
+        }
+        if (ifMatch != null) {
+            connection.setRequestProperty("If-Match", ifMatch);
         }
         if (body.length > 0 || "POST".equals(method) || "PUT".equals(method)) {
             connection.setDoOutput(true);
@@ -87,6 +99,7 @@ final class RuntimeHttpTestSupport {
                 status,
                 connection.getContentType(),
                 connection.getHeaderField("Allow"),
+                connection.getHeaderField("ETag"),
                 responseBody);
     }
 
@@ -106,7 +119,7 @@ final class RuntimeHttpTestSupport {
         }
     }
 
-    record HttpResponse(int status, String contentType, String allow, String body) {
+    record HttpResponse(int status, String contentType, String allow, String etag, String body) {
     }
 
     record StartedOrion(

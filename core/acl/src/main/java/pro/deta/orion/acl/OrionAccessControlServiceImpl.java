@@ -826,7 +826,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public byte[] accessControlConfigurationFile() {
+    public ConfigurationFile accessControlConfigurationFile() {
         return switch (accessControlStorage.load()) {
             case Result.Success<AccessControlSnapshot>(var snapshot) -> {
                 byte[] content = snapshot.files().get(accessControlStorage.primaryPath());
@@ -835,9 +835,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             "Primary ACL configuration file is missing: "
                                     + accessControlStorage.primaryPath());
                 }
-                yield serializeOrionConfiguration(parseOrionConfiguration(
+                yield new ConfigurationFile(serializeOrionConfiguration(parseOrionConfiguration(
                         content,
-                        accessControlStorage.primaryPath()));
+                        accessControlStorage.primaryPath())), snapshot.version());
             }
             case Result.Failure<AccessControlSnapshot> failure ->
                     throw new IllegalStateException("Cannot load ACL configuration file", failure.throwable());
@@ -845,7 +845,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public void saveAccessControlConfigurationFile(byte[] content) {
+    public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision) {
         if (content == null || content.length == 0) {
             throw new AccessControlValidationException("ACL configuration content is required");
         }
@@ -856,21 +856,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         } catch (IllegalArgumentException failure) {
             throw new AccessControlValidationException("Invalid ACL configuration file");
         }
-        AccessControlSnapshot snapshot = AccessControlSnapshot.singleFile(
-                primaryPath,
-                serializeOrionConfiguration(document));
-        switch (documentFrom(snapshot)) {
-            case Result.Success<OrionDocument> ignored -> {
-                accessControlStorage.save(
-                        snapshot,
-                        new AccessControlSaveRequest(
-                                "saveAccessControlConfigurationFile() " + primaryPath,
-                                UserEmail.EMPTY));
-                requestAclUpdateAndWait("saveAccessControlConfigurationFile()");
-            }
-            case Result.Failure<OrionDocument> failure ->
-                    throw new AccessControlValidationException("Invalid ACL configuration file");
+        AccessControlSnapshot input = AccessControlSnapshot.singleFile(
+                primaryPath, serializeOrionConfiguration(document));
+        if (documentFrom(input) instanceof Result.Failure<OrionDocument>) {
+            throw new AccessControlValidationException("Invalid ACL configuration file");
         }
+        updatePrimaryConfiguration(expectedRevision, ignored -> document,
+                new AccessControlSaveRequest("saveAccessControlConfigurationFile() " + primaryPath,
+                        UserEmail.EMPTY));
     }
 
     private AccessControl parseAccessControlConfiguration(byte[] content, String sourceName) {
@@ -1778,11 +1771,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         Objects.requireNonNull(update, "configuration update");
         Objects.requireNonNull(request, "save request");
-        AccessControlSnapshot loaded = loadValidatedAccessControlSnapshot()
+        AccessControlSnapshot loaded = accessControlStorage.load()
                 .valueOrFailure("Cannot load configuration for update");
         if (!loaded.version().equals(Optional.of(expectedRevision))) {
             throw new AccessControlConcurrentUpdateException("Configuration revision changed", null);
         }
+        validateSnapshot(loaded).valueOrFailure("Cannot validate configuration for update");
         Map<String, byte[]> files = new LinkedHashMap<>(loaded.files());
         String primaryPath = accessControlStorage.primaryPath();
         OrionDocument primary = parseOrionConfiguration(files.get(primaryPath), primaryPath);

@@ -12,6 +12,8 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 public interface OrionAccessControlService {
     long MAX_TOKEN_EXPIRES_IN_SECONDS = 3_600;
@@ -71,7 +73,19 @@ public interface OrionAccessControlService {
             AuthenticationResult.Success renewalAuthority,
             long expiresInSeconds);
 
-    byte[] accessControlConfigurationFile();
+    ConfigurationFile accessControlConfigurationFile();
 
-    void saveAccessControlConfigurationFile(byte[] content);
+    void saveAccessControlConfigurationFile(byte[] content, String expectedRevision);
+
+    record ConfigurationFile(byte[] content, Optional<String> revision) {
+        public ConfigurationFile {
+            content = Objects.requireNonNull(content, "content").clone();
+            Objects.requireNonNull(revision, "revision");
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+    }
 }

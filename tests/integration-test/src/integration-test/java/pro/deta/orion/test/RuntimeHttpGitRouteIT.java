@@ -71,7 +71,8 @@ class RuntimeHttpGitRouteIT {
                         orion.httpUrl("/api/admin/acl"),
                         TestBearerTokens.bearer(rootToken),
                         "application/xml",
-                        serialize(accessControlForHttpGitUser(repositoryName)));
+                        serialize(accessControlForHttpGitUser(repositoryName)),
+                        RuntimeHttpTestSupport.aclEtag(orion, rootToken));
                 assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
 
                 String userToken = TestBearerTokens.issueToken(
@@ -175,7 +176,8 @@ class RuntimeHttpGitRouteIT {
                         orion.httpUrl("/api/admin/acl"),
                         TestBearerTokens.bearer(rootToken),
                         "application/xml",
-                        serialize(accessControlForHttpGitUser(repositoryName, true, false, false)));
+                        serialize(accessControlForHttpGitUser(repositoryName, true, false, false)),
+                        RuntimeHttpTestSupport.aclEtag(orion, rootToken));
                 assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
 
                 String userToken = TestBearerTokens.issueToken(
@@ -272,7 +274,8 @@ class RuntimeHttpGitRouteIT {
                         orion.httpUrl("/api/admin/acl"),
                         TestBearerTokens.bearer(rootToken),
                         "application/xml",
-                        serialize(accessControlForHttpGitUser(repositoryName, true, true, true, BRANCH, false)));
+                        serialize(accessControlForHttpGitUser(repositoryName, true, true, true, BRANCH, false)),
+                        RuntimeHttpTestSupport.aclEtag(orion, rootToken));
                 assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
 
                 String userToken = TestBearerTokens.issueToken(

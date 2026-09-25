@@ -60,7 +60,7 @@ class RemoteBootstrapConfigurationIT {
 
         try (var upstream = RuntimeHttpTestSupport.start(upstreamConfiguration)) {
             var environment = configureSources(tempDir, target, upstream, transport);
-            byte[] xml = upstream.accessControlService().accessControlConfigurationFile();
+            byte[] xml = upstream.accessControlService().accessControlConfigurationFile().content();
             byte[] material = materialBytes(target, environment);
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("native bootstrap repository");
@@ -107,7 +107,7 @@ class RemoteBootstrapConfigurationIT {
                     assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                     lifecycle.waitForStarting();
                     var loaded = OrionXml.read(new ByteArrayInputStream(
-                            component.orionAccessControlService().accessControlConfigurationFile()));
+                            component.orionAccessControlService().accessControlConfigurationFile().content()));
                     var seeded = OrionXml.read(new ByteArrayInputStream(xml));
                     var seededAcl = seeded.system().accessControl();
                     var loadedAcl = loaded.system().accessControl();
@@ -197,7 +197,7 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("material upstream");
             configurationRepository.saveFiles(acl.getRef(),
                     Map.of(acl.getPath(),
-                            GitFile.regular(configurationServer.accessControlService().accessControlConfigurationFile())), Set.of(),
+                            GitFile.regular(configurationServer.accessControlService().accessControlConfigurationFile().content())), Set.of(),
                     "seed configuration", GitCommitAuthor.EMPTY);
             materialRepository.saveFiles(material.getRef(),
                     Map.of(material.getPath(), GitFile.regular(materialBytes(target, environment))), Set.of(),
@@ -220,7 +220,7 @@ class RemoteBootstrapConfigurationIT {
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                         lifecycle.waitForStarting();
-                        byte[] xml = component.orionAccessControlService().accessControlConfigurationFile();
+                        byte[] xml = component.orionAccessControlService().accessControlConfigurationFile().content();
                         var document = OrionXml.read(new ByteArrayInputStream(xml));
                         assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
                                 .containsExactlyInAnyOrder("configuration", "material");

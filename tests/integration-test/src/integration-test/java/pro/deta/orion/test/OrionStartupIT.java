@@ -109,13 +109,14 @@ class OrionStartupIT {
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             AccessControl loadedAcl = deserialize(
-                    orion.accessControlService().accessControlConfigurationFile());
+                    orion.accessControlService().accessControlConfigurationFile().content());
 
             assertThat(hasUser(loadedAcl, "remote-user")).isTrue();
             assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
 
             orion.accessControlService().saveAccessControlConfigurationFile(
-                    serialize(accessControlWithUsers("root", "saved-remote-user")));
+                    serialize(accessControlWithUsers("root", "saved-remote-user")),
+                    orion.accessControlService().accessControlConfigurationFile().revision().orElseThrow());
         }
 
         AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));

@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlValidationException;
+import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -25,16 +26,30 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        byte[] content = accessControlService.accessControlConfigurationFile();
-        return OrionHttpResponse.xml(SC_OK, new String(content, StandardCharsets.UTF_8));
+        OrionAccessControlService.ConfigurationFile file = accessControlService.accessControlConfigurationFile();
+        String revision = file.revision().orElseThrow(() -> new IllegalStateException(
+                "Configuration revision is unavailable"));
+        return OrionHttpResponse.xml(SC_OK, new String(file.content(), StandardCharsets.UTF_8))
+                .withHeader("ETag", "\"" + revision + "\"");
     }
 
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
+        String ifMatch = req.getHeader("If-Match");
+        if (ifMatch == null || ifMatch.isBlank()) {
+            return OrionHttpResponse.json(428, Map.of("status", "configuration-revision-required"));
+        }
+        if (ifMatch.length() < 3 || !ifMatch.startsWith("\"") || !ifMatch.endsWith("\"")
+                || ifMatch.indexOf('"', 1) != ifMatch.length() - 1) {
+            throw new HttpRequestValidationException("Invalid configuration revision");
+        }
         try {
-            accessControlService.saveAccessControlConfigurationFile(req.getInputStream().readAllBytes());
+            accessControlService.saveAccessControlConfigurationFile(
+                    req.getInputStream().readAllBytes(), ifMatch.substring(1, ifMatch.length() - 1));
         } catch (AccessControlValidationException failure) {
             throw new HttpRequestValidationException(failure.getMessage());
+        } catch (AccessControlConcurrentUpdateException failure) {
+            return OrionHttpResponse.json(409, Map.of("status", "configuration-conflict"));
         }
         return OrionHttpResponse.created(Map.of("status", "ok"));
     }

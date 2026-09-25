@@ -604,12 +604,12 @@ class OrionSshAuthenticatorTest {
         }
 
         @Override
-        public byte[] accessControlConfigurationFile() {
+        public ConfigurationFile accessControlConfigurationFile() {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public void saveAccessControlConfigurationFile(byte[] content) {
+        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision) {
             throw new UnsupportedOperationException();
         }
 
