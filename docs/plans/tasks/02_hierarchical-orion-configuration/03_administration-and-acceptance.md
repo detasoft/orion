@@ -3,7 +3,7 @@
 Status: todo
 Depends on: completed hierarchical-authorization (1f09d248),
 completed repository-and-mirror-configuration (146b9e76),
-02_native-git-configuration-snapshots.md
+completed native-git-configuration-snapshots (934e73d5)
 
 Provide safe mutation and operational visibility for the versioned Orion
 configuration.
