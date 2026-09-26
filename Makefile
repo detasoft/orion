@@ -11,7 +11,7 @@ RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>
 RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=<log-file>]
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
-	help skill-check skills-check \
+	help skill-check skills-check docker-exec \
 	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
@@ -37,7 +37,7 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: help dist test run-test test-jfr test-jfr-report xml-schema skill-check skills-check \
+.PHONY: help dist test run-test test-jfr test-jfr-report xml-schema skill-check skills-check docker-exec \
 	cargo-init rust-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 
@@ -63,6 +63,9 @@ help: ## Show available goals and their descriptions
 		} \
 		{ pending = "" } \
 		' $(MAKEFILE_LIST)
+
+docker-exec: ## Run CMD in orion-external-services; e.g. make docker-exec CMD='ps -ef'
+	docker exec orion-external-services $(CMD)
 
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
