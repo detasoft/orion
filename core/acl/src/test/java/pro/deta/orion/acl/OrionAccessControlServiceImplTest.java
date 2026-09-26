@@ -93,6 +93,38 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void configurationStatusTracksStoredValidationSeparatelyFromActiveRevision() {
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            OrionAccessControlServiceImpl.ConfigurationStatus initial = fixture.service.configurationStatus();
+            assertThat(initial.storedRevision()).contains("version-one");
+            assertThat(initial.activeRevision()).contains("version-one");
+            assertThat(initial.validation()).isEqualTo("valid");
+
+            fixture.storage.snapshot = new AccessControlSnapshot(
+                    Map.of(ACL_PATH, "<invalid".getBytes(StandardCharsets.UTF_8)), Optional.of("version-two"));
+            OrionAccessControlServiceImpl.ConfigurationStatus invalid = fixture.service.configurationStatus();
+            assertThat(invalid.storedRevision()).contains("version-two");
+            assertThat(invalid.activeRevision()).contains("version-one");
+            assertThat(invalid.validation()).isEqualTo("invalid");
+
+            fixture.storage.loadUnavailable = true;
+            OrionAccessControlServiceImpl.ConfigurationStatus unavailable = fixture.service.configurationStatus();
+            assertThat(unavailable.storedRevision()).isEmpty();
+            assertThat(unavailable.activeRevision()).contains("version-one");
+            assertThat(unavailable.validation()).isEqualTo("unavailable");
+            fixture.storage.loadUnavailable = false;
+
+            fixture.storage.snapshot = new AccessControlSnapshot(
+                    Map.of(ACL_PATH, serialize(new AccessControl())), Optional.of("version-three"));
+            fixture.service.reload("test recovery");
+            OrionAccessControlServiceImpl.ConfigurationStatus recovered = fixture.service.configurationStatus();
+            assertThat(recovered.storedRevision()).contains("version-three");
+            assertThat(recovered.activeRevision()).contains("version-three");
+            assertThat(recovered.validation()).isEqualTo("valid");
+        }
+    }
+
+    @Test
     void organizationIdentityCannotIssueTokenAsSystemUserWithSameId() {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("alice"));
@@ -1234,6 +1266,7 @@ class OrionAccessControlServiceImplTest {
         private volatile AccessControlSnapshot snapshot;
         private int saveCount;
         private boolean concurrentOnSave;
+        private boolean loadUnavailable;
         private boolean blockCredentialRemoval;
         private final CountDownLatch credentialRemovalSaveEntered = new CountDownLatch(1);
         private final CountDownLatch continueCredentialRemoval = new CountDownLatch(1);
@@ -1244,6 +1277,9 @@ class OrionAccessControlServiceImplTest {
 
         @Override
         public Result<AccessControlSnapshot> load() {
+            if (loadUnavailable) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL);
+            }
             return new Result.Success<>(snapshot);
         }
 

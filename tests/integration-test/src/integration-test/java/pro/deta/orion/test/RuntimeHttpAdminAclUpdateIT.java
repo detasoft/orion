@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
@@ -31,6 +33,29 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void configurationStatusIsAdminOnlyAndReportsTheActiveGitRevision() throws Exception {
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-status"));
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            RuntimeHttpTestSupport.HttpResponse withoutToken = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/configuration/status"), null);
+            assertThat(withoutToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            RuntimeHttpTestSupport.HttpResponse acl = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token));
+            RuntimeHttpTestSupport.HttpResponse status = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/configuration/status"), TestBearerTokens.bearer(token));
+            assertThat(status.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+            JsonNode json = new ObjectMapper().readTree(status.body());
+            assertThat(json.get("storedRevision").asText()).isEqualTo(acl.etag().replace("\"", ""));
+            assertThat(json.get("activeRevision").asText()).isEqualTo(acl.etag().replace("\"", ""));
+            assertThat(json.get("validation").asText()).isEqualTo("valid");
+            assertThat(json.size()).isEqualTo(3);
+        }
+    }
 
     @Test
     void postAccessControlReloadsRuntimeAclAndSurvivesRestart() throws Exception {

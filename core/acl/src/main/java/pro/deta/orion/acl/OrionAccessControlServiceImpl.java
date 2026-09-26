@@ -205,6 +205,22 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return desiredState.isPublished();
     }
 
+    public ConfigurationStatus configurationStatus() {
+        Result<AccessControlSnapshot> stored = accessControlStorage.load();
+        Optional<String> activeRevision = desiredState.current().revision();
+        return switch (stored) {
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> new ConfigurationStatus(
+                    snapshot.version(), activeRevision,
+                    validateSnapshot(snapshot) instanceof Result.Success<?> ? "valid" : "invalid");
+            case Result.Failure<AccessControlSnapshot> ignored ->
+                    new ConfigurationStatus(Optional.empty(), activeRevision, "unavailable");
+        };
+    }
+
+    public record ConfigurationStatus(
+            Optional<String> storedRevision, Optional<String> activeRevision, String validation) {
+    }
+
     private void printAndClearPlainTextPasswordMessage(PrintStream out, char[] secureChars) {
         out.println();
         out.print("---ROOT PASSWORD: ");
