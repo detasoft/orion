@@ -28,30 +28,6 @@ preserving tests and test artifacts. Do not assert POM structure with a test.
 **Priority signals.** Importance: medium due to unnecessary coupling across modules. Repair ease: high,
 a few build-scope changes with complete reactor verification.
 
-## 9. Root inheritance exports Lombok as a runtime dependency
-
-**Problem.** Root Lombok has default compile scope, so consumers of production artifacts receive the annotation
-processor library at runtime despite no observed runtime calls to it.
-
-**Sources.** [Dependency](pom.xml#L228), [processor configuration](pom.xml#L270),
-[annotation consumer](core/common/src/main/java/pro/deta/orion/util/ConfigurationContext.java),
-[existing provided scope](integration/cloudflare-api/pom.xml#L44), and
-[shading exclusion](core/bootstrap/pom.xml#L110).
-
-**Documented behavior and contract.** No runtime Lombok requirement was found. Existing generated code and
-annotation processing during compilation must remain available.
-
-**Minimal repair.** Scope the inherited dependency to provided while retaining processor configuration.
-Verify `make test` and effective dependency scopes.
-
-**Alternatives and consequences.** Optional prevents transitive export but keeps runtime scope inside modules.
-Distribution exclusions only remove particular copies. Removing annotations requires unrelated source rewrites.
-Provided scope removes an unused runtime dependency without adding concepts.
-
-**Confidence.** High from real annotations and absence of runtime consumers; the modified build is unverified.
-
-**Priority signals.** Importance: low. Repair ease: high, a local scope change with reactor verification.
-
 ## 10. HTTP clone helper generates an endpoint rejected by the transport
 
 **Problem.** The documented `make clone-http-repo project` sends Git to `/r/project`, producing discovery at
