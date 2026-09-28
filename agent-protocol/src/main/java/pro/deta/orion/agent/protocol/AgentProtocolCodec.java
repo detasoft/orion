@@ -624,14 +624,6 @@ public final class AgentProtocolCodec {
             return value.intValue();
         }
 
-        long unsignedInt(int index, String name) throws AgentProtocolException {
-            BigInteger value = integer(index, name);
-            if (value.signum() < 0 || value.bitLength() > Integer.SIZE) {
-                throw failure(INVALID_FIELD, name + " must fit an unsigned 32-bit integer");
-            }
-            return value.longValue();
-        }
-
         long operationSequence(int index) throws AgentProtocolException {
             BigInteger value = integer(index, "operationSequence");
             if (value.signum() < 0 || value.bitLength() > Long.SIZE) {
