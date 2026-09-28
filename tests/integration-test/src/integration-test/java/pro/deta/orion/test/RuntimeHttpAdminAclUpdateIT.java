@@ -13,6 +13,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -41,6 +42,93 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void configurationRollbackCreatesANewCommitAndRevokesRemovedUserAccess() throws Exception {
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+                tempDir.resolve("configuration-rollback"));
+        String originalXml;
+        String rollbackEtag;
+        String rootToken;
+        byte[] userToken;
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            String bearer = TestBearerTokens.bearer(rootToken);
+            RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            originalXml = initial.body();
+            byte[] originalContent = originalXml.getBytes(StandardCharsets.UTF_8);
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
+                    "application/xml", withPasswordUser(originalXml, "rollback-user"), initial.etag()).status())
+                    .isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.HttpResponse changed = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            assertThat(changed.etag()).isNotEqualTo(initial.etag());
+            assertUserAuthenticates(orion, "rollback-user");
+            userToken = TestBearerTokens.issueToken(orion.httpUrl("/api/admin/token"),
+                    "rollback-user", TEST_PASSWORD.toCharArray(), 600).getBytes(StandardCharsets.UTF_8);
+            assertThat(orion.accessControlService().verifyToken(userToken))
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
+
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
+                    "application/xml", originalContent, initial.etag()).status())
+                    .isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            RuntimeHttpTestSupport.HttpResponse afterConflict = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            assertThat(afterConflict.etag()).isEqualTo(changed.etag());
+            assertThat(afterConflict.body()).isEqualTo(changed.body());
+            assertUserAuthenticates(orion, "rollback-user");
+            assertThat(orion.accessControlService().verifyToken(userToken))
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
+
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
+                    "application/xml", originalContent, changed.etag()).status())
+                    .isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.HttpResponse rolledBack = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            rollbackEtag = rolledBack.etag();
+            assertThat(rollbackEtag).isNotEqualTo(initial.etag()).isNotEqualTo(changed.etag());
+            assertThat(rolledBack.body()).isEqualTo(originalXml);
+            assertThat(new String(readFileFromAclRepository(orion), StandardCharsets.UTF_8))
+                    .isEqualTo(originalXml);
+            assertThat(orion.accessControlService().authenticateUser(
+                    "rollback-user", TEST_PASSWORD.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(orion.accessControlService().verifyToken(userToken))
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
+
+            NativeGitRepository repository = orion.repositoryProvider().openForRead("orion")
+                    .valueOrFailure("configuration repository");
+            RevCommit rollback = RevCommit.parse(repository.readObject(
+                    new ObjectId(rollbackEtag.replace("\"", ""))).orElseThrow().data());
+            assertThat(rollback.getParentCount()).isEqualTo(1);
+            assertThat(rollback.getParent(0).name()).isEqualTo(changed.etag().replace("\"", ""));
+            RevCommit previous = RevCommit.parse(repository.readObject(
+                    new ObjectId(rollback.getParent(0).name())).orElseThrow().data());
+            assertThat(previous.getParentCount()).isEqualTo(1);
+            assertThat(previous.getParent(0).name()).isEqualTo(initial.etag().replace("\"", ""));
+            assertConfigurationCommitAuthor(orion, "root");
+            RuntimeHttpTestSupport.HttpResponse status = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/configuration/status"), bearer);
+            assertThat(status.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+            JsonNode json = new ObjectMapper().readTree(status.body());
+            assertThat(json.get("storedRevision").asText()).isEqualTo(rollbackEtag.replace("\"", ""));
+            assertThat(json.get("activeRevision").asText()).isEqualTo(rollbackEtag.replace("\"", ""));
+            assertThat(json.get("validation").asText()).isEqualTo("valid");
+        }
+        try (RuntimeHttpTestSupport.StartedOrion restarted = RuntimeHttpTestSupport.start(configuration)) {
+            RuntimeHttpTestSupport.HttpResponse current = RuntimeHttpTestSupport.request(
+                    "GET", restarted.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
+            assertThat(current.etag()).isEqualTo(rollbackEtag);
+            assertThat(current.body()).isEqualTo(originalXml);
+            assertThat(restarted.accessControlService().authenticateUser(
+                    "rollback-user", TEST_PASSWORD.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(restarted.accessControlService().verifyToken(userToken))
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
+        }
+    }
 
     @Test
     void configurationCommitsIdentifyTheAuthenticatedAdministrator() throws Exception {
