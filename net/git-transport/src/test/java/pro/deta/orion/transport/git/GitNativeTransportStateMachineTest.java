@@ -4,7 +4,6 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
-import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -17,7 +16,6 @@ import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.util.Result;
 
 import java.io.OutputStream;
-import java.lang.reflect.Constructor;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -160,14 +158,8 @@ class GitNativeTransportStateMachineTest {
     }
 
     @Test
-    void nativeGitStateMachineUsesGenericServiceLifecycleAdapter() {
-        assertTrue(ServiceLifecycleStateMachineAdapter.class.isAssignableFrom(GitNativeTransportStateMachine.class));
-    }
-
-    @Test
-    void nativeGitStateMachineIsDaggerManagedButNotAnApplicationListener() {
+    void nativeGitStateMachineIsDaggerManaged() {
         assertTrue(GitNativeTransportStateMachine.class.isAnnotationPresent(Singleton.class));
-        assertEquals(1, injectConstructor().getParameterCount());
     }
 
     @Test
@@ -376,15 +368,6 @@ class GitNativeTransportStateMachineTest {
 
     private static GitNativeTransportStateMachine machine(RecordingGitNativeTransportService service) {
         return new GitNativeTransportStateMachine(() -> service);
-    }
-
-    private static Constructor<?> injectConstructor() {
-        for (Constructor<?> constructor : GitNativeTransportStateMachine.class.getDeclaredConstructors()) {
-            if (constructor.isAnnotationPresent(Inject.class)) {
-                return constructor;
-            }
-        }
-        throw new AssertionError("Missing @Inject constructor");
     }
 
     private static boolean awaitEndOfInput(

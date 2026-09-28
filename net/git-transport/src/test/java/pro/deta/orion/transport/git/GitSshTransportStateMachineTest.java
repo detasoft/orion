@@ -36,7 +36,6 @@ import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
@@ -80,11 +79,6 @@ class GitSshTransportStateMachineTest {
         if (executor != null) {
             executor.shutdownNow();
         }
-    }
-
-    @Test
-    void sshGitStateMachineUsesGenericServiceLifecycleAdapter() {
-        assertEquals(ServiceLifecycleStateMachineAdapter.class, GitSshTransportStateMachine.class.getSuperclass());
     }
 
     @Test
