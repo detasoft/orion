@@ -4,7 +4,7 @@
 
     <groupId>pro.deta.maven</groupId>
     <artifactId>rust-maven-plugin</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.1-SNAPSHOT</version>
     <packaging>maven-plugin</packaging>
 
     <name>Rust Maven Plugin</name>
@@ -23,7 +23,7 @@
         <connection>scm:git:https://github.com/detasoft/orion.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/detasoft/orion.git</developerConnection>
         <url>https://github.com/detasoft/orion</url>
-        <tag>rust-maven-plugin-0.1.0</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <distributionManagement>
