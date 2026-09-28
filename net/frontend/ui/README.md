@@ -105,6 +105,16 @@ npm test
 npm run build
 ```
 
+For the Runtime state browser layout regression, keep Vite and the fixture's
+Chromium running, then run from the repository root:
+
+```sh
+node --test tests/integration-test/playwright/ui-runtime-state.test.mjs
+```
+
+This check uses synthetic API responses and verifies multiline indentation and
+long values on mobile; it does not authenticate against a real Orion backend.
+
 The UI is also part of the Maven reactor. Maven installs its own pinned Node.js
 toolchain, builds the UI, and packages the production assets in the `frontend-ui`
 JAR. Frontend tests are temporarily excluded from Maven verification; run
