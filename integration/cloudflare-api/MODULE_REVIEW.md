@@ -1,16 +1,5 @@
 # Module review: integration/cloudflare-api
 
-## 1. Неиспользуемый пустой CloudflareAPI
-
-- **Проблема и триггер.** Публичный CloudflareAPI не содержит поведения/данных и не используется; рядом с рабочим client публикуется второй API-тип без роли.
-- **Источники и владельцы.** [Marker](src/main/java/pro/deta/orion/cloudflare/CloudflareAPI.java#L3), [client](src/main/java/pro/deta/orion/cloudflare/CloudflareClient.java#L13), [implementation](src/main/java/pro/deta/orion/cloudflare/CloudflareClientImpl.java#L24), содержательные [тесты](src/test/java/pro/deta/orion/cloudflare/CloudflareClientImplTest.java#L45), реальный [integration caller](../../tests/integration-test/src/integration-test/java/pro/deta/orion/cloudflare/IntegrationCloudflareIT.java#L29). Поиск marker возвращает только declaration.
-- **Документированное поведение.** [План DNS](../../docs/plans/tasks/15_dynamic-domains/02_allocation-and-dns.md#L90) требует существующий CloudflareClient; marker и reflective/service binding не предусмотрены.
-- **Контракт.** Сохранить DNS operations, wire DTOs и provider boundary; пустой marker не выражает требования.
-- **Минимальное исправление.** Удалить CloudflareAPI.java без replacement API и теста отсутствия класса.
-- **Альтернативы и последствия.** Facade/alias создают ещё один путь без consumer; narrowing visibility оставляет мёртвый тип.
-- **Уверенность.** Высокая: external binary promise и tracked service metadata не найдены. Generated output не собирался.
-- **Важность / простота.** Важность низкая: лишняя публичная концепция. Простота высокая: один файл и compilation потребителей.
-
 ## 2. Retry-настройки обещаны, но клиент их не читает
 
 - **Проблема и триггер.** Значения maxRetries/retryDelayMillis/maxRetryDelayMillis не влияют на requests/delays. После законченного ошибочного HTTP response, например 500, executeRequest сразу возвращает ошибку. Это фиктивная configurable policy, а не утверждение отсутствия внутренних transport retries OkHttp.
