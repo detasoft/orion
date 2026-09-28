@@ -20,16 +20,6 @@
                 <artifactId>netty-buffer</artifactId>
                 <version>${netty.version}</version>
             </dependency>
-            <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-transport</artifactId>
-                <version>${netty.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.netty</groupId>
-                <artifactId>netty-all</artifactId>
-                <version>${netty.version}</version>
-            </dependency>
 
             <dependency>
                 <groupId>pro.deta.orion</groupId>
@@ -144,11 +134,6 @@
             <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
                 <artifactId>integration-test-support</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core</groupId>
-                <artifactId>communication</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

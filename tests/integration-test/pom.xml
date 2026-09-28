@@ -22,10 +22,6 @@
             <artifactId>bootstrap</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>communication</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.integration</groupId>
             <artifactId>cloudflare-api</artifactId>
         </dependency>

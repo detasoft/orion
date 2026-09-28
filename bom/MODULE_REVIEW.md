@@ -39,7 +39,7 @@ through an existing mechanism, without production or persisted changes.
 **Problem.** The BOM entry for `pro.deta.orion.git:git` uses the default JAR type; its producer packages a POM.
 The catalog therefore manages a coordinate the reactor does not produce.
 
-**Sources.** [Managed entry](pom.xml#L199) and [producer](../git/pom.xml).
+**Sources.** [Managed entry](pom.xml#L184) and [producer](../git/pom.xml).
 The five child Git modules use it as a parent, which dependency management does not govern. No dependency
 consumer of the JAR key was found; no current build or runtime failure is claimed.
 
