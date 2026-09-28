@@ -2,6 +2,7 @@ prefix_rule(pattern=["make"], decision="allow")
 prefix_rule(pattern=["docker", "exec", "orion-external-services"], decision="allow")
 prefix_rule(pattern=["docker", "logs"], decision="allow")
 prefix_rule(pattern=["curl"], decision="allow")
+prefix_rule(pattern=["tests/external-services/fixture", ["up", "down"]], decision="allow")
 prefix_rule(
     pattern=[
         "/bin/zsh",
