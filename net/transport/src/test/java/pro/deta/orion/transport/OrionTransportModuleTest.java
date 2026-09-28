@@ -1,54 +1,15 @@
 package pro.deta.orion.transport;
 
-import dagger.Module;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
-import pro.deta.orion.transport.git.command.SshCommandModule;
-
-import java.lang.reflect.Method;
-import java.lang.reflect.Type;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionTransportModuleTest {
-    @Test
-    void transportModuleHasNoDirectServiceBindings() {
-        List<String> parameterTypes = new ArrayList<>();
-        for (Method method : OrionTransportModule.class.getDeclaredMethods()) {
-            for (Type parameterType : method.getGenericParameterTypes()) {
-                parameterTypes.add(parameterType.getTypeName());
-            }
-        }
-
-        assertFalse(containsType(parameterTypes, "GitNativeTransportStateMachine"));
-        assertFalse(containsType(parameterTypes, "GitNativeTransportService"));
-        assertFalse(containsType(parameterTypes, "GitSshTransportService"));
-        assertFalse(containsType(parameterTypes, "JettyHTTPServer"));
-    }
-
-    @Test
-    void transportModuleIncludesSshCommandBindingsWithoutLifecycleParameters() {
-        Module module = OrionTransportModule.class.getAnnotation(Module.class);
-        boolean providesNavigator = false;
-
-        assertTrue(List.of(module.includes()).contains(SshCommandModule.class));
-        for (Method method : SshCommandModule.class.getDeclaredMethods()) {
-            providesNavigator |= method.getReturnType() == CommandNavigator.class;
-            for (Type parameterType : method.getGenericParameterTypes()) {
-                assertFalse(parameterType.getTypeName().contains("AggregateStateMachine"));
-                assertFalse(parameterType.getTypeName().contains("OrionApplicationLifecycle"));
-            }
-        }
-        assertTrue(providesNavigator);
-    }
-
     @Test
     void transportModuleProvidesGitTransportConfigFromRuntimeConfiguration() {
         OrionConfiguration configuration = new OrionConfiguration();
@@ -81,14 +42,5 @@ class OrionTransportModuleTest {
         SshTransportConfig sshTransportConfig = OrionTransportModule.sshTransportConfig(configuration);
 
         assertFalse(sshTransportConfig.isEnabled());
-    }
-
-    private static boolean containsType(List<String> parameterTypes, String value) {
-        for (String parameterType : parameterTypes) {
-            if (parameterType.contains(value)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

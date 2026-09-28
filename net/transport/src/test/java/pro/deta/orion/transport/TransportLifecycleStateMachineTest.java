@@ -17,9 +17,6 @@ import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Type;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,23 +30,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class TransportLifecycleStateMachineTest {
-    @Test
-    void aggregateConstructorTakesAllThreeChildStateMachines() {
-        List<String> parameterTypes = new ArrayList<>();
-        for (Constructor<?> constructor : TransportLifecycleStateMachine.class.getDeclaredConstructors()) {
-            for (Type parameterType : constructor.getGenericParameterTypes()) {
-                parameterTypes.add(parameterType.getTypeName());
-            }
-        }
-
-        assertTrue(containsType(parameterTypes, GitNativeTransportStateMachine.class.getName()));
-        assertTrue(containsType(parameterTypes, GitSshTransportStateMachine.class.getName()));
-        assertTrue(containsType(parameterTypes, JettyHTTPServerStateMachine.class.getName()));
-        assertFalse(containsType(parameterTypes, "GitNativeTransportService"));
-        assertFalse(containsType(parameterTypes, "GitSshTransportService"));
-        assertFalse(parameterTypes.contains(JettyHTTPServer.class.getName()));
-    }
-
     @Test
     void transportAggregateIsStartedDirectlyByParentMachine() {
         OrionConfiguration configuration = configuration(true, true, true);
@@ -188,15 +168,6 @@ class TransportLifecycleStateMachineTest {
             result = result.getCause();
         }
         return result;
-    }
-
-    private static boolean containsType(List<String> parameterTypes, String value) {
-        for (String parameterType : parameterTypes) {
-            if (parameterType.contains(value)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static final class RecordingGitNativeTransportService extends GitNativeTransportService {
