@@ -16,7 +16,7 @@ RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-
 	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	cargo-init rust-install session-host session-host-test session-host-linux-test \
+	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
@@ -39,7 +39,7 @@ endif
 endif
 
 .PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema skill-check skills-check docker-exec \
-	cargo-init rust-install session-host session-host-test session-host-linux-test \
+	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 
 help: ## Show available goals and their descriptions
@@ -99,6 +99,18 @@ cargo-init: ## Install rustup when Cargo is unavailable
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 			| sh -s -- -y --profile minimal --no-modify-path --default-toolchain none; \
 	fi
+
+rust-maven-plugin-install: ## Install Rust Maven Plugin 0.1.0 locally from its tag without changing the checkout
+	@set -eu; \
+		temporary=$$(mktemp -d "$${TMPDIR:-/tmp}/orion-rust-maven-plugin.XXXXXX"); \
+		trap 'rm -rf "$$temporary"' EXIT; \
+		trap 'exit 129' HUP; \
+		trap 'exit 130' INT; \
+		trap 'exit 143' TERM; \
+		git archive --format=tar --output="$$temporary/source.tar" rust-maven-plugin-0.1.0 \
+			build-tools/rust-maven-plugin; \
+		tar -xf "$$temporary/source.tar" -C "$$temporary"; \
+		$(MAVEN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
 
 rust-install: cargo-init ## Install the pinned Rust toolchain
 	@$(HOME)/.cargo/bin/rustup run 1.97.0 rustc --version >/dev/null 2>&1 \
