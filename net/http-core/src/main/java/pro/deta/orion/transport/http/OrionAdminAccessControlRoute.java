@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.auth.SecurityContext;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,8 +45,11 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
             throw new HttpRequestValidationException("Invalid configuration revision");
         }
         try {
+            SecurityContext context = (SecurityContext) req.getAttribute(
+                    OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
             accessControlService.saveAccessControlConfigurationFile(
-                    req.getInputStream().readAllBytes(), ifMatch.substring(1, ifMatch.length() - 1));
+                    req.getInputStream().readAllBytes(), ifMatch.substring(1, ifMatch.length() - 1),
+                    context.getUserIdentity().getUserId());
         } catch (AccessControlValidationException failure) {
             throw new HttpRequestValidationException(failure.getMessage());
         } catch (AccessControlConcurrentUpdateException failure) {

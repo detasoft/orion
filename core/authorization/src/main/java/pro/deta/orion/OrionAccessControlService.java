@@ -75,7 +75,7 @@ public interface OrionAccessControlService {
 
     ConfigurationFile accessControlConfigurationFile();
 
-    void saveAccessControlConfigurationFile(byte[] content, String expectedRevision);
+    void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId);
 
     record ConfigurationFile(byte[] content, Optional<String> revision) {
         public ConfigurationFile {

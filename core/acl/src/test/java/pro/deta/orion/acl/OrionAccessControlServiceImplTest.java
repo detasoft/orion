@@ -1004,10 +1004,10 @@ class OrionAccessControlServiceImplTest {
                     "alice", "", List.of(), List.of(
                             new AccessControlRepositoryGrantUpdate("", true, false, false, false, "main")))))
                     .isInstanceOf(AccessControlValidationException.class);
-            assertThatThrownBy(() -> fixture.service.saveAccessControlConfigurationFile(new byte[0], "revision"))
+            assertThatThrownBy(() -> fixture.service.saveAccessControlConfigurationFile(new byte[0], "revision", ""))
                     .isInstanceOf(AccessControlValidationException.class);
             assertThatThrownBy(() -> fixture.service.saveAccessControlConfigurationFile(
-                    "not xml".getBytes(StandardCharsets.UTF_8), "revision"))
+                    "not xml".getBytes(StandardCharsets.UTF_8), "revision", ""))
                     .isInstanceOf(AccessControlValidationException.class);
             assertThat(fixture.storage.snapshot).isSameAs(original);
         }

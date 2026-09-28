@@ -197,7 +197,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
             first.orionAccessControlService().saveAccessControlConfigurationFile(
                     accessControlBytes(draft.toAccessControl()),
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow());
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
             beforeReset = new XmlService().deserialize(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()));
             versionBeforeReset = repository(first)
@@ -347,7 +347,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             first.orionAccessControlService().saveAccessControlConfigurationFile(missingRootAclBytes(),
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow());
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {

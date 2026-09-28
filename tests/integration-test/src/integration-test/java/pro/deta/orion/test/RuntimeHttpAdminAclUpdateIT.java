@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.eclipse.jgit.revwalk.RevCommit;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -38,6 +41,80 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void configurationCommitsIdentifyTheAuthenticatedAdministrator() throws Exception {
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+                tempDir.resolve("configuration-authors"));
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
+            AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
+                    initial.body().getBytes(StandardCharsets.UTF_8))).toDraft();
+            AccessControlDraft.User operator = AccessControlDraft.User.from(
+                    draft.getUsers().getFirst().toAccessControl());
+            operator.setId("operator");
+            operator.setEmail("operator@example.test");
+            operator.getCredentials().clear();
+            operator.addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
+            draft.getUsers().add(operator);
+            byte[] xml = serialize(draft.toAccessControl());
+            RuntimeHttpTestSupport.HttpResponse created = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken),
+                    "application/xml", xml, initial.etag());
+            assertThat(created.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertConfigurationCommitAuthor(orion, "root");
+
+            String operatorToken = TestBearerTokens.issueToken(orion.httpUrl("/api/admin/token"),
+                    "operator", TEST_PASSWORD.toCharArray(), 600);
+            String bearer = TestBearerTokens.bearer(operatorToken);
+            RuntimeHttpTestSupport.HttpResponse current = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            operator.setEmail("updated@example.test");
+            xml = serialize(draft.toAccessControl());
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
+                    "application/xml", xml, current.etag()).status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertConfigurationCommitAuthor(orion, "operator");
+            RuntimeHttpTestSupport.HttpResponse changed = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"),
+                    TestBearerTokens.bearer(rootToken), "application/xml", xml, current.etag()).status())
+                    .isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            assertThat(RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/acl"), bearer).etag())
+                    .isEqualTo(changed.etag());
+            assertConfigurationCommitAuthor(orion, "operator");
+
+            Map<String, Object> command = Map.of("action", "create", "scope", "system", "alias", "archive",
+                    "revision", changed.etag().replace("\"", ""),
+                    "upstream", tempDir.resolve("offline.git").toUri().toString(),
+                    "ref", "main", "credentialKind", "NONE");
+            RuntimeHttpTestSupport.HttpResponse proxy = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/proxies"), bearer, "application/json",
+                    new ObjectMapper().writeValueAsBytes(command));
+            assertThat(proxy.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertConfigurationCommitAuthor(orion, "operator");
+            RuntimeHttpTestSupport.HttpResponse proxyRevision = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/proxies"),
+                    TestBearerTokens.bearer(rootToken), "application/json",
+                    new ObjectMapper().writeValueAsBytes(command)).status()).isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            assertThat(RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/acl"), bearer).etag())
+                    .isEqualTo(proxyRevision.etag());
+            assertConfigurationCommitAuthor(orion, "operator");
+        }
+    }
+
+    private static void assertConfigurationCommitAuthor(
+            RuntimeHttpTestSupport.StartedOrion orion, String expectedAuthor) {
+        NativeGitRepository repository = orion.repositoryProvider().openForRead("orion")
+                .valueOrFailure("configuration repository");
+        String revision = repository.refs().get(
+                orion.configuration().getBootstrap().getAccessControl().selectedRef());
+        RevCommit commit = RevCommit.parse(repository.readObject(new ObjectId(revision)).orElseThrow().data());
+        assertThat(commit.getAuthorIdent().getName()).isEqualTo(expectedAuthor);
+    }
 
     @Test
     void oidcSecretIsEncryptedInGitAndPlaintextXmlIsRejectedBeforeCommit() throws Exception {

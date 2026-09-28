@@ -98,8 +98,11 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 }
             } else {
                 MutationRequest mutation = request;
+                SecurityContext context = (SecurityContext) req.getAttribute(
+                        OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
                 acl.updatePrimaryConfiguration(request.revision(), document -> update(document, selected, mutation),
-                        new AccessControlSaveRequest("proxy " + action + " " + alias, UserEmail.EMPTY));
+                        new AccessControlSaveRequest("proxy " + action + " " + alias,
+                                new UserEmail(context.getUserIdentity().getUserId(), "")));
             }
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             GitProxyBinding binding = find(snapshot.document(), selected);

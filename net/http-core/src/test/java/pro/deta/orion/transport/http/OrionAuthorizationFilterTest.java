@@ -290,7 +290,7 @@ class OrionAuthorizationFilterTest {
         }
 
         @Override
-        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision) {
+        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
             throw new UnsupportedOperationException();
         }
     }

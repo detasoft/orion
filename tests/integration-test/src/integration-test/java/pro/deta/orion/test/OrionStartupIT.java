@@ -116,7 +116,7 @@ class OrionStartupIT {
 
             orion.accessControlService().saveAccessControlConfigurationFile(
                     serialize(accessControlWithUsers("root", "saved-remote-user")),
-                    orion.accessControlService().accessControlConfigurationFile().revision().orElseThrow());
+                    orion.accessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
         }
 
         AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));

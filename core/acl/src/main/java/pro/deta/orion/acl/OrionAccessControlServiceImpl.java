@@ -861,7 +861,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision) {
+    public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
         if (content == null || content.length == 0) {
             throw new AccessControlValidationException("ACL configuration content is required");
         }
@@ -879,7 +879,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         updatePrimaryConfiguration(expectedRevision, ignored -> document,
                 new AccessControlSaveRequest("saveAccessControlConfigurationFile() " + primaryPath,
-                        UserEmail.EMPTY));
+                        new UserEmail(Objects.requireNonNull(authorId, "configuration author"), "")));
     }
 
     private AccessControl parseAccessControlConfiguration(byte[] content, String sourceName) {
