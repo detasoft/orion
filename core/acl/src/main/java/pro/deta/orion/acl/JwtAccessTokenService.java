@@ -40,10 +40,6 @@ final class JwtAccessTokenService {
         this.clock = clock;
     }
 
-    IssuedToken issue(String subject, long expiresInSeconds) throws GeneralSecurityException {
-        return issue(subject, expiresInSeconds, null);
-    }
-
     IssuedToken issue(
             String subject,
             long expiresInSeconds,
@@ -341,13 +337,6 @@ final class JwtAccessTokenService {
         }
 
         record Failure(String reason) implements VerificationResult {
-        }
-
-        static VerificationResult success(
-                String subject,
-                String authenticationGeneration,
-                String tokenId) {
-            return new Success(subject, authenticationGeneration, tokenId, null);
         }
 
         static VerificationResult failure(String reason) {

@@ -91,26 +91,3 @@ abstraction would add unnecessary ownership.
 **Confidence.** High for repository consumers; external binary compatibility is not an established contract.
 
 **Priority signals.** Importance: low, redundant boundary. Repair ease: medium, test migration across modules.
-
-## 6. JWT test conveniences are unmarked production entry points
-
-**Problem.** The two-argument `issue` overload and `VerificationResult.success` are used only by tests,
-but remain unmarked production conveniences. Real token issuance uses the three- and four-argument methods.
-
-**Sources.** [Overloads](src/main/java/pro/deta/orion/acl/JwtAccessTokenService.java#L43),
-[factory](src/main/java/pro/deta/orion/acl/JwtAccessTokenService.java#L346),
-[tests](src/test/java/pro/deta/orion/acl/JwtAccessTokenServiceTest.java), and
-[actual issuance](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L736).
-
-**Documented behavior and contract.** `AGENTS.md` requires non-contract test-only methods to be marked with
-`TestOnly`. Token claims and signature verification are required; these shortcut entry points are incidental.
-
-**Minimal repair.** Delete these two shortcuts and use a live issuance entry point and the result constructor
-in tests, preserving all token behavior cases. No additional wrapper or absence assertion is needed.
-
-**Alternatives and consequences.** Applying the existing `TestOnly` annotation satisfies the marking rule
-but preserves redundant shortcuts. Deletion affects only test source references, not token wire behavior.
-
-**Confidence.** High from package visibility and all repository callers.
-
-**Priority signals.** Importance: low, local API ownership. Repair ease: high, mechanical caller migration.

@@ -34,7 +34,7 @@ class JwtAccessTokenServiceTest {
                     assertThat(result.organization()).isEqualTo("acme");
                     assertThat(result.authenticationGeneration()).isEqualTo("oidc-binding");
                 });
-        assertThat(service.verify(service.issue("root", 600).value())).isInstanceOfSatisfying(
+        assertThat(service.verify(service.issue("root", 600, null).value())).isInstanceOfSatisfying(
                 JwtAccessTokenService.VerificationResult.Success.class,
                 result -> assertThat(result.organization()).isNull());
     }
@@ -44,7 +44,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
 
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         String payload = payload(token.value());
         assertThat(payload)
@@ -62,7 +62,7 @@ class JwtAccessTokenServiceTest {
     void acceptsTokenUntilItsExactExpirationBoundary() throws Exception {
         TestIdentity identity = TestIdentity.single("server-signing-v1");
         JwtAccessTokenService issuer = new JwtAccessTokenService(identity, CLOCK);
-        JwtAccessTokenService.IssuedToken token = issuer.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = issuer.issue("alice", 600, null);
 
         JwtAccessTokenService beforeExpiration = new JwtAccessTokenService(
                 identity,
@@ -104,7 +104,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.issue("alice", 3_601))
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.issue("alice", 3_601, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Token expiration exceeds 3600 seconds");
     }
@@ -113,7 +113,7 @@ class JwtAccessTokenServiceTest {
     void issuesAndVerifiesTokenAtMaximumLifetime() throws Exception {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 3_600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 3_600, null);
         assertThat(token.expiresAtEpochSecond()).isEqualTo(CLOCK.instant().getEpochSecond() + 3_600);
         assertThat(service.verify(token.value())).isInstanceOf(JwtAccessTokenService.VerificationResult.Success.class);
     }
@@ -187,7 +187,7 @@ class JwtAccessTokenServiceTest {
     void returnsTokenIdInVerifiedIdentity() throws Exception {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         JwtAccessTokenService.VerificationResult result = service.verify(token.value());
 
@@ -203,7 +203,7 @@ class JwtAccessTokenServiceTest {
         TestIdentity identity = TestIdentity.single("server-signing-v2");
         JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
 
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         assertThat(header(token.value())).contains("\"kid\":\"server-signing-v2\"");
         assertVerified(service, token.value(), "alice", null);
@@ -214,7 +214,7 @@ class JwtAccessTokenServiceTest {
         String alias = "server-\"signing\\v2";
         JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single(alias), CLOCK);
 
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         assertThat(header(token.value())).contains("\"kid\":\"server-\\\"signing\\\\v2\"");
         assertVerified(service, token.value(), "alice", null);
@@ -227,13 +227,13 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService oldService = new JwtAccessTokenService(
                 new TestIdentity("server-signing-v1", Map.of("server-signing-v1", oldKey)),
                 CLOCK);
-        String oldToken = oldService.issue("alice", 600).value();
+        String oldToken = oldService.issue("alice", 600, null).value();
         TestIdentity rotated = new TestIdentity(
                 "server-signing-v2",
                 orderedKeys("server-signing-v2", newKey, "server-signing-v1", oldKey));
         JwtAccessTokenService rotatedService = new JwtAccessTokenService(rotated, CLOCK);
 
-        String newToken = rotatedService.issue("alice", 600).value();
+        String newToken = rotatedService.issue("alice", 600, null).value();
 
         assertVerified(rotatedService, oldToken, "alice", null);
         assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2\"");
@@ -242,7 +242,7 @@ class JwtAccessTokenServiceTest {
     @Test
     void rejectsTokenWhoseExactKidIsNotConfigured() throws Exception {
         TestIdentity unknown = TestIdentity.single("unknown-signing");
-        String token = new JwtAccessTokenService(unknown, CLOCK).issue("alice", 600).value();
+        String token = new JwtAccessTokenService(unknown, CLOCK).issue("alice", 600, null).value();
         JwtAccessTokenService configured = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
 
@@ -267,7 +267,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService service = new JwtAccessTokenService(
                 TestIdentity.single("server-signing-v1"), CLOCK);
 
-        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600, null);
 
         assertThat(payload(token.value())).doesNotContain("orion_auth_generation");
         assertVerified(service, token.value(), "alice", null);
@@ -316,10 +316,11 @@ class JwtAccessTokenServiceTest {
             String subject,
             String authenticationGeneration) {
         assertThat(service.verify(token))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success(
+                .isEqualTo(new JwtAccessTokenService.VerificationResult.Success(
                         subject,
                         authenticationGeneration,
-                        stringClaim(payload(token), "jti")));
+                        stringClaim(payload(token), "jti"),
+                        null));
     }
 
     private static String signedToken(TestIdentity identity, String payload) throws GeneralSecurityException {
