@@ -77,7 +77,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                         "e2e/server-rsa.pem", tempDir.resolve("server-rsa.pem")))
                 .valueOrFailure("Server SSH key should load");
         try (GitSshTestServer gitServer = GitSshTestServer.start(
-                repositoriesRoot, "git", hostKey, userKey.getPublic(), TestPorts.nextBatch().ssh())) {
+                repositoriesRoot, "git", hostKey, userKey.getPublic())) {
             var authentication = Map.of("credentialKind", "private-key",
                     "credential", privateKey.toRealPath().toUri().toString(),
                     "knownHosts", org.apache.sshd.common.config.keys.PublicKeyEntry.toString(hostKey.getPublic()));
@@ -89,8 +89,6 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
             }
 
             var http = configuration.getTransport().getHttp();
-            URL aclUrl = new URL("http", http.getAddress(), http.getPort(), "/api/admin/acl");
-            URL tokenUrl = new URL("http", http.getAddress(), http.getPort(), "/api/admin/token");
             for (int launch = 0; launch < 2; launch++) {
                 try (var bootstrap = BootstrapContext.open(configuration, environment)) {
                     var component = runtimeComponent(configuration, bootstrap);
@@ -98,6 +96,9 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                         lifecycle.waitForStarting();
+                        int httpPort = component.httpTransport().boundHttpPort();
+                        URL aclUrl = new URL("http", http.getAddress(), httpPort, "/api/admin/acl");
+                        URL tokenUrl = new URL("http", http.getAddress(), httpPort, "/api/admin/token");
                         String authorization = TestBearerTokens.bearer(rootToken(tokenUrl));
                         var initialAcl = RuntimeHttpTestSupport.request("GET", aclUrl, authorization);
                         assertThat(initialAcl.status()).isEqualTo(HttpURLConnection.HTTP_OK);

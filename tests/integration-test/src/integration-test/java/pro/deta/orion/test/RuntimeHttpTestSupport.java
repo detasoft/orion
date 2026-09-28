@@ -32,7 +32,7 @@ final class RuntimeHttpTestSupport {
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
 
-        TestPorts.nextBatch().configure(configuration);
+        TestPorts.configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
         customizer.accept(configuration);
@@ -54,7 +54,10 @@ final class RuntimeHttpTestSupport {
                     lifecycle,
                     orionComponent.orionAccessControlService(),
                     orionComponent.nativeGitRepositoryProvider(),
-                    identity);
+                    identity,
+                    orionComponent.httpTransport().boundHttpPort(),
+                    orionComponent.nativeGitTransport().boundPort(),
+                    orionComponent.sshTransport().boundPort());
         } catch (Exception failure) {
             throw new IllegalStateException("Cannot open test server identity", failure);
         }
@@ -128,13 +131,16 @@ final class RuntimeHttpTestSupport {
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,
             NativeGitRepositoryProvider repositoryProvider,
-            TestServerIdentityMaterial identity)
+            TestServerIdentityMaterial identity,
+            int httpPort,
+            int gitPort,
+            int sshPort)
             implements AutoCloseable {
         URL httpUrl(String path) throws IOException {
             return new URL(
                     "http",
                     configuration.getTransport().getHttp().getAddress(),
-                    configuration.getTransport().getHttp().getPort(),
+                    httpPort,
                     path);
         }
 

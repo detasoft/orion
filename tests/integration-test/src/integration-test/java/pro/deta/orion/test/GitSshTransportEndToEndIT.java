@@ -701,7 +701,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         USERNAME,
                         startedOrion.configuration().getTransport().getSsh().getAddress(),
-                        startedOrion.configuration().getTransport().getSsh().getPort())
+                        startedOrion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             session.addPublicKeyIdentity(TRUSTED_USER_KEY);
@@ -748,7 +748,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         "root",
                         startedOrion.configuration().getTransport().getSsh().getAddress(),
-                        startedOrion.configuration().getTransport().getSsh().getPort())
+                        startedOrion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             session.addPublicKeyIdentity(serverIdentityKey);
@@ -1040,7 +1040,9 @@ class GitSshTransportEndToEndIT {
                     lifecycle,
                     component.nativeGitRepositoryProvider(),
                     component.orionAccessControlService(),
-                    identity);
+                    identity,
+                    component.httpTransport().boundHttpPort(),
+                    component.sshTransport().boundPort());
         } catch (Exception failure) {
             throw new IllegalStateException("Cannot open test server identity", failure);
         }
@@ -1138,7 +1140,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         username,
                         orion.configuration().getTransport().getSsh().getAddress(),
-                        orion.configuration().getTransport().getSsh().getPort())
+                        orion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             session.addPublicKeyIdentity(keyPair);
@@ -1197,7 +1199,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         username,
                         orion.configuration().getTransport().getSsh().getAddress(),
-                        orion.configuration().getTransport().getSsh().getPort())
+                        orion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             session.auth().verify(10, TimeUnit.SECONDS);
@@ -1244,7 +1246,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         username,
                         orion.configuration().getTransport().getSsh().getAddress(),
-                        orion.configuration().getTransport().getSsh().getPort())
+                        orion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             for (KeyPair keyPair : keyPairs) {
@@ -1312,7 +1314,7 @@ class GitSshTransportEndToEndIT {
         try (ClientSession session = client.connect(
                         "root",
                         orion.configuration().getTransport().getSsh().getAddress(),
-                        orion.configuration().getTransport().getSsh().getPort())
+                        orion.sshPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
             session.addPublicKeyIdentity(keyPair);
@@ -1345,7 +1347,7 @@ class GitSshTransportEndToEndIT {
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
         configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
 
-        TestPorts.nextBatch().configure(configuration);
+        TestPorts.configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);
 
         configuration.getTransport().getSsh().setEnabled(true);
@@ -1662,7 +1664,7 @@ class GitSshTransportEndToEndIT {
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
                                 NativeGitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService,
-                                TestServerIdentityMaterial identity) {
+                                TestServerIdentityMaterial identity, int httpPort, int sshPort) {
         private KeyPair serverIdentityKey() {
             return identity.keyPair();
         }
@@ -1671,7 +1673,7 @@ class GitSshTransportEndToEndIT {
             return "ssh://%s@%s:%d/%s".formatted(
                     "git",
                     configuration.getTransport().getSsh().getAddress(),
-                    configuration.getTransport().getSsh().getPort(),
+                    sshPort,
                     repository);
         }
 
@@ -1683,7 +1685,7 @@ class GitSshTransportEndToEndIT {
             return new URL(
                     "http",
                     configuration.getTransport().getHttp().getAddress(),
-                    configuration.getTransport().getHttp().getPort(),
+                    httpPort,
                     path);
         }
 

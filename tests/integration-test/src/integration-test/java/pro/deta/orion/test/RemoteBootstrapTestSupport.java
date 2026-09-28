@@ -66,7 +66,7 @@ final class RemoteBootstrapTestSupport {
             credential = "-----BEGIN PRIVATE KEY-----\n"
                     + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())
                     + "\n-----END PRIVATE KEY-----\n";
-            int port = upstream.configuration().getTransport().getSsh().getPort();
+            int port = upstream.sshPort();
             StringBuilder hosts = new StringBuilder();
             for (var hostKey : upstream.identity().sshHostKeys().keyPairs()) {
                 hosts.append(PublicKeyEntry.toString(hostKey.getPublic())).append('\n');

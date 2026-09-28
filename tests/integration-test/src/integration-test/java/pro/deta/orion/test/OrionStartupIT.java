@@ -38,6 +38,7 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -69,6 +70,39 @@ class OrionStartupIT {
         }
 
         assertInitialConfigurationCreated(orionRoot);
+    }
+
+    @Test
+    void automaticallyAssignedPortsServeConcurrentRuntimesAndAllowRestart() throws Exception {
+        Path firstRoot = tempDir.resolve("first-orion");
+        Path secondRoot = tempDir.resolve("second-orion");
+        OrionConfiguration firstConfiguration = serverConfiguration(firstRoot);
+        OrionConfiguration secondConfiguration = serverConfiguration(secondRoot);
+
+        try (StartedOrion second = startServerWithConfig(secondConfiguration)) {
+            try (StartedOrion first = startServerWithConfig(firstConfiguration)) {
+                assertThat(first.httpUrl("/").getPort()).isPositive();
+                assertThat(second.httpUrl("/").getPort()).isPositive();
+                assertThat(first.httpUrl("/").getPort()).isNotEqualTo(second.httpUrl("/").getPort());
+                assertThat(List.of(first.gitPort(), first.httpPort(), first.sshPort(),
+                        second.gitPort(), second.httpPort(), second.sshPort())).doesNotHaveDuplicates();
+                assertGitAndSshAcceptConnections(first);
+                assertGitAndSshAcceptConnections(second);
+                assertThat(validateOrionXml(first, readFileFromAclRepository(firstRoot)))
+                        .containsEntry("valid", true);
+                assertThat(validateOrionXml(second, readFileFromAclRepository(secondRoot)))
+                        .containsEntry("valid", true);
+            }
+            try (StartedOrion restarted = startServerWithConfig(firstConfiguration)) {
+                assertThat(restarted.httpUrl("/").getPort()).isPositive();
+                assertThat(restarted.httpUrl("/").getPort()).isNotEqualTo(second.httpUrl("/").getPort());
+                assertGitAndSshAcceptConnections(restarted);
+                assertThat(validateOrionXml(restarted, readFileFromAclRepository(firstRoot)))
+                        .containsEntry("valid", true);
+                assertThat(validateOrionXml(second, readFileFromAclRepository(secondRoot)))
+                        .containsEntry("valid", true);
+            }
+        }
     }
 
     @Test
@@ -246,6 +280,7 @@ class OrionStartupIT {
         configuration.getTransport().getSsh().setEnabled(false);
 
         ServerSocket occupiedHttpPort = bindHttpPort(configuration);
+        configuration.getTransport().getHttp().setPort(occupiedHttpPort.getLocalPort());
         try {
             OrionComponent orionComponent = TestRuntimeBootstrap
                     .componentBuilder(
@@ -281,9 +316,12 @@ class OrionStartupIT {
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
 
-        assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Bootstrap inputs are unavailable or invalid");
+        try (ServerSocket occupiedHttpPort = bindHttpPort(configuration)) {
+            configuration.getTransport().getHttp().setPort(occupiedHttpPort.getLocalPort());
+            assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Bootstrap inputs are unavailable or invalid");
+        }
         assertCanBindHttpPort(configuration);
     }
 
@@ -301,7 +339,10 @@ class OrionStartupIT {
                     lifecycle,
                     orionComponent.orionAccessControlService(),
                     orionComponent.nativeGitRepositoryProvider(),
-                    identity);
+                    identity,
+                    orionComponent.nativeGitTransport().boundPort(),
+                    orionComponent.httpTransport().boundHttpPort(),
+                    orionComponent.sshTransport().boundPort());
         } catch (Exception failure) {
             throw new IllegalStateException("Cannot start Orion test runtime", failure);
         }
@@ -313,6 +354,17 @@ class OrionStartupIT {
         assertThat(hasUser(accessControl, "root")).isTrue();
         assertThat(hasRole(accessControl, "ROOT")).isTrue();
         assertThat(hasGrant(accessControl, "ALL_REPOSITORY")).isTrue();
+    }
+
+    private static void assertGitAndSshAcceptConnections(StartedOrion orion) throws IOException {
+        assertThat(orion.gitPort()).isPositive();
+        assertThat(orion.sshPort()).isPositive();
+        try (Socket git = new Socket(orion.configuration().getTransport().getGit().getAddress(), orion.gitPort());
+             Socket ssh = new Socket(orion.configuration().getTransport().getSsh().getAddress(), orion.sshPort())) {
+            assertThat(git.isConnected()).isTrue();
+            ssh.setSoTimeout(5_000);
+            assertThat(new String(ssh.getInputStream().readNBytes(4), StandardCharsets.US_ASCII)).isEqualTo("SSH-");
+        }
     }
 
     private static AccessControl readAcl(Path orionRoot) throws IOException {
@@ -497,7 +549,7 @@ class OrionStartupIT {
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
         configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
 
-        TestPorts.nextBatch().configure(configuration);
+        TestPorts.configure(configuration);
         return configuration;
     }
 
@@ -540,13 +592,16 @@ class OrionStartupIT {
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,
             NativeGitRepositoryProvider repositoryProvider,
-            TestServerIdentityMaterial identity)
+            TestServerIdentityMaterial identity,
+            int gitPort,
+            int httpPort,
+            int sshPort)
             implements AutoCloseable {
         private URL httpUrl(String path) throws IOException {
             return new URL(
                     "http",
                     configuration.getTransport().getHttp().getAddress(),
-                    configuration.getTransport().getHttp().getPort(),
+                    httpPort,
                     path);
         }
 

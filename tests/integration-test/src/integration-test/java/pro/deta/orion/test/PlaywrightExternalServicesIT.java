@@ -28,6 +28,7 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManagerFactory;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -57,11 +58,7 @@ class PlaywrightExternalServicesIT {
         Path caRoot = fixtureRoot.resolve(".state/step/certs/root_ca.crt");
         assertThat(caRoot).exists();
 
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
-                tempDir.resolve("orion"), options -> {
-                    options.getTransport().getHttp().setAddress("0.0.0.0");
-                    options.getTransport().getHttp().setPort(8000);
-                });
+        OrionConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
         AcmeMaterialConfiguration material = acmeMaterial(configuration);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
@@ -90,6 +87,19 @@ class PlaywrightExternalServicesIT {
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {
             assertThat(reopened.material().acme().certificateChain(material)).isPresent();
         }
+    }
+
+    static OrionConfiguration serverConfiguration(Path orionRoot) throws IOException {
+        return RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot, options -> {
+            options.getTransport().getHttp().setAddress("0.0.0.0");
+            options.getTransport().getHttp().setPort(8000);
+            options.getTransport().getGit().setEnabled(true);
+            options.getTransport().getGit().setAddress("0.0.0.0");
+            options.getTransport().getGit().setPort(9419);
+            options.getTransport().getSsh().setEnabled(true);
+            options.getTransport().getSsh().setAddress("0.0.0.0");
+            options.getTransport().getSsh().setPort(8022);
+        });
     }
 
     private static AcmeMaterialConfiguration acmeMaterial(OrionConfiguration configuration) {

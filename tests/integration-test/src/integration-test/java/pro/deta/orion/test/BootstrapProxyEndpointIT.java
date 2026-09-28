@@ -103,6 +103,8 @@ class BootstrapProxyEndpointIT {
                     try {
                         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                         lifecycle.waitForStarting();
+                        int port = "http".equals(transport)
+                                ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
                             for (var user : List.of(
@@ -120,11 +122,13 @@ class BootstrapProxyEndpointIT {
                                 .repositoryName().orElseThrow();
                         char[] rootPassword = upstream.accessControlService()
                                 .plainRootToken(PlainRootTokenAccessForTests.create());
-                        try (var writer = client(target, bootstrap, transport, "writer", writerKey, PASSWORD.toCharArray());
-                             var reader = client(target, bootstrap, transport, "reader", readerKey, PASSWORD.toCharArray());
-                             var outsider = client(target, bootstrap, transport, "outsider", outsiderKey,
+                        try (var writer = client(target, bootstrap, transport, port,
+                                     "writer", writerKey, PASSWORD.toCharArray());
+                             var reader = client(target, bootstrap, transport, port,
+                                     "reader", readerKey, PASSWORD.toCharArray());
+                             var outsider = client(target, bootstrap, transport, port, "outsider", outsiderKey,
                                      PASSWORD.toCharArray());
-                             var root = client(target, bootstrap, transport, "root", rootKey, rootPassword)) {
+                             var root = client(target, bootstrap, transport, port, "root", rootKey, rootPassword)) {
                             assertThat(Git.lsRemoteRepository().setRemote(root.uri(ENDPOINT))
                                     .setTransportConfigCallback(root.callback()).call()).isNotEmpty();
                             assertThat(Git.lsRemoteRepository().setRemote(outsider.uri("ordinary"))
@@ -199,11 +203,11 @@ class BootstrapProxyEndpointIT {
                 List.of(new AccessControlRepositoryGrantUpdate(repository, true, write, false, false, "main")));
     }
 
-    private Client client(OrionConfiguration configuration, BootstrapContext bootstrap, String transport,
+    private Client client(OrionConfiguration configuration, BootstrapContext bootstrap, String transport, int port,
             String username, KeyPair key, char[] password) throws Exception {
         if ("http".equals(transport)) {
             var http = configuration.getTransport().getHttp();
-            var base = new URL("http", http.getAddress(), http.getPort(), "/r/");
+            var base = new URL("http", http.getAddress(), port, "/r/");
             String token = TestBearerTokens.issueToken(new URL(base, "/api/admin/token"), username, password, 600);
             return new Client(base.toString(), selected -> ((TransportHttp) selected)
                     .setAdditionalHeaders(Map.of("Authorization", TestBearerTokens.bearer(token))), null);
@@ -234,7 +238,7 @@ class BootstrapProxyEndpointIT {
                         return false;
                     }
                 }).build(null);
-        return new Client("ssh://" + username + "@localhost:" + configuration.getTransport().getSsh().getPort() + "/",
+        return new Client("ssh://" + username + "@localhost:" + port + "/",
                 selected -> ((SshTransport) selected).setSshSessionFactory(factory), factory);
     }
 

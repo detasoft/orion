@@ -26,6 +26,9 @@ import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.OrionTransportModule;
+import pro.deta.orion.transport.git.GitNativeTransportService;
+import pro.deta.orion.transport.git.GitSshTransportService;
+import pro.deta.orion.transport.http.JettyHTTPServer;
 
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +46,15 @@ public interface OrionComponent {
 
     @TestOnly
     NativeGitRepositoryProvider nativeGitRepositoryProvider();
+
+    @TestOnly
+    GitNativeTransportService nativeGitTransport();
+
+    @TestOnly
+    GitSshTransportService sshTransport();
+
+    @TestOnly
+    JettyHTTPServer httpTransport();
 
     @Named("runtime")
     AggregateStateMachine runtimeStateMachine();

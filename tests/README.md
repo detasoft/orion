@@ -24,6 +24,11 @@ listener is disabled. `make run-frontend` starts Vite separately. The external
 services and Chromium share the `orion-external-services` container; their
 published ports bind to host `127.0.0.1`.
 
+The browser integration scenario also starts Orion with HTTP on `8000`, SSH on
+`8022`, and native Git on `9419`. All three transports are enabled; the scenario
+stops its Orion server when it finishes. Other HTTP-only integration scenarios
+keep Git native and SSH disabled.
+
 The fixture's HTTPS certificates are issued for `fixture.orion.test`, so opening
 an HTTPS `localhost` address in a browser produces a certificate warning. For
 hostname-matching HTTPS access, run once from the repository root:

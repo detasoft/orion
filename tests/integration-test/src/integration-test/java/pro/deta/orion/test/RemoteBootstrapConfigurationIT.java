@@ -121,11 +121,12 @@ class RemoteBootstrapConfigurationIT {
                     });
                     var http = configuration.getTransport().getHttp();
                     assertThat(RuntimeHttpTestSupport.request("GET",
-                            new URL("http", http.getAddress(), http.getPort(), "/api/admin/acl"), null).status())
+                            new URL("http", http.getAddress(), component.httpTransport().boundHttpPort(),
+                                    "/api/admin/acl"), null).status())
                             .isEqualTo(403);
                     try (var ssh = new Socket()) {
                         ssh.connect(new InetSocketAddress(configuration.getTransport().getSsh().getAddress(),
-                                configuration.getTransport().getSsh().getPort()), 2000);
+                                component.sshTransport().boundPort()), 2000);
                         assertThat(ssh.isConnected()).isTrue();
                     }
                 } finally {
@@ -272,13 +273,20 @@ class RemoteBootstrapConfigurationIT {
 
     private static void assertBootstrapRejected(
             OrionConfiguration configuration, Map<String, String> environment, String scenario) throws Exception {
-        assertThatThrownBy(() -> {
-            try (var ignored = BootstrapContext.open(configuration, environment)) {
-                throw new AssertionError("Invalid bootstrap must fail");
+        int requestedPort = configuration.getTransport().getHttp().getPort();
+        try (ServerSocket occupiedPort = new ServerSocket(0)) {
+            configuration.getTransport().getHttp().setPort(occupiedPort.getLocalPort());
+            try {
+                assertThatThrownBy(() -> {
+                    try (var ignored = BootstrapContext.open(configuration, environment)) {
+                        throw new AssertionError("Invalid bootstrap must fail");
+                    }
+                }).as(scenario).isInstanceOf(IllegalStateException.class)
+                        .hasMessage("Bootstrap inputs are unavailable or invalid");
+            } finally {
+                configuration.getTransport().getHttp().setPort(requestedPort);
             }
-        }).as(scenario).isInstanceOf(IllegalStateException.class)
-                .hasMessage("Bootstrap inputs are unavailable or invalid");
-        assertPortsAvailable(configuration);
+        }
     }
 
     private static String unauthorizedCredential(String transport) throws Exception {
@@ -318,13 +326,4 @@ class RemoteBootstrapConfigurationIT {
                                 "port", transport.getGit().getPort(), "enabled", true))));
     }
 
-    private static void assertPortsAvailable(OrionConfiguration configuration) throws Exception {
-        var transport = configuration.getTransport();
-        for (int port : new int[]{transport.getHttp().getPort(), transport.getSsh().getPort(),
-                transport.getGit().getPort()}) {
-            try (var socket = new ServerSocket()) {
-                socket.bind(new InetSocketAddress("localhost", port));
-            }
-        }
-    }
 }
