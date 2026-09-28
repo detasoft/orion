@@ -1,16 +1,5 @@
 # Module review: core/common
 
-## 7. Экспериментальный OpenSSH parser живёт ради print-only теста
-
-- **Проблема и триггер.** OpenSSHKey использует ByteArrayMap; иных consumers у пары нет. Единственный тест декодирует fixture и печатает объект без содержательного assertion.
-- **Источники и владельцы.** [Parser](src/main/java/pro/deta/orion/util/OpenSSHKey.java#L11), [map](src/main/java/pro/deta/orion/util/ByteArrayMap.java#L10), [тест](src/test/java/pro/deta/orion/util/rle/RLETCoderTest.java#L34). Живой RLE формат: [encode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L55), [decode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L129).
-- **Документированное поведение.** Текущая обязанность parser не найдена; действующие SSH paths используют SSH/crypto библиотеки.
-- **Контракт.** Сохранить RLETCoder и persisted salt/hash format, ByteBufferUtil и действующие SSH providers.
-- **Минимальное исправление.** Удалить пару типов и только testReadingContainer с его fixture/import; сохранить другие RLE tests.
-- **Альтернативы и последствия.** Исчезает неполный parser без production consumers. Исправлять его формат вместо удаления не требуется; EdDSA provider сохраняется.
-- **Уверенность.** Высокая по всем найденным потребителям.
-- **Важность / простота.** Низкая/средняя важность; высокая простота, сокращение двух типов.
-
 ## 8. TimeoutReader не ограничивает неполную строку
 
 - **Проблема и триггер.** Поток выдаёт символ без newline и остаётся открыт. После ready()==true readLine блокируется; deadline больше не проверяется. Cleanup OpenSSL процесса находится после чтения.

@@ -1,7 +1,6 @@
 package pro.deta.orion.util.rle;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.util.OpenSSHKey;
 
 import java.util.HexFormat;
 
@@ -29,14 +28,6 @@ public class RLETCoderTest {
         assertEquals(HEX.formatHex(result), expected);
         byte[][] original = RLETCoder.ENCODER_INT.decodeRLET(result);
         assertArrayEquals(data, original[0]);
-    }
-
-    @Test
-    public void testReadingContainer() {
-        String s =
-                "b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jYmMAAAAGYmNyeXB0AAAAGAAAABAMI6J9elHWflqdA5w3HO0jAAAAQAAAAAEAAAAAAAAAkEzlhHSSVjdSs45PBdGOVLxFtwybaZ4KIccgFuZvh5uXQYwxi1HtEDuEcr88w0MWw0VTdx06yaFOIOZ5WxMdDafaeWvZ+XFZfFxtVYAyKRBrIUJ0MojwdteQ+J/hM8hAjJoSquWTD+1q80hDtP+S7Wo8FfOB4eqKResOg55kgr1a7AMfnfGadlF8VAPImRsoVg==";
-        OpenSSHKey key = OpenSSHKey.decode(s);
-        System.out.println(key);
     }
 
     @Test
