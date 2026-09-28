@@ -67,7 +67,7 @@ class AgentSessionAcceptanceIT {
     private static final SessionId SESSION = new SessionId("one");
     private static final Path HOST = Path.of("../../session-host/target/cargo/debug/session-host")
             .toAbsolutePath().normalize();
-    private static final Path UI = Path.of("../frontend/ui").toAbsolutePath().normalize();
+    private static final Path UI = Path.of("../../net/frontend/ui").toAbsolutePath().normalize();
     @TempDir Path directory;
 
     @ParameterizedTest

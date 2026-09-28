@@ -125,8 +125,8 @@ From the repository root on macOS or Linux, with the repository JDK, Maven,
 Rust toolchain, and frontend Node dependencies available:
 
 ```sh
-make run-test MODULE=net/http-core TEST='AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT'
-mvn verify -Pdev -T 4 -pl net/http-core -am \
+make run-test MODULE=core/bootstrap TEST='AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT'
+mvn verify -Pdev -T 4 -pl core/bootstrap -am \
   -Dit.test='JettyHTTPServerIT,AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT,JettyHttp2LivePeerIT' \
   -Dfailsafe.failIfNoSpecifiedTests=false
 cd net/frontend/ui
@@ -143,8 +143,8 @@ actual HTTPS history and live event responses. Recovery recreates server
 services over the same durable directories and replaces AgentD while keeping
 native sessions intact. Native tests fail if the local host binary is missing;
 they are supported only on macOS and Linux. Test reports are in
-`net/http-core/target/{surefire,failsafe}-reports`; process logs and terminal
-results are retained under `net/http-core/target/acceptance`.
+`core/bootstrap/target/{surefire,failsafe}-reports`; process logs and terminal
+results are retained under `core/bootstrap/target/acceptance`.
 
 The fixture grants its explicit test administrator token access to client routes;
 production deployments use the ordinary Orion authorization filter. AgentD uses
