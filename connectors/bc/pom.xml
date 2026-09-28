@@ -83,22 +83,6 @@
             </exclusions>
 
         </dependency>
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bctls-debug-jdk18on</artifactId>
-            <version>${bouncycastle.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.bouncycastle</groupId>
-                    <artifactId>bcprov-jdk18on</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.bouncycastle</groupId>
-                    <artifactId>bcutil-jdk18on</artifactId>
-                </exclusion>
-            </exclusions>
-
-        </dependency>
 
     </dependencies>
 
