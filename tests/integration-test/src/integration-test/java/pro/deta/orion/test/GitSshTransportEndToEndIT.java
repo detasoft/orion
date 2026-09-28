@@ -764,24 +764,35 @@ class GitSshTransportEndToEndIT {
                 channel.setOut(output);
                 channel.setErr(new ByteArrayOutputStream());
                 channel.open().verify(10, TimeUnit.SECONDS);
+                String promptAfterCommand = "\n\r\u001b[2K[root@orion] > ";
                 awaitContains(output, "[root@orion] > ");
 
                 send(clientInput, "help\r");
                 awaitContains(output, "repositories");
+                awaitOccurrences(output, promptAfterCommand, 1);
                 send(clientInput, "stateX\u001b[D\u001b[3~\r");
                 awaitContains(output, "orion: RUNNING");
+                awaitOccurrences(output, promptAfterCommand, 2);
                 send(clientInput, "\u001b[A\r");
                 awaitOccurrences(output, "orion: RUNNING", 2);
+                awaitOccurrences(output, promptAfterCommand, 3);
 
                 channel.sendWindowChange(20, 24, 0, 0);
-                send(clientInput, "repositori\t\r");
+                String resizedPromptAfterCommand = "\n\r\u001b[2K[root@or~";
+                awaitContains(output, "\r\u001b[2K[root@or~");
+                send(clientInput, "repositori\t");
+                awaitContains(output, "\r\u001b[2K[root@or~sitories ");
+                send(clientInput, "\r");
                 awaitContains(output, "orion\n");
+                awaitOccurrences(output, resizedPromptAfterCommand, 1);
                 send(clientInput, "touch " + marker + "; echo $(id) | cat >x `id`\r");
                 awaitContains(output, "UNKNOWN_COMMAND: Unknown command");
+                awaitOccurrences(output, resizedPromptAfterCommand, 2);
                 assertThat(Files.exists(marker)).isFalse();
 
                 send(clientInput, "partial\u0004\u0003");
                 awaitContains(output, "^C");
+                awaitOccurrences(output, resizedPromptAfterCommand, 3);
                 clientInput.write(4);
                 clientInput.flush();
                 assertThat(channel.waitFor(

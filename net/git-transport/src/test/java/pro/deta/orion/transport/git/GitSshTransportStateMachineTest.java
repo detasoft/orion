@@ -5,6 +5,7 @@ import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
+import org.apache.sshd.client.channel.ChannelShell;
 import org.apache.sshd.client.config.hosts.HostConfigEntry;
 import org.apache.sshd.client.keyverifier.AcceptAllServerKeyVerifier;
 import org.apache.sshd.client.session.ClientSession;
@@ -158,22 +159,23 @@ class GitSshTransportStateMachineTest {
              ClientSession session = connect(client, service.boundPort(), "alice")) {
             session.addPublicKeyIdentity(keyPair);
             session.auth().verify(5, TimeUnit.SECONDS);
-            try (ClientChannel channel = session.createShellChannel()) {
+            try (ChannelShell channel = session.createShellChannel()) {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 PipedInputStream shellInput = new PipedInputStream();
                 try (PipedOutputStream clientInput = new PipedOutputStream(shellInput)) {
+                    channel.setPtyType("dumb");
                     channel.setIn(shellInput);
                     channel.setOut(output);
                     channel.setErr(new ByteArrayOutputStream());
                     channel.open().verify(5, TimeUnit.SECONDS);
-                    awaitOccurrences(output, "@orion", 1);
+                    awaitContains(output, "[alice@orion] > ");
 
                     clientInput.write("help\n".getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
-                    awaitOccurrences(output, "@orion", 2);
+                    awaitContains(output, "\r\n\r[alice@orion] > ");
                     clientInput.write(("touch " + marker + "\n").getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
-                    awaitContains(output, "UNKNOWN_COMMAND");
+                    awaitContains(output, "UNKNOWN_COMMAND: Unknown command\n\r[alice@orion] > ");
                     clientInput.write("quit\n".getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
                 }
@@ -217,7 +219,7 @@ class GitSshTransportStateMachineTest {
                     shell.setOut(output);
                     shell.setErr(new ByteArrayOutputStream());
                     shell.open().verify(5, TimeUnit.SECONDS);
-                    awaitOccurrences(output, "@orion", 1);
+                    awaitContains(output, "[alice@orion] > ");
                     clientInput.write("/auth/key ls\r".getBytes(StandardCharsets.UTF_8));
                     clientInput.flush();
                     awaitContains(output, "true");
@@ -232,33 +234,12 @@ class GitSshTransportStateMachineTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (!output.toString(StandardCharsets.UTF_8).contains(expected)) {
             if (System.nanoTime() >= deadline) {
-                throw new AssertionError("Timed out waiting for terminal output: " + expected);
+                throw new AssertionError("Timed out waiting for terminal output: " + expected
+                        + "; received: " + output.toString(StandardCharsets.UTF_8)
+                                .replace("\r", "\\r").replace("\n", "\\n").replace("\u001b", "\\u001b"));
             }
             Thread.sleep(10);
         }
-    }
-
-    private static void awaitOccurrences(
-            ByteArrayOutputStream output,
-            String expected,
-            int count) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (occurrences(output.toString(StandardCharsets.UTF_8), expected) < count) {
-            if (System.nanoTime() >= deadline) {
-                throw new AssertionError("Timed out waiting for terminal prompt " + count);
-            }
-            Thread.sleep(10);
-        }
-    }
-
-    private static int occurrences(String value, String expected) {
-        int result = 0;
-        int offset = 0;
-        while ((offset = value.indexOf(expected, offset)) >= 0) {
-            result++;
-            offset += expected.length();
-        }
-        return result;
     }
 
     private GitSshTransportService service(int port) throws Exception {
