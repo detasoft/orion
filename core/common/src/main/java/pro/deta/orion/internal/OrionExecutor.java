@@ -6,16 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.internal.async.StackTraceCapturingCallable;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.util.OrionUtils;
 
-import java.util.*;
 import java.util.concurrent.*;
 
 @Singleton
 @Slf4j
 public class OrionExecutor extends ScheduledThreadPoolExecutor implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
-    private final List<Thread> dedicatedThreads = new LinkedList<>();
-
     @Inject
     public OrionExecutor(OrionConfiguration orionConfiguration, OrionThreadFactory orionThreadFactory) {
         this(orionConfiguration.getBootstrap().getThreadPoolSize(), orionThreadFactory);
@@ -42,10 +38,6 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements Servic
 
     @Override
     public void onStop() {
-        for (Thread t: dedicatedThreads) {
-            t.interrupt();
-
-        }
         shutdown();
     }
 
@@ -57,13 +49,6 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements Servic
     @Override
     public boolean isRunning() {
         return !isShutdown();
-    }
-
-    public Thread newDedicatedThread(Runnable r) {
-        Thread thread = getThreadFactory().newThread(() -> {
-            OrionUtils.wrapRunnableInThreadName(OrionUtils.initiatorOf(r.getClass()), () -> r.run());
-        });
-        return thread;
     }
 
 }

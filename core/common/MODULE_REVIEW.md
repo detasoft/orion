@@ -1,16 +1,5 @@
 # Module review: core/common
 
-## 2. Executor сохраняет неработающую модель отдельных потоков
-
-- **Проблема и триггер.** dedicatedThreads никогда не пополняется; stop loop пуст. newDedicatedThread не вызывается и не регистрирует поток.
-- **Источники и владельцы.** [Поле](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L17), [stop](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L44), [factory](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L62), действующий [lifecycle](src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java#L85).
-- **Документированное поведение.** Текущего требования отдельного владения потоками не найдено.
-- **Контракт.** Сохранить shutdown ScheduledThreadPoolExecutor и его действующую фабрику рабочих потоков.
-- **Минимальное исправление.** Удалить список, пустой цикл и неиспользуемую factory.
-- **Альтернативы и последствия.** Исчезает ложная модель ownership. Регистрация, синхронизация и join для отсутствующего потребителя добавят ненужную сложность.
-- **Уверенность.** Высокая: добавления элементов и вызовы отсутствуют; проверка статическая.
-- **Важность / простота.** Низкая/средняя важность; высокая простота. Независимый результат от №1.
-
 ## 3. Неиспользуемый адаптер внутреннего JavaLangAccess
 
 - **Проблема и триггер.** Интерфейс, reflection adapter и молчаливый fallback существуют только внутри фабрики, которую никто не вызывает.
