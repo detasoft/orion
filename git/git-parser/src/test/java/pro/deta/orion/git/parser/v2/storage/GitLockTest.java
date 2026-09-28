@@ -2,10 +2,11 @@ package pro.deta.orion.git.parser.v2.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -59,11 +60,11 @@ class GitLockTest {
         var first = new GitLock(directory);
         var second = new GitLock(directory.resolve("another"));
         byte[] bytes = new byte[20];
-        try (var pack = first.lockPack(new PackId(bytes));
-             var object = first.lockObject(new ObjectId(bytes));
-             var otherRepository = second.lockPack(new PackId(bytes))) {
+        try (GitLock.Lease pack = first.lockPack(new PackId(bytes));
+             GitLock.Lease refs = first.lockRefs(List.of(new RefId("refs/heads/main")));
+             GitLock.Lease otherRepository = second.lockPack(new PackId(bytes))) {
             assertThat(pack).isNotNull();
-            assertThat(object).isNotNull();
+            assertThat(refs).isNotNull();
             assertThat(otherRepository).isNotNull();
         }
     }
