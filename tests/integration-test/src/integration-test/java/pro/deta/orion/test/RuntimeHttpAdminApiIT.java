@@ -5,9 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.test.integration.git.GitHttpTestServer;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 
 import java.net.HttpURLConnection;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +29,46 @@ class RuntimeHttpAdminApiIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void proxyCredentialIsEncryptedInConfigurationCommitAndHiddenFromResponses() throws Exception {
+        Path repositories = tempDir.resolve("upstreams");
+        GitRepositoryFixture.seedBareRepository(repositories.resolve("upstream.git"), tempDir.resolve("seed"),
+                "main", Map.of("file", "content".getBytes(StandardCharsets.UTF_8)));
+        try (GitHttpTestServer upstream = GitHttpTestServer.start(repositories);
+             RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                     RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("proxy-secret")))) {
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            JsonNode before = OBJECT_MAPPER.readTree(RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/proxies"), TestBearerTokens.bearer(token)).body());
+            Map<String, Object> create = Map.of("action", "create", "scope", "system",
+                    "revision", before.get("revision").asText(), "alias", "archive",
+                    "upstream", upstream.repositoryUrl("upstream.git"), "ref", "main",
+                    "credentialKind", "TOKEN", "credential", "private-proxy-value");
+            RuntimeHttpTestSupport.HttpResponse saved = proxyCommand(orion, token, create);
+            assertThat(saved.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertThat(saved.body()).doesNotContain("private-proxy-value");
+
+            byte[] persisted = orion.repositoryProvider().openForRead("orion")
+                    .valueOrFailure("configuration repository").loadFiles(
+                            orion.configuration().getBootstrap().getAccessControl().selectedRef(),
+                            List.of("orion.xml")).files().get("orion.xml").content();
+            String xml = new String(persisted, StandardCharsets.UTF_8);
+            assertThat(xml).doesNotContain("private-proxy-value");
+            OrionDocument stored = new XmlService().deserializeDocument(new ByteArrayInputStream(persisted));
+            assertThat(stored.system().secrets()).hasSize(1);
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
+                    orion.identity().material().configurationCipher());
+            String secretId = stored.system().proxies().getFirst().secret().orElseThrow();
+            assertThat(secrets.resolveSystem(stored, secretId))
+                    .isEqualTo("private-proxy-value".toCharArray());
+            JsonNode after = OBJECT_MAPPER.readTree(RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/proxies"), TestBearerTokens.bearer(token)).body());
+            assertThat(after.get("revision").asText()).isNotEqualTo(before.get("revision").asText());
+            assertThat(after.toString()).doesNotContain("private-proxy-value");
+        }
+    }
 
     @Test
     void adminProxyCommandsPersistAndRecoverAcrossRetryAndRestart() throws Exception {
