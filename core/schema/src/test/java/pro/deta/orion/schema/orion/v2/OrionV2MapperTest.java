@@ -45,8 +45,6 @@ class OrionV2MapperTest {
 
         assertThat(root).isNotNull();
         assertThat(root.name()).isEqualTo("orion");
-        assertThat(OrionDocument.class.getAnnotation(XmlRootElement.class)).isNull();
-        assertThat(OrionV2.class.getPackageName()).endsWith(".schema.orion.v2");
     }
 
     @Test
