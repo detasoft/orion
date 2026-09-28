@@ -36,10 +36,6 @@ class JsonSessionManifestReaderTest {
         assertThat(manifest.childPid()).hasValue(4243);
         assertThat(manifest.control().transport()).isEqualTo(ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET);
         assertThat(manifest.control().address()).isEqualTo(session.resolve("control.sock"));
-        assertThat(SessionManifest.class.getRecordComponents())
-                .extracting(component -> component.getName())
-                .doesNotContain("journalId", "activeSegment", "oldestAvailableTimestamp", "latestTimestamp",
-                        "state", "operationSequence");
     }
 
     @Test

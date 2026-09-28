@@ -36,37 +36,6 @@ No wire or persisted-contract change is required.
 **Priority signals.** Importance: high for fresh direct daemon startup. Repair ease: high to medium, local to
 existing directory handling.
 
-## 4. Reader tests assert incidental Java structure through reflection
-
-**Problem.** Behavior-preserving changes to journal-position visibility or manifest representation fail
-reflection assertions requiring particular methods, constructor modifiers, or absent record components.
-
-**Sources.** [Journal reader test](src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java#L132)
-enumerates public methods and constructors of
-[JournalReadPosition](src/main/java/pro/deta/orion/agentd/journal/JournalReadPosition.java#L8).
-[Manifest reader test](src/test/java/pro/deta/orion/agentd/session/JsonSessionManifestReaderTest.java#L39)
-enumerates components of [SessionManifest](src/main/java/pro/deta/orion/agentd/session/SessionManifest.java#L7)
-to assert removed fields are absent. Existing page and
-[manifest-reading behavior](src/main/java/pro/deta/orion/agentd/session/JsonSessionManifestReader.java#L42)
-already exercise actual consumers, including ignored metadata fields.
-
-**Documented behavior.** The [test-quality rule](../.agents/skills/orion-minimal-implementation/SKILL.md#verify-and-review)
-prohibits incidental structure assertions. No reflective consumer contract was found.
-
-**Contract.** Preserve page limits, resumption and rotation, validation, metadata interpretation, and ignored-field
-behavior. Reflection itself is not a required contract.
-
-**Minimal repair.** Delete the two reflection assertion blocks and newly unused imports; retain their behavioral
-assertions and surrounding tests.
-
-**Alternatives and consequences.** Source inspection retains the violation. New public test APIs add unnecessary
-surface. Deleting these assertions changes no production, wire, or persistence behavior.
-
-**Confidence.** High; both blocks directly match the prohibited pattern.
-
-**Priority signals.** Importance: medium as an explicit repository review violation. Repair ease: very high,
-a behavior-preserving deletion.
-
 ## 5. Server lanes preserve receipts while terminal effects can reorder
 
 **Problem.** A native handler sends the first input admission receipt, then pauses before acquiring the effect

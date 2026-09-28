@@ -17,7 +17,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
-import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -114,7 +113,7 @@ class FileSystemSessionJournalReaderTest {
     }
 
     @Test
-    void validatesPageLimitsAndKeepsPositionsOpaque() {
+    void validatesPageLimits() {
         assertThatThrownBy(() -> new JournalReadLimits(0, AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new JournalReadLimits(
@@ -129,13 +128,6 @@ class FileSystemSessionJournalReaderTest {
         assertThat(limits.maxRecords()).isEqualTo(3);
         assertThat(limits.maxEncodedBytes())
                 .isEqualTo(AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES);
-        assertThat(Arrays.stream(JournalReadPosition.class.getDeclaredMethods())
-                .filter(method -> Modifier.isPublic(method.getModifiers()))
-                .map(method -> method.getName()))
-                .containsExactly("lastEventId");
-        assertThat(Arrays.stream(JournalReadPosition.class.getDeclaredConstructors())
-                .noneMatch(constructor -> Modifier.isPublic(constructor.getModifiers())))
-                .isTrue();
     }
 
     @Test
