@@ -5,5 +5,6 @@ export default defineConfig({
   testMatch: '*.spec.js',
   timeout: 180_000,
   workers: 1,
+  use: { actionTimeout: 10_000 },
   reporter: 'list'
 })

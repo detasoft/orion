@@ -67,11 +67,6 @@
                             <goal>integration-test</goal>
                             <goal>verify</goal>
                         </goals>
-                        <configuration>
-                            <excludes>
-                                <exclude>**/PlaywrightAcmeIT.java</exclude>
-                            </excludes>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -88,34 +83,35 @@
                 <plugins>
                     <plugin>
                         <artifactId>maven-failsafe-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>playwright-acme</id>
-                                <goals>
-                                    <goal>integration-test</goal>
-                                    <goal>verify</goal>
-                                </goals>
-                                <configuration>
-                                    <includes>
-                                        <include>**/PlaywrightAcmeIT.java</include>
-                                    </includes>
-                                    <argLine>
-                                        ${argLine} ${orion.test.jvm.args}
-                                        -Djdk.net.hosts.file=${externalFixtureRoot}/hosts
-                                    </argLine>
-                                    <systemPropertyVariables>
-                                        <external.services.acme.enabled>true</external.services.acme.enabled>
-                                        <external.services.fixture.root>${externalFixtureRoot}</external.services.fixture.root>
-                                    </systemPropertyVariables>
-                                </configuration>
-                            </execution>
-                        </executions>
+                        <configuration>
+                            <argLine>
+                                ${argLine} ${orion.test.jvm.args}
+                                -Djdk.net.hosts.file=${externalFixtureRoot}/hosts
+                            </argLine>
+                            <systemPropertyVariables>
+                                <external.services.playwright.enabled>true</external.services.playwright.enabled>
+                                <external.services.fixture.root>${externalFixtureRoot}</external.services.fixture.root>
+                            </systemPropertyVariables>
+                        </configuration>
                     </plugin>
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
                         <version>3.5.0</version>
                         <executions>
+                            <execution>
+                                <id>start-external-services</id>
+                                <phase>pre-integration-test</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <workingDirectory>${externalFixtureRoot}</workingDirectory>
+                                    <executable>${externalFixtureRoot}/fixture</executable>
+                                    <arguments><argument>up</argument></arguments>
+                                    <environmentVariables>
+                                        <FRESH_FIXTURE>1</FRESH_FIXTURE>
+                                    </environmentVariables>
+                                </configuration>
+                            </execution>
                             <execution>
                                 <id>install-playwright</id>
                                 <phase>pre-integration-test</phase>

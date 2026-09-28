@@ -77,7 +77,6 @@ test: ## Run the Maven/JVM test suite with the dev profile
 
 integration-test: ## Start external services and run integration tests; show the browser URL first
 	@printf '%s\n' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
-	FRESH_FIXTURE=1 ./tests/external-services/fixture up
 	$(MAVEN_RUN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
 
 xml-schema: ## Generate and compile the XML schema model

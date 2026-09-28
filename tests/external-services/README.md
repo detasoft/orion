@@ -94,37 +94,27 @@ the fixture's port 80 for inspecting this route. After Orion has requested the
 certificate and started HTTPS on port 9443, run `./fixture check-orion` to
 verify its hostname and CA chain. The ordinary `check` verifies that the ACME
 directory is available; it does not request a certificate for Orion. The
-automated Playwright scenario below configures and starts its own Orion.
+automated integration round configures and starts its own Orion.
 
-The Playwright scenario is bound to Maven's `integration-test` phase in the
+Browser integration tests run in Maven's `integration-test` phase in the
 `external-services` profile. From the repository root, run:
 
 ```sh
 make integration-test
 ```
 
-This prints the noVNC browser URL immediately, starts or restarts the fixture for
-a fresh browser session, and runs the integration tests. Its `.state` data and host
+This prints the noVNC browser URL immediately and runs Maven. The
+`pre-integration-test` phase starts or restarts the fixture for a fresh browser
+session before the integration tests. Its `.state` data and host
 keys persist. The fixture remains running afterward; stop it with
 `tests/external-services/fixture down`.
 
-To run only the ACME scenario:
-
-```sh
-make integration-test INTEGRATION_TEST_ARGS='-Dit.test=PlaywrightAcmeIT -Dtest=PlaywrightAcmeIT -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false'
-```
-
-The Java integration test starts Orion once, enrolls a test root key without
-SSH, issues a test token, and runs Playwright in the container's visible Chromium.
-Playwright opens Orion's **Key material** screen, presses **Issue ACME certificate**,
-checks the new `orion.test` certificate, and fetches the saved chain through a
-fresh API client. It also checks that an invalid bearer token cannot replace
-the saved chain. The Java test reopens the material store after shutdown to
-verify persistence. The profile supplies the fixture hostname to the test JVM
-and the test trusts the fixture root CA. Orion listens on host port 8000 for
-HTTP-01. The server stops when the test ends; the browser retains its last page.
+The integration round starts an isolated Orion instance, configures test access
+and CA trust, and runs Playwright in the container's visible Chromium. Orion
+listens on host port 8000 for HTTP-01 and stops when the round ends. The browser
+retains its last page.
 The Playwright dependencies are installed from its lockfile in
-`pre-integration-test`; Node.js 20 or newer and npm are required. No browser
+`pre-integration-test`; Node.js 20 or newer, npm, and Git are required. No browser
 download is needed because Playwright connects to the fixture Chromium through
 the loopback-only DevTools port 9222.
 

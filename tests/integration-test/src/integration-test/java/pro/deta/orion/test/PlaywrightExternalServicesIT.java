@@ -1,6 +1,7 @@
 package pro.deta.orion.test;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -42,15 +43,16 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
-@EnabledIfSystemProperty(named = "external.services.acme.enabled", matches = "true")
-class PlaywrightAcmeIT {
+@EnabledIfSystemProperty(named = "external.services.playwright.enabled", matches = "true")
+class PlaywrightExternalServicesIT {
     private static final String DIRECTORY_URL = "https://fixture.orion.test:9000/acme/acme/directory";
 
     @TempDir
     Path tempDir;
 
     @Test
-    void orionRequestsAndPersistsItsCertificateOverHttp01() throws Exception {
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    void browserExercisesCertificateIssuanceRepositoriesAndExternalGitProxy() throws Exception {
         Path fixtureRoot = Path.of(System.getProperty("external.services.fixture.root"));
         Path caRoot = fixtureRoot.resolve(".state/step/certs/root_ca.crt");
         assertThat(caRoot).exists();
@@ -68,6 +70,7 @@ class PlaywrightAcmeIT {
                             configuration, identity.capability(), identity.sshHostKeys())
                     .acmeKeyMaterialCapability(identity.material().acme())
                     .configurationMaterialCapability(identity.material().configurationMaterial())
+                    .configurationCipherCapability(identity.material().configurationCipher())
                     .tlsCapability(identity.material().tls())
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
@@ -130,7 +133,7 @@ class PlaywrightAcmeIT {
             SSLContext fixtureContext = trustFixtureCa(caRoot);
             SSLContext.setDefault(fixtureContext);
             HttpsURLConnection.setDefaultSSLSocketFactory(fixtureContext.getSocketFactory());
-            Path output = tempDir.resolve("playwright.log");
+            Path output = fixtureRoot.getParent().resolve("integration-test/target/playwright.log");
             ProcessBuilder command = new ProcessBuilder("npm", "test")
                     .directory(fixtureRoot.getParent().resolve("integration-test/playwright").toFile())
                     .redirectErrorStream(true)
@@ -138,11 +141,16 @@ class PlaywrightAcmeIT {
             command.environment().put("ORION_HTTP_URL", "http://127.0.0.1:8000");
             command.environment().put("ORION_TOKEN", token);
             Process process = command.start();
-            if (!process.waitFor(4, TimeUnit.MINUTES)) {
-                process.destroyForcibly();
-                throw new AssertionError("Playwright ACME test timed out");
+            try {
+                if (!process.waitFor(4, TimeUnit.MINUTES)) {
+                    throw new AssertionError("Playwright external-services tests timed out: " + output);
+                }
+                assertThat(process.exitValue()).as(Files.readString(output)).isZero();
+            } finally {
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                }
             }
-            assertThat(process.exitValue()).as(Files.readString(output)).isZero();
         } finally {
             HttpsURLConnection.setDefaultSSLSocketFactory(previousFactory);
             SSLContext.setDefault(previousContext);
