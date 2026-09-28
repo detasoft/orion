@@ -127,11 +127,6 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.connectors</groupId>
-                <artifactId>sshd-common</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>key-material</artifactId>
                 <version>${project.version}</version>
