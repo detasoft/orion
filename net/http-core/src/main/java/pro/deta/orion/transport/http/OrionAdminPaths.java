@@ -13,6 +13,7 @@ final class OrionAdminPaths {
     static final String TRANSPORTS = ADMIN + "/transports";
     static final String SHUTDOWN = ADMIN + "/shutdown";
     static final String ACME_CERTIFICATE = ADMIN + "/acme/certificate";
+    static final String KEY_MATERIAL = ADMIN + "/key-material";
     static final String TOKEN = ADMIN + "/token";
 
     private OrionAdminPaths() {

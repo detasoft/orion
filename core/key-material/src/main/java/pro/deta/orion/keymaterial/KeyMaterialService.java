@@ -11,11 +11,14 @@ import java.security.KeyStore;
 import java.security.PKCS12Attribute;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.MessageDigest;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collection;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -387,6 +390,99 @@ public class KeyMaterialService implements AutoCloseable {
             descriptors.add(descriptor);
         }
         return List.copyOf(descriptors);
+    }
+
+    public synchronized List<KeyMaterialInventoryEntry> inventory() throws GeneralSecurityException {
+        requireOpen();
+        List<String> aliases = new ArrayList<>();
+        keyStore.aliases().asIterator().forEachRemaining(aliases::add);
+        aliases.sort(String::compareTo);
+        List<KeyMaterialInventoryEntry> entries = new ArrayList<>();
+        for (String alias : aliases) {
+            boolean trusted = keyStore.entryInstanceOf(alias, KeyStore.TrustedCertificateEntry.class);
+            boolean privateKey = keyStore.entryInstanceOf(alias, KeyStore.PrivateKeyEntry.class);
+            boolean secretKey = keyStore.entryInstanceOf(alias, KeyStore.SecretKeyEntry.class);
+            if (!trusted && !privateKey && !secretKey) {
+                throw new GeneralSecurityException("Unknown key material entry type: " + alias);
+            }
+            String metadata = trusted ? trustedCertificateDescriptorMetadata(alias) : descriptorMetadata(alias);
+            String[] fields = metadata.split(";", -1);
+            if (fields.length != 4) {
+                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
+            }
+            KeyMaterialPurpose purpose;
+            KeyMaterialAlgorithm algorithm;
+            long version;
+            String scope;
+            try {
+                purpose = KeyMaterialPurpose.valueOf(fields[0]);
+                algorithm = KeyMaterialAlgorithm.valueOf(fields[1]);
+                version = Long.parseLong(fields[2]);
+                scope = new String(Base64.getUrlDecoder().decode(fields[3]), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException failure) {
+                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias,
+                        failure);
+            }
+            if (trusted != (purpose == KeyMaterialPurpose.TRUST_ANCHOR)
+                    || secretKey != (purpose == KeyMaterialPurpose.CONFIGURATION_CIPHER)) {
+                throw new GeneralSecurityException("Key material entry type does not match purpose: " + alias);
+            }
+            Certificate[] chain = secretKey ? new Certificate[0] : keyStore.getCertificateChain(alias);
+            if (trusted) {
+                chain = new Certificate[]{keyStore.getCertificate(alias)};
+            }
+            String publicKey = secretKey ? null : publicKeyPem(chain[0].getPublicKey());
+            List<KeyMaterialInventoryEntry.CertificateDetails> certificates = new ArrayList<>();
+            if (!isStorageCertificate(chain)) {
+                for (Certificate certificate : chain) {
+                    if (!(certificate instanceof X509Certificate x509)) {
+                        throw new GeneralSecurityException("Non-X509 certificate in key material: " + alias);
+                    }
+                    certificates.add(certificateDetails(x509));
+                }
+            }
+            entries.add(new KeyMaterialInventoryEntry(alias, purpose.name(), algorithm.name(), version,
+                    scope, publicKey, certificates));
+        }
+        return List.copyOf(entries);
+    }
+
+    private static String publicKeyPem(PublicKey key) {
+        String encoded = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getEncoded());
+        return "-----BEGIN PUBLIC KEY-----\n" + encoded + "\n-----END PUBLIC KEY-----";
+    }
+
+    private static boolean isStorageCertificate(Certificate[] chain) {
+        if (chain.length != 1 || !(chain[0] instanceof X509Certificate certificate)) {
+            return false;
+        }
+        return certificate.getBasicConstraints() < 0
+                && certificate.getSubjectX500Principal().equals(certificate.getIssuerX500Principal())
+                && certificate.getSubjectX500Principal().getName()
+                        .contains("O=" + KeyMaterialConstants.STORAGE_CERTIFICATE_ORGANIZATION);
+    }
+
+    private static KeyMaterialInventoryEntry.CertificateDetails certificateDetails(X509Certificate certificate)
+            throws GeneralSecurityException {
+        byte[] fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded());
+        List<String> dnsNames = new ArrayList<>();
+        Collection<List<?>> alternatives = certificate.getSubjectAlternativeNames();
+        if (alternatives != null) {
+            for (List<?> alternative : alternatives) {
+                if (Integer.valueOf(2).equals(alternative.get(0))
+                        && alternative.get(1) instanceof String name) {
+                    dnsNames.add(name);
+                }
+            }
+        }
+        return new KeyMaterialInventoryEntry.CertificateDetails(
+                certificate.getSubjectX500Principal().getName(),
+                dnsNames,
+                certificate.getIssuerX500Principal().getName(),
+                certificate.getSerialNumber().toString(16),
+                certificate.getNotBefore().toInstant().toString(),
+                certificate.getNotAfter().toInstant().toString(),
+                HexFormat.of().withDelimiter(":").formatHex(fingerprint));
     }
 
     public synchronized void validateExisting(TrustedCertificateDescriptor descriptor)

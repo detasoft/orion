@@ -118,6 +118,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute keyMaterialRoute(OrionAdminKeyMaterialRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute configurationSchemaRoute(OrionConfigurationSchemaRoute route) {
         return route;
     }

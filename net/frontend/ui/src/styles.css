@@ -1060,6 +1060,60 @@ button,
   font-size: 10px;
 }
 
+.material-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.material-message,
+.material-error {
+  margin: 14px 0;
+  font-size: 12px;
+}
+
+.material-error {
+  color: #a43c36;
+}
+
+.material-entry {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.material-entry-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.material-entry h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.material-entry p,
+.material-entry details {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.material-certificate {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.material-certificate p {
+  margin: 5px 0 0;
+}
+
+.material-entry pre {
+  overflow-x: auto;
+  color: var(--text);
+}
+
 .people-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

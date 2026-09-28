@@ -36,7 +36,7 @@ directly works after those archives are cached by `./fixture build`.
 | Gitea HTTPS/OIDC | `https://fixture.orion.test:8443`; user `fixture`, `GITEA_PASSWORD` |
 | S3 | `https://fixture.orion.test:8333`; `S3_ACCESS_KEY`, `S3_SECRET_KEY` |
 | ACME directory | `https://fixture.orion.test:9000/acme/acme/directory` |
-| Browser in container | `http://localhost:6080/vnc.html` |
+| Browser in container | `http://localhost:6080/vnc.html?autoconnect=1` |
 
 The credentials are local test secrets. Ports bind to `127.0.0.1` on the host.
 For macOS clients, `./fixture hosts-install` adds this line to `/etc/hosts`
@@ -79,7 +79,7 @@ public URL to the same `https://orion.test:9443` origin and trust the fixture CA
 in Orion's Java truststore. The fixture check verifies OIDC discovery; completing
 the interactive authorization requires configuring Orion's application.
 
-For Orion's ACME HTTP-01 flow, configure its directory URL to the value in the
+For a manually started Orion ACME HTTP-01 flow, configure its directory URL to the value in the
 table, its requested domain to `orion.test`, and its HTTP challenge listener on
 host port 8000. Set `transport.defaultAddress: 0.0.0.0` in the test Orion
 bootstrap configuration so the container can reach that listener. In the
@@ -93,26 +93,33 @@ Nginx forwards `/.well-known/acme-challenge/*` to
 the fixture's port 80 for inspecting this route. After Orion has requested the
 certificate and started HTTPS on port 9443, run `./fixture check-orion` to
 verify its hostname and CA chain. The ordinary `check` verifies that the ACME
-directory is available; it does not request a certificate for Orion.
+directory is available; it does not request a certificate for Orion. The
+automated Playwright scenario below configures and starts its own Orion.
 
 The Playwright scenario is bound to Maven's `integration-test` phase in the
-`external-services` profile. After starting the fixture and the configured
-Orion, issue an application-admin bearer token (for example with
-`make issue-token-raw` after enrolling an admin SSH key), then run:
+`external-services` profile. After starting the fixture, run:
 
 ```sh
-ORION_TOKEN=<test-admin-token> \
-  mvn verify -Pdev,external-services -T 4 -pl tests/integration-test -am
+mvn verify -Pdev,external-services -T 4 -pl tests/integration-test -am
 ```
 
-This scenario calls Orion's ACME issuance route, observes its HTTP-01 issuance
-result, checks that the leaf is for `orion.test` and chains to this fixture's
-CA, then fetches the same certificate from Orion through a fresh API client.
-It also checks that an invalid bearer token cannot replace the saved chain.
-The host mapping above and Orion's JVM trust of the fixture root are required.
+To run only the ACME scenario, add `-Dit.test=PlaywrightAcmeIT`
+`-Dtest=PlaywrightAcmeIT` `-Dsurefire.failIfNoSpecifiedTests=false`
+`-Dfailsafe.failIfNoSpecifiedTests=false`.
+
+The Java integration test starts Orion once, enrolls a test root key without
+SSH, issues a test token, and runs Playwright in the container's visible Chromium.
+Playwright opens Orion's **Key material** screen, presses **Issue ACME certificate**,
+checks the new `orion.test` certificate, and fetches the saved chain through a
+fresh API client. It also checks that an invalid bearer token cannot replace
+the saved chain. The Java test reopens the material store after shutdown to
+verify persistence. The profile supplies the fixture hostname to the test JVM
+and the test trusts the fixture root CA. Orion listens on host port 8000 for
+HTTP-01. The server stops when the test ends; the browser retains its last page.
 The Playwright dependencies are installed from its lockfile in
 `pre-integration-test`; Node.js 20 or newer and npm are required. No browser
-download is needed for this API scenario.
+download is needed because Playwright connects to the fixture Chromium through
+the loopback-only DevTools port 9222.
 
 For a local JVM started with a dedicated test truststore, one way to add the
 root is:
@@ -133,7 +140,11 @@ the JVM's usual public roots.
 
 The container's Chromium uses a 1440×900 Xvfb screen. Its NSS database trusts
 the fixture root CA; certificate validation stays enabled. Open
-`http://localhost:6080/vnc.html` to watch or drive it.
+`http://localhost:6080/vnc.html?autoconnect=1` to watch or drive it. For a
+manually running Orion configured for this CA, open `http://orion.test:8000/`,
+connect with an application-admin bearer token under **Settings**, then open
+**Key material** to inspect public keys and certificates or issue a new ACME
+certificate. The interface never returns private or symmetric key bytes.
 
 On macOS with Google Chrome installed, run `./fixture trust-mac` once to add the
 root to your **login Keychain** as a trusted root. This affects other applications using that

@@ -56,6 +56,10 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         return material.serverIdentity();
     }
 
+    OrionKeyMaterial material() {
+        return material;
+    }
+
     KeyPair keyPair() {
         return keyPair;
     }

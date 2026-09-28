@@ -13,6 +13,8 @@ const client = {
   decisions: vi.fn(),
   resolveDecision: vi.fn(),
   lifecycleState: vi.fn(),
+  keyMaterial: vi.fn(),
+  issueAcmeCertificate: vi.fn(),
   repositories: vi.fn(),
   remoteAliases: vi.fn(),
   routes: vi.fn(),
@@ -75,6 +77,8 @@ beforeEach(() => {
     routes: [{ urlPattern: '/api/admin/routes', methods: ['GET'], authorization: 'admin' }],
   })
   client.lifecycleState.mockResolvedValue('RUNNING')
+  client.keyMaterial.mockResolvedValue({ entries: [] })
+  client.issueAcmeCertificate.mockResolvedValue('-----BEGIN CERTIFICATE-----')
   client.repositories.mockResolvedValue({ repositories: [] })
   client.remoteAliases.mockResolvedValue({ aliases: [] })
   client.decisions.mockResolvedValue({ decisions: [] })
@@ -89,6 +93,19 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('shows the key material viewer only to a connected administrator', async () => {
+    const wrapper = mountApp()
+    expect(wrapper.text()).not.toContain('Key material')
+    await connect(wrapper)
+    const navigation = wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Key material')
+    expect(navigation).toBeDefined()
+    await navigation.trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Issue ACME certificate'))
+    expect(client.keyMaterial).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
   it('checks session renewal in the background and stops after unmount', async () => {
     vi.useFakeTimers()
     const wrapper = mountApp()

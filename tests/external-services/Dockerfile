@@ -19,5 +19,5 @@ RUN chmod +x /usr/local/bin/external-entrypoint /usr/local/bin/external-check \
 
 ENV STEPPATH=/state/step
 VOLUME /state
-EXPOSE 80 8443 8333 9000 2222 2223 6080
+EXPOSE 80 8443 8333 9000 2222 2223 6080 9223
 ENTRYPOINT ["/usr/local/bin/external-entrypoint"]

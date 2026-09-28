@@ -5,6 +5,7 @@ import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
 
 const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAliases.vue'))
+const KeyMaterial = defineAsyncComponent(() => import('./components/KeyMaterial.vue'))
 const PendingDecisions = defineAsyncComponent(() => import('./components/PendingDecisions.vue'))
 const SessionTerminal = defineAsyncComponent(() => import('./components/SessionTerminal.vue'))
 
@@ -12,6 +13,7 @@ const allNavItems = [
   { id: 'overview', label: 'Overview', icon: 'overview' },
   { id: 'repositories', label: 'Repositories', icon: 'repository' },
   { id: 'remote-aliases', label: 'Remote aliases', icon: 'git-branch' },
+  { id: 'key-material', label: 'Key material', icon: 'lock' },
   { id: 'pending-decisions', label: 'Pending decisions', icon: 'bell' },
   { id: 'people', label: 'People', icon: 'users' },
   { id: 'activity', label: 'Activity', icon: 'activity' },
@@ -20,7 +22,8 @@ const allNavItems = [
 
 const identity = ref(null)
 const navItems = computed(() => identity.value?.organization
-  ? allNavItems.filter((item) => item.id === 'repositories') : allNavItems)
+  ? allNavItems.filter((item) => item.id === 'repositories')
+  : allNavItems.filter((item) => item.id !== 'key-material' || identity.value?.admin))
 const signIn = ref(null)
 const providerRevision = ref(0)
 const OrganizationOidc = defineAsyncComponent(() => import('./components/OrganizationOidc.vue'))
@@ -51,6 +54,7 @@ let draftConnectionAttempt = 0
 
 const titles = {
   overview: ['Overview', 'A quiet view of everything happening in Orion.'],
+  'key-material': ['Key material', 'Inspect certificates and public information in the protected store.'],
   repositories: ['Repositories', 'Browse and manage source repositories.'],
   'remote-aliases': ['Remote aliases', 'Inspect upstream-backed Git access paths.'],
   'pending-decisions': ['Pending decisions', 'Review requests awaiting your response.'],
@@ -621,6 +625,11 @@ onUnmounted(() => {
             <h3>Connect to Orion first</h3>
             <p>Open Settings to inspect remote aliases.</p>
           </div>
+        </template>
+
+        <template v-else-if="activeView === 'key-material'">
+          <KeyMaterial v-if="isConnected && identity?.admin" :token="settings.token"
+            @authorization-error="clearExpiredCredentials" />
         </template>
 
         <template v-else-if="activeView === 'pending-decisions'">

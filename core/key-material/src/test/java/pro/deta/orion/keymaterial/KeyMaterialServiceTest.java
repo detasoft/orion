@@ -174,6 +174,40 @@ class KeyMaterialServiceTest {
     }
 
     @Test
+    void inventoriesPublicMaterialWithoutExposingPrivateOrSecretKeys() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialScope scope = KeyMaterialScope.cluster("orion-prod");
+        KeyMaterialDescriptor identity = descriptor(
+                "tls-identity-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, scope);
+        KeyMaterialDescriptor cipher = descriptor(
+                "configuration-v1", KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, scope);
+        TrustedCertificateDescriptor trust = trustedCertificate("issuer-v1", 1, scope);
+        TestCertificateChain.Authority issuer = TestCertificateChain.root("Public Root");
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            KeyPair keyPair = service.generateKeyIfMissing(identity, 2048);
+            service.setPrivateKey(identity, keyPair,
+                    List.of(TestCertificateChain.leaf("orion.test", keyPair, issuer), issuer.certificate()));
+            service.generateSecretKeyIfMissing(cipher, 256);
+            service.setTrustedCertificate(trust, issuer.certificate());
+            service.save();
+        }
+
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            List<KeyMaterialInventoryEntry> entries = service.inventory();
+            assertThat(entries).extracting(KeyMaterialInventoryEntry::alias)
+                    .containsExactly("configuration-v1", "issuer-v1", "tls-identity-v1");
+            assertThat(entries.get(0).publicKeyPem()).isNull();
+            assertThat(entries.get(0).certificates()).isEmpty();
+            assertThat(entries.get(1).certificates()).hasSize(1);
+            assertThat(entries.get(2).publicKeyPem()).startsWith("-----BEGIN PUBLIC KEY-----");
+            assertThat(entries.get(2).certificates()).hasSize(2);
+            assertThat(entries.get(2).certificates().getFirst().subject()).contains("orion.test");
+            assertThat(entries.get(2).certificates().getFirst().dnsNames()).isEmpty();
+            assertThat(entries.toString()).doesNotContain("PRIVATE KEY", "SECRET KEY");
+        }
+    }
+
+    @Test
     void refusesPrivateKeyWhenCertificateChainHasDifferentPublicKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialService service = KeyMaterialService.open(store, options());

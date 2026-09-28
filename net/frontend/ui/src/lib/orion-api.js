@@ -165,6 +165,12 @@ export function createOrionClient(options = {}) {
     lifecycleState() {
       return request('/api/admin/lifecycle/state')
     },
+    keyMaterial() {
+      return request('/api/admin/key-material')
+    },
+    issueAcmeCertificate() {
+      return request('/api/admin/acme/certificate', { method: 'POST' })
+    },
     remoteAliases() {
       return request('/api/admin/proxies')
     },

@@ -66,10 +66,16 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>integration-tests</id>
                         <goals>
                             <goal>integration-test</goal>
                             <goal>verify</goal>
                         </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/PlaywrightAcmeIT.java</exclude>
+                            </excludes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -79,8 +85,36 @@
     <profiles>
         <profile>
             <id>external-services</id>
+            <properties>
+                <externalFixtureRoot>${project.basedir}/../external-services</externalFixtureRoot>
+            </properties>
             <build>
                 <plugins>
+                    <plugin>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>playwright-acme</id>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                                <configuration>
+                                    <includes>
+                                        <include>**/PlaywrightAcmeIT.java</include>
+                                    </includes>
+                                    <argLine>
+                                        ${argLine} ${orion.test.jvm.args}
+                                        -Djdk.net.hosts.file=${externalFixtureRoot}/hosts
+                                    </argLine>
+                                    <systemPropertyVariables>
+                                        <external.services.acme.enabled>true</external.services.acme.enabled>
+                                        <external.services.fixture.root>${externalFixtureRoot}</external.services.fixture.root>
+                                    </systemPropertyVariables>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>exec-maven-plugin</artifactId>
@@ -94,19 +128,6 @@
                                     <workingDirectory>${project.basedir}/playwright</workingDirectory>
                                     <executable>npm</executable>
                                     <arguments><argument>ci</argument></arguments>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>playwright-external-services</id>
-                                <phase>integration-test</phase>
-                                <goals><goal>exec</goal></goals>
-                                <configuration>
-                                    <workingDirectory>${project.basedir}/playwright</workingDirectory>
-                                    <executable>npm</executable>
-                                    <arguments><argument>test</argument></arguments>
-                                    <environmentVariables>
-                                        <NODE_EXTRA_CA_CERTS>${project.basedir}/../external-services/.state/step/certs/root_ca.crt</NODE_EXTRA_CA_CERTS>
-                                    </environmentVariables>
                                 </configuration>
                             </execution>
                         </executions>

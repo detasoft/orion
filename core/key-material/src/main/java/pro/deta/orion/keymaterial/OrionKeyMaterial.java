@@ -101,6 +101,11 @@ public final class OrionKeyMaterial implements AutoCloseable {
                 requireOwnerScope(descriptor.scope());
                 owner.validateExisting(descriptor);
             }
+
+            @Override
+            public List<KeyMaterialInventoryEntry> inventory() throws GeneralSecurityException {
+                return owner.inventory();
+            }
         };
     }
 

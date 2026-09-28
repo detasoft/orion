@@ -9,6 +9,21 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('lists public key material and starts ACME issuance with the administrator token', async () => {
+    const fetchImpl = vi.fn(async (url) => url.endsWith('/key-material')
+      ? new Response(JSON.stringify({ entries: [] }), { headers: { 'Content-Type': 'application/json' } })
+      : new Response('-----BEGIN CERTIFICATE-----\nissued\n-----END CERTIFICATE-----'))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+
+    expect(await client.keyMaterial()).toEqual({ entries: [] })
+    expect(await client.issueAcmeCertificate()).toContain('BEGIN CERTIFICATE')
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      '/api/admin/key-material', '/api/admin/acme/certificate',
+    ])
+    expect(fetchImpl.mock.calls[1][1].method).toBe('POST')
+    expect(fetchImpl.mock.calls[1][1].headers.get('Authorization')).toBe('Bearer admin-token')
+  })
+
   it('renews an expired OIDC token once for simultaneous requests after sleep', async () => {
     const onToken = vi.fn()
     const renewed = { token: 'new-token', expiresAt: Date.now() / 1000 + 3600,
