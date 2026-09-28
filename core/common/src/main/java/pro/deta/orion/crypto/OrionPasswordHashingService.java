@@ -80,15 +80,6 @@ public class OrionPasswordHashingService {
                 })));
     }
 
-    public static byte[] toByteArray(List<Character> list) {
-        int size = list.size();
-        byte[] r = new byte[size];
-        for (int i = 0; i < size; i++) {
-            r[i] = (byte) list.get(i).charValue();
-        }
-        return r;
-    }
-
     public static char[] toCharArray(List<Character> list) {
         int size = list.size();
         char[] r = new char[size];

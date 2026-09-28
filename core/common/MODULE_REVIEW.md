@@ -1,16 +1,5 @@
 # Module review: core/common
 
-## 5. Неиспользуемое преобразование List<Character> в bytes
-
-- **Проблема и триггер.** toByteArray(List<Character>) нигде не вызывается и не участвует в генерации или проверке паролей.
-- **Источники и владельцы.** [Метод](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L83), [живое преобразование в chars](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L92), [hashing test](src/test/java/pro/deta/orion/crypto/OrionPasswordHashingServiceTest.java#L14).
-- **Документированное поведение.** Требования к преобразованию не найдено.
-- **Контракт.** Сохранить используемую UTF-8 обработку и hash format.
-- **Минимальное исправление.** Удалить только неиспользуемый метод.
-- **Альтернативы и последствия.** Исчезает внутренний API без потребителей. Переделывать его кодировку вместо удаления не требуется.
-- **Уверенность.** Высокая: нет вызовов и static imports.
-- **Важность / простота.** Низкая важность; высокая простота. Независимо от №4.
-
 ## 6. Неиспользуемые PEM/JKS readers сохраняют лишний импорт ключей
 
 - **Проблема и триггер.** readKeyWithCertsFromPEM и readKeyWithCertsFromJKS имеют только определения, без runtime/test consumers.
@@ -25,7 +14,7 @@
 ## 7. Экспериментальный OpenSSH parser живёт ради print-only теста
 
 - **Проблема и триггер.** OpenSSHKey использует ByteArrayMap; иных consumers у пары нет. Единственный тест декодирует fixture и печатает объект без содержательного assertion.
-- **Источники и владельцы.** [Parser](src/main/java/pro/deta/orion/util/OpenSSHKey.java#L11), [map](src/main/java/pro/deta/orion/util/ByteArrayMap.java#L10), [тест](src/test/java/pro/deta/orion/util/rle/RLETCoderTest.java#L34). Живой RLE формат: [encode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L55), [decode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L138).
+- **Источники и владельцы.** [Parser](src/main/java/pro/deta/orion/util/OpenSSHKey.java#L11), [map](src/main/java/pro/deta/orion/util/ByteArrayMap.java#L10), [тест](src/test/java/pro/deta/orion/util/rle/RLETCoderTest.java#L34). Живой RLE формат: [encode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L55), [decode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L129).
 - **Документированное поведение.** Текущая обязанность parser не найдена; действующие SSH paths используют SSH/crypto библиотеки.
 - **Контракт.** Сохранить RLETCoder и persisted salt/hash format, ByteBufferUtil и действующие SSH providers.
 - **Минимальное исправление.** Удалить пару типов и только testReadingContainer с его fixture/import; сохранить другие RLE tests.
