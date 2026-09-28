@@ -42,7 +42,7 @@ mutation.
 **Sources.** [Mutation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1602),
 [redundant wait](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1607),
 [helper](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L939), and
-[synchronous activation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1775).
+[synchronous activation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1767).
 The ACL service is the event's sole production publisher and handler. Storage has its own
 [external change subscription](../../connectors/acl-storage/src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java#L143).
 [User mutation tests](src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java) cover persistence,
@@ -91,28 +91,6 @@ abstraction would add unnecessary ownership.
 **Confidence.** High for repository consumers; external binary compatibility is not an established contract.
 
 **Priority signals.** Importance: low, redundant boundary. Repair ease: medium, test migration across modules.
-
-## 5. An unreachable ACL projection helper remains
-
-**Problem.** Private `accessControlFrom` has no callers, registrations or method references. All current
-loading uses `documentFrom` and validates the complete document.
-
-**Sources.** [Unused helper](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1688),
-[live document loader](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1696), and
-[snapshot validation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1680).
-
-**Documented behavior and contract.** No requirement for the private projection was found. Complete document
-validation and the existing authentication and mutation contracts remain required.
-
-**Minimal repair.** Delete this method only, retaining the document loader and existing behavior tests.
-Add no source or reflection assertion about its absence.
-
-**Alternatives and consequences.** Retention leaves unreachable code; migrating live callers to this
-projection would weaken document ownership. Deletion changes no observable behavior or contract.
-
-**Confidence.** High from visibility and repository-wide caller search.
-
-**Priority signals.** Importance: low, dead code. Repair ease: very high, one deletion.
 
 ## 6. JWT test conveniences are unmarked production entry points
 

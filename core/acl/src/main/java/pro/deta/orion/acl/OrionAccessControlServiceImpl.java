@@ -1685,14 +1685,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         };
     }
 
-    private Result<AccessControl> accessControlFrom(AccessControlSnapshot snapshot) {
-        return switch (documentFrom(snapshot)) {
-            case Result.Success<OrionDocument>(var document) ->
-                    new Result.Success<>(document.system().accessControl());
-            case Result.Failure<OrionDocument> failure -> new Result.Failure<>(failure);
-        };
-    }
-
     private Result<OrionDocument> documentFrom(AccessControlSnapshot snapshot) {
         if (snapshot.files().isEmpty()) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
