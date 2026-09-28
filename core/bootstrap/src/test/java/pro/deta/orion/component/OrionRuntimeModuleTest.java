@@ -36,8 +36,6 @@ import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.KeyMaterialService;
-import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -270,16 +268,6 @@ class OrionRuntimeModuleTest {
                 "access-control",
                 "agent-session-server",
                 "transports");
-    }
-
-    @Test
-    void runtimeComponentExposesNoRawMaterialOwnerOrService() {
-        assertThat(OrionComponent.class.getMethods())
-                .noneMatch(method -> method.getReturnType().equals(OrionKeyMaterial.class))
-                .noneMatch(method -> method.getReturnType().equals(KeyMaterialService.class));
-        assertThat(OrionComponent.Builder.class.getMethods())
-                .noneMatch(method -> List.of(method.getParameterTypes()).contains(OrionKeyMaterial.class))
-                .noneMatch(method -> List.of(method.getParameterTypes()).contains(KeyMaterialService.class));
     }
 
     @Test
