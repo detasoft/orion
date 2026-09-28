@@ -23,29 +23,3 @@ adds no production abstraction.
 
 **Priority signals.** Importance: medium, an advertised command fails. Repair ease: high locally; affected
 real goals require a server or documented dry-run limitation.
-
-## 11. Diagnostic Make goals expose active administrator tokens
-
-**Problem.** HTTP and SSH Git check goals print the acquired administrator bearer token. Admin ACL helpers
-use `curl -v`, exposing the Authorization request header in stderr. Saved diagnostic output contains a usable
-authentication secret; the SSH check does not use the token it obtains.
-
-**Sources.** [HTTP diagnostic output](make/server.mk#L140),
-[SSH diagnostic output](make/server.mk#L163), and [verbose ACL helpers](make/server.mk#L127).
-`check-git-all` invokes the checks. [README](README.md#L204) recommends the ACL helper.
-
-**Documented behavior and contract.** [Explicit token export](README.md#L212) is the purpose of
-`issue-token` and `issue-token-raw`. Diagnostic goals require authenticated requests and useful results,
-without a documented promise to publish the credentials used for them.
-
-**Minimal repair.** Delete diagnostic token printing, remove unused token issuance from the SSH check, and
-remove verbose request-header output from ACL helpers. Preserve intended token-export commands and useful
-HTTP error/body reporting. Exercise success and failure via controlled helper commands.
-
-**Alternatives and consequences.** Filtering verbose output adds redaction machinery and can miss secrets.
-Removing the unnecessary output is smaller. Authentication and diagnostic results remain supported.
-
-**Confidence.** High; exposure follows directly from the commands, without a live token invocation.
-
-**Priority signals.** Importance: high when diagnostic output is saved or shared. Repair ease: high locally,
-with observable output and error-path coverage required.
