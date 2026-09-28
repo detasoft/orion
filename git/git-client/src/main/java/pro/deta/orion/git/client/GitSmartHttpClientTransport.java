@@ -474,10 +474,6 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
             }
         }
 
-        private void timeout() {
-            timeout(progress.get());
-        }
-
         private void timeout(long expectedProgress) {
             if (progress.get() == expectedProgress && state.compareAndSet(0, 2)) {
                 Flow.Subscription currentSubscription = subscription;
