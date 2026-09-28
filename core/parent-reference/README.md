@@ -156,7 +156,6 @@ Modules can add capabilities without changing the parser:
 ResourceReferenceResolver resolver = ResourceReferenceResolver.builder()
         .scope(ResourceReferenceScope.empty())
         .registry(ResourceResolverRegistry.builder()
-                .withDefaults()
                 .add(new LocalRepositoryResolver())
                 .build())
         .build();

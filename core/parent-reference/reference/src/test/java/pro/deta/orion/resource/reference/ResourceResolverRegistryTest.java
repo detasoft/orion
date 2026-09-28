@@ -11,7 +11,6 @@ class ResourceResolverRegistryTest {
         ResourceReferenceResolver resolver = ResourceReferenceResolver.builder()
                 .scope(ResourceReferenceScope.empty())
                 .registry(ResourceResolverRegistry.builder()
-                        .withDefaults()
                         .add(new LocalRepositoryResolver())
                         .build())
                 .build();

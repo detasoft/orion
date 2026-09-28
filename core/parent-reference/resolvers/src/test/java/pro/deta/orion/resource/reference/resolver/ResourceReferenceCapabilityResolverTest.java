@@ -97,7 +97,6 @@ class ResourceReferenceCapabilityResolverTest {
                         .environment(environment)
                         .build())
                 .registry(ResourceResolverRegistry.builder()
-                        .withDefaults()
                         .add(resolver)
                         .build())
                 .build();

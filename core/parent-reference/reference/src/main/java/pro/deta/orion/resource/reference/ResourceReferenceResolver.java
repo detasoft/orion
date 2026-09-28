@@ -40,11 +40,11 @@ public final class ResourceReferenceResolver {
 
     private ResourceReferenceResolver(ResourceReferenceScope scope, ResourceResolverRegistry registry) {
         this.scope = scope == null ? ResourceReferenceScope.empty() : scope;
-        this.registry = registry == null ? ResourceResolverRegistry.builder().withDefaults().build() : registry;
+        this.registry = registry == null ? ResourceResolverRegistry.builder().build() : registry;
     }
 
     public static ResourceReferenceResolver standard(ResourceReferenceScope scope) {
-        return new ResourceReferenceResolver(scope, ResourceResolverRegistry.builder().withDefaults().build());
+        return new ResourceReferenceResolver(scope, ResourceResolverRegistry.builder().build());
     }
 
     public static Builder builder() {
@@ -83,7 +83,7 @@ public final class ResourceReferenceResolver {
 
     public static final class Builder {
         private ResourceReferenceScope scope = ResourceReferenceScope.empty();
-        private ResourceResolverRegistry registry = ResourceResolverRegistry.builder().withDefaults().build();
+        private ResourceResolverRegistry registry = ResourceResolverRegistry.builder().build();
 
         public Builder scope(ResourceReferenceScope scope) {
             this.scope = scope;

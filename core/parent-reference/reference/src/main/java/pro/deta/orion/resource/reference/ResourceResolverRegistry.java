@@ -21,10 +21,6 @@ public final class ResourceResolverRegistry {
     public static final class Builder {
         private final List<ResourceCapabilityResolver<?>> resolvers = new ArrayList<>();
 
-        public Builder withDefaults() {
-            return this;
-        }
-
         public Builder add(ResourceCapabilityResolver<?> resolver) {
             resolvers.add(resolver);
             return this;

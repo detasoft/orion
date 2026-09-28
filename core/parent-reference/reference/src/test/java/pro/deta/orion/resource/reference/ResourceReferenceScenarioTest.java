@@ -74,7 +74,7 @@ class ResourceReferenceScenarioTest {
         }
 
         private ResourceReferenceResolver resolver() {
-            return resolver(ResourceResolverRegistry.builder().withDefaults().build());
+            return resolver(ResourceResolverRegistry.builder().build());
         }
 
         private ResourceReferenceResolver resolver(ResourceResolverRegistry registry) {
@@ -205,7 +205,6 @@ class ResourceReferenceScenarioTest {
         @Override
         public void verify(Scenario scenario) {
             ResourceReferenceResolver resolver = scenario.resolver(ResourceResolverRegistry.builder()
-                    .withDefaults()
                     .add(new RemoteGitRepositoryResolver())
                     .build());
             assertThat(resolve(scenario, resolver, type, path))
