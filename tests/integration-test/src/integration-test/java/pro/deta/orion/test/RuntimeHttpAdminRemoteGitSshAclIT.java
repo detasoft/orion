@@ -116,7 +116,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
                             var update = RuntimeHttpTestSupport.request("POST", aclUrl, authorization,
-                                    "application/xml", serialize(updated));
+                                    "application/xml", serialize(updated), initialAcl.etag());
                             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
                             assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
                             assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
