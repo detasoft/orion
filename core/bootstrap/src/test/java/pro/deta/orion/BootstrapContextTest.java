@@ -670,6 +670,58 @@ class BootstrapContextTest {
         exerciseAdoptionSave(AdoptionStorage.Mode.CONCURRENT_WINNER, true);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"material", "primary", "secondary", "added", "removed"})
+    void rechecksConfigurationWhenTheRepositoryAdvancesBeforeAdoptionSave(String changedFile) throws Exception {
+        OrionConfiguration configuration = configuration();
+        Upstream upstream = upstream("revision-before-save", Map.of("orion.xml", xml()));
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("material.p12", GitFile.regular(materialBytes(configuration))));
+        AdoptionStorage storage = new AdoptionStorage(xml());
+        OrionDesiredState.Snapshot approved = approved(storage);
+        AccessControl changedAcl = new AccessControl(List.of(new AccessControl.User(
+                "concurrent-user", "", "", "", List.of(), List.of(), List.of())), List.of(), List.of());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OrionXml.write(OrionDocument.withAccessControl(changedAcl), output);
+        byte[] changedXml = output.toByteArray();
+        storage.afterLoad = () -> {
+            Map<String, byte[]> changed = new LinkedHashMap<>(storage.files);
+            switch (changedFile) {
+                case "primary" -> changed.put("orion.xml", changedXml);
+                case "secondary" -> changed.put("extra.xml", changedXml);
+                case "added" -> changed.put("concurrent.xml", changedXml);
+                case "removed" -> changed.remove("extra.xml");
+                default -> {
+                }
+            }
+            storage.files = Map.copyOf(changed);
+            storage.version++;
+        };
+        try (Git ignored = upstream.git();
+             BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            Optional<OrionDocument> adopted = adoptApproved(context, storage, approved);
+            if ("material".equals(changedFile)) {
+                assertThat(adopted.orElseThrow().system().proxies()).hasSize(1);
+                assertThat(storage.saves).isEqualTo(1);
+                assertThat(storage.files.get("extra.xml")).isEqualTo(xml());
+            } else {
+                assertThat(adopted).isEmpty();
+                assertThat(storage.saves).isZero();
+                switch (changedFile) {
+                    case "primary" -> assertThat(storage.files.get("orion.xml")).isEqualTo(changedXml);
+                    case "secondary" -> assertThat(storage.files.get("extra.xml")).isEqualTo(changedXml);
+                    case "added" -> assertThat(storage.files.get("concurrent.xml")).isEqualTo(changedXml);
+                    case "removed" -> assertThat(storage.files).doesNotContainKey("extra.xml");
+                    default -> throw new AssertionError("Unexpected configuration change");
+                }
+            }
+            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                    .repositoryName().orElseThrow();
+            assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
+        }
+    }
+
     @Test
     void recognizesASavedAdoptionAfterItsResponseWasLost() throws Exception {
         exerciseAdoptionSave(AdoptionStorage.Mode.LOST_RESPONSE, true);
@@ -769,6 +821,7 @@ class BootstrapContextTest {
         private int version = 1;
         private int saves;
         private Mode mode = Mode.NORMAL;
+        private Runnable afterLoad;
 
         private AdoptionStorage(byte[] xml) {
             files = Map.of("orion.xml", xml, "extra.xml", xml);
@@ -782,7 +835,13 @@ class BootstrapContextTest {
             if (mode == Mode.INVALID_SECONDARY) {
                 loaded.put("extra.xml", bytes("invalid"));
             }
-            return new Result.Success<>(new AccessControlSnapshot(loaded, revision));
+            AccessControlSnapshot snapshot = new AccessControlSnapshot(loaded, revision);
+            Runnable callback = afterLoad;
+            afterLoad = null;
+            if (callback != null) {
+                callback.run();
+            }
+            return new Result.Success<>(snapshot);
         }
 
         @Override

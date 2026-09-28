@@ -250,7 +250,22 @@ public final class BootstrapContext implements AutoCloseable {
             if (attempt == 3) {
                 throw new IllegalStateException("Proxy configuration kept changing during adoption", lastSaveFailure);
             }
-            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+            Result<AccessControlSnapshot> prepared = storage.load();
+            if (!(prepared instanceof Result.Success<AccessControlSnapshot> preparedSuccess)) {
+                return Optional.empty();
+            }
+            AccessControlSnapshot preparedSnapshot = preparedSuccess.value();
+            Map<String, byte[]> currentFiles = snapshot.files();
+            Map<String, byte[]> preparedFiles = preparedSnapshot.files();
+            if (preparedSnapshot.version().isEmpty() || !currentFiles.keySet().equals(preparedFiles.keySet())) {
+                return Optional.empty();
+            }
+            for (Map.Entry<String, byte[]> file : currentFiles.entrySet()) {
+                if (!Arrays.equals(file.getValue(), preparedFiles.get(file.getKey()))) {
+                    return Optional.empty();
+                }
+            }
+            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(preparedFiles);
             try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 OrionXml.write(candidate, output);
                 updatedFiles.put(storage.primaryPath(), output.toByteArray());
@@ -258,7 +273,7 @@ public final class BootstrapContext implements AutoCloseable {
                 throw new IllegalStateException("Cannot serialize proxy configuration");
             }
             try {
-                storage.save(new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                storage.save(new AccessControlSnapshot(updatedFiles, preparedSnapshot.version()),
                         new AccessControlSaveRequest("Adopt bootstrap Git proxies", UserEmail.EMPTY));
                 return Optional.of(candidate);
             } catch (RuntimeException failure) {
