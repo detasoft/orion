@@ -31,7 +31,6 @@ public class OrionSSLEngine<T> {
     @Getter
     private final RecentTimestampedValueBuffer<DtlsSessionEndpoint<T>> endpointTracking;
     private final RecentTimestampedValueBuffer<LastCommandExecution> commandExecutionResult;
-    private final DtlsSessionState sessionState = new DtlsSessionState();
 
     public OrionSSLEngine(SSLEngine sslEngine, DtlsSessionEndpoint<T> endpoint) {
         this.sslEngine = sslEngine;

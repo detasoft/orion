@@ -31,7 +31,7 @@ identity decision. No default Orion runtime exposure was established.
 the source reader index adds `r` again. This skips bytes or throws. Resetting a derived or pooled NIO view's
 position/limit also discards its backing-memory coordinate system.
 
-**Sources.** [Conversion](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L113),
+**Sources.** [Conversion](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L112),
 [application input](src/main/java/pro/deta/orion/comm/DtlsApplication.java#L18), and
 [Netty input](src/main/java/pro/deta/orion/comm/v3/netty/OrionV3DtlsChannelInboundHandler.java#L29).
 Installed Netty 4.2.1.Final sources confirm the different view coordinates.
@@ -57,9 +57,9 @@ local accounting with meaningful buffer cases.
 retains the old writer index and NIO view. A reset can make the next limit exceed capacity; no reclaimed
 space can instead produce an endless unchanged retry on the sole processing worker.
 
-**Sources.** [Allocation](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L36),
-[retained slices](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L60),
-[retry loop](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L113), and
+**Sources.** [Allocation](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L35),
+[retained slices](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L59),
+[retry loop](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L112), and
 [executor](src/main/java/pro/deta/orion/comm/v3/OrionDTLSAsyncHandler.java#L36).
 
 **Documented behavior and contract.** No lifetime traffic cap was found. Sessions must continue after earlier
@@ -132,26 +132,6 @@ Lifecycle coordination must preserve active slices and cannot race unsafely with
 **Priority signals.** Importance: high for repeated standalone use and deterministic shutdown. Repair ease:
 medium/low, lifecycle crosses application and adapter. No default-runtime exposure was established.
 
-## 6. Every engine allocates an unused session-state model
-
-**Problem.** The `sessionState` field is initialized but never read; its class has no other real consumer.
-
-**Sources.** [Field](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L34) and
-[model](src/main/java/pro/deta/orion/comm/v3/DtlsSessionState.java). Repository-wide searches found only
-allocation and model definitions.
-
-**Documented behavior and contract.** No requirement for this model was found. JSSE owns live handshake
-state; current queues and handshake behavior remain required.
-
-**Minimal repair.** Delete the field and unused class, retaining existing DTLS behavior coverage.
-
-**Alternatives and consequences.** Implementing a second lifecycle model adds unrequested behavior.
-Deletion removes an allocation and internal API without changing the wire contract.
-
-**Confidence.** High for repository use; no registered or serialized consumer was found.
-
-**Priority signals.** Importance: low, inert state. Repair ease: very high, local deletions.
-
 ## 7. Typed DTLS metadata has no consumer
 
 **Problem.** `TypedMap` and its sole `DtlsCommonKeys` constant are referenced only within that unused model.
@@ -197,7 +177,7 @@ Deletion changes an unused public setter but no packet or callback delivery curr
 **Problem.** Debug mode wraps a retained slice only to override `release` with `super.release`, without any
 observable change. Normal mode returns the same retained slice directly.
 
-**Sources.** [Slice creation](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L60) and
+**Sources.** [Slice creation](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L59) and
 [delivery](src/main/java/pro/deta/orion/comm/v3/OrionDTLSAsyncHandler.java#L264).
 
 **Documented behavior and contract.** No debug-wrapper requirement was found. Reference counting and
@@ -216,8 +196,8 @@ preserves retention/release behavior; use existing behavior coverage, not reflec
 
 **Problem.** Private `throwIfOverflow` has no calls; actual overflow processing is in `commandInternal`.
 
-**Sources.** [Helper](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L144) and
-[live path](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L113).
+**Sources.** [Helper](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L143) and
+[live path](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L112).
 
 **Documented behavior and contract.** No separate helper requirement was found. Finding 3 describes the
 live overflow defect; deleting this unused method neither repairs nor changes that behavior.
@@ -238,8 +218,8 @@ results while production reads only the latest. Two ring utility types expose in
 only their own test callers.
 
 **Sources.** [Fields and initialization](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L31),
-[latest reads](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L86),
-[diagnostics](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L173),
+[latest reads](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L85),
+[diagnostics](src/main/java/pro/deta/orion/comm/v3/OrionSSLEngine.java#L172),
 [ring](src/main/java/pro/deta/orion/comm/util/RecentValueBuffer.java),
 [timestamp wrapper](src/main/java/pro/deta/orion/comm/util/RecentTimestampedValueBuffer.java), and
 [index tests](src/test/java/pro/deta/orion/comm/v3/RecentValueBufferTest.java#L17).
