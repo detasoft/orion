@@ -124,27 +124,3 @@ Removing the unnecessary output is smaller. Authentication and diagnostic result
 
 **Priority signals.** Importance: high when diagnostic output is saved or shared. Repair ease: high locally,
 with observable output and error-path coverage required.
-
-## 12. Agent instructions point to a removed annotation location
-
-**Problem.** The test-only method rule points agents to `core/lifecycle-state-machine`, which no longer
-contains the annotation. Following the documented path fails to locate the required existing mechanism.
-
-**Sources.** [Instruction](AGENTS.md#L124) and
-[actual annotation](core/common-runtime/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java).
-The current module manifest and repository file inventory place lifecycle runtime code in `common-runtime`.
-
-**Documented behavior and contract.** The rule requires marking non-contract test-only methods with the
-existing `TestOnly` annotation. Its package and semantics remain valid; the obsolete filesystem path is
-incidental and should identify the actual owner.
-
-**Minimal repair.** Correct only this path in `AGENTS.md`. Inspect the documentation diff and remove this
-finding in the same correction; no test or new annotation is needed.
-
-**Alternatives and consequences.** Recreating the old directory or adding an alias preserves unnecessary
-structure. The path correction changes no implementation or annotation contract.
-
-**Confidence.** High from the current tracked file and the absent old path.
-
-**Priority signals.** Importance: low, misleading development instructions. Repair ease: very high, one
-documentation correction.

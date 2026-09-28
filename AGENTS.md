@@ -121,7 +121,7 @@
 - Keep source lines at or below 112 characters; up to 135 is acceptable only
   for a line that barely cannot fit.
 - Mark test-only non-contract methods with
-  `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
+  `core/common-runtime/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
 - When comments or explanations are requested for classes, add class-level
   comments only unless method or constructor comments are explicitly requested.
 - Treat class-level `@AiRule` comments as local implementation rules. Read and
