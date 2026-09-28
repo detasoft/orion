@@ -254,16 +254,6 @@ final class ConfigurationLocationParameters {
         return result;
     }
 
-    static String firstPresent(Map<String, String> values, String... keys) {
-        for (String key : keys) {
-            String value = values.get(key);
-            if (value != null && !value.isBlank()) {
-                return value;
-            }
-        }
-        return null;
-    }
-
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
@@ -412,13 +402,6 @@ final class ConfigurationLocationSecret {
             }
         }
         throw new IllegalArgumentException(name + " must use env: or file: reference");
-    }
-
-    static String optionalSecret(String name, String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-        return requiredSecret(name, value);
     }
 
     static Path fileReference(String name, String value) {
