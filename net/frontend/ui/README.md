@@ -49,12 +49,31 @@ The current Vite toolchain requires Node.js 20.19+, 22.12+, or a newer release.
 ```sh
 cd net/frontend/ui
 npm install
-npm run dev
 ```
 
+From the repository root, start the backend and frontend in separate terminals:
+
+```sh
+# Backend: use the password for the existing key-material store.
+export ORION_KEY_MATERIAL_PASSWORD='your-local-development-password'
+make run-server
+```
+
+```sh
+# Frontend: Vite watches UI sources and updates the browser automatically.
+make run-frontend
+```
+
+For a new installation, use `make init-server` for the first backend start as
+described in the repository README. You can also start the frontend directly with
+`npm run dev` from `net/frontend/ui`.
+
 The development server listens on `http://localhost:4173` and proxies `/api`
-requests to `http://localhost:8000`. Change the proxy target in
-`vite.config.js` when the local Orion HTTP listener uses another port.
+requests to `http://localhost:8000`. Vue and CSS changes use Vite's hot module
+replacement; other changes reload the page when needed. UI changes do not require
+rebuilding or restarting the backend. Change the proxy target in `vite.config.js`
+when the local Orion HTTP listener uses another port. Stop either process with
+Ctrl+C in its terminal.
 
 ## Checks
 
