@@ -1,16 +1,5 @@
 # Module review: core/common
 
-## 3. Неиспользуемый адаптер внутреннего JavaLangAccess
-
-- **Проблема и триггер.** Интерфейс, reflection adapter и молчаливый fallback существуют только внутри фабрики, которую никто не вызывает.
-- **Источники и владельцы.** [Интерфейс](src/main/java/pro/deta/orion/internal/system/OrionJavaLangAccess.java#L3), [adapter](src/main/java/pro/deta/orion/internal/system/JavaLangAccessInterop.java#L9); действующий [addSuppressed](src/main/java/pro/deta/orion/internal/async/StackTraceCapturingCallable.java#L23).
-- **Документированное поведение.** Текущего требования или внешнего контракта не найдено.
-- **Контракт.** Сохранить submission stack и обычные причины исключений.
-- **Минимальное исправление.** Удалить оба типа.
-- **Альтернативы и последствия.** Исчезают reflection, обработка недоступности JDK internals и fallback; новый adapter не нужен.
-- **Уверенность.** Высокая: production/test/configuration consumers не найдены.
-- **Важность / простота.** Низкая/средняя важность; высокая простота.
-
 ## 4. Неиспользуемый shuffle collector в hashing service
 
 - **Проблема и триггер.** SHUFFLER и toShuffledList не используются; живой генератор самостоятельно собирает и перемешивает список.
