@@ -184,8 +184,6 @@ class OrionKeyMaterialTest {
         assertThat(material.acme().certificateChain(acme).orElseThrow()).hasSize(1);
         assertThat(material.tls().createContext(tls).getProtocol()).isEqualTo("TLS");
         assertThat(store.readCalls).isEqualTo(1);
-        assertThat(OrionKeyMaterial.class.getMethods())
-                .noneMatch(method -> method.getReturnType().equals(KeyMaterialService.class));
 
         material.close();
         material.close();

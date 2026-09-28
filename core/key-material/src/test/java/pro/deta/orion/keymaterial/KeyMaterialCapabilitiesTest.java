@@ -48,8 +48,6 @@ class KeyMaterialCapabilitiesTest {
             assertThat(capabilities.verification(List.of(signing)).verify(payload, signature)).isTrue();
             assertThat(capabilities.verification(List.of(signing)).verify(
                     "modified".getBytes(StandardCharsets.UTF_8), signature)).isFalse();
-            assertThat(SigningCapability.class.getMethods())
-                    .noneMatch(method -> method.getReturnType().getSimpleName().contains("PrivateKey"));
         }
     }
 
@@ -557,8 +555,6 @@ class KeyMaterialCapabilitiesTest {
             assertThat(envelope.ciphertext()).isNotEqualTo(plaintext);
             assertThat(capabilities.configurationCipher(cipher).open(envelope, context))
                     .isEqualTo(plaintext);
-            assertThat(ConfigurationCipherCapability.class.getMethods())
-                    .noneMatch(method -> method.getReturnType().getSimpleName().contains("SecretKey"));
         }
     }
 

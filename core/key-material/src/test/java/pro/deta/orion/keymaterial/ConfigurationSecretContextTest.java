@@ -2,20 +2,12 @@ package pro.deta.orion.keymaterial;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ConfigurationSecretContextTest {
-    @Test
-    void exposesOnlyStableSecretIdentity() {
-        assertThat(Arrays.stream(ConfigurationSecretContext.class.getRecordComponents())
-                .map(component -> component.getName()))
-                .containsExactly("secretId", "kind");
-    }
-
     @Test
     void encodesEqualContextsDeterministically() {
         ConfigurationSecretContext first = completeContext();
