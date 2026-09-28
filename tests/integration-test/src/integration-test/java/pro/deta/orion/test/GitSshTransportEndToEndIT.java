@@ -155,6 +155,46 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void directConfigurationPushRetainsValidStateUntilAValidCommitArrives() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-configuration-push");
+        FileUtils.wipeDirectory(orionRoot);
+        seedAclRepository(orionRoot, configurationPushAccessControl(false));
+        startedOrion = startOrion(e2eConfiguration(orionRoot));
+        String activeA = startedOrion.accessControlService()
+                .configurationStatus().activeRevision().orElseThrow();
+
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(
+                tempDir.resolve("configuration-ssh-home"), TRUSTED_USER_KEY);
+             Git source = Git.cloneRepository()
+                     .setURI(startedOrion.sshUrl("orion.git"))
+                     .setDirectory(tempDir.resolve("configuration-source").toFile())
+                     .setBranch(BRANCH)
+                     .setTransportConfigCallback(sshCallback(ssh))
+                     .call()) {
+            ObjectId invalidB = createCommit(source, "orion.xml", "<orion", "invalid configuration");
+            pushConfiguration(source, ssh);
+
+            OrionAccessControlServiceImpl.ConfigurationStatus invalid = startedOrion.accessControlService()
+                    .configurationStatus();
+            assertThat(invalid.storedRevision()).contains(invalidB.name());
+            assertThat(invalid.activeRevision()).contains(activeA);
+            assertThat(invalid.validation()).isEqualTo("invalid");
+            assertThat(startedOrion.accessControlService().userExists(USERNAME)).isTrue();
+
+            ObjectId validC = createCommit(source, "orion.xml",
+                    serializeAccessControl(configurationPushAccessControl(true)), "repaired configuration");
+            pushConfiguration(source, ssh);
+
+            OrionAccessControlServiceImpl.ConfigurationStatus recovered = startedOrion.accessControlService()
+                    .configurationStatus();
+            assertThat(recovered.storedRevision()).contains(validC.name());
+            assertThat(recovered.activeRevision()).contains(validC.name());
+            assertThat(recovered.validation()).isEqualTo("valid");
+            assertThat(startedOrion.accessControlService().userExists("recovered-user")).isTrue();
+        }
+    }
+
+    @Test
     void authorizedUserCanCreateRepositoryPushCommitAndFetchItOverSsh() throws Exception {
         startedOrion = startOrion(tempDir.resolve("orion-root"), TRUSTED_USER_KEY);
 
@@ -1407,6 +1447,33 @@ class GitSshTransportEndToEndIT {
 
     private static void seedAclRepository(Path orionRoot, KeyPair userKey) throws Exception {
         seedAclRepository(orionRoot, accessControlFor(userKey.getPublic()));
+    }
+
+    private static AccessControl configurationPushAccessControl(boolean recovered) {
+        AccessControlDraft draft = accessControlFor(TRUSTED_USER_KEY.getPublic()).toDraft();
+        allowRepository(draft.getUsers().getFirst(), "orion");
+        if (recovered) {
+            draft.getUsers().add(ACLUtil.createUser("recovered-user", "recovered@example.test"));
+        }
+        return draft.toAccessControl();
+    }
+
+    private static String serializeAccessControl(AccessControl accessControl) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        new XmlService().serialize(accessControl, output);
+        return output.toString(StandardCharsets.UTF_8);
+    }
+
+    private void pushConfiguration(Git source, SshdSessionFactory ssh) throws Exception {
+        Iterable<PushResult> results = source.push()
+                .setRemote(startedOrion.sshUrl("orion.git"))
+                .setTransportConfigCallback(sshCallback(ssh))
+                .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                .call();
+        assertThat(results)
+                .flatExtracting(PushResult::getRemoteUpdates)
+                .extracting(RemoteRefUpdate::getStatus)
+                .containsExactly(RemoteRefUpdate.Status.OK);
     }
 
     private static void seedAclRepository(Path orionRoot, AccessControl accessControl) throws Exception {
