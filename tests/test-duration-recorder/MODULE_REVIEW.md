@@ -3,7 +3,7 @@
 ## 1. Настроенный путь без каталога отключает запись результатов
 
 - **Проблема и триггер.** При `-Dorion.testDurations.output=durations.jsonl` у пути нет parent. `Files.createDirectories(null)` бросает `NullPointerException`, которое не перехватывается обработчиком `IOException`; результаты test plan не записываются.
-- **Источники и владельцы.** [Путь](src/main/java/pro/deta/orion/test/duration/TestDurationRecorder.java#L149), [запись](src/main/java/pro/deta/orion/test/duration/TestDurationRecorder.java#L101); реальные настройки [Surefire](../../pom.xml#L283) и [Failsafe](../../pom.xml#L303). [Launcher-тест](src/test/java/pro/deta/orion/test/duration/TestDurationRecorderTest.java#L26) использует только путь внутри `@TempDir`.
+- **Источники и владельцы.** [Путь](src/main/java/pro/deta/orion/test/duration/TestDurationRecorder.java#L149), [запись](src/main/java/pro/deta/orion/test/duration/TestDurationRecorder.java#L101); реальные настройки [Surefire](../../pom.xml#L285) и [Failsafe](../../pom.xml#L305). [Launcher-тест](src/test/java/pro/deta/orion/test/duration/TestDurationRecorderTest.java#L26) использует только путь внутри `@TempDir`.
 - **Документированное поведение.** Property задана в корневом POM; ограничения на абсолютный путь или наличие каталога не найдено.
 - **Контракт.** Настроенный файловый путь должен сохранять результаты; наличие компонента каталога не обязательно.
 - **Минимальное исправление.** Создавать parent только при его наличии либо нормализовать configured path через `toAbsolutePath().normalize()`. Проверить basename через настоящий listener.
@@ -26,7 +26,7 @@
 
 - **Проблема и триггер.** `csvValue` заключает значения в кавычки при comma, quote или LF, но пропускает CR. Реальные параметры `"/item\r"` и `"help\r"` создают display names с неэкранированным CR внутри CSV-записи.
 - **Источники и владельцы.** [Quoting](src/main/java/pro/deta/orion/test/duration/TestAnalyticsReport.java#L1202), [запись displayName](src/main/java/pro/deta/orion/test/duration/TestAnalyticsReport.java#L378), реальный producer [InteractiveTerminalTest](../../core/command/src/test/java/pro/deta/orion/command/terminal/InteractiveTerminalTest.java#L396); [тест генератора](src/test/java/pro/deta/orion/test/duration/TestAnalyticsReportTest.java#L16) не покрывает управляющие символы.
-- **Документированное поведение.** [README](../../README.md#L893) обещает CSV-артефакты; [Makefile](../../Makefile#L172) запускает генерацию отчётов после JFR-тестов.
+- **Документированное поведение.** [README](../../README.md#L902) обещает CSV-артефакты; [Makefile](../../Makefile#L172) запускает генерацию отчётов после JFR-тестов.
 - **Контракт.** Значение display name должно сохраняться внутри одной CSV-записи, включая CR.
 - **Минимальное исправление.** Добавить CR в условие quoting. Проверить round trip готового CSV для CR, LF, comma и quote через CSV reader.
 - **Альтернативы и последствия.** Кавычки вокруг всех полей корректны, но меняют больше выходного текста. Замена CR пробелом теряет данные. Новая зависимость только ради теста необязательна.

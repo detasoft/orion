@@ -5,7 +5,7 @@
 **Problem.** The documented `make clone-http-repo project` sends Git to `/r/project`, producing discovery at
 `/r/project/info/refs`. The current HTTP route requires the explicit `.git/` boundary and returns HTTP 400.
 
-**Sources.** [Helper example and URL](make/server.mk#L107),
+**Sources.** [Helper example and URL](make/server.mk#L114),
 [route validation](net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L102),
 and [behavior test](net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java#L401).
 
@@ -30,8 +30,8 @@ real goals require a server or documented dry-run limitation.
 use `curl -v`, exposing the Authorization request header in stderr. Saved diagnostic output contains a usable
 authentication secret; the SSH check does not use the token it obtains.
 
-**Sources.** [HTTP diagnostic output](make/server.mk#L133),
-[SSH diagnostic output](make/server.mk#L156), and [verbose ACL helpers](make/server.mk#L120).
+**Sources.** [HTTP diagnostic output](make/server.mk#L140),
+[SSH diagnostic output](make/server.mk#L163), and [verbose ACL helpers](make/server.mk#L127).
 `check-git-all` invokes the checks. [README](README.md#L204) recommends the ACL helper.
 
 **Documented behavior and contract.** [Explicit token export](README.md#L212) is the purpose of
