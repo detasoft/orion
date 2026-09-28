@@ -12,6 +12,7 @@ import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -26,9 +27,11 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -106,22 +109,43 @@ class OrionStartupIT {
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        XmlService xmlService = new XmlService();
+        OrionDocument loadedDocument;
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            AccessControl loadedAcl = deserialize(
-                    orion.accessControlService().accessControlConfigurationFile().content());
+            ConfigurationFile configurationFile = orion.accessControlService().accessControlConfigurationFile();
+            loadedDocument = xmlService.deserializeDocument(new ByteArrayInputStream(configurationFile.content()));
 
-            assertThat(hasUser(loadedAcl, "remote-user")).isTrue();
+            assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
+            assertThat(loadedDocument.system().proxies()).hasSize(1);
             assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
 
+            OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
+                    accessControlWithUsers("root", "saved-remote-user"));
+            ByteArrayOutputStream updatedContent = new ByteArrayOutputStream();
+            xmlService.serializeDocument(updatedDocument, updatedContent);
             orion.accessControlService().saveAccessControlConfigurationFile(
-                    serialize(accessControlWithUsers("root", "saved-remote-user")),
-                    orion.accessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
+                    updatedContent.toByteArray(), configurationFile.revision().orElseThrow(), "");
+
+            assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
+            assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
         }
 
-        AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));
-        assertThat(hasUser(savedAcl, "remote-user")).isFalse();
-        assertThat(hasUser(savedAcl, "saved-remote-user")).isTrue();
+        OrionDocument savedDocument = xmlService.deserializeDocument(
+                new ByteArrayInputStream(readFileFromRepository(remoteAclRepository, ACL_FILE)));
+        assertThat(hasUser(savedDocument.system().accessControl(), "remote-user")).isFalse();
+        assertThat(hasUser(savedDocument.system().accessControl(), "saved-remote-user")).isTrue();
+        assertThat(savedDocument.system().proxies()).isEqualTo(loadedDocument.system().proxies());
+
+        try (StartedOrion orion = startServerWithConfig(configuration)) {
+            OrionDocument restartedDocument = xmlService.deserializeDocument(new ByteArrayInputStream(
+                    orion.accessControlService().accessControlConfigurationFile().content()));
+
+            assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
+            assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
+            assertThat(restartedDocument.system().proxies()).isEqualTo(loadedDocument.system().proxies());
+            assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
+        }
     }
 
     @Test
