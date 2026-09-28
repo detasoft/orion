@@ -1,16 +1,5 @@
 # Module review: core/common
 
-## 6. Неиспользуемые PEM/JKS readers сохраняют лишний импорт ключей
-
-- **Проблема и триггер.** readKeyWithCertsFromPEM и readKeyWithCertsFromJKS имеют только определения, без runtime/test consumers.
-- **Источники и владельцы.** [PEM](src/main/java/pro/deta/orion/util/CertUtils.java#L80), [JKS](src/main/java/pro/deta/orion/util/CertUtils.java#L112); сохраняемые методы реально использует [AgentControlLivePeerTest](../../agentd/src/test/java/pro/deta/orion/agentd/core/AgentControlLivePeerTest.java#L376).
-- **Документированное поведение.** Контракт этих readers не найден. Планирование импорта ключей не требует именно их.
-- **Контракт.** Сохранить генерацию сертификата, PrivateKeyWithCerts, преобразование в keystore и действующее владение материалом.
-- **Минимальное исправление.** Удалить два readers и только их imports.
-- **Альтернативы и последствия.** Исчезает файловая/парсерная ветка без потребителей. Удалять весь CertUtils или cryptographic dependencies нельзя.
-- **Уверенность.** Высокая; потребители сохраняемой части проверены.
-- **Важность / простота.** Низкая/средняя важность; высокая простота.
-
 ## 7. Экспериментальный OpenSSH parser живёт ради print-only теста
 
 - **Проблема и триггер.** OpenSSHKey использует ByteArrayMap; иных consumers у пары нет. Единственный тест декодирует fixture и печатает объект без содержательного assertion.
