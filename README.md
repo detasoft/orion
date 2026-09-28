@@ -840,6 +840,15 @@ the allowed set, and a `BRANCH=*` grant permits all branches.
 
 ## Development
 
+Use `make test` for routine verification and `make run-test` for focused tests.
+Maven calls through Make require Python 3 and acquire an OS lock on
+`.mvn/build.lock` for the current checkout. Concurrent calls wait until the active
+Maven process exits; separate checkouts build independently. The lock file stays
+on disk and must not be deleted while a build is running. Process termination
+releases the lock automatically. Maven-based server and agent goals hold it until
+they stop. Direct `mvn` calls bypass the lock; to include a custom invocation, use
+`python3 make/run-maven.py mvn <arguments>` from the repository root.
+
 Run routine local tests with the `dev` Maven profile:
 
 ```sh

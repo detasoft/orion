@@ -24,6 +24,8 @@ class RustMavenPluginInstallTest(unittest.TestCase):
             pom.write_text("released sources", encoding="utf-8")
             (checkout / "make").mkdir()
             (checkout / "make/server.mk").touch()
+            (checkout / "make/run-maven.py").symlink_to(makefile.parent / "make/run-maven.py")
+            (checkout / ".gitignore").write_text("/.mvn/build.lock\n", encoding="utf-8")
 
             def git(*arguments):
                 return subprocess.run(

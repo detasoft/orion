@@ -62,14 +62,14 @@ init-server: ## Initialize key material and run the Orion server for the first t
 	$(MAKE) run-server ORION_ARGS="--create-if-missing $(ORION_ARGS)"
 
 run-server: require-key-material-password ## Run the Orion server
-	$(MAVEN) -pl core/bootstrap -am -Prun-server \
+	$(MAVEN_RUN) -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
 run-frontend: ## Run the frontend Vite development server with automatic UI updates
 	cd net/frontend/ui && $(NPM) run dev
 
 run-agent: ## Run AgentD on this machine; set AGENT_ARGS for its command-line options
-	$(MAVEN) -pl agentd -am -Pdev,run-agent \
+	$(MAVEN_RUN) -pl agentd -am -Pdev,run-agent \
 		-Dagentd.run.arguments="$(AGENT_ARGS)" process-classes
 
 # Scenario:

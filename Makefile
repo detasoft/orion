@@ -1,4 +1,5 @@
 MAVEN ?= mvn
+MAVEN_RUN = python3 "$(CURDIR)/make/run-maven.py" $(MAVEN)
 UV ?= uv
 INTEGRATION_TEST_ARGS ?=
 TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
@@ -69,18 +70,18 @@ docker-exec: ## Run CMD in orion-external-services; e.g. make docker-exec CMD='p
 	docker exec orion-external-services $(CMD)
 
 dist: ## Package the bootstrap distribution
-	$(MAVEN) package -Pdist -pl core/bootstrap -am
+	$(MAVEN_RUN) package -Pdist -pl core/bootstrap -am
 
 test: ## Run the Maven/JVM test suite with the dev profile
-	$(MAVEN) package -Pdev -T 4 -q
+	$(MAVEN_RUN) package -Pdev -T 4 -q
 
 integration-test: ## Start external services and run integration tests; show the browser URL first
 	@printf '%s\n' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
 	FRESH_FIXTURE=1 ./tests/external-services/fixture up
-	$(MAVEN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
+	$(MAVEN_RUN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
 
 xml-schema: ## Generate and compile the XML schema model
-	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
+	$(MAVEN_RUN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
 
 skill-check: ## Validate one skill; set SKILL=.agents/skills/<skill>
 	@if [ -z "$(SKILL)" ]; then \
@@ -110,7 +111,7 @@ rust-maven-plugin-install: ## Install Rust Maven Plugin 0.1.0 locally from its t
 		git archive --format=tar --output="$$temporary/source.tar" rust-maven-plugin-0.1.0 \
 			build-tools/rust-maven-plugin; \
 		tar -xf "$$temporary/source.tar" -C "$$temporary"; \
-		$(MAVEN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
+		$(MAVEN_RUN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
 
 rust-install: cargo-init ## Install the pinned Rust toolchain
 	@$(HOME)/.cargo/bin/rustup run 1.97.0 rustc --version >/dev/null 2>&1 \
@@ -126,7 +127,7 @@ COMMAND ?= $(SHELL)
 
 ## Build AgentD and launch a local session; set COMMAND to override the shell
 run-agentd-session: session-host
-	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
+	$(MAVEN_RUN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
 		-Dagentd.local.command='$(COMMAND)'
 
 SESSION_HOST_LINUX_HOST ?= root@gw.ntechs.ru
@@ -166,28 +167,28 @@ run-test: ## Run focused Maven tests; set MODULE and TEST, optionally LOG for Ma
 		printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
 		exit 2; \
 	fi
-	$(MAVEN) package -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
+	$(MAVEN_RUN) package -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
 		-Dtest='$(RUN_TEST_LOCATOR)' \
 		-Dsurefire.failIfNoSpecifiedTests=false $(if $(strip $(value LOG)),-l '$(value LOG)')
 
 test-jfr: ## Run Maven tests with JFR analytics
 	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
 	@status=0; \
-	$(MAVEN) package -Pdev,test-jfr -T 4 -fae \
+	$(MAVEN_RUN) package -Pdev,test-jfr -T 4 -fae \
 		-Dorion.test.analytics.runId="$(TEST_ANALYTICS_RUN_ID)" \
 		-Dorion.test.analytics.dir="$(TEST_ANALYTICS_ROOT)" \
 		-Dorion.test.jfr.directory="$(TEST_ANALYTICS_DIR)/jfr" \
 		$(TEST_JFR_MAVEN_ARGS) || status=$$?; \
-	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile || exit $$?; \
-	$(MAVEN) -q -pl tests/test-duration-recorder \
+	$(MAVEN_RUN) -q -pl tests/test-duration-recorder -am -DskipTests compile || exit $$?; \
+	$(MAVEN_RUN) -q -pl tests/test-duration-recorder \
 		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
 		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
 		-Dexec.args="$(TEST_ANALYTICS_DIR) $(TEST_ANALYTICS_TOP)" || exit $$?; \
 	exit $$status
 
 test-jfr-report: ## Generate a report from existing JFR analytics
-	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile
-	$(MAVEN) -q -pl tests/test-duration-recorder \
+	$(MAVEN_RUN) -q -pl tests/test-duration-recorder -am -DskipTests compile
+	$(MAVEN_RUN) -q -pl tests/test-duration-recorder \
 		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
 		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
