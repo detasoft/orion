@@ -1,20 +1,9 @@
 # Module review: core/common
 
-## 1. Неиспользуемая ThreadLocal диагностика возвращает пустой результат
-
-- **Проблема и триггер.** dumpThreadContextParams отражает JDK internals, но заполнение результата закомментировано; вызовов нет.
-- **Источники и владельцы.** [Метод/helper](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L63); [executor test](src/test/java/pro/deta/orion/util/OrionExecutorTest.java#L14) проверяет независимый действующий submission stack.
-- **Документированное поведение.** Требования к этой диагностике не найдено.
-- **Контракт.** Сохранить executor, lifecycle и submission stack; пустая диагностика не обслуживает потребителя.
-- **Минимальное исправление.** Удалить метод, appendThreadContextMap и лишние imports.
-- **Альтернативы и последствия.** Исчезают неиспользуемый API и зависимость от JDK internals. Реализовывать диагностику без потребителя не требуется.
-- **Уверенность.** Высокая: вызовы, wiring и конфигурационные ссылки не найдены; runtime-проверки не выполнялись.
-- **Важность / простота.** Низкая важность; высокая простота: локальное удаление.
-
 ## 2. Executor сохраняет неработающую модель отдельных потоков
 
 - **Проблема и триггер.** dedicatedThreads никогда не пополняется; stop loop пуст. newDedicatedThread не вызывается и не регистрирует поток.
-- **Источники и владельцы.** [Поле](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L18), [stop](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L45), [factory](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L103), действующий [lifecycle](src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java#L85).
+- **Источники и владельцы.** [Поле](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L17), [stop](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L44), [factory](src/main/java/pro/deta/orion/internal/OrionExecutor.java#L62), действующий [lifecycle](src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java#L85).
 - **Документированное поведение.** Текущего требования отдельного владения потоками не найдено.
 - **Контракт.** Сохранить shutdown ScheduledThreadPoolExecutor и его действующую фабрику рабочих потоков.
 - **Минимальное исправление.** Удалить список, пустой цикл и неиспользуемую factory.
