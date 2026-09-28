@@ -1,28 +1,5 @@
 # Module Review: `orion`
 
-## 7. Zstandard version has duplicate declarations
-
-**Problem.** The root POM declares `zstd-jni.version=1.5.7-11` twice. Editing the first declaration can leave
-the later declaration supplying the old effective value.
-
-**Sources.** [First declaration](pom.xml#L42), [second declaration](pom.xml#L48),
-[dependency management](pom.xml#L109), [AgentD dependency](agentd/pom.xml#L41), and
-[session server dependency](agent-session-server/pom.xml#L56).
-[Journal reader tests](agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java)
-exercise the actual Zstandard consumer.
-
-**Documented behavior and contract.** No independent versions are documented. Both consumers use one managed
-library version; the duplicate declaration establishes no separate behavior.
-
-**Minimal repair.** Delete the second identical property. Verify with `make test`; do not add a POM-text test.
-
-**Alternatives and consequences.** Renaming the property creates unnecessary independent version ownership.
-Deletion preserves the effective value, dependencies, and runtime behavior.
-
-**Confidence.** High; both declarations and consumers are present.
-
-**Priority signals.** Importance: low. Repair ease: very high, one behavior-preserving deletion.
-
 ## 8. Root inheritance exports JUnit as a production dependency
 
 **Problem.** Root `junit-jupiter-api` and `junit-jupiter-params` dependencies have default compile scope.
