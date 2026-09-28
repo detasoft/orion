@@ -64,7 +64,11 @@ case "${1:-}" in
             "$engine" rm "$name" >/dev/null
         fi
         if "$engine" container inspect "$name" >/dev/null 2>&1; then
-            "$engine" start "$name" >/dev/null
+            if [ "${FRESH_FIXTURE:-0}" = 1 ]; then
+                "$engine" restart "$name" >/dev/null
+            else
+                "$engine" start "$name" >/dev/null
+            fi
         else
             "$engine" run -d --name "$name" --env-file "$state/credentials.env" \
                 --add-host orion.test:127.0.0.1 \

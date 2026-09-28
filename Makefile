@@ -1,5 +1,6 @@
 MAVEN ?= mvn
 UV ?= uv
+INTEGRATION_TEST_ARGS ?=
 TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 TEST_ANALYTICS_ROOT ?= $(CURDIR)/target/test-analytics
 TEST_ANALYTICS_DIR ?= $(TEST_ANALYTICS_ROOT)/$(TEST_ANALYTICS_RUN_ID)
@@ -10,7 +11,7 @@ TEST_JFR_MAVEN_ARGS ?=
 RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>' [LOG=<log-file>]
 RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=<log-file>]
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
-RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
+RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-report xml-schema \
 	help skill-check skills-check docker-exec \
 	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
@@ -37,7 +38,7 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: help dist test run-test test-jfr test-jfr-report xml-schema skill-check skills-check docker-exec \
+.PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema skill-check skills-check docker-exec \
 	cargo-init rust-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 
@@ -72,6 +73,11 @@ dist: ## Package the bootstrap distribution
 
 test: ## Run the Maven/JVM test suite with the dev profile
 	$(MAVEN) package -Pdev -T 4 -q
+
+integration-test: ## Start external services and run integration tests; show the browser URL first
+	@printf '%s\n' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
+	FRESH_FIXTURE=1 ./tests/external-services/fixture up
+	$(MAVEN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
 
 xml-schema: ## Generate and compile the XML schema model
 	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests

@@ -97,15 +97,22 @@ directory is available; it does not request a certificate for Orion. The
 automated Playwright scenario below configures and starts its own Orion.
 
 The Playwright scenario is bound to Maven's `integration-test` phase in the
-`external-services` profile. After starting the fixture, run:
+`external-services` profile. From the repository root, run:
 
 ```sh
-mvn verify -Pdev,external-services -T 4 -pl tests/integration-test -am
+make integration-test
 ```
 
-To run only the ACME scenario, add `-Dit.test=PlaywrightAcmeIT`
-`-Dtest=PlaywrightAcmeIT` `-Dsurefire.failIfNoSpecifiedTests=false`
-`-Dfailsafe.failIfNoSpecifiedTests=false`.
+This prints the noVNC browser URL immediately, starts or restarts the fixture for
+a fresh browser session, and runs the integration tests. Its `.state` data and host
+keys persist. The fixture remains running afterward; stop it with
+`tests/external-services/fixture down`.
+
+To run only the ACME scenario:
+
+```sh
+make integration-test INTEGRATION_TEST_ARGS='-Dit.test=PlaywrightAcmeIT -Dtest=PlaywrightAcmeIT -Dsurefire.failIfNoSpecifiedTests=false -Dfailsafe.failIfNoSpecifiedTests=false'
+```
 
 The Java integration test starts Orion once, enrolls a test root key without
 SSH, issues a test token, and runs Playwright in the container's visible Chromium.
