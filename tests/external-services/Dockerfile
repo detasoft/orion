@@ -12,6 +12,7 @@ RUN chmod +x /usr/local/bin/step-ca /usr/local/bin/weed
 COPY entrypoint.sh /usr/local/bin/external-entrypoint
 COPY check.sh /usr/local/bin/external-check
 COPY browser.sh /usr/local/bin/external-browser
+COPY chromium-policy.json /etc/chromium/policies/managed/orion.json
 COPY nginx.conf /etc/nginx/http.d/default.conf
 COPY supervisord.conf /etc/supervisord.conf
 RUN chmod +x /usr/local/bin/external-entrypoint /usr/local/bin/external-check \
