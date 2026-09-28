@@ -132,26 +132,6 @@ Lifecycle coordination must preserve active slices and cannot race unsafely with
 **Priority signals.** Importance: high for repeated standalone use and deterministic shutdown. Repair ease:
 medium/low, lifecycle crosses application and adapter. No default-runtime exposure was established.
 
-## 7. Typed DTLS metadata has no consumer
-
-**Problem.** `TypedMap` and its sole `DtlsCommonKeys` constant are referenced only within that unused model.
-
-**Sources.** [Map](src/main/java/pro/deta/orion/comm/common/TypedMap.java) and
-[key](src/main/java/pro/deta/orion/comm/common/DtlsCommonKeys.java). No real repository, reflective,
-serialization or service-loader consumer was found.
-
-**Documented behavior and contract.** No requirement for typed endpoint metadata was found. Real packet,
-endpoint and handshake contracts do not use it.
-
-**Minimal repair.** Delete these two types without adding replacement storage.
-
-**Alternatives and consequences.** Retaining hypothetical metadata preserves unnecessary API. Deletion
-changes unused public Java types, with no established external compatibility requirement or wire effect.
-
-**Confidence.** High for repository use; undocumented external consumers are unknown.
-
-**Priority signals.** Importance: low, unused concept. Repair ease: very high, two files.
-
 ## 8. A test indication callback is never invoked
 
 **Problem.** `onNeedUnwrap` is assigned only by the test bridge and is never invoked, so its promised
