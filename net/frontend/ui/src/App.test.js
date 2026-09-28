@@ -34,10 +34,11 @@ function mountApp() {
 }
 
 async function connect(wrapper) {
+  await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+  await wrapper.get('input[placeholder="Your Orion username"]').setValue('alice')
+  await wrapper.get('form.modal').trigger('submit')
   await wrapper.find('.server-card').trigger('click')
-  const fields = wrapper.findAll('.modal input')
-  await fields[0].setValue('token')
-  await fields[1].setValue('alice')
+  await wrapper.get('input[placeholder="Bearer token"]').setValue('token')
   await wrapper.get('form.modal').trigger('submit')
   await flushPromises()
 }
@@ -93,6 +94,83 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('opens a token-only connection form from either connection entry point', async () => {
+    const wrapper = mountApp()
+    for (const entry of [wrapper.get('.connection-empty .primary-button'), wrapper.get('.server-card')]) {
+      await entry.trigger('click')
+      expect(wrapper.get('[role="dialog"] h2').text()).toBe('Connect to Orion')
+      expect(wrapper.findAll('.modal input')).toHaveLength(1)
+      expect(wrapper.get('input[placeholder="Bearer token"]').attributes('type')).toBe('password')
+      expect(wrapper.get('[role="dialog"]').text()).not.toContain('SSH username')
+      await wrapper.get('.close-button').trigger('click')
+    }
+    wrapper.unmount()
+  })
+
+  it('saves SSH clone settings without connecting to the server', async () => {
+    const wrapper = mountApp()
+    await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+    expect(wrapper.get('[role="dialog"] h2').text()).toBe('Git clone settings')
+    expect(wrapper.findAll('.modal input')).toHaveLength(1)
+    expect(wrapper.find('input[placeholder="Bearer token"]').exists()).toBe(false)
+    await wrapper.get('input[placeholder="Your Orion username"]').setValue('  alice  ')
+    await wrapper.get('form.modal').trigger('submit')
+    await flushPromises()
+    expect(localStorage.getItem('orion.ui.ssh-username')).toBe('alice')
+    expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+    expect(client.me).not.toHaveBeenCalled()
+    expect(wrapper.get('.server-card').text()).toContain('Not connected')
+    wrapper.unmount()
+  })
+
+  it('updates SSH clone URLs without resetting the verified connection', async () => {
+    localStorage.setItem('orion.ui.ssh-username', 'alice')
+    sessionStorage.setItem('orion.ui.token', 'token')
+    client.repositories.mockResolvedValue({ repositories: [{ name: 'team/project' }] })
+    const wrapper = mountApp()
+    await flushPromises()
+    await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
+    expect(wrapper.text()).toContain('ssh://alice@localhost:8022/team/project.git')
+    const disposals = client.dispose.mock.calls.length
+    for (const username of ['bob', '']) {
+      await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+      await wrapper.get('input[placeholder="Your Orion username"]').setValue(username)
+      await wrapper.get('form.modal').trigger('submit')
+      await flushPromises()
+      expect(wrapper.text()).toContain('team/project')
+      expect(wrapper.text()).not.toContain('ssh://alice@')
+      if (username) expect(wrapper.text()).toContain('ssh://bob@localhost:8022/team/project.git')
+      else expect(wrapper.text()).not.toContain('ssh://')
+      expect(wrapper.get('.server-card').text()).toContain('Connected')
+      expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+    }
+    expect(client.me).toHaveBeenCalledOnce()
+    expect(client.repositories).toHaveBeenCalledOnce()
+    expect(client.dispose).toHaveBeenCalledTimes(disposals)
+    wrapper.unmount()
+  })
+
+  it('preserves credentials renewed while SSH settings are open', async () => {
+    sessionStorage.setItem('orion.ui.token', 'old-token')
+    sessionStorage.setItem('orion.ui.oidc', JSON.stringify({ expiresAt: 1, organization: 'acme', userId: 'alice' }))
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    const wrapper = mountApp()
+    await flushPromises()
+    const options = createOrionClient.mock.calls.at(-1)[0]
+    await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+    await wrapper.get('input[placeholder="Your Orion username"]').setValue('alice')
+    options.onToken({ token: 'renewed', expiresAt: 200, organization: 'acme', userId: 'alice' })
+    await wrapper.get('form.modal').trigger('submit')
+    await flushPromises()
+    expect(sessionStorage.getItem('orion.ui.token')).toBe('renewed')
+    expect(JSON.parse(sessionStorage.getItem('orion.ui.oidc'))).toEqual({
+      expiresAt: 200, organization: 'acme', userId: 'alice',
+    })
+    expect(client.me).toHaveBeenCalledOnce()
+    expect(wrapper.get('.server-card').text()).toContain('Connected')
+    wrapper.unmount()
+  })
+
   it('shows the key material viewer only to a connected administrator', async () => {
     const wrapper = mountApp()
     expect(wrapper.text()).not.toContain('Key material')
@@ -486,21 +564,37 @@ describe('Orion connection', () => {
     expect(wrapper.findAll('.clone-url')).toHaveLength(0)
   })
 
-  it('discards an unsaved settings draft when the dialog closes', async () => {
+  it('discards an unsaved token draft when the connection dialog closes', async () => {
     const wrapper = mountApp()
     await connect(wrapper)
 
     await wrapper.find('.server-card').trigger('click')
-    const fields = wrapper.findAll('.modal input')
-    await fields[0].setValue('unsaved-token')
-    await fields[1].setValue('unsaved-user')
+    await wrapper.get('input[placeholder="Bearer token"]').setValue('unsaved-token')
     await wrapper.get('.close-button').trigger('click')
     await wrapper.find('.server-card').trigger('click')
 
-    const reopenedFields = wrapper.findAll('.modal input')
-    expect(reopenedFields[0].element.value).toBe('token')
-    expect(reopenedFields[1].element.value).toBe('alice')
+    expect(wrapper.get('input[placeholder="Bearer token"]').element.value).toBe('token')
     expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+    expect(localStorage.getItem('orion.ui.ssh-username')).toBe('alice')
+    wrapper.unmount()
+  })
+
+  it('discards an unsaved SSH username when clone settings close', async () => {
+    const wrapper = mountApp()
+    await connect(wrapper)
+    for (const dismiss of ['close', 'escape', 'backdrop']) {
+      await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+      await wrapper.get('input[placeholder="Your Orion username"]').setValue('unsaved-user')
+      if (dismiss === 'close') await wrapper.get('.close-button').trigger('click')
+      else if (dismiss === 'escape') await wrapper.get('form.modal').trigger('keydown', { key: 'Escape' })
+      else await wrapper.get('.modal-layer').trigger('mousedown')
+      expect(wrapper.find('form.modal').exists()).toBe(false)
+      expect(localStorage.getItem('orion.ui.ssh-username')).toBe('alice')
+    }
+    await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+    expect(wrapper.get('input[placeholder="Your Orion username"]').element.value).toBe('alice')
+    expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+    wrapper.unmount()
   })
 
   it('keeps active server data when testing an invalid unsaved draft', async () => {

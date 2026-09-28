@@ -34,7 +34,7 @@ const search = ref('')
 const darkMode = ref(false)
 const sidebarOpen = ref(false)
 const createOpen = ref(false)
-const settingsOpen = ref(false)
+const settingsDialog = ref(null)
 const submitting = ref(false)
 const connectionState = ref('disconnected')
 const serverSnapshot = ref({ lifecycle: '', routes: [], transports: {} })
@@ -105,10 +105,10 @@ function showToast(message, kind = 'success') {
   }, 3400)
 }
 
-function openSettings() {
+function openSettings(dialog) {
   settingsDraft.value = { ...settings.value }
   draftConnectionState.value = 'disconnected'
-  settingsOpen.value = true
+  settingsDialog.value = dialog
   sidebarOpen.value = false
 }
 
@@ -116,7 +116,7 @@ function closeSettings() {
   draftConnectionAttempt += 1
   settingsDraft.value = { ...settings.value }
   draftConnectionState.value = 'disconnected'
-  settingsOpen.value = false
+  settingsDialog.value = null
 }
 
 function clearConnectedState(nextState = 'disconnected') {
@@ -327,25 +327,32 @@ async function testConnection() {
   }
 }
 
-async function saveSettings() {
+async function saveConnection() {
   connectionAttempt += 1
   draftConnectionAttempt += 1
   settings.value = {
     ...(settingsDraft.value.token.trim() === settings.value.token && settings.value.oidc
       ? { oidc: settings.value.oidc } : {}),
-    sshUsername: settingsDraft.value.sshUsername.trim(),
+    sshUsername: settings.value.sshUsername,
     token: settingsDraft.value.token.trim(),
   }
   saveConnectionSettings(settings.value)
   api.dispose()
   api = savedClient()
-  settingsOpen.value = false
+  settingsDialog.value = null
   clearConnectedState()
   if (settings.value.token) {
     await connectSavedSettings()
     return
   }
   showToast('Connection settings saved')
+}
+
+function saveCloneSettings() {
+  settings.value = { ...settings.value, sshUsername: settingsDraft.value.sshUsername.trim() }
+  saveConnectionSettings(settings.value)
+  closeSettings()
+  showToast('Git clone settings saved')
 }
 
 async function connectSavedSettings() {
@@ -459,11 +466,11 @@ onUnmounted(() => {
       <div class="sidebar-bottom">
         <button v-if="!isConnected" class="nav-item" @click="signIn = {}">Sign in with OIDC</button>
         <button v-else class="nav-item" @click="signOut">Sign out</button>
-        <button class="nav-item" @click="openSettings">
+        <button class="nav-item" @click="openSettings('cloning')">
           <AppIcon name="settings" :size="19" />
           <span>Settings</span>
         </button>
-        <button type="button" class="server-card" @click="openSettings">
+        <button type="button" class="server-card" @click="openSettings('connection')">
           <span class="server-icon"><AppIcon name="server" :size="17" /></span>
           <span>
             <strong>{{ serverName }}</strong>
@@ -556,7 +563,7 @@ onUnmounted(() => {
               <span class="modal-icon"><AppIcon name="server" :size="23" /></span>
               <h2>Connect to an Orion server</h2>
               <p>Server data is shown only after the Admin API connection has been verified.</p>
-              <button class="primary-button" @click="openSettings">
+              <button class="primary-button" @click="openSettings('connection')">
                 <AppIcon name="server" :size="17" />Connect to Orion
               </button>
             </section>
@@ -623,7 +630,7 @@ onUnmounted(() => {
           />
           <div v-else class="empty-state panel">
             <h3>Connect to Orion first</h3>
-            <p>Open Settings to inspect remote aliases.</p>
+            <p>Click the server card to connect and inspect remote aliases.</p>
           </div>
         </template>
 
@@ -640,7 +647,7 @@ onUnmounted(() => {
           />
           <div v-else class="empty-state panel">
             <h3>Connect to Orion first</h3>
-            <p>Open Settings to review pending decisions.</p>
+            <p>Click the server card to connect and review pending decisions.</p>
           </div>
         </template>
 
@@ -660,7 +667,7 @@ onUnmounted(() => {
           />
           <div v-else class="empty-state panel">
             <h3>Connect to Orion first</h3>
-            <p>Open Settings to connect, then enter a Session ID.</p>
+            <p>Click the server card to connect, then enter a Session ID.</p>
           </div>
         </template>
 
@@ -724,14 +731,14 @@ onUnmounted(() => {
       </form>
     </div>
 
-    <div v-if="settingsOpen" class="modal-layer" @mousedown.self="closeSettings">
+    <div v-if="settingsDialog" class="modal-layer" @mousedown.self="closeSettings">
       <form
         class="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
         @keydown.esc="closeSettings"
-        @submit.prevent="saveSettings"
+        @submit.prevent="settingsDialog === 'connection' ? saveConnection() : saveCloneSettings()"
       >
         <button
           type="button"
@@ -741,30 +748,41 @@ onUnmounted(() => {
         >
           <AppIcon name="close" />
         </button>
-        <span class="modal-icon"><AppIcon name="server" :size="23" /></span>
-        <h2 id="settings-title">Connect to Orion</h2>
-        <p>Use the current Orion server and an Admin API token to view verified server data.</p>
-        <label>
-          Admin token
-          <input v-model="settingsDraft.token" autofocus type="password" placeholder="Bearer token" />
-        </label>
-        <label>
-          SSH username<input v-model="settingsDraft.sshUsername" placeholder="Your Orion username" />
-        </label>
-        <div class="connection-result" :class="draftConnectionState">
-          <i /><span>{{ draftServerLabel }}</span>
-        </div>
-        <div class="modal-actions split">
-          <button
-            type="button"
-            class="secondary-button"
-            :disabled="draftConnectionState === 'checking'"
-            @click="testConnection"
-          >
-            Test connection
-          </button>
-          <button class="primary-button" :disabled="draftConnectionState === 'checking'">Save settings</button>
-        </div>
+        <template v-if="settingsDialog === 'connection'">
+          <span class="modal-icon"><AppIcon name="server" :size="23" /></span>
+          <h2 id="settings-title">Connect to Orion</h2>
+          <p>Use the current Orion server and an Admin API token to view verified server data.</p>
+          <label>
+            Admin token
+            <input v-model="settingsDraft.token" autofocus type="password" placeholder="Bearer token" />
+          </label>
+          <div class="connection-result" :class="draftConnectionState">
+            <i /><span>{{ draftServerLabel }}</span>
+          </div>
+          <div class="modal-actions split">
+            <button
+              type="button"
+              class="secondary-button"
+              :disabled="draftConnectionState === 'checking'"
+              @click="testConnection"
+            >
+              Test connection
+            </button>
+            <button class="primary-button" :disabled="draftConnectionState === 'checking'">Save connection</button>
+          </div>
+        </template>
+        <template v-else>
+          <span class="modal-icon"><AppIcon name="git-branch" :size="23" /></span>
+          <h2 id="settings-title">Git clone settings</h2>
+          <p>SSH username is used only in SSH clone URLs. Leave it empty to hide SSH clone links.</p>
+          <label>
+            SSH username<input v-model="settingsDraft.sshUsername" autofocus placeholder="Your Orion username" />
+          </label>
+          <div class="modal-actions">
+            <button type="button" class="secondary-button" @click="closeSettings">Cancel</button>
+            <button class="primary-button">Save settings</button>
+          </div>
+        </template>
       </form>
     </div>
 

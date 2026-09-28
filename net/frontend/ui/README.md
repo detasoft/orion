@@ -1,9 +1,11 @@
 # Orion Admin UI
 
 A small Vue 3 administration console served by Orion. The UI uses same-origin
-Admin API routes and never asks for a separate server URL. Open **Settings** to
-provide an Admin API bearer token and, optionally, an SSH username. Tokens are
-kept in session storage; usernames are kept in local storage.
+Admin API routes and never asks for a separate server URL. Use **Connect to Orion**
+or the sidebar server card to provide an Admin API bearer token. Open **Settings**
+to configure the optional SSH username used in clone URLs; saving it preserves
+the active connection. Tokens are kept in session storage; usernames are kept in
+local storage.
 
 The current Admin API exposes lifecycle and route information plus repository
 creation. It does not expose repository, member, notification, or activity
