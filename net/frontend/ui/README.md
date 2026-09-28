@@ -75,6 +75,27 @@ rebuilding or restarting the backend. Change the proxy target in `vite.config.js
 when the local Orion HTTP listener uses another port. Stop either process with
 Ctrl+C in its terminal.
 
+## Agent UI review
+
+Use the repository skill in a normal Codex task to review and repair the UI:
+
+```text
+$orion-ui-review Review the frontend at localhost:4173, fix reproducible layout
+and interaction bugs, and show before/after screenshots.
+```
+
+You can name particular screens to limit the pass. The skill checks desktop,
+mobile, and short viewports, reproduces bugs in a browser, and verifies fixes
+through the same scenarios and required repository checks. A review-only request
+keeps the UI read-only; asking to fix bugs authorizes repairs within that scope.
+Repository workflow approvals and commit rules still apply.
+
+For the existing external-services browser, observe actions at
+`http://localhost:6080/vnc.html?autoconnect=1` while its fixture is running.
+The agent shares the active browser scenario and screenshot links. Missing
+backend credentials limit authenticated coverage; disconnected layout checks can
+continue. Saved review artifacts belong under ignored `target/ui-review/`.
+
 ## Checks
 
 ```sh

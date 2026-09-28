@@ -1,0 +1,5 @@
+interface:
+  display_name: "Orion UI Review"
+  short_description: "Review UI in the browser and fix confirmed bugs"
+  default_prompt: "Use $orion-ui-review to review the frontend in a browser, fix reproducible UI bugs,
+    and show before/after screenshots and verification results."
