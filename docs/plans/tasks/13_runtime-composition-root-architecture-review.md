@@ -2,7 +2,8 @@
 
 Status: todo
 Depends on:
-[hierarchical configuration acceptance](02_hierarchical-orion-configuration/03_administration-and-acceptance.md),
+completed configuration administration and acceptance
+(53d04946, 73adf3ca, c0470996, 64ce657a, c2b9faa0, b1dec409, 18aca60a),
 completed key-material rotation and recovery (9a87d139, 406c4354),
 [the Git server transport review](11_git/04_server-transport-architecture-review.md)
 
