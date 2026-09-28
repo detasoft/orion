@@ -1,70 +1,59 @@
 # Module Review: `bom`
 
-Date: 2026-09-02  
-Status: reviewed in isolation
+## 1. The internal artifact catalog omits five produced JARs
 
-## Scope and coverage
+**Problem.** The BOM omits `agentd`, `antlr-parser`, `resolvers`, `git-sync`, and
+`git-engine-orion-adapters`. Dependencies on the first, second and fifth already compensate through separate
+version declarations. A dependency without a version cannot obtain its version from this central catalog.
 
-This review covers only [`pom.xml`](pom.xml) and the module-specific change history. It deliberately does not
-evaluate consumers, dependency direction, or consistency with other project modules.
+**Sources.** [Catalog](pom.xml), producers [AgentD](../agentd/pom.xml),
+[parser](../core/parent-reference/antlr-parser/pom.xml),
+[resolvers](../core/parent-reference/resolvers/pom.xml), [sync](../git/git-sync/pom.xml), and
+[adapters](../tests/git-engine-orion-adapters/pom.xml).
+Separate declarations exist in [session server](../agent-session-server/pom.xml),
+[provisioning](../agent-provisioning/pom.xml), [HTTP](../net/http-core/pom.xml),
+[matrix](../tests/git-engine-interoperability-matrix/pom.xml), and
+[reference parent](../core/parent-reference/pom.xml).
+Actual consumers include `SessionJournalRelayLivePeerTest`, `RemoteAgentdProvisionerTest`,
+`AgentSessionAcceptanceIT`, `GitMatrixDefinition` and the production `ResourceReferenceParser`.
 
-The review uses these clarified requirements:
+**Documented behavior and contract.** The previously accepted report states that the BOM is internal,
+contains every produced project artifact, and includes shared test artifacts. No independent definition was
+found. These five JAR omissions violate that accepted catalog contract regardless of the treatment of POMs.
+No current build failure is established: local declarations compensate, and two JARs have no dependent module.
 
-- the BOM is used only inside the project build;
-- every produced project artifact belongs in the BOM;
-- test artifacts belong in the BOM when multiple modules use them.
+**Minimal repair.** Add five entries using the existing project version. Remove the four compensated versions
+for AgentD/adapters and the redundant local parser/reference management block. Preserve scopes and versions.
+Verify real Maven resolution and the reactor; do not add POM-text assertions.
 
-No source code, runtime flow, mutable state, persistence, concurrency, or lifecycle exists in this module.
+**Alternatives and consequences.** Keeping separate catalogs requires changing the accepted central-ownership
+contract. A separate test BOM or generated catalog adds unnecessary mechanisms.
 
-## Current conceptual model
+**Confidence.** High from all reactor and catalog coordinates; the effective graph and publication were not run.
 
-The module is an internal Maven BOM with two responsibilities:
+**Priority signals.** Importance: medium, central ownership is incomplete. Repair ease: high, a few POM edits
+through an existing mechanism, without production or persisted changes.
 
-1. Assign the current project version to produced Orion artifacts.
-2. Keep explicitly selected Netty artifacts on one version.
+## 2. The Git aggregator is catalogued as a nonexistent JAR
 
-All Orion entries use `${project.version}`. The Netty entries use the shared `${netty.version}` property.
+**Problem.** The BOM entry for `pro.deta.orion.git:git` uses the default JAR type; its producer packages a POM.
+The catalog therefore manages a coordinate the reactor does not produce.
 
-## Highest-value findings
+**Sources.** [Managed entry](pom.xml#L204) and [producer](../git/pom.xml).
+The five child Git modules use it as a parent, which dependency management does not govern. No dependency
+consumer of the JAR key was found; no current build or runtime failure is claimed.
 
-No confirmed architectural inconsistencies were found within the stated module boundary.
+**Documented behavior and contract.** The accepted catalog requirement says every produced artifact belongs
+in the BOM but does not resolve whether aggregator POMs are intended dependency entries. Parent inheritance
+does not require this JAR entry.
 
-### Considered: production and test artifacts share one BOM
+**Minimal repair.** Remove the unused JAR key. If the catalog must also contain this POM as a dependency,
+replace the entry with its actual POM type. Resolve that intention before implementation.
 
-This is consistent with the module's requirements. The BOM is internal, every produced artifact is expected to
-be listed, and shared test artifacts require centralized version management. Splitting them into a second BOM
-would add a boundary without a demonstrated requirement.
+**Alternatives and consequences.** Both options preserve current dependency consumers. Adding all parent
+POMs without a verified dependency contract broadens the result unnecessarily.
 
-### Considered: selected Netty artifacts are managed explicitly
+**Confidence.** High in the type mismatch; the intended POM catalog policy remains uncertain.
 
-Importing the upstream Netty BOM could replace the individual entries, but it would also manage artifacts not
-currently named by this module. Without evidence from consumers, the broader version contract is not clearly
-simpler than the current targeted list. This is therefore not a finding.
-
-## Things to try deleting
-
-None within the isolated scope.
-
-## Proposed conceptual model
-
-Keep the current model: one internal catalog of all produced Orion artifacts plus narrowly selected external
-version constraints required by the build.
-
-## Incremental migration path
-
-No migration is justified by the isolated review.
-
-## Do not change
-
-- Keep a single version source for Orion artifacts through `${project.version}`.
-- Keep shared test artifacts in this BOM when they are consumed by multiple modules.
-- Keep `packaging` set to `pom`.
-- Do not introduce a separate test BOM without an independent versioning or consumption requirement.
-
-## Deferred questions
-
-The following checks require a later cross-module review and are intentionally deferred:
-
-- whether every produced artifact is present exactly once;
-- whether every listed test artifact is shared by multiple modules;
-- whether the selected Netty constraints cover all Netty artifacts used by the build.
+**Priority signals.** Importance: low, stale unused configuration. Repair ease: very high after the catalog
+decision, with real Maven verification.

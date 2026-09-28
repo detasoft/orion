@@ -1,79 +1,23 @@
-# Module Review: `connectors/acl-storage`
+# Module review: connectors/acl-storage
 
-## 2. Local save can partially publish a multi-document change
+## 2. Local save частично публикует несколько документов
 
-**Problem.** If several ACL documents actually change, a failure replacing a later document can leave earlier
-replacements persisted while the service returns `PERSISTENCE_FAILED` without activating the new snapshot.
-Each changed document is replaced atomically, but the sequence of replacements is not a transaction.
+- **Проблема и триггер.** При изменении двух и более ACL files первый rename проходит, следующий Files.move бросает IOException. Snapshot уже смешанный; save throws, последующая activation/reload не выполняется.
+- **Источники и владельцы.** [Sequential moves/cleanup](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L121), реальный multidocument [resetRootPassword](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L951), [save-before-reload](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1775), [prepare-all test](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L271), [multifile success](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L369).
+- **Документированное поведение.** [Snapshot plan](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md#L14) оставляет atomic generation либо narrower contract решением.
+- **Контракт.** Сохранить snapshot CAS, общий reader/writer lock, per-file atomic replacement, permissions и untouched identical files. Несколько moves не обеспечивают общую transaction/crash durability.
+- **Минимальное исправление.** Согласовать all-or-nothing либо explicit partial publication/reconciliation; затем regression failure после первого rename. Prepare всех temp files не решает поздний отказ.
+- **Альтернативы и последствия.** Immutable generations меняют operator layout; rollback может сам отказать и не атомарен; запрет Local/multifile writers убирает поддерживаемую возможность.
+- **Уверенность.** Высокая по текущему пути; fault/crash repro не выполнялся. Не вся credential operation меняет несколько документов; typed PERSISTENCE_FAILED не приписывается безусловно startup recovery.
+- **Важность / простота.** Важность высокая: root recovery может оставить partial durable state. Простота низкая: требуется contract/layout решение.
 
-**Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
-checks the snapshot version under a file lock, omits byte-identical files, prepares all changed documents in
-temporary files, then replaces active files sequentially. Preparation failures leave active documents unchanged;
-failure during the replacement phase can still partially publish the snapshot.
-[`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java)
-saves before reloading. `resetRootPassword` in the same service can change more than one document.
-[`LocalAccessControlStorageTest`](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java)
-covers complete per-file replacement, access attributes, failure preparing a later document, temporary-file
-cleanup, and successful retry, not multi-file rollback.
+## 3. Проверки Local paths оставляют directory-swap TOCTOU
 
-**Documented behavior.** The queued
-[`saved snapshot contract`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md)
-requires an explicit Local publication guarantee but leaves multi-file atomicity as a decision.
-
-**Contract.** Local readers and writers hold the same file lock across the complete operation; the version check
-rejects stale saves. Per-file atomic replacement preserves complete documents. These mechanisms prevent a
-participating reader from observing an in-progress save, but do not make multi-document publication atomic or
-constrain an external editor that ignores the lock. Multi-document failure semantics and power-loss durability
-need explicit guarantees.
-
-**Minimal repair.** Decide whether genuinely multi-document mutations require all-or-nothing publication or
-an explicit partial-publication result with reconciliation of the live snapshot. Cover failure after the first
-replacement, live state, and restart under the chosen contract.
-
-**Alternatives and consequences.** Preparing every temporary file before publishing cannot prevent a later
-rename failure. Immutable generations can make multi-document
-publication atomic but change the operator-visible layout. Restricting writes to native Git removes supported
-Local capability. Best-effort rollback can itself fail and must not be described as atomic.
-
-**Confidence.** High for sequential publication and the service outcome. Multi-document publication fault
-injection and crash recovery have not been executed.
-
-**Priority signals.** Importance: high for multi-document credential operations because durable and live ACLs can
-diverge. Repair ease: low because the publication contract and operator-visible layout require a decision.
-
-## 3. Local path checks remain vulnerable to concurrent directory replacement
-
-**Problem.** An actor able to modify descendants of the configured ACL root can replace a checked directory
-with a symlink before a later filesystem operation. The operation still uses an ordinary path and may follow
-that intermediate link outside the root. Static links, including dangling links and the lock file, are rejected;
-this does not anchor subsequent I/O to the checked directories.
-
-**Sources.** [`LocalAccessControlStorage.resolvePath`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java)
-checks every descendant component before load, save, and opening the lock file. Document and lock opens use
-`NOFOLLOW_LINKS`, which protects the final component, not intermediate directories. Temporary-file creation,
-attribute handling, and publication also use paths.
-[`BootstrapContext.validateDirectConfiguration`](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java)
-uses the same check and opens the final document without following links.
-
-**Documented behavior.** The queued
-[`physical containment`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md)
-requires containment through use. The accepted limited repair rejects static descendant links and leaves the
-concurrent replacement problem open.
-
-**Contract.** The configured root is trusted and may itself be a link. Descendant links are rejected even when
-their target stays inside the root. File locks coordinate participating readers and writers, but do not stop an
-external actor from renaming directories or replacing the lock file.
-
-**Minimal repair.** Anchor traversal, reads, lock acquisition, temporary-file creation, and replacement to open
-directory handles. Preserve nested-directory creation and per-file atomic publication. Resolve platform support
-before selecting a native implementation or changing supported Local filesystem behavior.
-
-**Alternatives and consequences.** Repeated path checks only narrow the race. Requiring trusted, non-mutable
-ancestor directories changes the deployment contract. Java's `SecureDirectoryStream` is provider-dependent;
-the installed macOS Corretto 21 provider returned an ordinary `UnixDirectoryStream` during inspection.
-
-**Confidence.** High for the check/use gap from code inspection. Static file, directory, dangling, and lock-link
-cases are covered by behavior tests. An adversarial concurrent directory-replacement test has not been executed.
-
-**Priority signals.** Importance: high where another actor can mutate descendants while Orion accesses ACLs.
-Repair ease: low because platform-specific operations and directory-creation semantics need an explicit design.
+- **Проблема и триггер.** Actor с правом rename descendant directory меняет проверенный каталог на symlink до read/open/temp/move. Final NOFOLLOW не защищает intermediate components; операция может выйти за ACL root.
+- **Источники и владельцы.** [resolvePath](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L248), [read](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L264), [prepare](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L146), [publication](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L129), реальный [bootstrap consumer](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java#L318), [static symlink tests](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L321).
+- **Документированное поведение.** [Containment plan](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md#L14) требует through-use anchoring, safe creation и outside-root nonaccess.
+- **Контракт.** Root trusted и может быть symlink; descendant links отвергаются даже внутри root. Cooperative lock не исключает external directory rename.
+- **Минимальное исправление.** Выбрать поддерживаемый directory-handle mechanism для traversal/read/lock/temp/publication, сохранив nested creation и per-file atomic replacement; согласовать платформы и проверить adversarial race.
+- **Альтернативы и последствия.** Rechecks сужают окно, но не закрывают гонку. Immutable ancestors меняют deployment contract. SecureDirectoryStream зависит от provider.
+- **Уверенность.** Высокая в gap; adversarial race/providers при аудите не запускались. Наличие конкретного macOS/Corretto provider не утверждается.
+- **Важность / простота.** Важность высокая при доступных actor mutable descendants. Простота низкая: platform и creation semantics.
