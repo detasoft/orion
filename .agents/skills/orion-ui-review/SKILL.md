@@ -49,6 +49,28 @@ when requested. Setting up this process does not itself start UI repairs.
   Share the observer URL and current scenario. Save screenshots and useful traces
   under a session-specific `target/ui-review/` directory.
 
+For browser scenarios observed through noVNC, make actions easy to follow:
+
+- Bring the dedicated review page to the foreground and confirm it is visible
+  through the observer URL before starting the scenario.
+- Pause for about one second between navigation, clicks, and field edits. Keep
+  normal locator assertions and readiness checks; these pauses are presentation
+  timing, not a substitute for waiting for the UI to become ready.
+- Before each action, show a short action label on the dedicated review page.
+  Mark the actual click position with a visible ring or dot for about one second.
+  Use a temporary overlay with `pointer-events: none`, installed by the browser
+  scenario (for example with `context.addInitScript` and a `pointerdown` listener).
+  Install it only in an owned page or a new dedicated context. Do not add
+  instrumentation to production UI or modify another session's page. When a click
+  navigates, briefly highlight its target beforehand and restore the action label
+  on the destination page.
+- Describe controls, never entered tokens, passwords, or other secret values.
+  Keep markers visible in monitoring captures; clear both labels and click markers
+  before taking clean before/after layout screenshots. Use synthetic credentials
+  for recorded scenarios or exclude secret-bearing traces and logs.
+- Apply this pacing to observed review/reproduction scenarios. Ordinary unattended
+  regression tests retain their normal timing.
+
 Without backend credentials, continue reachable disconnected and layout scenarios;
 report authentication-dependent coverage as unavailable. Use explicit test data or
 mocked responses only where needed, label them, and keep real backend integration
