@@ -11,6 +11,9 @@ import org.eclipse.jgit.transport.TransportHttp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.auth.TokenAuthenticationResult;
+import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -18,9 +21,24 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.GrantAddress;
+import pro.deta.orion.schema.orion.GrantId;
+import pro.deta.orion.schema.orion.OidcProvider;
+import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
+import pro.deta.orion.schema.orion.RoleId;
+import pro.deta.orion.schema.orion.ScopedGrant;
+import pro.deta.orion.schema.orion.ScopedRole;
+import pro.deta.orion.schema.orion.TeamId;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +58,146 @@ class RuntimeHttpGitRouteIT {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void sameNameOrganizationUsersHaveIsolatedGitAccessAndObserveRoleRevocation() throws Exception {
+        Path orionRoot = tempDir.resolve("organization-http-git");
+        Path repositoryRoot = orionRoot.resolve("repos");
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
+             Git acmeSource = initRepository(tempDir.resolve("acme-source"));
+             Git otherSource = initRepository(tempDir.resolve("other-source"))) {
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"), 600);
+            RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
+                    "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
+            OrionDocument base = new XmlService().deserializeDocument(new ByteArrayInputStream(
+                    initial.body().getBytes(StandardCharsets.UTF_8)));
+            OrionDocument document = new OrionDocument(base.system(), List.of(
+                    gitOrganization("acme"), gitOrganization("other")));
+            ConfigurationSecrets secrets = new ConfigurationSecrets(() -> base,
+                    orion.identity().material().configurationCipher());
+            for (String organization : List.of("acme", "other")) {
+                document = secrets.replace(document, ConfigurationScope.organization(new OrganizationId(organization)),
+                        "oidc", "test-client-secret".toCharArray());
+            }
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"),
+                    TestBearerTokens.bearer(rootToken), "application/xml", serializeDocument(document),
+                    initial.etag()).status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            String acmeToken = organizationToken(orion, "acme");
+            String otherToken = organizationToken(orion, "other");
+            TransportConfigCallback acmeAuthorization = bearerAuthorization(acmeToken);
+            TransportConfigCallback otherAuthorization = bearerAuthorization(otherToken);
+            String acmeUrl = orion.httpUrl("/r/acme/team/repo.git").toString();
+            String otherUrl = orion.httpUrl("/r/other/team/repo.git").toString();
+            ObjectId acmeCommit = createCommit(acmeSource, "README.md", "acme content\n", "acme seed");
+            ObjectId otherCommit = createCommit(otherSource, "README.md", "other content\n", "other seed");
+            assertSuccessfulPush(acmeSource, acmeUrl, acmeAuthorization);
+            assertSuccessfulPush(otherSource, otherUrl, otherAuthorization);
+            assertRepositoryContains(repositoryRoot, "acme/team/repo", acmeCommit, "README.md", "acme content\n");
+            assertRepositoryContains(repositoryRoot, "other/team/repo", otherCommit, "README.md", "other content\n");
+            for (String organization : List.of("acme", "other")) {
+                String ownUrl = organization.equals("acme") ? acmeUrl : otherUrl;
+                String foreignUrl = organization.equals("acme") ? otherUrl : acmeUrl;
+                TransportConfigCallback authorization = organization.equals("acme")
+                        ? acmeAuthorization : otherAuthorization;
+                Git source = organization.equals("acme") ? acmeSource : otherSource;
+                Path cloneDirectory = tempDir.resolve(organization + "-clone");
+                try (Git clone = Git.cloneRepository().setURI(ownUrl).setDirectory(cloneDirectory.toFile())
+                        .setBranch(BRANCH).setTransportConfigCallback(authorization).call()) {
+                    assertThat(clone.getRepository().resolve("HEAD"))
+                            .isEqualTo(organization.equals("acme") ? acmeCommit : otherCommit);
+                    assertThat(Files.readString(cloneDirectory.resolve("README.md")))
+                            .isEqualTo(organization + " content\n");
+                }
+                assertThatThrownBy(() -> Git.cloneRepository().setURI(foreignUrl)
+                        .setDirectory(tempDir.resolve(organization + "-foreign-clone").toFile())
+                        .setBranch(BRANCH).setTransportConfigCallback(authorization).call())
+                        .isInstanceOf(TransportException.class);
+                assertThatThrownBy(() -> source.push().setRemote(foreignUrl)
+                        .setTransportConfigCallback(authorization)
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH)).call())
+                        .isInstanceOf(TransportException.class);
+            }
+            assertRepositoryRef(repositoryRoot, "acme/team/repo", BRANCH, acmeCommit);
+            assertRepositoryRef(repositoryRoot, "other/team/repo", BRANCH, otherCommit);
+
+            OrionDocument.Organization acme = document.organizations().getFirst();
+            AccessControl.User assigned = acme.users().getFirst();
+            AccessControl.User revoked = new AccessControl.User(assigned.getId(), assigned.getFirst(),
+                    assigned.getLast(), assigned.getEmail(), assigned.getCredentials(), List.of(),
+                    assigned.getGrants());
+            OrionDocument updated = new OrionDocument(document.system(), List.of(new OrionDocument.Organization(
+                    acme.id(), acme.displayName(), List.of(revoked), acme.grants(), acme.roles(), acme.teams(),
+                    acme.secrets(), acme.oidcProviders(), acme.invitations()), document.organizations().get(1)));
+            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"),
+                    TestBearerTokens.bearer(rootToken), "application/xml", serializeDocument(updated),
+                    RuntimeHttpTestSupport.aclEtag(orion, rootToken)).status())
+                    .isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertThat(orion.accessControlService().verifyToken(acmeToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
+            assertThatThrownBy(() -> acmeSource.fetch().setRemote(acmeUrl)
+                    .setTransportConfigCallback(acmeAuthorization)
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/remotes/origin/" + BRANCH)).call())
+                    .isInstanceOf(TransportException.class);
+            createCommit(acmeSource, "README.md", "revoked change\n", "revoked push");
+            assertThatThrownBy(() -> acmeSource.push().setRemote(acmeUrl)
+                    .setTransportConfigCallback(acmeAuthorization)
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH)).call())
+                    .isInstanceOf(TransportException.class);
+            assertRepositoryContains(repositoryRoot, "acme/team/repo", acmeCommit, "README.md", "acme content\n");
+            otherSource.fetch().setRemote(otherUrl).setTransportConfigCallback(otherAuthorization)
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/remotes/origin/" + BRANCH)).call();
+            assertThat(otherSource.getRepository().resolve("refs/remotes/origin/" + BRANCH)).isEqualTo(otherCommit);
+            ObjectId otherUpdated = createCommit(otherSource, "README.md", "other updated\n", "other update");
+            assertSuccessfulPush(otherSource, otherUrl, otherAuthorization);
+            assertRepositoryContains(repositoryRoot, "other/team/repo", otherUpdated, "README.md", "other updated\n");
+        }
+    }
+
+    private static OrionDocument.Organization gitOrganization(String id) {
+        String issuer = "https://login.example.test";
+        AccessControl.User user = new AccessControl.User("alice", null, null, null,
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+                List.of(id + "/developer"), List.of());
+        ScopedGrant grant = new ScopedGrant(new GrantId("write"), ScopedGrant.Effect.ALLOW, List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.CREATE, "true")));
+        ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(),
+                List.of(GrantAddress.parse(id + "/write")));
+        OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
+                "refs/heads/" + BRANCH,
+                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of());
+        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
+                List.of(repository));
+        OidcProvider provider = new OidcProvider("oidc", URI.create(issuer), "client", "oidc",
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+        return new OrionDocument.Organization(new OrganizationId(id), "", List.of(user), List.of(grant),
+                List.of(role), List.of(team), List.of(new ConfigurationSecret("oidc", "placeholder")),
+                List.of(provider), List.of());
+    }
+
+    private static String organizationToken(RuntimeHttpTestSupport.StartedOrion orion, String organization) {
+        TokenIssueResult issued = orion.accessControlService().issueOrganizationToken(
+                new OrganizationId(organization), "alice", "https://login.example.test", "alice", 600);
+        assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
+        return ((TokenIssueResult.Success) issued).token();
+    }
+
+    private static byte[] serializeDocument(OrionDocument document) throws Exception {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            new XmlService().serializeDocument(document, output);
+            return output.toByteArray();
+        }
+    }
+
+    private static void assertSuccessfulPush(Git source, String remote, TransportConfigCallback authorization)
+            throws Exception {
+        assertThat(source.push().setRemote(remote).setTransportConfigCallback(authorization)
+                .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH)).call())
+                .flatExtracting(PushResult::getRemoteUpdates).extracting(RemoteRefUpdate::getStatus)
+                .containsExactly(RemoteRefUpdate.Status.OK);
+    }
 
     @Test
     void jgitClientCanPushCloneAndFetchThroughHttpGitRoute() throws Exception {
