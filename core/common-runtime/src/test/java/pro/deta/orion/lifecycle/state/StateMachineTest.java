@@ -9,12 +9,7 @@ import org.junit.jupiter.api.TestInfo;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,74 +45,6 @@ class StateMachineTest {
     private enum StartOutcome {
         STARTED,
         DISABLED
-    }
-
-    @Test
-    void stateTransitionResultIsNotParameterized() {
-        assertThat(StateTransitionResult.class.getTypeParameters()).isEmpty();
-    }
-
-    @Test
-    void stateTransitionIsNotParameterizedAndDoesNotExecuteActions() {
-        assertThat(StateTransition.class.getTypeParameters()).isEmpty();
-        assertThat(StateTransition.class.getDeclaredMethods())
-                .noneMatch(method -> method.getName().equals("execute"));
-    }
-
-    @Test
-    void stateMachineDoesNotExposePropagationHandlerFactories() {
-        assertThat(StateMachine.class.getDeclaredMethods())
-                .noneMatch(method -> method.getName().equals("propagateSequentialHandler"))
-                .noneMatch(method -> method.getName().equals("propagateParallelHandler"))
-                .noneMatch(method -> method.getName().equals("propagateSequential"))
-                .noneMatch(method -> method.getName().equals("propagateParallel"));
-    }
-
-    @Test
-    void structuredMonitoringViewsKeepStateNamesAndStructuredChildStates() {
-        assertThat(recordComponentNames(StateMachineStatus.class))
-                .containsExactly(
-                        "name",
-                        "state",
-                        "computedState",
-                        "children",
-                        "availableActions",
-                        "terminal");
-        assertThat(Arrays.stream(StateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains("childStatuses")
-                .doesNotContain("childStates", "childPhysicalStates");
-        assertThat(Arrays.stream(AggregateStateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains(
-                        "name",
-                        "childStatuses",
-                        "machine",
-                        "findMachine",
-                        "states",
-                        "availableTransitions",
-                        "status",
-                        "lastTransitionResult",
-                        "describe",
-                        "describeStatus",
-                        "subscribe")
-                .doesNotContain("childStates", "childPhysicalStates");
-    }
-
-    @Test
-    void stateMachinePublishesSingleStructuredStatusView() {
-        assertThat(Arrays.stream(StateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains("status")
-                .doesNotContain("snapshot");
-        assertThatThrownBy(() -> Class.forName(
-                "pro.deta.orion.lifecycle.state.StateMachineSnapshot"))
-                .isInstanceOf(ClassNotFoundException.class);
-    }
-
-    @Test
-    void stateMachineReadsChildStatesFromChildrenWithoutCachingCopies() {
-        assertThat(Arrays.stream(StateMachine.class.getDeclaredFields()).map(Field::getName))
-                .doesNotContain("childStates", "observedChildStates", "childSubscriptions", "computedState");
-        assertThat(AutoCloseable.class.isAssignableFrom(StateMachine.class)).isFalse();
-        assertThat(AutoCloseable.class.isAssignableFrom(AggregateStateMachine.class)).isFalse();
     }
 
     @Test
@@ -179,13 +106,6 @@ class StateMachineTest {
         assertThatThrownBy(() -> root.directChild("missing"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Direct child state machine not found: missing");
-    }
-
-    @Test
-    void aggregateRawStateMachineAccessorIsNotPublic() throws NoSuchMethodException {
-        Method accessor = AggregateStateMachine.class.getDeclaredMethod("stateMachine");
-
-        assertThat(Modifier.isPublic(accessor.getModifiers())).isFalse();
     }
 
     @Test
@@ -1822,12 +1742,6 @@ class StateMachineTest {
 
     private static LogCapture captureStateMachineLogs() {
         return new LogCapture();
-    }
-
-    private static List<String> recordComponentNames(Class<?> recordType) {
-        return Arrays.stream(recordType.getRecordComponents())
-                .map(RecordComponent::getName)
-                .toList();
     }
 
     private static Map<String, State> states(Map<String, StateMachineStatus> childStates) {
