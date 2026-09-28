@@ -11,11 +11,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
-import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -26,13 +24,6 @@ import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 
 
 public class OrionPasswordHashingService {
-    private static final Collector<?, ?, ?> SHUFFLER = collectingAndThen(
-            Collectors.toCollection(ArrayList::new),
-            list -> {
-                shuffle(list);
-                return list;
-            }
-    );
     private static final int HASH_LENGTH = 32;
     private static final char[] HEX = "0123456789abcdef".toCharArray();
 
@@ -125,11 +116,6 @@ public class OrionPasswordHashingService {
     public Stream<Character> getRandomSpecialChars(int count) {
         IntStream specialChars = random.ints(count, 33, 45);
         return specialChars.mapToObj(data -> (char) data);
-    }
-
-    @SuppressWarnings("unchecked")
-    public static <T> Collector<T, ?, List<T>> toShuffledList() {
-        return (Collector<T, ?, List<T>>) SHUFFLER;
     }
 
     private OrionGenerator getHashBuilder(byte[] salt) {

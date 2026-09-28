@@ -1,20 +1,9 @@
 # Module review: core/common
 
-## 4. Неиспользуемый shuffle collector в hashing service
-
-- **Проблема и триггер.** SHUFFLER и toShuffledList не используются; живой генератор самостоятельно собирает и перемешивает список.
-- **Источники и владельцы.** [SHUFFLER](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L29), [генератор](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L84), [accessor](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L130).
-- **Документированное поведение.** Требования к отдельному collector не найдено.
-- **Контракт.** Сохранить генерацию паролей и persisted hashing format.
-- **Минимальное исправление.** Удалить поле, accessor, suppression и только лишние imports.
-- **Альтернативы и последствия.** Runtime/wire/storage не меняются. Подключать collector к живому пути вместо удаления не требуется.
-- **Уверенность.** Высокая, включая поиск static imports.
-- **Важность / простота.** Низкая важность; высокая простота.
-
 ## 5. Неиспользуемое преобразование List<Character> в bytes
 
 - **Проблема и триггер.** toByteArray(List<Character>) нигде не вызывается и не участвует в генерации или проверке паролей.
-- **Источники и владельцы.** [Метод](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L92), [живое преобразование в chars](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L101), [hashing test](src/test/java/pro/deta/orion/crypto/OrionPasswordHashingServiceTest.java#L14).
+- **Источники и владельцы.** [Метод](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L83), [живое преобразование в chars](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L92), [hashing test](src/test/java/pro/deta/orion/crypto/OrionPasswordHashingServiceTest.java#L14).
 - **Документированное поведение.** Требования к преобразованию не найдено.
 - **Контракт.** Сохранить используемую UTF-8 обработку и hash format.
 - **Минимальное исправление.** Удалить только неиспользуемый метод.
@@ -36,7 +25,7 @@
 ## 7. Экспериментальный OpenSSH parser живёт ради print-only теста
 
 - **Проблема и триггер.** OpenSSHKey использует ByteArrayMap; иных consumers у пары нет. Единственный тест декодирует fixture и печатает объект без содержательного assertion.
-- **Источники и владельцы.** [Parser](src/main/java/pro/deta/orion/util/OpenSSHKey.java#L11), [map](src/main/java/pro/deta/orion/util/ByteArrayMap.java#L10), [тест](src/test/java/pro/deta/orion/util/rle/RLETCoderTest.java#L34). Живой RLE формат: [encode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L64), [decode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L152).
+- **Источники и владельцы.** [Parser](src/main/java/pro/deta/orion/util/OpenSSHKey.java#L11), [map](src/main/java/pro/deta/orion/util/ByteArrayMap.java#L10), [тест](src/test/java/pro/deta/orion/util/rle/RLETCoderTest.java#L34). Живой RLE формат: [encode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L55), [decode](src/main/java/pro/deta/orion/crypto/OrionPasswordHashingService.java#L138).
 - **Документированное поведение.** Текущая обязанность parser не найдена; действующие SSH paths используют SSH/crypto библиотеки.
 - **Контракт.** Сохранить RLETCoder и persisted salt/hash format, ByteBufferUtil и действующие SSH providers.
 - **Минимальное исправление.** Удалить пару типов и только testReadingContainer с его fixture/import; сохранить другие RLE tests.
