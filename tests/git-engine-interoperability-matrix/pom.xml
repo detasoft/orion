@@ -26,6 +26,11 @@
             <artifactId>git-engine-orion-adapters</artifactId>
             <version>${revision}</version>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>test-duration-recorder</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
