@@ -8,6 +8,7 @@ import pro.deta.orion.component.OrionComponent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
@@ -374,6 +375,40 @@ class BootstrapContextTest {
             configurationUpstream.git().close();
             materialUpstream.git().close();
         }
+    }
+
+    @Test
+    void rejectsUnsupportedRepositoryStorageOnFirstStart() {
+        OrionConfiguration configuration = configuration();
+        String location = "s3://bucket/repositories";
+        configuration.getStorage().setLocation(location);
+
+        assertThatThrownBy(() -> {
+            try (BootstrapContext ignored = BootstrapContext.open(configuration, ENVIRONMENT, true)) {
+                // Close material if an invalid configuration unexpectedly starts.
+            }
+        }).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Unsupported repository storage location: " + location);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" "})
+    void rejectsMissingRepositoryStorageEnvironmentOnFirstStart(String directory) {
+        OrionConfiguration configuration = configuration();
+        String variable = "ORION_TEST_REPOSITORY_DIR";
+        configuration.getStorage().setLocation("env:" + variable);
+        Map<String, String> environment = new LinkedHashMap<>(ENVIRONMENT);
+        if (directory != null) {
+            environment.put(variable, directory);
+        }
+
+        assertThatThrownBy(() -> {
+            try (BootstrapContext ignored = BootstrapContext.open(configuration, environment, true)) {
+                // Close material if an invalid configuration unexpectedly starts.
+            }
+        }).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Environment variable " + variable + " is not set");
     }
 
     @Test

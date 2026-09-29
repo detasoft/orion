@@ -9,7 +9,6 @@ import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
@@ -89,12 +88,8 @@ public final class BootstrapContext implements AutoCloseable {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(environment, "environment");
         ConfigurationContext configurationContext = new ConfigurationContext(configuration, environment);
-        NativeGitRepositoryProvider backend;
-        try {
-            backend = new FileNativeGitRepositoryProvider(configurationContext.getFileGitStoragePath());
-        } catch (IllegalArgumentException ignored) {
-            backend = new InMemoryNativeGitRepositoryProvider();
-        }
+        NativeGitRepositoryProvider backend =
+                new FileNativeGitRepositoryProvider(configurationContext.getFileGitStoragePath());
         return open(configuration, environment, backend, createIfMissing);
     }
 
