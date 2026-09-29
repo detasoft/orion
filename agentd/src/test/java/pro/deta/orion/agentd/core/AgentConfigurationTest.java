@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,8 +91,8 @@ class AgentConfigurationTest {
     }
 
     @Test
-    void installsBundledSessionHostWhenTheOverrideIsAbsent() throws Exception {
-        Path state = temporaryDirectory.resolve("state");
+    void installsBundledSessionHostInPrivateStateThatCanBeLocked() throws Exception {
+        Path state = temporaryDirectory.resolve("parent/state");
 
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
@@ -105,6 +106,18 @@ class AgentConfigurationTest {
         assertThat(configuration.sessionHostExecutable())
                 .isEqualTo(state.resolve("runtime/session-host").toAbsolutePath());
         assertThat(configuration.sessionHostExecutable()).isExecutable();
+        try (AgentProcessLock lock = new AgentProcessLock(configuration.processLockFile(),
+                new AgentProcessMetadata(101, 1_000, configuration.launchId(), configuration.generation(),
+                        "/opt/orion/agentd"))) {
+            lock.start();
+            assertThat(configuration.processLockFile()).isRegularFile();
+        }
+        if (Files.getFileStore(state).supportsFileAttributeView("posix")) {
+            for (Path directory : new Path[]{state.getParent(), state, state.resolve("runtime")}) {
+                assertThat(Files.getPosixFilePermissions(directory))
+                        .isEqualTo(PosixFilePermissions.fromString("rwx------"));
+            }
+        }
     }
 
     @Test

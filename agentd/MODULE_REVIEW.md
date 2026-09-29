@@ -1,41 +1,5 @@
 # Module Review: `agentd`
 
-## 3. Bundled installation creates state that daemon startup rejects
-
-**Problem.** Direct `AgentdMain` startup with an absent `--state-dir`, no `--session-host` override, and a
-POSIX umask such as `022` installs the bundled host before acquiring the process lock. Default directory
-permissions expose state to other user classes; the lock then rejects that directory and startup fails.
-`LocalAgentMain` already creates private state, so `make run-agent` is protected.
-
-**Sources.** [Parsing and install](src/main/java/pro/deta/orion/agentd/core/AgentConfiguration.java#L80),
-[default directory creation](src/main/java/pro/deta/orion/agentd/runtime/BundledSessionHost.java#L91),
-[state rejection](src/main/java/pro/deta/orion/agentd/core/AgentProcessLock.java#L45),
-[daemon caller](src/main/java/pro/deta/orion/agentd/AgentdMain.java#L65), and
-[assembly](src/main/java/pro/deta/orion/agentd/core/Agent.java#L61).
-[ConfigurationTest](src/test/java/pro/deta/orion/agentd/core/AgentConfigurationTest.java#L93) checks absent-state
-installation but not subsequent locking; [ProcessLockTest](src/test/java/pro/deta/orion/agentd/core/AgentProcessLockTest.java#L90)
-separately checks shared-directory rejection. [Local launcher](src/main/java/pro/deta/orion/agentd/LocalAgentMain.java#L53)
-prepares private state.
-
-**Documented behavior.** [README](README.md#L17) promises owner-only state and
-[documents bundled installation](README.md#L159).
-
-**Contract.** Fresh ordinary daemon startup must create usable private state; unsafe existing state remains
-rejected, and the executable override remains supported.
-
-**Minimal repair.** Create missing state/runtime directories with owner-only POSIX attributes through the
-existing directory policy. Cover bundled installation followed by lock acquisition, and existing shared-state
-rejection.
-
-**Alternatives and consequences.** Moving installation after lifecycle locking broadens ownership changes.
-Weakening lock rejection breaks privacy. Requiring manual private-directory creation narrows automatic startup.
-No wire or persisted-contract change is required.
-
-**Confidence.** High from the composed production path under permissive POSIX umask; no runtime reproduction run.
-
-**Priority signals.** Importance: high for fresh direct daemon startup. Repair ease: high to medium, local to
-existing directory handling.
-
 ## 5. Server lanes preserve receipts while terminal effects can reorder
 
 **Problem.** A native handler sends the first input admission receipt, then pauses before acquiring the effect

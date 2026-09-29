@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
+import pro.deta.orion.agentd.runtime.BundledSessionHost;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,6 +92,10 @@ class AgentProcessLockTest {
         Path state = Files.createDirectories(temporaryDirectory.resolve("shared-state"));
         assumeTrue(Files.getFileAttributeView(state, PosixFileAttributeView.class) != null);
         Files.setPosixFilePermissions(state, PosixFilePermissions.fromString("rwxr-x---"));
+
+        BundledSessionHost.install(state);
+        assertThat(Files.getPosixFilePermissions(state))
+                .isEqualTo(PosixFilePermissions.fromString("rwxr-x---"));
 
         assertThatIOException().isThrownBy(() ->
                         new AgentProcessLock(state.resolve("agentd.lock"), FIRST).start())

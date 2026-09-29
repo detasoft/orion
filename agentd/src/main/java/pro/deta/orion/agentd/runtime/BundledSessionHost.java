@@ -12,13 +12,14 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 import java.util.Set;
 
 public final class BundledSessionHost {
-    private static final Set<PosixFilePermission> OWNER_EXECUTABLE = Set.of(
+    private static final Set<PosixFilePermission> OWNER_ONLY = Set.of(
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE,
             PosixFilePermission.OWNER_EXECUTE);
@@ -91,7 +92,12 @@ public final class BundledSessionHost {
     private static void install(URL resource, FileTime resourceTimestamp, Path destination)
             throws IOException {
         try {
-            Files.createDirectories(destination.getParent());
+            try {
+                Files.createDirectories(destination.getParent(),
+                        PosixFilePermissions.asFileAttribute(OWNER_ONLY));
+            } catch (UnsupportedOperationException ignored) {
+                Files.createDirectories(destination.getParent());
+            }
         } catch (IOException failure) {
             throw new IOException("Cannot create the session-host runtime directory", failure);
         }
@@ -117,7 +123,7 @@ public final class BundledSessionHost {
 
     private static void makeExecutable(Path executable) throws IOException {
         try {
-            Files.setPosixFilePermissions(executable, OWNER_EXECUTABLE);
+            Files.setPosixFilePermissions(executable, OWNER_ONLY);
         } catch (UnsupportedOperationException ignored) {
             if (!executable.toFile().setExecutable(true, true)) {
                 throw new IOException("Cannot make the bundled session-host executable");
