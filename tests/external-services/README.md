@@ -130,7 +130,7 @@ tests/external-services/fixture up
 npm --prefix tests/integration-test/playwright ci
 
 # In another terminal; see the repository README for first-time initialization.
-make run-server
+make run server
 
 # Fast: test plain HTTP without ACME or JVM CA configuration.
 make browser-test URL=http://localhost:8000 TEST='local repository'

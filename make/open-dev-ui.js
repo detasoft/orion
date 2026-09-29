@@ -26,7 +26,7 @@ async function main() {
       await response.body?.cancel()
       if (response.status === 401 || response.ok) break
     } catch { /* The backend may still be compiling or starting. */ }
-    if (Date.now() >= deadline) throw new Error('Orion is not ready. Check run-server and retry make open-ui.')
+    if (Date.now() >= deadline) throw new Error('Orion is not ready. Check make run server and retry make open-ui.')
     await delay(500)
   }
   let token = process.env.ORION_TOKEN?.trim()
@@ -50,18 +50,7 @@ async function main() {
   await identity.body?.cancel()
   if (!identity.ok) throw new Error(`Orion rejected the token (HTTP ${identity.status}).`)
   url.hash = new URLSearchParams({ 'dev-token': token }).toString()
-  const environment = { ...process.env }
-  delete environment.BROWSER
-  await new Promise((resolve, reject) => {
-    const child = execFile('python3', ['-c',
-      'import sys, webbrowser; sys.exit(not webbrowser.open(sys.stdin.read(), new=2))'],
-    { env: environment, timeout: 15000 }, error => {
-      if (error) reject(new Error('Cannot open the default browser. Check Python 3 and your desktop session.'))
-      else resolve()
-    })
-    child.stdin.on('error', () => {})
-    child.stdin.end(url.href)
-  })
+  await require('./open-browser.cjs')(url.href)
   console.log(`Opened ${url.origin} with a development login in your default browser.`)
 }
 

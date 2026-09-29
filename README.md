@@ -38,7 +38,7 @@ export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 mvn -pl core/bootstrap -am -Prun-server -Dorion.run.arguments="--create-if-missing" process-classes
 ```
 
-For subsequent starts, use `make run-server` with the same material password.
+For subsequent starts, use `make run server` with the same material password.
 Both goals accept additional application options through `ORION_ARGS`.
 `init-server` explicitly permits creating missing key material; do not use it
 to recover lost keys from an existing installation. Restore its matching
@@ -48,13 +48,13 @@ For UI development, start Orion and Vite together from the repository root:
 
 ```sh
 npm --prefix net/frontend/ui ci # Once, or after frontend dependencies change.
-make run-dev
+make run dev
 ```
 
 Keep `ORION_KEY_MATERIAL_PASSWORD` set to the existing store's password.
-`run-dev` starts the existing `run-server` and `run-frontend` goals concurrently:
-one Maven invocation runs Orion, and npm runs Vite at `http://localhost:4173`.
-Vite opens your normal default browser already signed in (also with `make run-frontend`).
+`make run dev` starts `make run server` and Vite concurrently using Node.js, which the frontend already requires.
+One Maven invocation runs Orion, and npm runs Vite at `http://localhost:4173`.
+Vite opens your normal default browser already signed in.
 The opener waits up to two minutes for Orion, issues an admin token using your
 enrolled SSH key, and verifies it before opening the tab. If port 4173 is occupied,
 it uses Vite's actual port. Set `BROWSER=none` to suppress automatic opening.
@@ -71,16 +71,16 @@ with `ORION_SSH_HOST` (defaults to the URL hostname), `ORION_SSH_PORT`, and
 The token travels in a URL fragment, which is not sent in HTTP requests; the dev UI
 immediately removes it from the address and keeps it in the tab's session storage.
 Production builds do not accept these login links. No separate browser profile,
-Playwright session, or container is used. Node.js and Python 3 are required.
+Playwright session, or container is used. Node.js and the system browser opener are required.
 
-`run-server` disables Maven build-cache restoration because the `process-classes`
+`make run server` disables Maven build-cache restoration because the `process-classes`
 launch needs reactor dependency outputs that cached builds may not make available.
-`run-dev` forwards `ORION_ARGS`, `MAVEN`, and `NPM` to those goals. To select a
+`make run dev` forwards `ORION_ARGS`, `MAVEN`, and `NPM` to its child processes. To select a
 base directory through `ORION_ROOT`, use `bootstrap.baseDir: env:ORION_ROOT`
 in your configuration. Ctrl-C stops both process trees; processes that ignore shutdown
 are killed after ten seconds. If either service exits, the other is stopped too.
-Use `make init-server` first for a new installation. Python 3 is required for
-the shared development launcher on macOS and Linux.
+Use `make init-server` first for a new installation. See [DEVELOPMENT.md](DEVELOPMENT.md)
+for process status, stopping, and PID records.
 
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's
@@ -827,11 +827,11 @@ the current user, while a user scope starts a new operation without an inherited
 
 ### Local AgentD
 
-After `make run-server` and the one-time `make enroll-admin-key`, start the
+After `make run server` and the one-time `make enroll-admin-key`, start the
 agent in another terminal:
 
 ```sh
-make run-agent
+make run agent
 ```
 
 The alias defaults `AGENT_ARGS` to `--allow-unsecure`, connecting to
@@ -943,14 +943,13 @@ the allowed set, and a `BRANCH=*` grant permits all branches.
 
 ## Development
 
-Use `make test` for routine verification and `make run-test` for focused tests.
-Maven calls through Make require Python 3 and acquire an OS lock on
-`.mvn/build.lock` for the current checkout. Concurrent calls wait until the active
-Maven process exits; separate checkouts build independently. The lock file stays
-on disk and must not be deleted while a build is running. Process termination
-releases the lock automatically. Maven-based server and agent goals hold it until
-they stop. Direct `mvn` calls bypass the lock; to include a custom invocation, use
-`python3 make/run-maven.py mvn <arguments>` from the repository root.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, process lifecycle, PID records, and test commands.
+
+Use `make test` for routine verification and
+`make test MODULE=<module> TEST='<test-locator>'` for focused tests.
+Set `LOG=/tmp/orion-tests.log` to save Maven output to a file.
+Make invokes Maven directly, without a checkout lock or RAM disk; temporary files
+use the normal system location.
 
 Run routine local tests with the `dev` Maven profile:
 
@@ -977,7 +976,7 @@ the JDK, bypass the cache:
 make test MAVEN='mvn -Dmaven.build.cache.enabled=false'
 ```
 
-The same override works with `make run-test`. To try the installed Maven daemon,
+The same override works with focused `make test` invocations. To try the installed Maven daemon,
 pass `MAVEN='mvnd --batch-mode'`; Maven remains the default.
 
 Unit tests use normal log levels by default. Enable project DEBUG logging for a

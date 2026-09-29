@@ -19,8 +19,8 @@ host setup below. HTTPS certificate requirements apply separately.
 | Browser monitoring / noVNC | `http://localhost:6080/vnc.html?autoconnect=1` | — | HTTP |
 | Chromium DevTools / CDP | [http://localhost:9222](http://localhost:9222) | — | HTTP/WebSocket; container port `9223` |
 
-Orion runs on the host when started with `make run-server`; its default HTTPS
-listener is disabled. `make run-frontend` starts Vite separately. The external
+Orion runs on the host when started with `make run server`; its default HTTPS
+listener is disabled. `npm --prefix net/frontend/ui run dev` starts Vite separately. The external
 services and Chromium share the `orion-external-services` container; their
 published ports bind to host `127.0.0.1`.
 

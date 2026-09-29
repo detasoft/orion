@@ -30,9 +30,8 @@ async function exercise(t, { dev = true, reject = false, warming = false } = {})
 require('node:fs').writeFileSync(process.env.TRACE_MAKE, JSON.stringify(process.argv.slice(2)));
 console.log('synthetic+token');
 `, { mode: 0o755 })
-  await fs.writeFile(path.join(directory, 'python3'), `#!${process.execPath}
-let input = ''; process.stdin.on('data', chunk => input += chunk);
-process.stdin.on('end', () => require('node:fs').writeFileSync(process.env.TRACE_OPEN, input));
+  await fs.writeFile(path.join(directory, process.platform === 'darwin' ? 'open' : 'xdg-open'), `#!${process.execPath}
+require('node:fs').writeFileSync(process.env.TRACE_OPEN, process.argv.at(-1));
 `, { mode: 0o755 })
   const url = `http://127.0.0.1:${server.address().port}/`
   const result = await run(process.execPath, [path.join(__dirname, 'open-dev-ui.js'), url], {

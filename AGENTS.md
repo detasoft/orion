@@ -67,13 +67,13 @@
 - Use `make help` as the entry point for repository commands and prefer a
   documented Make goal. Run tools directly only when no suitable goal exists or
   a more specific instruction requires the exact command.
-- Prefer `make run-test` for focused tests and `make test` for the full quiet
-  Maven/JVM suite, including the pre-commit check. Both goals use Maven's `-q`.
+- Prefer `make test` for the full quiet Maven/JVM suite, including the pre-commit
+  check, and `make test MODULE=... TEST=...` for focused tests. Both use Maven's `-q`.
   Direct `mvn test` invocation is discouraged; use it only when no Make goal
   supports the required invocation or the user explicitly requests it.
 - Do not capture build or test logs with shell redirection (`>`, `>>`, `2>&1`)
   or shell wrappers. These can prevent saved command-prefix approvals from matching.
-  For focused tests, pass `LOG=/tmp/<session-specific-name>.log` to `make run-test`;
+  For focused tests, pass `LOG=/tmp/<session-specific-name>.log` to `make test`;
   for required direct Maven runs, use Maven's `-l /tmp/<session-specific-name>.log`.
   Otherwise limit tool output and inspect test reports instead of adding redirection.
 - Run all tests outside the sandbox because they may need loopback sockets.
@@ -82,7 +82,7 @@
 - Use `make test` when both Maven/JVM and `session-host` must be checked and
   for routine Change-workflow verification after integration.
 - For focused Maven tests, always use
-  `make run-test MODULE=<module> TEST='<test-locator>'`. The target supplies the
+  `make test MODULE=<module> TEST='<test-locator>'`. The target supplies the
   dev profile, reactor dependencies, parallelism, and Surefire configuration.
 - Run `mvn verify -Pdev -T 4` when the Maven verify lifecycle is explicitly
   needed. Run Maven without `-Pdev` only to check default-build behavior or

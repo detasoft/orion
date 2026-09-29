@@ -121,7 +121,7 @@ coordination, and restart from shared storage belong to externalized storage.
 - Extend the existing tests in `net/git-transport`, `net/http-core`, and
   `git/git-parser` where their responsibilities apply. Use real transport
   fixtures for dispatch and disconnect behavior, and the Git interoperability
-  fixtures for protocol parity. Run focused tests through `make run-test`;
+  fixtures for protocol parity. Run focused tests through `make test`;
   run the full Maven/JVM suite for implementation verification. Explicitly
   execute any required real-Jetty integration fixture and record its result.
 - No duplicate byte API, protocol runner, global executor replacement, or

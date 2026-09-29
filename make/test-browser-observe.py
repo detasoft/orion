@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -16,15 +17,15 @@ class BrowserObserveTest(unittest.TestCase):
             temporary = Path(directory)
             events = temporary / "events.jsonl"
             events.write_text("")
-            (temporary / "webbrowser.py").write_text(
-                "import json, os\n"
-                "def open(url, **kwargs):\n"
-                "    with open_log() as log: log.write(json.dumps(['open', url]) + '\\n')\n"
-                "    return os.environ['TEST_BROWSER_OPENS'] == '1'\n"
-                "def open_log():\n"
-                "    import builtins\n"
-                "    return builtins.open(os.environ['TEST_BROWSER_EVENTS'], 'a')\n"
+            opener = temporary / ("open" if sys.platform == "darwin" else "xdg-open")
+            opener.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "with open(os.environ['TEST_BROWSER_EVENTS'], 'a') as log:\n"
+                "    log.write(json.dumps(['open', sys.argv[-1]]) + '\\n')\n"
+                "sys.exit(0 if os.environ['TEST_BROWSER_OPENS'] == '1' else 1)\n"
             )
+            opener.chmod(0o755)
             npm = temporary / "npm"
             npm.write_text(
                 "#!/usr/bin/env python3\n"
@@ -37,7 +38,7 @@ class BrowserObserveTest(unittest.TestCase):
                 ["make", "-s", "browser-test", "browser-acme-test", f"URL={url}",
                  f"OBSERVE={observe}", f"NPM={npm}", "TEST=local repository"],
                 cwd=ROOT, text=True, capture_output=True, timeout=15,
-                env={**os.environ, "PYTHONPATH": str(temporary),
+                env={**os.environ, "PATH": str(temporary) + os.pathsep + os.environ["PATH"],
                      "TEST_BROWSER_EVENTS": str(events), "TEST_BROWSER_OPENS": str(int(opens)),
                      "MAKEFLAGS": "", "MFLAGS": "", "MAKELEVEL": "0"},
             )

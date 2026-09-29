@@ -260,7 +260,7 @@ Cover equal tips, linear history, two diverged tips, unrelated histories, and a 
 Run:
 
 ```bash
-make run-test MODULE=git/git-native-storage TEST='NativeObjectClosureTest'
+make test MODULE=git/git-native-storage TEST='NativeObjectClosureTest'
 ```
 
 Expected: compilation failure because `isAncestor` and `mergeBase` do not exist.
@@ -305,7 +305,7 @@ Also assert stable branch ordering, every divergence is reported in one plan, an
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitAttachPlannerTest'
+make test MODULE=git/git-sync TEST='GitAttachPlannerTest'
 ```
 
 Expected: reactor/module failure because `git-sync` does not exist.
@@ -346,7 +346,7 @@ unsupported providers, non-GitHub hosts, missing credentials, and secret-bearing
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitHubRemoteProfileTest'
+make test MODULE=git/git-sync TEST='GitHubRemoteProfileTest'
 ```
 
 Expected: compilation failure because the profile classes do not exist.
@@ -379,7 +379,7 @@ after a lost response, remote ref mismatch, rejection, and sanitized failures.
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitHubRemoteProfileTest,SmartHttpGitRemoteGatewayTest'
+make test MODULE=git/git-sync TEST='GitHubRemoteProfileTest,SmartHttpGitRemoteGatewayTest'
 ```
 
 Expected: PASS.
@@ -404,7 +404,7 @@ head remain unchanged. Add an expected-old-ID race that asserts the complete pla
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitAttachmentTest'
+make test MODULE=git/git-sync TEST='GitAttachmentTest'
 ```
 
 Expected: compilation failure because attachment execution does not exist.
@@ -445,7 +445,7 @@ Assert serialized files contain no credential, authorization header, pack bytes,
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitSyncStateStoreTest,FileGitSyncStateStoreTest'
+make test MODULE=git/git-sync TEST='GitSyncStateStoreTest,FileGitSyncStateStoreTest'
 ```
 
 Expected: compilation failure because the state store does not exist.
@@ -486,7 +486,7 @@ Use a deterministic scheduler/gateway and assert:
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitSyncCoordinatorTest'
+make test MODULE=git/git-sync TEST='GitSyncCoordinatorTest'
 ```
 
 Expected: compilation failure because the coordinator does not exist.
@@ -520,7 +520,7 @@ manual retry from `CONFLICTED`, registration replacement, disabled/removal behav
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync TEST='GitSyncServiceTest'
+make test MODULE=git/git-sync TEST='GitSyncServiceTest'
 ```
 
 Expected: compilation failure because the service does not exist.
@@ -554,13 +554,13 @@ tracking-ref availability, manual operator reconciliation in Orion, and explicit
 Run:
 
 ```bash
-make run-test MODULE=git/git-sync \
+make test MODULE=git/git-sync \
   TEST='GitAttachPlannerTest,GitHubRemoteProfileTest,SmartHttpGitRemoteGatewayTest'
-make run-test MODULE=git/git-sync \
+make test MODULE=git/git-sync \
   TEST='GitAttachmentTest,GitSyncStateStoreTest,FileGitSyncStateStoreTest'
-make run-test MODULE=git/git-sync \
+make test MODULE=git/git-sync \
   TEST='GitSyncCoordinatorTest,GitSyncServiceTest,GitSyncEndToEndTest'
-make run-test MODULE=git/git-native-storage TEST='NativeObjectClosureTest,NativeGitRepositoryTest'
+make test MODULE=git/git-native-storage TEST='NativeObjectClosureTest,NativeGitRepositoryTest'
 ```
 
 Expected: PASS.

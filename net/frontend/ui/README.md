@@ -128,12 +128,12 @@ From the repository root, start the backend and frontend in separate terminals:
 ```sh
 # Backend: use the password for the existing key-material store.
 export ORION_KEY_MATERIAL_PASSWORD='your-local-development-password'
-make run-server
+make run server
 ```
 
 ```sh
 # Frontend: Vite watches UI sources and updates the browser automatically.
-make run-frontend
+npm --prefix net/frontend/ui run dev -- --open
 ```
 
 For a new installation, use `make init-server` for the first backend start as

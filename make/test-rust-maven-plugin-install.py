@@ -24,8 +24,6 @@ class RustMavenPluginInstallTest(unittest.TestCase):
             pom.write_text("released sources", encoding="utf-8")
             (checkout / "make").mkdir()
             (checkout / "make/server.mk").touch()
-            (checkout / "make/run-maven.py").symlink_to(makefile.parent / "make/run-maven.py")
-            (checkout / ".gitignore").write_text("/.mvn/build.lock\n", encoding="utf-8")
 
             def git(*arguments):
                 return subprocess.run(
@@ -75,13 +73,6 @@ class RustMavenPluginInstallTest(unittest.TestCase):
     def test_cleans_temporary_sources_and_propagates_maven_failure(self):
         self.check_install(23)
 
-    def test_rejects_install_goal_as_a_positional_test_argument(self):
-        result = subprocess.run(
-            ["make", "--no-print-directory", "run-test", "rust-maven-plugin-install", "placeholder"],
-            cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Positional arguments cannot match Make goals", result.stderr)
 
 
 if __name__ == "__main__":

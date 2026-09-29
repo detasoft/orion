@@ -118,7 +118,7 @@ trip XML and survive every existing document-copy/update consumer.
    callback/state/nonce/signature/audience/issuer failures, replay/concurrency,
    same-name accounts, cross-organization list and direct-access denial,
    disabled user/policy reload, logout/CSRF and unchanged system Bearer/SSH.
-   Run focused make run-test plus full make test; frontend tests/build as needed.
+   Run focused make test plus full make test; frontend tests/build as needed.
 
 ## Acceptance
 

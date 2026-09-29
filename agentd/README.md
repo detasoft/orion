@@ -6,8 +6,8 @@ With Orion running and your administrator SSH key enrolled (`make enroll-admin-k
 start AgentD in another terminal:
 
 ```sh
-make run-agent
-make run-agent AGENT_ARGS='--help'
+make run agent
+make run agent AGENT_ARGS='--help'
 ```
 
 The Make goal builds the reactor dependencies and runs `LocalAgentMain` through
@@ -22,7 +22,7 @@ Defaults are SSH `root@localhost:8022`, control `https://localhost:8443`, agent 
 through `AGENT_ARGS`, for example:
 
 ```sh
-make run-agent AGENT_ARGS="--ssh-port 9022 --server https://localhost:9443 --state-dir '/tmp/local agent'"
+make run agent AGENT_ARGS="--ssh-port 9022 --server https://localhost:9443 --state-dir '/tmp/local agent'"
 ```
 
 `--ssh-option` passes one additional `ssh -o` option, such as `IdentityFile=/path/to/key`.
@@ -31,7 +31,7 @@ stop startup. Stopping AgentD leaves its native sessions running; another invoca
 reuses their state and registers a fresh AgentD instance.
 
 HTTPS must already be enabled on Orion with a certificate trusted by the AgentD JVM.
-The default `make run-server` configuration has HTTPS disabled. The launcher retains
+The default `make run server` configuration has HTTPS disabled. The launcher retains
 certificate and hostname validation and does not change server TLS configuration.
 For a private CA, configure the Maven JVM truststore before running the alias.
 
@@ -125,7 +125,7 @@ From the repository root on macOS or Linux, with the repository JDK, Maven,
 Rust toolchain, and frontend Node dependencies available:
 
 ```sh
-make run-test MODULE=core/bootstrap TEST='AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT'
+make test MODULE=core/bootstrap TEST='AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT'
 mvn verify -Pdev -T 4 -pl core/bootstrap -am \
   -Dit.test='JettyHTTPServerIT,AgentSessionAcceptanceIT,AgentReplicationAcceptanceIT,JettyHttp2LivePeerIT' \
   -Dfailsafe.failIfNoSpecifiedTests=false

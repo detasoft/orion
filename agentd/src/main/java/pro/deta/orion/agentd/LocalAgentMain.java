@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 /** Starts a local AgentD with a fresh server-issued permit obtained over administrative SSH. */
 public final class LocalAgentMain {
     private static final String USAGE = """
-            Usage: make run-agent [AGENT_ARGS='options']
+            Usage: make run agent [AGENT_ARGS='options']
               --server URI          server control endpoint (https://localhost:8443)
               --allow-unsecure      allow HTTP; default server becomes http://localhost:8000
               --state-dir PATH      local state (orion_root/agentd-local)

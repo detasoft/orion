@@ -117,7 +117,7 @@ every slice: straightforward success plus cancellation/races, invalid or missing
 update/delete, reload, stale revision, failed persistence and confidentiality. Include a real SSH flow
 for hidden import and a native proxy flow proving imported credentials and persisted aliases are usable.
 
-Use `make run-test MODULE=<module> TEST='<locator>'` for focused Maven checks, outside the sandbox.
+Use `make test MODULE=<module> TEST='<locator>'` for focused Maven checks, outside the sandbox.
 The implementation worker owns development verification (`mvn verify -Pdev -T 4`) and `make test` after
 code commits. Keep logs and exact verification outcomes. Update the module review to distinguish fixed
 findings from still-pending streaming/session attachment work; document actual terminal syntax.

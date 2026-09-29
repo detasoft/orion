@@ -1,5 +1,4 @@
 MAVEN ?= mvn
-MAVEN_RUN = python3 "$(CURDIR)/make/run-maven.py" $(MAVEN)
 UV ?= uv
 INTEGRATION_TEST_ARGS ?=
 TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
@@ -9,42 +8,14 @@ TEST_ANALYTICS_TOP ?= 50
 TEST_ANALYTICS_REPORT_ARGS ?=
 TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
 TEST_JFR_MAVEN_ARGS ?=
-RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>' [LOG=<log-file>]
-RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=<log-file>]
-RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
-RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
-	dependency-minimize \
-	help skill-check skills-check docker-exec build-processes \
-	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
-	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
-	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
-	run-agentd-session
-RUN_TEST_POSITIONAL_ARGUMENTS :=
-RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
-RUN_TEST_MODULE = $(value MODULE)
-RUN_TEST_LOCATOR = $(value TEST)
 SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
 
 .DEFAULT_GOAL := help
 
-ifeq ($(firstword $(MAKECMDGOALS)),run-test)
-RUN_TEST_POSITIONAL_ARGUMENTS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
-ifneq ($(strip $(RUN_TEST_POSITIONAL_ARGUMENTS)),)
-%:
-	@:
-endif
-ifeq ($(words $(RUN_TEST_POSITIONAL_ARGUMENTS)),2)
-RUN_TEST_MODULE := $(word 1,$(RUN_TEST_POSITIONAL_ARGUMENTS))
-RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
-endif
-endif
-
-.PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
+.PHONY: help dist test integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
-	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
-	run-agentd-session
+	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test
 
 help: ## Show available goals and their descriptions
 	@awk '\
@@ -74,33 +45,39 @@ docker-exec: ## Run CMD in orion-external-services; e.g. make docker-exec CMD='p
 
 build-processes: ## Show running Maven builds and Make test processes
 	@ps -axo pid,ppid,etime,state,command | \
-		rg '^[[:space:]]*PID|[o]rg[.]codehaus[.]plexus.*[.]Launcher|[m]ake (test|run-test)|[m]vn .*clean'
+		rg '^[[:space:]]*PID|[o]rg[.]codehaus[.]plexus.*[.]Launcher|[m]ake test|[m]vn .*clean'
 
 dist: ## Package the bootstrap distribution
-	$(MAVEN_RUN) package -Pdist -pl core/bootstrap -am
+	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-test: ## Run the Maven/JVM test suite; use RAM-backed temporary files on macOS
-	python3 make/test-ramdisk.py $(MAVEN_RUN) package -Pdev -T 4 -q
+test: ## Run Maven tests; optionally set MODULE and TEST for focused tests, LOG for a log file
+	@if { [ -n '$(strip $(value MODULE))' ] && [ -z '$(strip $(value TEST))' ]; } \
+		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
+		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
+	fi
+	$(MAVEN) package -Pdev -T 4 -q \
+		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am -Dtest='$(value TEST)' \
+		-Dsurefire.failIfNoSpecifiedTests=false) $(if $(strip $(value LOG)),-l '$(value LOG)')
 
 dependency-audit: ## Report explicit Maven dependencies that also have transitive paths
-	$(MAVEN_RUN) org.apache.maven.plugins:maven-dependency-plugin:3.10.0:tree -Pdev -T 4 -q \
+	$(MAVEN) org.apache.maven.plugins:maven-dependency-plugin:3.10.0:tree -Pdev -T 4 -q \
 		-DoutputType=json -DoutputFile=target/dependency-audit.json -Dverbose=true
 	python3 build-tools/orion-dependency-cleanup-audit.py
 
 ## Propose moving Maven dependencies to their actual consumers; set APPLY=1 to write the patch
 dependency-minimize: dependency-audit
-	$(MAVEN_RUN) org.apache.maven.plugins:maven-help-plugin:3.5.1:effective-pom \
+	$(MAVEN) org.apache.maven.plugins:maven-help-plugin:3.5.1:effective-pom \
 		-Pdev -q -Doutput=target/dependency-effective-pom.xml
-	$(MAVEN_RUN) package org.apache.maven.plugins:maven-dependency-plugin:3.10.0:build-classpath \
+	$(MAVEN) package org.apache.maven.plugins:maven-dependency-plugin:3.10.0:build-classpath \
 		-Pdev -T 4 -q -DskipTests -Dmdep.outputFile=target/dependency-classpath.txt
 	python3 -B build-tools/orion-dependency-minimize.py $(if $(filter 1,$(APPLY)),--apply)
 
 integration-test: ## Start external services and run integration tests; show the browser URL first
 	@printf '%s\n' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
-	$(MAVEN_RUN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
+	$(MAVEN) verify -Pdev,external-services -T 4 -pl tests/integration-test -am $(INTEGRATION_TEST_ARGS)
 
 xml-schema: ## Generate and compile the XML schema model
-	$(MAVEN_RUN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
+	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
 
 skill-check: ## Validate one skill; set SKILL=.agents/skills/<skill>
 	@if [ -z "$(SKILL)" ]; then \
@@ -130,7 +107,7 @@ rust-maven-plugin-install: ## Install Rust Maven Plugin 0.1.0 locally from its t
 		git archive --format=tar --output="$$temporary/source.tar" rust-maven-plugin-0.1.0 \
 			build-tools/rust-maven-plugin; \
 		tar -xf "$$temporary/source.tar" -C "$$temporary"; \
-		$(MAVEN_RUN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
+		$(MAVEN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
 
 rust-install: cargo-init ## Install the pinned Rust toolchain
 	@cd session-host && $(HOME)/.cargo/bin/rustc --version
@@ -142,11 +119,6 @@ session-host-test: rust-install ## Run session-host Rust tests
 	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
 
 COMMAND ?= $(SHELL)
-
-## Build AgentD and launch a local session; set COMMAND to override the shell
-run-agentd-session: session-host
-	$(MAVEN_RUN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
-		-Dagentd.local.command='$(COMMAND)'
 
 SESSION_HOST_LINUX_HOST ?= root@gw.ntechs.ru
 SESSION_HOST_LINUX_PORT ?= 30022
@@ -170,43 +142,24 @@ session-host-linux-test: ## Run session-host tests on the configured Linux host
 		SESSION_HOST_LINUX_SCP="$(SESSION_HOST_LINUX_SCP)" \
 		sh make/session-host-linux-test.sh
 
-run-test: ## Run focused Maven tests; set MODULE and TEST, optionally LOG for Maven's log file
-	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \
-		if [ -z '$(strip $(value MODULE))' ] || [ -z '$(strip $(value TEST))' ]; then \
-			printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
-			exit 2; \
-		fi; \
-	elif [ -n "$(RUN_TEST_POSITIONAL_CONFLICT)" ]; then \
-		printf '%s\n' "$(RUN_TEST_CONFLICT_USAGE)" >&2; \
-		exit 2; \
-	elif [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -ne 2 ] \
-			|| [ -n '$(strip $(value MODULE))' ] \
-			|| [ -n '$(strip $(value TEST))' ]; then \
-		printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
-		exit 2; \
-	fi
-	$(MAVEN_RUN) package -Pdev -T 4 -q -pl '$(RUN_TEST_MODULE)' -am \
-		-Dtest='$(RUN_TEST_LOCATOR)' \
-		-Dsurefire.failIfNoSpecifiedTests=false $(if $(strip $(value LOG)),-l '$(value LOG)')
-
 test-jfr: ## Run Maven tests with JFR analytics
 	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
 	@status=0; \
-	$(MAVEN_RUN) package -Pdev,test-jfr -T 4 -fae \
+	$(MAVEN) package -Pdev,test-jfr -T 4 -fae \
 		-Dorion.test.analytics.runId="$(TEST_ANALYTICS_RUN_ID)" \
 		-Dorion.test.analytics.dir="$(TEST_ANALYTICS_ROOT)" \
 		-Dorion.test.jfr.directory="$(TEST_ANALYTICS_DIR)/jfr" \
 		$(TEST_JFR_MAVEN_ARGS) || status=$$?; \
-	$(MAVEN_RUN) -q -pl tests/test-duration-recorder -am -DskipTests compile || exit $$?; \
-	$(MAVEN_RUN) -q -pl tests/test-duration-recorder \
+	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile || exit $$?; \
+	$(MAVEN) -q -pl tests/test-duration-recorder \
 		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
 		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
 		-Dexec.args="$(TEST_ANALYTICS_DIR) $(TEST_ANALYTICS_TOP)" || exit $$?; \
 	exit $$status
 
 test-jfr-report: ## Generate a report from existing JFR analytics
-	$(MAVEN_RUN) -q -pl tests/test-duration-recorder -am -DskipTests compile
-	$(MAVEN_RUN) -q -pl tests/test-duration-recorder \
+	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile
+	$(MAVEN) -q -pl tests/test-duration-recorder \
 		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
 		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"

@@ -37,7 +37,8 @@ def service_double(role, worker=False):
                 time.sleep(0.1)
     subprocess.Popen([sys.executable, __file__, "--worker", role])
     (directory / f"{role}-invocation.json").write_text(json.dumps({
-        "cwd": os.getcwd(), "arguments": sys.argv[3:], "orion_root": os.environ.get("ORION_ROOT"),
+        "cwd": os.getcwd(), "arguments": sys.argv[3:],
+        "orion_root": os.environ.get("ORION_ROOT"), "browser": os.environ.get("BROWSER"),
     }))
     while not all((directory / f"{name}.json").exists() for name in ("server", "frontend")):
         time.sleep(0.05)
@@ -50,7 +51,7 @@ def service_double(role, worker=False):
 
 
 class RunDevTest(unittest.TestCase):
-    def exercise(self, fail=None, stubborn=None):
+    def exercise(self, fail=None, stubborn=None, browser=""):
         with tempfile.TemporaryDirectory(prefix="orion-run-dev-test-") as directory:
             state = Path(directory)
             checkout = state / "checkout with spaces"
@@ -60,10 +61,11 @@ class RunDevTest(unittest.TestCase):
             executable = " ".join(shlex.quote(part) for part in [sys.executable, __file__, "--service"])
             environment = {**os.environ, "DEV_TEST_STATE": directory,
                            "DEV_TEST_FAIL": fail or "", "DEV_TEST_STUBBORN": stubborn or "",
-                           "ORION_KEY_MATERIAL_PASSWORD": "synthetic-test-password",
-                           "MAKEFLAGS": "", "MFLAGS": "", "MAKELEVEL": "0"}
+                           "ORION_KEY_MATERIAL_PASSWORD": "synthetic-test-password", "BROWSER": browser,
+                           "MAKEFLAGS": "", "MFLAGS": "", "MAKELEVEL": "0",
+                           "ORION_DEV_RUN_DIR": str(state / "processes")}
             process = subprocess.Popen(
-                ["make", "--no-print-directory", "-j2", "-f", str(ROOT / "Makefile"), "run-dev",
+                ["make", "--no-print-directory", "-j2", "-f", str(ROOT / "Makefile"), "run", "dev",
                  f"MAVEN={executable} server", f"NPM={executable} frontend",
                  "ORION_ARGS=--example", f"ORION_ROOT={state / 'server state'}"],
                 cwd=checkout, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -85,6 +87,11 @@ class RunDevTest(unittest.TestCase):
                 self.assertEqual(server["orion_root"], str(state / "server state"))
                 self.assertEqual(Path(frontend["cwd"]).resolve(), (checkout / "net/frontend/ui").resolve())
                 self.assertEqual(frontend["arguments"], ["run", "dev", "--", "--open"])
+                if browser:
+                    self.assertEqual(frontend["browser"], browser)
+                else:
+                    self.assertEqual(Path(frontend["browser"]).resolve(),
+                                     (checkout / "make/open-dev-ui.js").resolve())
                 if fail:
                     (state / "release").touch()
                 else:
@@ -116,6 +123,9 @@ class RunDevTest(unittest.TestCase):
 
     def test_ctrl_c_escalates_for_a_descendant_that_ignores_signals(self):
         self.exercise(stubborn="frontend")
+
+    def test_browser_opening_can_be_disabled(self):
+        self.exercise(browser="none")
 
 
 if __name__ == "__main__":

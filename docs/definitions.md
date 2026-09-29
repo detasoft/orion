@@ -102,10 +102,10 @@ must run outside the sandbox because they may need loopback sockets. Do not
 repeat an identical passed check after commit unless the committed or integrated
 environment itself is what the check must validate.
 
-Use `make run-test MODULE=<module> TEST='<test-locator>'` for focused Maven tests
+Use `make test MODULE=<module> TEST='<test-locator>'` for focused Maven tests
 during development. Focused tests do not replace the table's full pre-commit
 check. Use `make test` for the full quiet Maven/JVM suite and for routine
-verification after Change integration. Both goals enable Maven's `-q`; prefer
+verification after Change integration. Both forms enable Maven's `-q`; prefer
 them over direct `mvn test` invocations.
 
 ### Quick workflow

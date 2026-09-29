@@ -31,10 +31,10 @@ when requested. Setting up this process does not itself start UI repairs.
 
 ## Running UI and observing the browser
 
-- Start with `make help` and reuse existing processes. `make run-frontend` calls
-  `npm run dev` in `net/frontend/ui`; Vite normally serves `http://localhost:4173`
+- Start with `make help` and reuse existing processes. `npm --prefix net/frontend/ui run dev` starts
+  Vite directly; Vite normally serves `http://localhost:4173`
   with hot updates and proxies `/api` to Orion on port `8000`.
-- `make run-server` serves the backend and packaged UI. Review source changes on
+- `make run server` serves the backend and packaged UI. Review source changes on
   the Vite URL; use the startup output if its port differs.
 - Use available browser tools or the existing Node/Playwright installation in
   `tests/integration-test/playwright`. The external-services fixture exposes
