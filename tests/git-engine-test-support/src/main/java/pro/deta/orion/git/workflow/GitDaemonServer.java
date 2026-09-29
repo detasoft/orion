@@ -94,7 +94,6 @@ final class GitDaemonServer implements GitServer {
             return;
         }
         Process running = daemon;
-        daemon = null;
         running.destroy();
         if (!waitFor(running, STOP_TIMEOUT)) {
             running.destroyForcibly();
@@ -103,6 +102,7 @@ final class GitDaemonServer implements GitServer {
                         + diagnostics());
             }
         }
+        daemon = null;
     }
 
     private void requireCanonicalGit() throws IOException {
@@ -131,7 +131,15 @@ final class GitDaemonServer implements GitServer {
                 return;
             } catch (IOException failure) {
                 lastFailure = failure;
-                stopFailedAttempt(process);
+                try {
+                    stopFailedAttempt(process);
+                } catch (IOException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                    throw failure;
+                }
+                if (Thread.currentThread().isInterrupted()) {
+                    throw failure;
+                }
                 appendLog("attempt " + attempt + " failed: " + failure.getMessage()
                         + System.lineSeparator());
             }
@@ -202,12 +210,23 @@ final class GitDaemonServer implements GitServer {
         }
     }
 
-    private static boolean waitFor(Process process, Duration timeout) throws IOException {
+    private static boolean waitFor(Process process, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        boolean interrupted = false;
         try {
-            return process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while waiting for canonical git daemon", error);
+            long remaining;
+            while ((remaining = deadline - System.nanoTime()) > 0) {
+                try {
+                    return process.waitFor(remaining, TimeUnit.NANOSECONDS);
+                } catch (InterruptedException error) {
+                    interrupted = true;
+                }
+            }
+            return !process.isAlive();
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
