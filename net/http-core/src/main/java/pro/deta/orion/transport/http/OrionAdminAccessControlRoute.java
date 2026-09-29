@@ -8,7 +8,6 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
@@ -30,7 +29,7 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
         OrionAccessControlService.ConfigurationFile file = accessControlService.accessControlConfigurationFile();
         String revision = file.revision().orElseThrow(() -> new IllegalStateException(
                 "Configuration revision is unavailable"));
-        return OrionHttpResponse.xml(SC_OK, new String(file.content(), StandardCharsets.UTF_8))
+        return OrionHttpResponse.resource(SC_OK, file.content(), OrionHttpResponse.XML_CONTENT_TYPE)
                 .withHeader("ETag", "\"" + revision + "\"");
     }
 
