@@ -102,6 +102,41 @@ beforeEach(() => {
 })
 
 describe('Orion navigation', () => {
+  it('exposes section URLs as links and marks the current page', async () => {
+    const wrapper = mountApp()
+    const repositories = wrapper.get('.primary-nav a[href="#/repositories"]')
+    await repositories.trigger('click')
+    expect(repositories.attributes('aria-current')).toBe('page')
+    expect(wrapper.get('.primary-nav a[href="#/overview"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('.page-heading h1').text()).toBe('Repositories')
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }])(
+    'leaves modified navigation clicks to the browser: %j', async (options) => {
+      const wrapper = mountApp()
+      const link = wrapper.get('.primary-nav a[href="#/repositories"]')
+      let prevented
+      link.element.addEventListener('click', (event) => {
+        prevented = event.defaultPrevented
+        event.preventDefault()
+      }, { once: true })
+      await link.trigger('click', options)
+      expect(prevented).toBe(false)
+      expect(window.location.hash).toBe('#/overview')
+      expect(wrapper.get('.page-heading h1').text()).toBe('Overview')
+    },
+  )
+
+  it('explains how to open a protected section without a connection', async () => {
+    window.history.replaceState(null, '', '/#/key-material')
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(wrapper.get('.empty-state').text()).toContain('Connect as an administrator')
+    expect(wrapper.get('.empty-state').text()).toContain('server card')
+    expect(client.keyMaterial).not.toHaveBeenCalled()
+    expect(window.location.hash).toBe('#/key-material')
+  })
+
   it.each([
     ['overview', 'Overview'], ['repositories', 'Repositories'], ['remote-aliases', 'Remote aliases'],
     ['pending-decisions', 'Pending decisions'], ['people', 'People'], ['activity', 'Activity'],

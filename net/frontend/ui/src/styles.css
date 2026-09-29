@@ -157,6 +157,7 @@ button,
   border-radius: 9px;
   font-size: 13px;
   text-align: left;
+  text-decoration: none;
   transition: color .2s, background .2s, transform .2s;
 }
 

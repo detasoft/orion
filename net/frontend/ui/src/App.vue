@@ -107,7 +107,9 @@ const draftServerLabel = computed(() => {
   return 'Not tested'
 })
 
-function selectView(view) {
+function selectView(view, event) {
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
   if (window.location.hash !== `#/${view}`) {
     window.history.pushState(null, '', `#/${view}`)
   }
@@ -492,16 +494,18 @@ onUnmounted(() => {
 
       <nav class="primary-nav" aria-label="Primary navigation">
         <p class="nav-label">Workspace</p>
-        <button
+        <a
           v-for="item in navItems"
           :key="item.id"
+          :href="`#/${item.id}`"
+          :aria-current="activeView === item.id ? 'page' : undefined"
           class="nav-item"
           :class="{ active: activeView === item.id }"
-          @click="selectView(item.id)"
+          @click="selectView(item.id, $event)"
         >
           <AppIcon :name="item.icon" :size="19" />
           <span>{{ item.label }}</span>
-        </button>
+        </a>
       </nav>
 
       <div class="sidebar-bottom">
@@ -678,6 +682,10 @@ onUnmounted(() => {
         <template v-else-if="activeView === 'key-material'">
           <KeyMaterial v-if="isConnected && identity?.admin" :token="settings.token"
             @authorization-error="clearExpiredCredentials" />
+          <div v-else class="empty-state panel">
+            <h3>Connect as an administrator</h3>
+            <p>Click the server card to connect and inspect key material.</p>
+          </div>
         </template>
 
         <template v-else-if="activeView === 'logs'">
