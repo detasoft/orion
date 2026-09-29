@@ -63,6 +63,11 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                             request),
                     "fetch");
             checked.storage().persist(target.complete());
+            for (String root : wants) {
+                if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
+                    throw GitRemoteException.local("complete object validation", false, null);
+                }
+            }
             publishTrackingRefs(checked, heads);
             return heads;
         } catch (IOException | RuntimeException error) {
