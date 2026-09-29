@@ -175,3 +175,19 @@ git --config-env=http.extraHeader=ORION_AUTH_HEADER clone "https://host/r/reposi
 Unset `ORION_AUTH_HEADER` after the clone. The command is supported by current
 Git versions in POSIX shells and PowerShell. It is intentionally not advertised
 for `cmd.exe`, whose percent expansion can corrupt encoded repository paths.
+
+### Task and user log files
+
+The administrator's **Logs** view reads the files under `bootstrap.logDir`.
+It defaults to `logs` relative to `bootstrap.baseDir`, so the shipped configuration
+uses `orion_root/logs`. Set an absolute path to store them elsewhere:
+
+```yaml
+bootstrap:
+  baseDir: orion_root
+  logDir: /var/log/orion
+```
+
+Relative paths are resolved against `baseDir`; blank values are rejected. Restart
+Orion after changing the setting. Existing files are not moved automatically.
+`ORION_LOG_FILE` separately controls the service's general stdout/stderr log.

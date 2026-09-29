@@ -19,6 +19,7 @@ public class OrionConfiguration {
     public static class BootstrapConfig {
         private String baseDir = "orion";
         private String workDir = "work";
+        private String logDir = "logs";
         private int threadPoolSize = 10;
         private BootstrapAccessControlConfig accessControl = new BootstrapAccessControlConfig();
         private KeyMaterialConfig keyMaterial = new KeyMaterialConfig();

@@ -52,6 +52,7 @@ class LocationConfigurationProviderTest {
         Files.writeString(configFile, """
                 bootstrap:
                   baseDir: /tmp/orion-file-yaml
+                  logDir: /tmp/orion-file-logs
                   accessControl:
                     path: file-yaml.xml
                 transport:
@@ -63,6 +64,7 @@ class LocationConfigurationProviderTest {
                 .readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-file-yaml", "file-yaml.xml", 28080);
+        assertEquals("/tmp/orion-file-logs", configuration.getBootstrap().getLogDir());
     }
 
     @Test

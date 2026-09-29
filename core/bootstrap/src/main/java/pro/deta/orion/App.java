@@ -73,7 +73,7 @@ public class App {
         try {
             OrionConfiguration configuration = configurationProvider.readConfiguration();
             OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
-                    ConfigurationContext.baseDirectory(configuration, System.getenv()).resolve("logs"));
+                    new ConfigurationContext(configuration).getLogDir());
             try (BootstrapContext bootstrap = BootstrapContext.open(
                     configuration, Map.copyOf(System.getenv()), options.createIfMissing())) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()

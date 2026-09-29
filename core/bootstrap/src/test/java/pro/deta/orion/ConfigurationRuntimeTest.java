@@ -3,6 +3,8 @@ package pro.deta.orion;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.util.ConfigurationContext;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +21,8 @@ public class ConfigurationRuntimeTest {
         OrionConfiguration oc = fcp.configurationLookup("classpath://" + resource);
 
         assertEquals("orion_root", oc.getBootstrap().getBaseDir());
+        assertEquals(Path.of("orion_root", "logs").toAbsolutePath().normalize(),
+                new ConfigurationContext(oc).getLogDir());
         assertEquals("local:orion", oc.getBootstrap().getAccessControl().getLocation());
         assertEquals("refs/heads/main", oc.getBootstrap().getAccessControl().selectedRef());
         assertEquals("orion.xml", oc.getBootstrap().getAccessControl().getPath());

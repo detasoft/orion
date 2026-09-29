@@ -49,6 +49,14 @@ public class ConfigurationContext {
         return resolve(configuration.getBootstrap().getWorkDir());
     }
 
+    public Path getLogDir() {
+        String directory = configuration.getBootstrap().getLogDir();
+        if (directory == null || directory.isBlank()) {
+            throw new IllegalArgumentException("Bootstrap logDir must not be blank");
+        }
+        return resolve(directory).normalize();
+    }
+
     public Path getBaseDir() {
         return baseDir.value();
     }

@@ -1,6 +1,7 @@
 bootstrap:
   baseDir: orion_root
   workDir: work
+  logDir: logs
   threadPoolSize: 10
   accessControl:
     location: local:orion

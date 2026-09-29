@@ -16,6 +16,30 @@ class ConfigurationContextTest {
     private Path tempDir;
 
     @Test
+    void defaultsLogsToTheBaseDirectoryAndResolvesConfiguredPaths() {
+        OrionConfiguration configuration = configuration(Path.of("orion_root"));
+        assertThat(new ConfigurationContext(configuration).getLogDir())
+                .isEqualTo(Path.of("orion_root", "logs").toAbsolutePath().normalize());
+        configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
+        configuration.getBootstrap().setLogDir("custom/../journals");
+        assertThat(new ConfigurationContext(configuration, Map.of("ORION_ROOT", tempDir.toString())).getLogDir())
+                .isEqualTo(tempDir.resolve("journals"));
+        Path external = tempDir.resolveSibling("external-logs").toAbsolutePath();
+        configuration.getBootstrap().setLogDir(external.toString());
+        assertThat(new ConfigurationContext(configuration, Map.of()).getLogDir()).isEqualTo(external);
+    }
+
+    @Test
+    void rejectsBlankLogDirectory() {
+        OrionConfiguration configuration = configuration(tempDir);
+        for (String directory : new String[]{null, "", "  "}) {
+            configuration.getBootstrap().setLogDir(directory);
+            assertThatThrownBy(() -> new ConfigurationContext(configuration).getLogDir())
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("logDir");
+        }
+    }
+
+    @Test
     void resolvesPlainStorageLocationRelativeToBaseDir() {
         OrionConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("repos");
