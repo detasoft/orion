@@ -44,7 +44,7 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
         String name = requireName(repositoryName);
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                name, storage, new InMemoryIndex(storage), DEFAULT_HEAD);
+                name, storage, new InMemoryIndex(), DEFAULT_HEAD);
         NativeGitRepository previous = repositories.putIfAbsent(
                 name,
                 repository);

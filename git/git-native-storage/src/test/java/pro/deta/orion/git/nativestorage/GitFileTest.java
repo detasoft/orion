@@ -1,6 +1,8 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 
 import java.util.LinkedHashMap;

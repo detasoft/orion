@@ -91,7 +91,7 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
             try {
                 GitStorageApi storage = new LocalGitStorage(repositoryDirectory);
                 return new NativeGitRepository(metadata.name(), storage,
-                        new LocalGitIndex(repositoryDirectory, storage), metadata.defaultHead());
+                        new LocalGitIndex(repositoryDirectory), metadata.defaultHead());
             } catch (IOException failure) {
                 throw new UncheckedIOException("Cannot open repository " + name, failure);
             }

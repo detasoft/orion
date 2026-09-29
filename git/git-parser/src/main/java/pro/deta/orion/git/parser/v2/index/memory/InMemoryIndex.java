@@ -7,7 +7,6 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
@@ -22,16 +21,11 @@ import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
-/** Transient repository refs with atomic snapshots and compare-and-set updates. Borrows object storage. */
+/** Transient repository refs with atomic snapshots and compare-and-set updates. */
 public final class InMemoryIndex implements GitIndexApi {
-    private final GitStorageApi storage;
     private final Map<RefId, ObjectId> refs = new LinkedHashMap<>();
     private Head head = new Head.Symbolic(new RefId("refs/heads/main"));
     private boolean closed;
-
-    public InMemoryIndex(GitStorageApi storage) {
-        this.storage = Objects.requireNonNull(storage, "storage");
-    }
 
     public synchronized RefsSnapshot snapshotRefs() throws IOException {
         requireOpen();
@@ -42,8 +36,6 @@ public final class InMemoryIndex implements GitIndexApi {
         Objects.requireNonNull(value, "head");
         if (value instanceof Head.Symbolic symbolic) {
             symbolic.target().requireFullName();
-        } else if (value instanceof Head.Detached detached && !storage.exists(new ObjectId(detached.target().toBytes()))) {
-            throw new IOException("Detached HEAD object does not exist: " + detached.target());
         }
         synchronized (this) {
             requireOpen();
@@ -62,25 +54,14 @@ public final class InMemoryIndex implements GitIndexApi {
         }
         try {
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            boolean missing = false;
-            for (RefUpdate update : updates) {
-                boolean absent = update.newId().isPresent() && !storage.exists(update.newId().orElseThrow());
-                results.add(new RefUpdateResult(update, absent ? OBJECT_NOT_FOUND : APPLIED, Optional.empty()));
-                missing |= absent;
-            }
             synchronized (this) {
                 requireOpen();
-                boolean failed = missing;
-                if (!atomic || !missing) {
-                    for (int index = 0; index < results.size(); index++) {
-                        RefUpdateResult result = results.get(index);
-                        RefUpdate update = result.update();
-                        if (result.status() == APPLIED
-                                && !Objects.equals(refs.get(update.ref()), update.expectedOld().orElse(null))) {
-                            results.set(index, new RefUpdateResult(update, EXPECTED_OLD_MISMATCH, Optional.empty()));
-                            failed = true;
-                        }
-                    }
+                boolean failed = false;
+                for (RefUpdate update : updates) {
+                    RefUpdateResult.Status status = Objects.equals(refs.get(update.ref()),
+                            update.expectedOld().orElse(null)) ? APPLIED : EXPECTED_OLD_MISMATCH;
+                    results.add(new RefUpdateResult(update, status, Optional.empty()));
+                    failed |= status != APPLIED;
                 }
                 for (int index = 0; index < results.size(); index++) {
                     RefUpdateResult result = results.get(index);

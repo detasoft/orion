@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import java.util.Optional;
 import pro.deta.orion.util.Result;

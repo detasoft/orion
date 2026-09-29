@@ -1,6 +1,8 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;

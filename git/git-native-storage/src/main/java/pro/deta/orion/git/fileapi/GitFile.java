@@ -1,4 +1,4 @@
-package pro.deta.orion.git.nativestorage;
+package pro.deta.orion.git.fileapi;
 
 import pro.deta.orion.git.parser.v2.data.FileMode;
 

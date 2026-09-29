@@ -12,7 +12,6 @@ import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.shared.GitLock;
 
 import java.io.IOException;
@@ -23,7 +22,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,16 +31,14 @@ import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
-/** Persistent repository refs with atomic snapshots and compare-and-set updates. Borrows object storage. */
+/** Persistent repository refs with atomic snapshots and compare-and-set updates. */
 public final class LocalGitIndex implements GitIndexApi {
     private static final RefId HEAD = new RefId("HEAD");
     private static final String SYMBOLIC = "ref: ";
-    private final GitStorageApi storage;
     private final Path path;
     private final GitLock lock;
 
-    public LocalGitIndex(Path repository, GitStorageApi storage) throws IOException {
-        this.storage = Objects.requireNonNull(storage, "storage");
+    public LocalGitIndex(Path repository) throws IOException {
         Path root = repository.toRealPath();
         path = root.resolve("refs.mv");
         lock = new GitLock(root);
@@ -178,9 +174,6 @@ public final class LocalGitIndex implements GitIndexApi {
 
     public void updateHead(Head head) throws IOException {
         Objects.requireNonNull(head, "head");
-        if (head instanceof Head.Detached detached && !storage.exists(new ObjectId(detached.target().toBytes()))) {
-            throw new IOException("Detached HEAD object does not exist: " + detached.target());
-        }
         writeHead(head);
     }
 
@@ -194,31 +187,7 @@ public final class LocalGitIndex implements GitIndexApi {
             }
         }
         try {
-            List<RefUpdate> ready = new ArrayList<>(updates.size());
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
-                boolean missing = update.newId().isPresent() && !storage.exists(update.newId().orElseThrow());
-                results.add(new RefUpdateResult(update, missing ? OBJECT_NOT_FOUND : APPLIED, Optional.empty()));
-                if (!missing) {
-                    ready.add(update);
-                }
-            }
-            if (atomic && ready.size() != updates.size()) {
-                for (int index = 0; index < results.size(); index++) {
-                    RefUpdateResult result = results.get(index);
-                    if (result.status() == APPLIED) {
-                        results.set(index, new RefUpdateResult(result.update(), ATOMIC_ABORTED, Optional.empty()));
-                    }
-                }
-            } else {
-                Iterator<RefUpdateResult> applied = updateAll(ready, atomic).iterator();
-                for (int index = 0; index < results.size(); index++) {
-                    if (results.get(index).status() == APPLIED) {
-                        results.set(index, applied.next());
-                    }
-                }
-            }
-            return List.copyOf(results);
+            return updateAll(updates, atomic);
         } catch (IOException error) {
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
             for (RefUpdate update : updates) {

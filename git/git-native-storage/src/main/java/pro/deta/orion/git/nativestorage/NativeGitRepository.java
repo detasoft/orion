@@ -1,9 +1,11 @@
 package pro.deta.orion.git.nativestorage;
 
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.git.nativestorage.object.LooseObject;
+import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
+import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -34,7 +36,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -69,68 +70,7 @@ public class NativeGitRepository implements AutoCloseable {
     public String name() {
         return name;
     }
-
-    public GitRepositoryFileSnapshot loadFiles(
-            String branch,
-            List<String> paths) throws GitOperationException {
-        return new NativeRepositoryFileLoader(this).loadFiles(branch, paths);
-    }
-
-    public void saveFiles(
-            String branch,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        new NativeRepositoryFileSaver(this).saveFiles(branch, files, deletedPaths, message, author);
-    }
-
-    public NativeGitFileUpdate prepareFileUpdate(
-            String branch,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return new NativeRepositoryFileSaver(this).prepareFiles(branch, files, deletedPaths, message, author);
-    }
-
-    public NativeGitFileUpdate prepareFileUpdate(
-            String branch,
-            String expectedRefRevision,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return new NativeRepositoryFileSaver(this).prepareFiles(
-                branch, expectedRefRevision, files, deletedPaths, message, author, true);
-    }
-
-    public NativeGitFileUpdate prepareProxyFileUpdate(
-            String branch,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return new NativeRepositoryFileSaver(this).prepareFiles(
-                branch,
-                files,
-                deletedPaths,
-                message,
-                author,
-                false);
-    }
-
-    public NativeGitFileUpdate prepareProxyFileUpdate(
-            String branch,
-            String expectedRefRevision,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return new NativeRepositoryFileSaver(this).prepareFiles(
-                branch, expectedRefRevision, files, deletedPaths, message, author, false);
-    }
-
+    
     public String defaultHead() {
         return defaultHead;
     }
@@ -211,7 +151,7 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
-        List<RefUpdateResult> results = index().updateRefs(updates, atomic);
+        List<RefUpdateResult> results = GitRepositoryContext.publishRefs(storage(), index(), updates, atomic);
         for (RefUpdateResult result : results) {
             if (result.status() != RefUpdateResult.Status.APPLIED
                     || result.update().expectedOld().equals(result.update().newId())) {

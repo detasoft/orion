@@ -1,6 +1,9 @@
-package pro.deta.orion.git.nativestorage;
+package pro.deta.orion.git.fileapi;
 
-import pro.deta.orion.git.nativestorage.object.LooseObject;
+import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;

@@ -8,7 +8,11 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import java.io.IOException;
 import java.util.List;
 
-/** Repository reference index, independent of pack storage; its owner controls its lifetime. */
+/**
+ * Repository reference index, independent of pack storage; its owner controls its lifetime.
+ * Callers verify that new ref targets and detached HEAD targets exist in storage before updating the index.
+ * The index validates ref names and expected old values and applies atomic ref updates.
+ */
 public interface GitIndexApi extends AutoCloseable {
     RefsSnapshot snapshotRefs() throws IOException;
 

@@ -1,4 +1,4 @@
-package pro.deta.orion.git.nativestorage.object;
+package pro.deta.orion.git.parser.v2.object;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;

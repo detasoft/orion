@@ -1,6 +1,8 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
