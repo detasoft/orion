@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.auth.AccessControlCredentialUpdate;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PasswordHashingAlgorithm;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -38,8 +43,7 @@ class RuntimeHttpAdminApiIT {
         try (GitHttpTestServer upstream = GitHttpTestServer.start(repositories);
              RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                      RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("proxy-secret")))) {
-            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             JsonNode before = OBJECT_MAPPER.readTree(RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/proxies"), TestBearerTokens.bearer(token)).body());
             Map<String, Object> create = Map.of("action", "create", "scope", "system",
@@ -79,7 +83,7 @@ class RuntimeHttpAdminApiIT {
         String token;
         try (var orion = RuntimeHttpTestSupport.start(configuration)) {
             token = TestBearerTokens.issueRootToken(
-                    orion.accessControlService(), orion.httpUrl("/api/admin/token"), 600);
+                    orion.accessControlService(), 600);
             var listing = RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/proxies"),
                     TestBearerTokens.bearer(token));
             assertThat(listing.status()).isEqualTo(200);
@@ -149,7 +153,6 @@ class RuntimeHttpAdminApiIT {
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
 
             RuntimeHttpTestSupport.HttpResponse aclWithoutToken =
@@ -206,7 +209,6 @@ class RuntimeHttpAdminApiIT {
                 RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot))) {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
 
             RuntimeHttpTestSupport.HttpResponse withoutToken = RuntimeHttpTestSupport.request(
@@ -260,7 +262,6 @@ class RuntimeHttpAdminApiIT {
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-user-api")))) {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
             String baselineAcl = adminAcl(orion, token).body();
 
@@ -330,7 +331,6 @@ class RuntimeHttpAdminApiIT {
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-token-lifecycle")))) {
             String shortLivedToken = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     1);
 
             RuntimeHttpTestSupport.HttpResponse authorized = adminAcl(orion, shortLivedToken);
@@ -341,7 +341,6 @@ class RuntimeHttpAdminApiIT {
 
             String freshToken = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
             RuntimeHttpTestSupport.HttpResponse restored = adminAcl(orion, freshToken);
             assertThat(restored.status()).isEqualTo(HttpURLConnection.HTTP_OK);
@@ -376,17 +375,30 @@ class RuntimeHttpAdminApiIT {
                     "{}".getBytes(StandardCharsets.UTF_8));
             assertThat(wrongPassword.status()).isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED);
 
+            RuntimeHttpTestSupport.HttpResponse recoveryPassword = RuntimeHttpTestSupport.request(
+                    "POST", orion.httpUrl("/api/admin/token"), rootBasic(orion),
+                    "application/json", "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(recoveryPassword.status()).isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED);
+
+            char[] password = "token-user-password".toCharArray();
+            String hash = new OrionPasswordHashingService().calculateHash(PasswordHashingAlgorithm.SHA1, password);
+            orion.accessControlService().createOrUpdateUser(new AccessControlUserUpdate(
+                    "token-user", "token-user@example.test",
+                    List.of(new AccessControlCredentialUpdate(AccessControl.CredentialType.SHA1, hash)), List.of()));
             RuntimeHttpTestSupport.HttpResponse invalidExpiration = RuntimeHttpTestSupport.request(
                     "POST",
                     orion.httpUrl("/api/admin/token"),
-                    rootBasic(orion),
+                    basic("token-user", password),
                     "application/json",
                     OBJECT_MAPPER.writeValueAsBytes(Map.of("expiresInSeconds", 0)));
             assertThat(invalidExpiration.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            String userToken = TestBearerTokens.issueToken(
+                    orion.httpUrl("/api/admin/token"), "token-user", password, 600);
+            assertThat(orion.accessControlService().verifyToken(userToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
 
             String freshToken = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
             assertThat(adminAcl(orion, freshToken).status()).isEqualTo(HttpURLConnection.HTTP_OK);
         }
@@ -398,7 +410,6 @@ class RuntimeHttpAdminApiIT {
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
 
             RuntimeHttpTestSupport.HttpResponse lifecycleState = RuntimeHttpTestSupport.request(

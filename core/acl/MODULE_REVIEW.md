@@ -1,38 +1,5 @@
 # Module Review: `acl`
 
-## 2. First-start root authentication contradicts the enrollment documentation
-
-**Problem.** With missing ACL and normal defaults, startup creates an unmarked reusable password credential.
-Ordinary authentication accepts it; SSH enrollment adds keys without consuming it. The documented first-start
-procedure promises a recovery-only password consumed by enrollment.
-
-**Sources.** [Startup selection](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L150),
-[default creation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1054),
-[authentication](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L547),
-[enrollment](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L566), and
-[SSH consumer](../../net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/OrionSshAuthenticator.java#L143).
-The [bootstrap test](../bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleIT.java#L78)
-explicitly expects ordinary password authentication across restart.
-
-**Documented behavior and contract.** [First-start instructions](../../README.md#L55) describe a one-time
-recovery password and public-key-only token issuance. Creating a usable initial administrator is required;
-the separate initial and reset credential models are a policy choice. The current code and test contradict
-the instructions, so the intended policy needs a decision.
-
-**Minimal repair.** If the documented policy is intended, reuse `resetRootPassword` with the existing empty
-snapshot for first creation, remove the alternate creation helpers and algorithm seam, and update meaningful
-bootstrap/enrollment/authentication coverage. Preserve loading of existing stored configurations.
-
-**Alternatives and consequences.** Documenting a reusable initial password preserves current behavior but
-must explain its continued validity after enrollment. Reusing recovery changes fresh-install authentication
-and must verify ordinary authentication rejection, single enrollment consumption and reconnect behavior.
-Neither option requires a new schema or service.
-
-**Confidence.** High on the mismatch and execution path; medium on the intended product policy.
-
-**Priority signals.** Importance: high, administrator credential lifetime. Repair ease: medium, existing
-recovery mechanism with cross-boundary tests and a policy decision.
-
 ## 3. User mutations synchronously reload and then request another reload
 
 **Problem.** `createOrUpdateUser` saves and synchronously reloads the ACL, then publishes a self-handled event

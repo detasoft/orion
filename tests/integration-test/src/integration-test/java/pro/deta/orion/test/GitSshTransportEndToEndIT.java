@@ -567,6 +567,10 @@ class GitSshTransportEndToEndIT {
         createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
         String userToken = executeCommandOverSsh(
                 startedOrion, USERNAME, TRUSTED_USER_KEY, "issue-token 600").output().trim();
+        assertThat(executeCommandOverSsh(
+                startedOrion, "root", oldRootKey, "/auth/key ls").output())
+                .as("root keys before removing the last key")
+                .containsOnlyOnce("SHA256:");
         String rootFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(
                 oldRootKey.getPublic());
 
@@ -918,6 +922,31 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void initialRootPasswordOnlyEnrollsOneKeyAndRemainsConsumedAfterRestart() throws Exception {
+        Path orionRoot = tempDir.resolve("first-start-root");
+        startedOrion = startExistingOrion(orionRoot);
+        KeyPair key = KeyUtils.generateRSAKeyPair().valueOrFailure("enrolled root key");
+        char[] password = startedOrion.accessControlService().plainRootToken(PlainRootTokenAccessForTests.create());
+        try {
+            assertThatThrownBy(() -> executeStateOverSsh(startedOrion, startedOrion.serverIdentityKey()))
+                    .isInstanceOf(IOException.class);
+            assertThat(enrollKeyAndExecuteOverSsh(startedOrion, "root", password, key, "enroll-key"))
+                    .contains("Root SSH key enrolled");
+            assertThat(executeStateOverSsh(startedOrion, key)).contains("orion: RUNNING");
+            assertThatThrownBy(() -> attemptPasswordOnlyEnrollment(startedOrion, "root", password, key))
+                    .isInstanceOf(IOException.class);
+            startedOrion.stop();
+            startedOrion = null;
+            startedOrion = startExistingOrion(orionRoot);
+            assertThat(executeStateOverSsh(startedOrion, key)).contains("orion: RUNNING");
+            assertThatThrownBy(() -> attemptPasswordOnlyEnrollment(startedOrion, "root", password, key))
+                    .isInstanceOf(IOException.class);
+        } finally {
+            Arrays.fill(password, '\0');
+        }
+    }
+
+    @Test
     void recoveredRootRequiresDedicatedOneTimeEnrollmentAndNewKeyConnection() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         KeyPair enrolledKey = KeyUtils.generateRSAKeyPair()
@@ -1008,7 +1037,19 @@ class GitSshTransportEndToEndIT {
 
     private StartedOrion startFreshOrion(Path orionRoot) throws Exception {
         FileUtils.wipeDirectory(orionRoot);
-        return startExistingOrion(orionRoot);
+        StartedOrion started = startExistingOrion(orionRoot);
+        char[] password = started.accessControlService().plainRootToken(PlainRootTokenAccessForTests.create());
+        try {
+            assertThat(enrollKeyAndExecuteOverSsh(
+                    started, "root", password, started.serverIdentityKey(), "enroll-key"))
+                    .contains("Root SSH key enrolled");
+            return started;
+        } catch (Exception | AssertionError failure) {
+            started.stop();
+            throw failure;
+        } finally {
+            Arrays.fill(password, '\0');
+        }
     }
 
     private StartedOrion startExistingOrion(Path orionRoot) throws Exception {
@@ -1126,7 +1167,7 @@ class GitSshTransportEndToEndIT {
                     return new String[]{new String(password)};
                 }
                 if (prompt.length == 1 && prompt[0].startsWith("Keys (`all`")) {
-                    return new String[]{"all"};
+                    return new String[]{PublicKeyEntry.toString(keyPair.getPublic())};
                 }
                 throw new AssertionError("Unexpected SSH enrollment prompt: " + List.of(prompt));
             }

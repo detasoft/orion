@@ -49,7 +49,6 @@ import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
@@ -152,13 +151,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                                 throw new IllegalStateException(
                                         "ACL not found and default ACL creation is disabled.");
                             }
-                            if (runtimeOptions.resetRootPassword()) {
-                                resetRootPassword(AccessControlSnapshot.singleFile(
-                                        accessControlStorage.primaryPath(),
-                                        serializeInitialConfiguration(new AccessControl())));
-                            } else {
-                                createDefaultAccessControlAndRequestUpdate();
-                            }
+                            resetRootPassword(AccessControlSnapshot.singleFile(
+                                    accessControlStorage.primaryPath(),
+                                    serializeInitialConfiguration(new AccessControl())));
                         } else {
                             log.error("Error while preparing configuration repository.", f.throwable());
                             throw new IllegalStateException(
@@ -940,14 +935,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         orionProvider.getEventManager().publishAndWait(new RequestToAclUpdate(initiator));
     }
 
-    private AccessControl createDefaultAccessControl(
-            String passwordHash,
-            AccessControl.CredentialType passwordCredentialType) {
-        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType).toDraft();
-        synchronizeInternalServerKeysToRoot(draft);
-        return draft.toAccessControl();
-    }
-
     private void resetRootPassword(AccessControlSnapshot snapshot) {
         char[] rootPassword = orionPasswordHashingService.generateRandomString(10);
         try {
@@ -1051,37 +1038,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return first != null && second != null && first.equalsIgnoreCase(second);
     }
 
-    private void createDefaultAccessControlAndRequestUpdate() {
-        PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
-        char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-        try {
-            String passwordHash = orionPasswordHashingService.calculateHash(
-                    passwordHashingAlgorithm,
-                    defaultRootPassword);
-            AccessControl ac = createDefaultAccessControl(
-                    passwordHash,
-                    defaultPasswordCredentialType(passwordHashingAlgorithm));
-            saveAccessControlSnapshotAndReload(
-                    AccessControlSnapshot.singleFile(
-                            accessControlStorage.primaryPath(), serializeInitialConfiguration(ac)),
-                    "default scheme applied", UserEmail.EMPTY);
-            printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-        } finally {
-            Arrays.fill(defaultRootPassword, '\0');
-        }
-    }
-
-    protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
-        return ARGON2;
-    }
-
-    private AccessControl.CredentialType defaultPasswordCredentialType(PasswordHashingAlgorithm algorithm) {
-        return switch (algorithm) {
-            case ARGON2 -> AccessControl.CredentialType.ARGON2;
-            case SHA1 -> AccessControl.CredentialType.SHA1;
-        };
-    }
-
     private void prepareAndUpdateAccessControl(AccessControlSnapshot loadedSnapshot) {
         AccessControlSnapshot preparedSnapshot = loadedSnapshot;
         Map<String, AccessControlDraft> drafts = accessControlDrafts(loadedSnapshot);
@@ -1114,11 +1070,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
         desiredState.publish(document, preparedSnapshot.version());
-    }
-
-    private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft draft) {
-        AccessControlDraft.User rootUser = findRootUser(draft);
-        return rootUser != null && synchronizeInternalServerKeysToRoot(rootUser);
     }
 
     private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft.User rootUser) {
@@ -1261,15 +1212,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private static boolean isRoot(String userId) {
         return userId != null && ROOT_USER_ID.equalsIgnoreCase(userId);
-    }
-
-    private AccessControlDraft.User findRootUser(AccessControlDraft draft) {
-        for (AccessControlDraft.User user : draft.getUsers()) {
-            if (user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId())) {
-                return user;
-            }
-        }
-        return null;
     }
 
     private boolean hasPublicKeyCredential(AccessControlDraft.User user, PublicKey publicKey) {

@@ -38,7 +38,7 @@ class PlaywrightTransportTest {
         OrionConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
-            OrionTestRootAccess.enroll(orion.accessControlService(), rootKey.getPublic());
+            TestBearerTokens.enrollRootKey(orion.accessControlService(), rootKey);
             String token = OrionTestRootAccess.issueToken(
                     orion.accessControlService(), rootKey.getPublic(), 600);
             RuntimeHttpTestSupport.HttpResponse state = RuntimeHttpTestSupport.request(
@@ -67,7 +67,7 @@ class PlaywrightTransportTest {
         OrionConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
-            OrionTestRootAccess.enroll(orion.accessControlService(), rootKey.getPublic());
+            TestBearerTokens.enrollRootKey(orion.accessControlService(), rootKey);
             try (SshClient client = sshClient(orion)) {
                 KeyPair unknownKey = KeyUtils.generateRSAKeyPair().valueOrFailure("unknown test key");
                 try (ClientSession session = client.connect("root", "127.0.0.1",

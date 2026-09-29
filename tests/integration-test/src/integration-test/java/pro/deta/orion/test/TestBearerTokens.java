@@ -2,13 +2,17 @@ package pro.deta.orion.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.test.integration.OrionTestRootAccess;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
@@ -16,17 +20,28 @@ import java.util.Map;
 final class TestBearerTokens {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String ROOT_USER = "root";
+    private static final KeyPair ROOT_KEY = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
 
     private TestBearerTokens() {
     }
 
-    static String issueRootToken(OrionAccessControlServiceImpl accessControlService, URL tokenUrl, long expiresInSeconds)
-            throws IOException {
-        char[] rootPassword = accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
+    static String issueRootToken(OrionAccessControlServiceImpl accessControlService, long expiresInSeconds) {
+        AuthenticationResult authentication = accessControlService.authenticateSshUser(
+                ROOT_USER, ROOT_KEY.getPublic().getEncoded());
+        if (authentication instanceof AuthenticationResult.Failure) {
+            enrollRootKey(accessControlService, ROOT_KEY);
+        }
+        return OrionTestRootAccess.issueToken(accessControlService, ROOT_KEY.getPublic(), expiresInSeconds);
+    }
+
+    static void enrollRootKey(OrionAccessControlServiceImpl accessControlService, KeyPair key) {
+        char[] password = accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
+        byte[] credential = new String(password).getBytes(StandardCharsets.UTF_8);
         try {
-            return issueToken(tokenUrl, ROOT_USER, rootPassword, expiresInSeconds);
+            OrionTestRootAccess.enroll(accessControlService, key.getPublic(), credential);
         } finally {
-            Arrays.fill(rootPassword, '\0');
+            Arrays.fill(password, '\0');
+            Arrays.fill(credential, (byte) 0);
         }
     }
 

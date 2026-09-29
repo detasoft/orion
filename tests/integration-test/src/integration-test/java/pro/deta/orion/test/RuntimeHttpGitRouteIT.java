@@ -67,8 +67,7 @@ class RuntimeHttpGitRouteIT {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
              Git acmeSource = initRepository(tempDir.resolve("acme-source"));
              Git otherSource = initRepository(tempDir.resolve("other-source"))) {
-            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
             OrionDocument base = new XmlService().deserializeDocument(new ByteArrayInputStream(
@@ -222,7 +221,6 @@ class RuntimeHttpGitRouteIT {
 
                 String rootToken = TestBearerTokens.issueRootToken(
                         orion.accessControlService(),
-                        orion.httpUrl("/api/admin/token"),
                         600);
                 RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
                         "POST",
@@ -309,7 +307,6 @@ class RuntimeHttpGitRouteIT {
                 ObjectId initialCommit = createCommit(source, "README.md", "seeded for read-only http\n", "seed http commit");
                 String rootToken = TestBearerTokens.issueRootToken(
                         orion.accessControlService(),
-                        orion.httpUrl("/api/admin/token"),
                         600);
                 TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
 
@@ -398,7 +395,6 @@ class RuntimeHttpGitRouteIT {
                 ObjectId masterCommit = createCommit(source, "README.md", "master over http\n", "seed master");
                 String rootToken = TestBearerTokens.issueRootToken(
                         orion.accessControlService(),
-                        orion.httpUrl("/api/admin/token"),
                         600);
                 TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
 

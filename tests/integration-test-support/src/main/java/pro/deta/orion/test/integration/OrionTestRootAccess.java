@@ -4,6 +4,8 @@ import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.security.PublicKey;
@@ -15,8 +17,17 @@ public final class OrionTestRootAccess {
     }
 
     @TestOnly
-    public static void enroll(OrionAccessControlService accessControl, PublicKey key) {
-        accessControl.addSshKeysToUser("root", List.of(PublicKeyEntry.toString(key)));
+    public static void enroll(OrionAccessControlService accessControl, PublicKey key, byte[] recoveryPassword) {
+        SshKeyEnrollmentAuthentication authentication = accessControl.authenticateSshKeyEnrollment(
+                "root", recoveryPassword);
+        if (!(authentication instanceof SshKeyEnrollmentAuthentication.Success success)) {
+            throw new IllegalStateException("Test root recovery authentication failed");
+        }
+        String generation = success.rootRecoveryGeneration().orElseThrow();
+        if (!(accessControl.completeRootSshKeyEnrollment(generation, List.of(PublicKeyEntry.toString(key)))
+                instanceof SshKeyEnrollmentResult.Success)) {
+            throw new IllegalStateException("Test root key enrollment failed");
+        }
         if (!(accessControl.authenticateSshUser("root", key.getEncoded())
                 instanceof AuthenticationResult.Success)) {
             throw new IllegalStateException("Enrolled test root key was not accepted");

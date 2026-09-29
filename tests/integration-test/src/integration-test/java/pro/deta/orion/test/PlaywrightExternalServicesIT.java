@@ -75,7 +75,7 @@ class PlaywrightExternalServicesIT {
                 assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                 lifecycle.waitForStarting();
                 OrionAccessControlServiceImpl accessControl = component.orionAccessControlService();
-                OrionTestRootAccess.enroll(accessControl, rootKey.getPublic());
+                TestBearerTokens.enrollRootKey(accessControl, rootKey);
                 configureAcme(component, accessControl, configuration);
                 String token = OrionTestRootAccess.issueToken(accessControl, rootKey.getPublic(), 600);
                 runPlaywright(fixtureRoot, caRoot, token);

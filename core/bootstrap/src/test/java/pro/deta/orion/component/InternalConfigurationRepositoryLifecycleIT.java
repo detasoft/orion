@@ -77,6 +77,7 @@ class InternalConfigurationRepositoryLifecycleIT {
     @Test
     void bootstrapsOnceAndReusesTheCommittedAclOnRestart() throws Exception {
         OrionConfiguration configuration = configuration();
+        KeyPair enrolledKey = keyPair();
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         char[] rootPassword;
@@ -89,7 +90,10 @@ class InternalConfigurationRepositoryLifecycleIT {
                 assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
                 rootPassword = first.orionAccessControlService()
                         .plainRootToken(PlainRootTokenAccessForTests.create());
-                assertAuthenticated(first, "root", new String(rootPassword));
+                assertRecoveryPasswordOnly(first, new String(rootPassword));
+                assertThat(first.orionAccessControlService().authenticateUserAndIssueToken(
+                        "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8), 600))
+                        .isInstanceOf(TokenIssueResult.Failure.class);
                 assertThat(first.nativeGitRepositoryProvider().repositoryNames())
                         .containsExactly(REPOSITORY_NAME);
                 GitRepositoryFileSnapshot snapshot = repository(first).loadFiles(
@@ -107,12 +111,26 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
             try {
                 assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
-                assertAuthenticated(restarted, "root", new String(rootPassword));
+                assertRecoveryPasswordOnly(restarted, new String(rootPassword));
                 assertThat(repository(restarted).loadFiles(CONFIGURATION_REF, List.of(ACL_PATH)).version())
                         .contains(firstVersion);
                 assertThatThrownBy(() -> restarted.orionAccessControlService()
                         .plainRootToken(PlainRootTokenAccessForTests.create()))
                         .isInstanceOf(IllegalStateException.class);
+                SshKeyEnrollmentAuthentication.Success enrollment = (SshKeyEnrollmentAuthentication.Success)
+                        restarted.orionAccessControlService().authenticateSshKeyEnrollment(
+                                "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8));
+                String generation = enrollment.rootRecoveryGeneration().orElseThrow();
+                assertThat(restarted.orionAccessControlService().completeRootSshKeyEnrollment(
+                        generation, List.of(PublicKeyEntry.toString(enrolledKey.getPublic()))))
+                        .isInstanceOf(SshKeyEnrollmentResult.Success.class);
+                assertThat(restarted.orionAccessControlService().authenticateSshKeyEnrollment(
+                        "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8)))
+                        .isInstanceOf(SshKeyEnrollmentAuthentication.Failure.class);
+                assertThat(restarted.orionAccessControlService().completeRootSshKeyEnrollment(
+                        generation, List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
+                        .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
+                assertSshAuthenticated(restarted, "root", enrolledKey);
             } finally {
                 assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
             }
@@ -121,6 +139,17 @@ class InternalConfigurationRepositoryLifecycleIT {
         }
 
         assertThat(processOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+        OrionComponent enrolled = component(configuration);
+        OrionApplicationLifecycle enrolledLifecycle = enrolled.orionApplicationLifecycle();
+        try {
+            assertThat(enrolledLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertSshAuthenticated(enrolled, "root", enrolledKey);
+            assertThat(enrolled.orionAccessControlService().authenticateSshKeyEnrollment(
+                    "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(SshKeyEnrollmentAuthentication.Failure.class);
+        } finally {
+            assertThat(enrolledLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
     }
 
     @Test
@@ -170,7 +199,12 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             oldPassword = new String(first.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create()));
-            first.orionAccessControlService().addKeyToUser("root", rootOpenSshKey);
+            SshKeyEnrollmentAuthentication.Success enrollment = (SshKeyEnrollmentAuthentication.Success)
+                    first.orionAccessControlService().authenticateSshKeyEnrollment(
+                            "root", oldPassword.getBytes(StandardCharsets.UTF_8));
+            assertThat(first.orionAccessControlService().completeRootSshKeyEnrollment(
+                    enrollment.rootRecoveryGeneration().orElseThrow(), List.of(rootOpenSshKey)))
+                    .isInstanceOf(SshKeyEnrollmentResult.Success.class);
             first.orionAccessControlService().createOrUpdateUser(user("alice"));
             first.orionAccessControlService().addKeyToUser(
                     "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
@@ -563,6 +597,9 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            first.orionAccessControlService().saveAccessControlConfigurationFile(
+                    defaultAclBytes("legacy-password"),
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
             assertSshAuthenticated(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);

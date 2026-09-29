@@ -254,7 +254,6 @@ class OrionStartupIT {
         try {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"),
                     600);
 
             long startedAtNanos = System.nanoTime();

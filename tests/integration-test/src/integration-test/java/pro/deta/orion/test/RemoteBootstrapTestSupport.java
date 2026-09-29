@@ -2,6 +2,8 @@ package pro.deta.orion.test;
 
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.auth.SshCredentialListResult;
+import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
@@ -18,6 +20,8 @@ import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Native upstream authentication, material and runtime wiring shared by remote bootstrap scenarios. */
 final class RemoteBootstrapTestSupport {
@@ -56,14 +60,22 @@ final class RemoteBootstrapTestSupport {
         Map<String, String> authentication;
         if ("http".equals(transport)) {
             credential = TestBearerTokens.issueRootToken(
-                    upstream.accessControlService(), upstream.httpUrl("/api/admin/token"), 600);
+                    upstream.accessControlService(), 600);
             location = "git+" + upstream.httpUrl("/r/bootstrap-inputs.git");
             authentication = Map.of("credentialKind", "token", "credential", credentialReference);
         } else {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
             var key = generator.generateKeyPair();
-            upstream.accessControlService().addKeyToUser("root", PublicKeyEntry.toString(key.getPublic()));
+            SshCredentialListResult listed = upstream.accessControlService().listSshCredentials("root");
+            assertThat(listed).isInstanceOf(SshCredentialListResult.Success.class);
+            if (((SshCredentialListResult.Success) listed).credentials().isEmpty()) {
+                TestBearerTokens.enrollRootKey(upstream.accessControlService(), key);
+            } else {
+                assertThat(upstream.accessControlService().addSshCredentials(
+                        "root", List.of(PublicKeyEntry.toString(key.getPublic()))))
+                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+            }
             credential = "-----BEGIN PRIVATE KEY-----\n"
                     + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())
                     + "\n-----END PRIVATE KEY-----\n";

@@ -18,7 +18,6 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
-import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
@@ -84,6 +83,10 @@ class BootstrapProxyEndpointIT {
                     upstream.accessControlService().accessControlConfigurationFile().content()));
             var aclDraft = document.system().accessControl().toDraft();
             var rootDraft = aclDraft.getUsers().getFirst();
+            rootDraft.getCredentials().clear();
+            rootDraft.addCredential(AccessControl.CredentialType.SHA1,
+                    new OrionPasswordHashingService().calculateHash(
+                            PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray()));
             for (String name : List.of("proxy/system/*", "bootstrap/*")) {
                 rootDraft.addGrant("probe-" + rootDraft.getGrants().size())
                         .addKey(AccessControl.GrantKey.REPOSITORY, name)
@@ -120,8 +123,7 @@ class BootstrapProxyEndpointIT {
                         }
                         String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                                 .repositoryName().orElseThrow();
-                        char[] rootPassword = upstream.accessControlService()
-                                .plainRootToken(PlainRootTokenAccessForTests.create());
+                        char[] rootPassword = PASSWORD.toCharArray();
                         try (var writer = client(target, bootstrap, transport, port,
                                      "writer", writerKey, PASSWORD.toCharArray());
                              var reader = client(target, bootstrap, transport, port,

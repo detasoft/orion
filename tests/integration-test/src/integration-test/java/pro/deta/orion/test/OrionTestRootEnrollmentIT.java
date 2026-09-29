@@ -24,11 +24,10 @@ class OrionTestRootEnrollmentIT {
         KeyPair key = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            OrionTestRootAccess.enroll(orion.accessControlService(), key.getPublic());
+            TestBearerTokens.enrollRootKey(orion.accessControlService(), key);
             assertAdminTokenWorks(orion, key);
         }
         try (RuntimeHttpTestSupport.StartedOrion restarted = RuntimeHttpTestSupport.start(configuration)) {
-            OrionTestRootAccess.enroll(restarted.accessControlService(), key.getPublic());
             assertAdminTokenWorks(restarted, key);
             KeyPair unknown = KeyUtils.generateRSAKeyPair().valueOrFailure("unknown test key");
             assertThatThrownBy(() -> OrionTestRootAccess.issueToken(

@@ -12,7 +12,6 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.AuthenticationResult;
-import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -52,8 +51,7 @@ class RuntimeHttpAdminAclUpdateIT {
         String rootToken;
         byte[] userToken;
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             String bearer = TestBearerTokens.bearer(rootToken);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
@@ -135,8 +133,7 @@ class RuntimeHttpAdminAclUpdateIT {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("configuration-authors"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
             AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
@@ -209,8 +206,7 @@ class RuntimeHttpAdminAclUpdateIT {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("oidc-secret"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             String bearer = TestBearerTokens.bearer(token);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
@@ -272,8 +268,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     "GET", orion.httpUrl("/api/admin/configuration/status"), null);
             assertThat(withoutToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
 
-            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse acl = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token));
             RuntimeHttpTestSupport.HttpResponse status = RuntimeHttpTestSupport.request(
@@ -291,18 +286,10 @@ class RuntimeHttpAdminAclUpdateIT {
     void postAccessControlReloadsRuntimeAclAndSurvivesRestart() throws Exception {
         Path orionRoot = tempDir.resolve("orion-update");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
-        char[] rootPassword;
 
         RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
         try {
-            rootPassword = orion.accessControlService()
-                    .plainRootToken(PlainRootTokenAccessForTests.create())
-                    .clone();
-            String token = TestBearerTokens.issueToken(
-                    orion.httpUrl("/api/admin/token"),
-                    "root",
-                    rootPassword,
-                    600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
 
             RuntimeHttpTestSupport.HttpResponse initialAcl = RuntimeHttpTestSupport.request(
                     "GET",
@@ -322,10 +309,8 @@ class RuntimeHttpAdminAclUpdateIT {
 
             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
             assertUserAuthenticates(orion, "http-updated-user");
-            assertThat(orion.accessControlService().authenticateUser(
-                    "root",
-                    String.valueOf(rootPassword).getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(orion.accessControlService().verifyToken(token.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
         } finally {
             orion.close();
         }
@@ -342,14 +327,7 @@ class RuntimeHttpAdminAclUpdateIT {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            char[] rootPassword = orion.accessControlService()
-                    .plainRootToken(PlainRootTokenAccessForTests.create())
-                    .clone();
-            String token = TestBearerTokens.issueToken(
-                    orion.httpUrl("/api/admin/token"),
-                    "root",
-                    rootPassword,
-                    600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             byte[] storedBefore = readFileFromAclRepository(orion);
             RuntimeHttpTestSupport.HttpResponse activeBefore = RuntimeHttpTestSupport.request(
                     "GET",
@@ -371,10 +349,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(token));
             assertThat(activeAfter.body()).isEqualTo(activeBefore.body());
-            assertThat(orion.accessControlService().authenticateUser(
-                    "root",
-                    String.valueOf(rootPassword).getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Success.class);
+            assertThat(activeAfter.status()).isEqualTo(HttpURLConnection.HTTP_OK);
         }
     }
 
@@ -382,8 +357,7 @@ class RuntimeHttpAdminAclUpdateIT {
     void staleAccessControlPostCannotReplaceANewerCommit() throws Exception {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-stale"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            String token = TestBearerTokens.issueRootToken(orion.accessControlService(),
-                    orion.httpUrl("/api/admin/token"), 600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token));
             assertThat(initial.etag()).isNotBlank();
