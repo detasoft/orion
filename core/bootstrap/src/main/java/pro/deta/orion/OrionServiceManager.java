@@ -78,6 +78,11 @@ final class OrionServiceManager {
             managedProcess.waitFor(Duration.ofSeconds(5));
         }
 
+        if (managedProcess.isAlive()) {
+            errors.println(settings.appName() + " could not stop process with PID " + pid.get());
+            return 1;
+        }
+
         Files.deleteIfExists(settings.pidFile());
         output.println(settings.appName() + " stopped");
         return 0;

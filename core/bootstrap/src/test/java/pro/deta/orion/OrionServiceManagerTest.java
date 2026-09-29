@@ -9,11 +9,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionServiceManagerTest {
@@ -47,6 +49,69 @@ class OrionServiceManagerTest {
         assertEquals(0, exitCode);
         assertTrue(process.destroyed);
         assertFalse(Files.exists(pidFile()));
+    }
+
+    @Test
+    void stopEscalatesToForcedTerminationAndDeletesPidFile() throws Exception {
+        Files.writeString(pidFile(), "42");
+        RecordingProcess process = new RecordingProcess(42, true);
+        process.terminateOnDestroy = false;
+        OrionServiceManager manager = new OrionServiceManager(settings(), command -> {
+            throw new AssertionError("start should not be called");
+        }, pid -> Optional.of(process));
+
+        int exitCode = manager.stop(output(), output());
+
+        assertEquals(0, exitCode);
+        assertTrue(process.destroyed);
+        assertTrue(process.forciblyDestroyed);
+        assertFalse(process.isAlive());
+        assertEquals(List.of(Duration.ofSeconds(1), Duration.ofSeconds(5)), process.waitTimeouts);
+        assertFalse(Files.exists(pidFile()));
+    }
+
+    @Test
+    void stopReportsFailureAndKeepsPidWhenProcessRemainsAlive() throws Exception {
+        Files.writeString(pidFile(), "42");
+        RecordingProcess process = new RecordingProcess(42, true);
+        process.terminateOnDestroy = false;
+        process.terminateOnForce = false;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+        OrionServiceManager manager = new OrionServiceManager(settings(), command -> {
+            throw new AssertionError("start should not be called");
+        }, pid -> Optional.of(process));
+
+        int exitCode = manager.stop(
+                new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(errors, true, StandardCharsets.UTF_8));
+
+        assertEquals(1, exitCode);
+        assertTrue(process.destroyed);
+        assertTrue(process.forciblyDestroyed);
+        assertTrue(process.isAlive());
+        assertEquals(List.of(Duration.ofSeconds(1), Duration.ofSeconds(5)), process.waitTimeouts);
+        assertEquals("42", Files.readString(pidFile()).trim());
+        assertTrue(errors.toString(StandardCharsets.UTF_8).contains("could not stop process with PID 42"));
+        assertFalse(out.toString(StandardCharsets.UTF_8).contains("stopped"));
+    }
+
+    @Test
+    void restartDoesNotLaunchAnotherProcessWhenStopFails() throws Exception {
+        Files.writeString(pidFile(), "42");
+        RecordingProcess oldProcess = new RecordingProcess(42, true);
+        oldProcess.terminateOnDestroy = false;
+        oldProcess.terminateOnForce = false;
+        RecordingLauncher launcher = new RecordingLauncher(new RecordingProcess(43, true));
+        OrionServiceManager manager = new OrionServiceManager(
+                settings(), launcher, pid -> Optional.of(oldProcess));
+
+        int exitCode = manager.restart(List.of("--config", "config.yml"), output(), output());
+
+        assertEquals(1, exitCode);
+        assertNull(launcher.command);
+        assertTrue(oldProcess.isAlive());
+        assertEquals("42", Files.readString(pidFile()).trim());
     }
 
     @Test
@@ -142,6 +207,10 @@ class OrionServiceManagerTest {
         private final long pid;
         private boolean alive;
         private boolean destroyed;
+        private boolean forciblyDestroyed;
+        private boolean terminateOnDestroy = true;
+        private boolean terminateOnForce = true;
+        private final List<Duration> waitTimeouts = new ArrayList<>();
 
         private RecordingProcess(long pid, boolean alive) {
             this.pid = pid;
@@ -161,18 +230,24 @@ class OrionServiceManagerTest {
         @Override
         public boolean destroy() {
             destroyed = true;
-            alive = false;
+            if (terminateOnDestroy) {
+                alive = false;
+            }
             return true;
         }
 
         @Override
         public boolean destroyForcibly() {
-            alive = false;
+            forciblyDestroyed = true;
+            if (terminateOnForce) {
+                alive = false;
+            }
             return true;
         }
 
         @Override
         public boolean waitFor(Duration timeout) {
+            waitTimeouts.add(timeout);
             return !alive;
         }
     }
