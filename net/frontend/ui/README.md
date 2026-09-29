@@ -17,6 +17,39 @@ creation. It does not expose repository, member, notification, or activity
 lists. Repositories and activity created by the UI are therefore displayed only
 for the current browser session.
 
+## Key material and ACME accounts
+
+Application administrators can generate RSA 3072-bit key pairs or import an
+unencrypted RSA private key in PKCS#1 or PKCS#8 PEM format (2048–8192 bits) in
+**Key material**. Choose **ACME account** or **HTTPS certificate** as the purpose.
+Names must be unique and use lowercase letters, digits, dots, underscores or
+hyphens, starting with a letter or digit. Creating a key never overwrites an
+existing entry. The inventory shows its public key and SHA-256 fingerprint;
+private keys are never returned by the API. The import input is cleared after
+submission and is not saved in browser storage.
+
+In the ACME form, **Account key** selects a stored RSA ACME account key.
+To reuse an account from another client, import its account private key and
+select both that key and the same ACME directory. Importing a certificate's
+private key does not recover the ACME account. Certbot JSON/JWK files and
+encrypted PEM files are not accepted directly.
+
+**Automatic** preserves the current key when the provider and EAB account ID
+are unchanged; otherwise it generates a key for a new account. The settings,
+including the selected key's alias and version, are saved in `orion.xml` through
+the configuration repository. Private keys stay in the protected material store.
+Changing the account key does not change the HTTPS certificate's key or its
+activation settings. Generating an HTTPS key alone does not activate HTTPS.
+
+SSH uses the same persisted reference:
+
+```text
+/acme configure revision=<revision> provider=letsencrypt email=admin@example.com domains=example.com account-key=<alias> account-key-version=1
+```
+
+Omit both key parameters for automatic selection. `/acme show` reports
+`accountKey` and `accountKeyVersion`. Domain verification remains HTTP-01.
+
 ## Server logs
 
 Connect with an application-admin token, open **Settings**, enable **Server logs

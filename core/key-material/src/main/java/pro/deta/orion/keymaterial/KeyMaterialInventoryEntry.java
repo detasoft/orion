@@ -10,6 +10,7 @@ public record KeyMaterialInventoryEntry(
         long version,
         String scope,
         String publicKeyPem,
+        String publicKeySha256Fingerprint,
         List<CertificateDetails> certificates) {
     public KeyMaterialInventoryEntry {
         certificates = List.copyOf(certificates);

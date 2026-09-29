@@ -46,7 +46,7 @@ public final class OrionAdminAcmeConfigurationRoute extends BaseAdminRoute {
         } catch (AccessControlConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload ACME settings and try again.");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
-            return OrionHttpResponse.text(400, "Check ACME settings. New providers/accounts require EAB credentials.");
+            return OrionHttpResponse.text(400, "Check ACME settings, account key and any required EAB credentials.");
         } catch (Exception failure) {
             return OrionHttpResponse.text(503, "Could not save ACME settings.");
         } finally {

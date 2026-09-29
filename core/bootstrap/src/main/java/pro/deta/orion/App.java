@@ -82,6 +82,7 @@ public class App {
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
                         .configurationMaterialCapability(bootstrap.configurationMaterial())
+                        .keyMaterialAdministrationCapability(bootstrap.keyMaterialAdministration())
                         .initialConfiguration(bootstrap.initialConfiguration())
                         .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())

@@ -1152,6 +1152,7 @@ class BootstrapContextTest {
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
                 .configurationMaterialCapability(context.configurationMaterial())
+                .keyMaterialAdministrationCapability(context.keyMaterialAdministration())
                 .initialConfiguration(context.initialConfiguration())
                 .tlsCapability(context.tlsKeyMaterial())
                 .sshHostKeyCapability(context.sshHostKeys())

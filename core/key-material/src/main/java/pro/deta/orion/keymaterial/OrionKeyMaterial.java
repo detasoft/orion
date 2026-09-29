@@ -1,12 +1,24 @@
 package pro.deta.orion.keymaterial;
 
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+
 import javax.net.ssl.SSLContext;
 import javax.security.auth.x500.X500Principal;
 import java.io.IOException;
+import java.io.CharArrayReader;
 import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.RSAPublicKeySpec;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -86,6 +98,60 @@ public final class OrionKeyMaterial implements AutoCloseable {
 
     public TlsCapability tls() {
         return tls;
+    }
+
+    public KeyMaterialAdministrationCapability administration() {
+        return (alias, purpose, privateKeyPem) -> {
+            try {
+                if (alias == null || !alias.matches("[a-z0-9][a-z0-9._-]{0,127}")) {
+                    throw new IllegalArgumentException("Invalid key material name");
+                }
+                if (purpose != KeyMaterialPurpose.ACME_ACCOUNT && purpose != KeyMaterialPurpose.TLS_IDENTITY) {
+                    throw new IllegalArgumentException("Only ACME account and TLS identity keys can be created");
+                }
+                KeyPair imported = privateKeyPem == null || privateKeyPem.length == 0
+                        ? null : readRsaPrivateKey(privateKeyPem);
+                KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias(alias),
+                        purpose, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1), clusterScope);
+                synchronized (owner) {
+                    if (owner.containsAlias(alias)) {
+                        throw new IllegalArgumentException("Key material name already exists");
+                    }
+                    if (imported == null) owner.generateKeyIfMissing(descriptor, 3072);
+                    else owner.importKey(descriptor, imported);
+                    try {
+                        owner.save();
+                    } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+                        owner.close();
+                        throw failure;
+                    }
+                }
+            } finally {
+                if (privateKeyPem != null) Arrays.fill(privateKeyPem, '\0');
+            }
+        };
+    }
+
+    private static KeyPair readRsaPrivateKey(char[] pem) {
+        if (pem.length > 16384) throw new IllegalArgumentException("Private key PEM is too large");
+        try (PEMParser parser = new PEMParser(new CharArrayReader(pem))) {
+            Object parsed = parser.readObject();
+            PrivateKeyInfo info = switch (parsed) {
+                case PEMKeyPair pair -> pair.getPrivateKeyInfo();
+                case PrivateKeyInfo privateKey -> privateKey;
+                case null, default -> throw new IllegalArgumentException("Expected an unencrypted RSA private key");
+            };
+            if (parser.readObject() != null) throw new IllegalArgumentException("Expected exactly one private key");
+            PrivateKey key = new JcaPEMKeyConverter().getPrivateKey(info);
+            if (!(key instanceof RSAPrivateCrtKey rsa)
+                    || rsa.getModulus().bitLength() < 2048 || rsa.getModulus().bitLength() > 8192) {
+                throw new IllegalArgumentException("Expected an RSA key of 2048–8192 bits");
+            }
+            return new KeyPair(KeyFactory.getInstance("RSA").generatePublic(
+                    new RSAPublicKeySpec(rsa.getModulus(), rsa.getPublicExponent())), rsa);
+        } catch (IOException | GeneralSecurityException invalid) {
+            throw new IllegalArgumentException("Invalid RSA private key PEM");
+        }
     }
 
     public ConfigurationMaterialCapability configurationMaterial() {

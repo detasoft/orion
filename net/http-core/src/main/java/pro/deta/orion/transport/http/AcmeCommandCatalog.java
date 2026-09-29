@@ -17,6 +17,7 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
 import java.util.Arrays;
 import java.util.List;
@@ -39,7 +40,8 @@ public final class AcmeCommandCatalog {
         return CommandNode.builder()
                 .action(definition("show", Set.of(), Set.of(), ignored -> view(configuration.view())))
                 .action(definition("configure", Set.of("revision", "provider", "directory-url", "email", "domains",
-                        "eab-kid", "eab-hmac-key"), Set.of("eab-hmac-key"), this::configure))
+                        "eab-kid", "eab-hmac-key", "account-key", "account-key-version"),
+                        Set.of("eab-hmac-key"), this::configure))
                 .action(definition("issue", Set.of(), Set.of(), ignored -> {
                     certificates.issue(new AcmeCertificateService.IssueRequest(
                             null, null, null, null, null, null, true));
@@ -49,7 +51,8 @@ public final class AcmeCommandCatalog {
                         /acme show
                         /acme configure revision=<revision> provider=<letsencrypt|zerossl|google|custom> \
                         email=<email> domains=<domain,domain> [directory-url=<url>] \
-                        [eab-kid=<id> eab-hmac-key=<base64url-key>]
+                        [eab-kid=<id> eab-hmac-key=<base64url-key>] \
+                        [account-key=<stored-alias> account-key-version=<version>]
                         /acme issue
                         EAB credentials are stored encrypted. Omit the HMAC key to keep saved credentials.
                         Issuing confirms acceptance of the selected provider's terms of service.
@@ -63,10 +66,16 @@ public final class AcmeCommandCatalog {
         Map<String, String> parameters = invocation.arguments().named();
         char[] key = parameters.getOrDefault("eab-hmac-key", "").toCharArray();
         try {
+            if (parameters.containsKey("account-key") != parameters.containsKey("account-key-version")) {
+                throw new IllegalArgumentException("Account key alias and version must be supplied together");
+            }
+            OrionMaterialReference account = parameters.containsKey("account-key")
+                    ? new OrionMaterialReference(parameters.get("account-key"),
+                            Long.parseLong(parameters.get("account-key-version"))) : null;
             return view(configuration.save(new AcmeConfigurationService.Settings(parameters.get("revision"),
                     parameters.get("provider"), parameters.get("directory-url"), parameters.get("email"),
                     Arrays.asList(parameters.getOrDefault("domains", "").split(",", -1)),
-                    parameters.get("eab-kid"), key), invocation.context().securityContext()
+                    parameters.get("eab-kid"), key, account), invocation.context().securityContext()
                     .getUserIdentity().getUserId()));
         } finally {
             Arrays.fill(key, '\0');
@@ -87,7 +96,7 @@ public final class AcmeCommandCatalog {
                         return failure("Certificate issuance is already in progress.");
                     } catch (IllegalArgumentException invalid) {
                         return new CommandResult.Failure(CommandFailureCode.INVALID_ARGUMENTS,
-                                "Check ACME settings. New providers/accounts require EAB credentials.", List.of());
+                                "Check ACME settings, account key and any required EAB credentials.", List.of());
                     } catch (Exception failed) {
                         return failure("ACME operation failed. Check configuration and CA availability.");
                     }
@@ -112,6 +121,10 @@ public final class AcmeCommandCatalog {
         fields.put("provider", CommandValue.text(view.provider()));
         fields.put("directoryUrl", CommandValue.text(view.directoryUrl()));
         fields.put("accountEmail", CommandValue.text(view.accountEmail()));
+        fields.put("accountKey", CommandValue.text(
+                view.accountMaterial() == null ? "" : view.accountMaterial().alias()));
+        fields.put("accountKeyVersion", CommandValue.text(
+                view.accountMaterial() == null ? "" : Long.toString(view.accountMaterial().version())));
         fields.put("domains", CommandValue.text(String.join(",", view.domains())));
         fields.put("eabKeyId", CommandValue.text(view.eabKeyId()));
         fields.put("eabConfigured", CommandValue.bool(view.eabConfigured()));

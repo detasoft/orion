@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
@@ -46,6 +48,7 @@ class AcmeAdministrationTest {
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(null, mapper),
+                new OrionAdminKeyMaterialRoute(null, KeyMaterialAdministrationCapability.unavailable(), mapper),
                 new OrionAdminAcmeCertificateRoute(null, mapper))), new OrionHttpResponseWriter(mapper));
         for (SecurityContext context : List.of(SecurityContext.createContext(),
                 SecurityContext.createContext().withUserIdentity(new InternalUserImpl("reader", List.of())))) {
@@ -54,7 +57,8 @@ class AcmeAdministrationTest {
                         .isInstanceOfSatisfying(CommandResult.Failure.class,
                                 failure -> assertThat(failure.code()).isEqualTo(CommandFailureCode.ACCESS_DENIED));
             }
-            for (String path : List.of("/api/admin/acme/configuration", "/api/admin/acme/certificate")) {
+            for (String path : List.of("/api/admin/acme/configuration", "/api/admin/acme/certificate",
+                    "/api/admin/key-material")) {
                 for (String method : List.of("GET", "POST")) {
                     Response response = new Response();
                     servlet.service(httpRequest(method, path, "{}", context), response.proxy());
@@ -73,7 +77,8 @@ class AcmeAdministrationTest {
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
         AcmeConfigurationService configuration = new AcmeConfigurationService(desired, null, null,
                 new AcmeCertificateService(new OrionConfiguration(), desired,
-                        AcmeKeyMaterialCapability.unavailable(), null, null));
+                        AcmeKeyMaterialCapability.unavailable(), null, null),
+                ConfigurationMaterialCapability.unavailable(), new OrionConfiguration());
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper))), new OrionHttpResponseWriter(mapper));

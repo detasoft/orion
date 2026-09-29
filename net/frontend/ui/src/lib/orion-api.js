@@ -188,6 +188,9 @@ export function createOrionClient(options = {}) {
     keyMaterial() {
       return request('/api/admin/key-material')
     },
+    createKeyMaterial(settings) {
+      return request('/api/admin/key-material', { method: 'POST', body: JSON.stringify(settings) })
+    },
     issueAcmeCertificate() {
       return request('/api/admin/acme/certificate', {
         method: 'POST', body: JSON.stringify({ agreeToTermsOfService: true }),

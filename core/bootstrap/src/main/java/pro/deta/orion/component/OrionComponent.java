@@ -20,6 +20,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
@@ -66,6 +67,7 @@ public interface OrionComponent {
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
+        @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
         @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
         @BindsInstance Builder initialConfiguration(Optional<AccessControlSnapshot> snapshot);
         @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
@@ -87,6 +89,7 @@ public interface OrionComponent {
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                     .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
+                    .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
                     .initialConfiguration(Optional.empty())
                     .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                     .tlsCapability(TlsCapability.unavailable())

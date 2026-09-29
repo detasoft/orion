@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 
-const client = { keyMaterial: vi.fn(), issueAcmeCertificate: vi.fn(),
+const client = { keyMaterial: vi.fn(), createKeyMaterial: vi.fn(), issueAcmeCertificate: vi.fn(),
   acmeConfiguration: vi.fn(), saveAcmeConfiguration: vi.fn() }
 vi.mock('../lib/orion-api.js', () => ({ createOrionClient: vi.fn(() => client) }))
 
@@ -24,6 +24,90 @@ beforeEach(() => {
       { id: 'custom', label: 'Other ACME server', directoryUrl: '' },
     ] })
   client.saveAcmeConfiguration.mockResolvedValue({ revision: 'r2' })
+  client.createKeyMaterial.mockResolvedValue({})
+})
+
+it('generates a named account key and refreshes the inventory', async () => {
+  const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
+  await flushPromises()
+  await wrapper.get('[aria-label="Key name"]').setValue('account-two')
+  await wrapper.get('[aria-label="Create key material"]').trigger('submit')
+  await flushPromises()
+  expect(client.createKeyMaterial).toHaveBeenCalledWith({
+    alias: 'account-two', purpose: 'ACME_ACCOUNT', privateKeyPem: '',
+  })
+  expect(client.keyMaterial).toHaveBeenCalledTimes(2)
+  wrapper.unmount()
+})
+
+it('imports a key and clears the private input even when the request fails', async () => {
+  client.createKeyMaterial.mockRejectedValueOnce(Object.assign(new Error('Invalid key'), { status: 400 }))
+  const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
+  await flushPromises()
+  await wrapper.get('[aria-label="Key operation"]').setValue('import')
+  await wrapper.get('[aria-label="Key name"]').setValue('imported')
+  await wrapper.get('[aria-label="Private key PEM"]').setValue('secret-pem')
+  await wrapper.get('[aria-label="Create key material"]').trigger('submit')
+  await flushPromises()
+  expect(client.createKeyMaterial).toHaveBeenCalledWith(expect.objectContaining({ privateKeyPem: 'secret-pem' }))
+  expect(wrapper.get('[aria-label="Private key PEM"]').element.value).toBe('')
+  expect(wrapper.text()).toContain('Invalid key')
+  wrapper.unmount()
+})
+
+it('selects only compatible account keys and saves the reference before issuance', async () => {
+  client.keyMaterial.mockResolvedValue({ entries: [
+    { alias: 'account', version: 3, purpose: 'ACME_ACCOUNT', algorithm: 'RSA', certificates: [] },
+    { alias: 'tls-only', version: 1, purpose: 'TLS_IDENTITY', algorithm: 'RSA', certificates: [] },
+  ] })
+  const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
+  await flushPromises()
+  const select = wrapper.get('[aria-label="ACME account key"]')
+  expect(select.text()).toContain('account')
+  expect(select.text()).not.toContain('tls-only')
+  await select.setValue('account')
+  await wrapper.get('.acme-form').trigger('submit')
+  await flushPromises()
+  expect(client.saveAcmeConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+    accountMaterial: { alias: 'account', version: 3 },
+  }))
+  expect(client.issueAcmeCertificate).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
+it('keeps the configured key selected and does not save unchanged settings before issuance', async () => {
+  const settings = await client.acmeConfiguration()
+  client.acmeConfiguration.mockResolvedValue({ ...settings, accountMaterial: { alias: 'saved', version: 2 } })
+  client.keyMaterial.mockResolvedValue({ entries: [
+    { alias: 'saved', version: 2, purpose: 'ACME_ACCOUNT', algorithm: 'RSA', certificates: [] },
+  ] })
+  const wrapper = mount(KeyMaterial, { props: { token: 'admin-token' } })
+  await flushPromises()
+  expect(wrapper.get('[aria-label="ACME account key"]').element.value).toBe('saved')
+  await wrapper.get('.acme-form').trigger('submit')
+  await flushPromises()
+  expect(client.saveAcmeConfiguration).not.toHaveBeenCalled()
+  expect(client.issueAcmeCertificate).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
+it('does not let an old import clear a new sessions private input', async () => {
+  let finish
+  client.createKeyMaterial.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const wrapper = mount(KeyMaterial, { props: { token: 'old-token' } })
+  await flushPromises()
+  await wrapper.get('[aria-label="Key operation"]').setValue('import')
+  await wrapper.get('[aria-label="Key name"]').setValue('first')
+  await wrapper.get('[aria-label="Private key PEM"]').setValue('old-secret')
+  await wrapper.get('[aria-label="Create key material"]').trigger('submit')
+  await wrapper.setProps({ token: 'new-token' })
+  await flushPromises()
+  await wrapper.get('[aria-label="Private key PEM"]').setValue('new-secret')
+  finish({})
+  await flushPromises()
+  expect(wrapper.get('[aria-label="Private key PEM"]').element.value).toBe('new-secret')
+  expect(wrapper.text()).not.toContain('Key pair saved.')
+  wrapper.unmount()
 })
 
 it('enables a complete but disabled ACME configuration before issuing', async () => {

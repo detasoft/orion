@@ -9,6 +9,19 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('sends key creation through the authenticated admin endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    const input = { alias: 'account', purpose: 'ACME_ACCOUNT', privateKeyPem: 'private-pem' }
+    await client.createKeyMaterial(input)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/key-material')
+    expect(init.method).toBe('POST')
+    expect(init.headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(init.headers.get('Content-Type')).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual(input)
+  })
+
   it('loads server logs with the existing bearer token, cursor and cancellation signal', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: [], cursor: 'boot:2' }), {
       headers: { 'Content-Type': 'application/json' },

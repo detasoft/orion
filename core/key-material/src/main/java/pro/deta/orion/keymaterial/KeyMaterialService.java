@@ -298,6 +298,17 @@ public class KeyMaterialService implements AutoCloseable {
         return keyPair;
     }
 
+    synchronized void importKey(KeyMaterialDescriptor descriptor, KeyPair keyPair) throws GeneralSecurityException {
+        requireOpen();
+        requireDescriptor(descriptor);
+        if (keyStore.containsAlias(descriptor.alias().value())) {
+            throw new IllegalArgumentException("Key material name already exists");
+        }
+        X509Certificate certificate = storageCertificateFactory.create(
+                descriptor.alias().value(), descriptor.purpose().storageName(), keyPair);
+        setPrivateKey(descriptor, keyPair, List.of(certificate));
+    }
+
     public synchronized void generateSecretKeyIfMissing(
             KeyMaterialDescriptor descriptor,
             int keySize) throws GeneralSecurityException {
@@ -442,7 +453,9 @@ public class KeyMaterialService implements AutoCloseable {
                 }
             }
             entries.add(new KeyMaterialInventoryEntry(alias, purpose.name(), algorithm.name(), version,
-                    scope, publicKey, certificates));
+                    scope, publicKey, secretKey ? null : HexFormat.of().withDelimiter(":").formatHex(
+                            MessageDigest.getInstance("SHA-256").digest(chain[0].getPublicKey().getEncoded())),
+                    certificates));
         }
         return List.copyOf(entries);
     }

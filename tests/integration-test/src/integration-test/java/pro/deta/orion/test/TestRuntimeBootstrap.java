@@ -9,6 +9,7 @@ import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
+import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
@@ -49,6 +50,7 @@ final class TestRuntimeBootstrap {
                 .serverIdentityCapability(identity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())
+                .keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability.unavailable())
                 .initialConfiguration(java.util.Optional.empty())
                 .configurationCipherCapability(ConfigurationCipherCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
