@@ -31,7 +31,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
@@ -136,7 +136,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         RefUpdate feature = prepared.refUpdates().getFirst();
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        IndexedPack pack = ingest(repository, prepared.pack());
+        MutableIndexedPack pack = ingest(repository, prepared.pack());
         results = context.publish(Optional.of(pack), List.of(
                 RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
         assertThat(results).extracting(RefUpdateResult::status)
@@ -158,7 +158,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        IndexedPack pack = ingest(repository, update.pack());
+        MutableIndexedPack pack = ingest(repository, update.pack());
         results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
                 "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
@@ -177,7 +177,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        IndexedPack pack = ingest(repository, update.pack());
+        MutableIndexedPack pack = ingest(repository, update.pack());
         results = context.publish(Optional.of(pack), update.refUpdates(), true);
         assertThat(publishCalls).isEqualTo(1);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
@@ -219,7 +219,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
                 "next", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        IndexedPack pack = ingest(repository, next.pack());
+        MutableIndexedPack pack = ingest(repository, next.pack());
         assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
                 .extracting(RefUpdateResult::status).containsExactly(APPLIED);
         assertThat(calls).contains("update demo refs/heads/main false");
@@ -410,7 +410,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         return new FetchCommand(context, capabilities).prepareNegotiation(request, GitTransport.HTTP);
     }
 
-    private static IndexedPack ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
+    private static MutableIndexedPack ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             return repository.ingest(input);
         }

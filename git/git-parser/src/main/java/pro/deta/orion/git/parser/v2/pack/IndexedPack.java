@@ -14,27 +14,18 @@ import java.util.OptionalLong;
 import java.util.Set;
 
 /**
- * Pack bytes and their physical-entry and resolved-object index.
- * Writes and truncation invalidate the pack identity; ingestion assigns a verified trailer identity,
- * and finish validates dependencies and writes a new trailer when bytes have changed.
- * Returned inputs borrow the pack and must be closed before it. The pack owns temporary dependency state;
- * finish releases it after validation, close() releases all pack resources, and discard()
- * also removes a mutable working pack. Mutations after finish are tracked by subsequent dependency queries.
- * Storage publication takes ownership of accepted packs. Dependency queries and finish require a mutable pack.
+ * Read access to pack bytes and their physical-entry and resolved-object index.
+ * A read view does not imply that ingestion or delta resolution is complete; records may still be unresolved.
+ * Returned inputs borrow the pack and must be closed before it. Only the resource owner may close the pack;
+ * successful storage publication transfers ownership to storage.
  * Offsets iterate in ascending physical order. Missing records and object offsets are null; unresolved
  * records have no object ID or logical type and a size of -1. Entry metadata describes compressed bytes,
  * while a resolved record carries the logical object type and size after delta application.
  */
 public interface IndexedPack extends AutoCloseable {
-    void append(ByteBuffer source) throws IOException;
-
-    void write(long offset, ByteBuffer source) throws IOException;
-
     int read(long offset, ByteBuffer target) throws IOException;
 
     long size() throws IOException;
-
-    void truncate(long size) throws IOException;
 
     PackId id() throws IOException;
 
@@ -51,19 +42,11 @@ public interface IndexedPack extends AutoCloseable {
     <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
                      GitObjectRead<R> reader) throws IOException;
 
-    boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
-                     OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException;
-
-    boolean addObject(long offset, ObjectId id, GitObjectType type, long size)
-            throws IOException;
-
     Optional<EntryMetadata> find(ObjectId id) throws IOException;
 
     Optional<EntryMetadata> find(long offset) throws IOException;
 
     void close() throws IOException;
-
-    void discard() throws IOException;
 
     long entryCount();
 
@@ -73,25 +56,11 @@ public interface IndexedPack extends AutoCloseable {
 
     BufferedByteInputV2 input() throws IOException;
 
-    void flush() throws IOException;
-
-    void setId(PackId id) throws IOException;
-
-    PackId finish(long dataEnd) throws IOException;
-
     Iterator<Long> offsets();
 
     Long objectOffset(ObjectId id);
 
     Record record(long offset) throws IOException;
-
-    void requireMutable() throws IOException;
-
-    Optional<ObjectId> nextExternalBase() throws IOException;
-
-    Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException;
-
-    boolean hasUnresolved() throws IOException;
 
     record EntryMetadata(long offset, long dataOffset, long inflatedSize, GitObjectType type,
                          OptionalLong baseOffset, Optional<ObjectId> baseId) {

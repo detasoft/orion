@@ -6,6 +6,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -30,7 +31,7 @@ class PackDependenciesTest {
         Path path = directory.resolve("incoming.index");
         IndexedPack.EntryMetadata first = full(12);
         IndexedPack.EntryMetadata duplicate = full(64);
-        try (IndexedPack pack = create(memory, path)) {
+        try (MutableIndexedPack pack = create(memory, path)) {
             assertThat(pack.hasUnresolved()).isFalse();
             assertThat(pack.find(12)).isEmpty();
             assertThat(pack.find(id(1))).isEmpty();
@@ -61,7 +62,7 @@ class PackDependenciesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void walksWaitingBranchesAndChainsOneDependentAtATime(boolean memory) throws Exception {
-        try (IndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
             IndexedPack.EntryMetadata base = full(12);
             IndexedPack.EntryMetadata byId = ref(64, id(1));
             IndexedPack.EntryMetadata byOffset = ofs(128, 12);
@@ -91,7 +92,7 @@ class PackDependenciesTest {
         Path path = directory.resolve("incoming.mv");
         IndexedPack.EntryMetadata lateInternal = full(256);
         IndexedPack.EntryMetadata appendedBase = full(320);
-        try (IndexedPack pack = create(memory, path)) {
+        try (MutableIndexedPack pack = create(memory, path)) {
             for (IndexedPack.EntryMetadata entry : List.of(ref(12, id(10)), ref(64, id(20)), ref(128, id(20)))) {
                 addEntry(pack, entry);
                 pack.addObject(entry.offset(), id((int) entry.offset()), GitObjectType.BLOB, 99);
@@ -118,7 +119,7 @@ class PackDependenciesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void refusesToFinalizeCyclesWithoutEvidenceOfWhichExternalBaseBreaksThem(boolean memory) throws Exception {
-        try (IndexedPack pack = create(memory, directory.resolve("self.index"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("self.index"))) {
             IndexedPack.EntryMetadata self = ref(12, id(1));
             addEntry(pack, self);
             pack.addObject(self.offset(), id(1), GitObjectType.BLOB, 3);
@@ -126,7 +127,7 @@ class PackDependenciesTest {
             assertThat(pack.hasUnresolved()).isFalse();
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class).hasMessageContaining("cycle");
         }
-        try (IndexedPack pack = create(memory, directory.resolve("mixed.index"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("mixed.index"))) {
             IndexedPack.EntryMetadata first = ref(12, id(2));
             IndexedPack.EntryMetadata second = ofs(64, 12);
             addEntry(pack, first);
@@ -141,7 +142,7 @@ class PackDependenciesTest {
     @ValueSource(booleans = {false, true})
     void finalizesDeepForwardChainsWithoutAnInMemoryTraversalStack(boolean memory) throws Exception {
         Path path = directory.resolve("deep.index");
-        try (IndexedPack pack = create(memory, path)) {
+        try (MutableIndexedPack pack = create(memory, path)) {
             for (int i = 1; i <= 2000; i++) {
                 IndexedPack.EntryMetadata entry = i == 2000 ? full(12L + 64L * i) : ref(12L + 64L * i, id(i + 1));
                 addEntry(pack, entry);
@@ -159,7 +160,7 @@ class PackDependenciesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rejectsConflictingCompletionWithoutRemovingTheWaitingDependency(boolean memory) throws Exception {
-        try (IndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
             IndexedPack.EntryMetadata base = full(12);
             IndexedPack.EntryMetadata delta = ref(64, id(1));
             addEntry(pack, base);
@@ -185,7 +186,7 @@ class PackDependenciesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rejectsMalformedMetadataAndFullObjectCompletionWithDifferentTypeOrSize(boolean memory) throws Exception {
-        try (IndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
             for (IndexedPack.EntryMetadata invalid : List.of(new IndexedPack.EntryMetadata(12, 12, 3, GitObjectType.BLOB,
                             OptionalLong.empty(), Optional.empty()),
                     new IndexedPack.EntryMetadata(12, 13, -1, GitObjectType.BLOB,
@@ -217,7 +218,7 @@ class PackDependenciesTest {
     void rejectsUnresolvedStateAndTracksMutationsAfterSuccessfulCompletion(boolean memory) throws Exception {
         Path path = directory.resolve("incoming.index");
         IndexedPack.EntryMetadata entry = full(12);
-        try (IndexedPack pack = create(memory, path)) {
+        try (MutableIndexedPack pack = create(memory, path)) {
             addEntry(pack, entry);
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             pack.addObject(entry.offset(), id(1), GitObjectType.BLOB, 3);
@@ -240,7 +241,7 @@ class PackDependenciesTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void tracksDirectMutationsAfterDependencyQueries(boolean memory) throws Exception {
-        try (IndexedPack pack = create(memory, directory.resolve("incoming"))) {
+        try (MutableIndexedPack pack = create(memory, directory.resolve("incoming"))) {
             IndexedPack.EntryMetadata base = full(12);
             IndexedPack.EntryMetadata delta = ref(64, id(1));
             addEntry(pack, base);
@@ -259,13 +260,13 @@ class PackDependenciesTest {
         }
     }
 
-    private static void addEntry(IndexedPack pack, IndexedPack.EntryMetadata entry) throws IOException {
+    private static void addEntry(MutableIndexedPack pack, IndexedPack.EntryMetadata entry) throws IOException {
         pack.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
                 entry.baseOffset(), entry.baseId());
     }
 
-    private static IndexedPack create(boolean memory, Path path) throws IOException {
-        IndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(path);
+    private static MutableIndexedPack create(boolean memory, Path path) throws IOException {
+        MutableIndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(path);
         pack.append(ByteBuffer.wrap(PackTestData.pack()));
         return pack;
     }

@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
@@ -41,7 +41,7 @@ public final class LocalGitStorage implements GitStorageApi {
         return packs.createPack();
     }
 
-    public PackId persist(IndexedPack pack) throws IOException {
+    public PackId persist(MutableIndexedPack pack) throws IOException {
         Objects.requireNonNull(pack, "pack");
         if (!(pack instanceof LocalIndexedPack local)) {
             throw new IllegalArgumentException("Local storage requires a LocalIndexedPack");

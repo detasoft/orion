@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 
 import java.io.IOException;
@@ -104,7 +104,7 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     }
 
     @Override
-    public List<RefUpdateResult> publish(Optional<IndexedPack> pack, List<RefUpdate> updates, boolean atomic)
+    public List<RefUpdateResult> publish(Optional<MutableIndexedPack> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
         Optional<PackId> received = pack.isPresent()
                 ? Optional.of(storage().persist(pack.orElseThrow())) : Optional.empty();

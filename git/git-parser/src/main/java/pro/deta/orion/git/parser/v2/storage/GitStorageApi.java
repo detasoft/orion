@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 
@@ -29,9 +29,9 @@ import java.util.Set;
  * Index read failures are reported as errors, never as absent objects. No shared lookup index is required.
  */
 public interface GitStorageApi extends AutoCloseable {
-    IndexedPack newPack() throws IOException;
+    MutableIndexedPack newPack() throws IOException;
 
-    PackId persist(IndexedPack pack) throws IOException;
+    PackId persist(MutableIndexedPack pack) throws IOException;
 
     <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException;
 

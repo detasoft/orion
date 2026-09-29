@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -142,7 +143,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
             }
             writer.finish();
         }
-        IndexedPack pack = ingest(bytes.toByteArray());
+        MutableIndexedPack pack = ingest(bytes.toByteArray());
         List<ObjectId> ids = new ArrayList<>(pack.objectIds());
         new GitPackObjectResolver(pack, storage()).complete();
         storage().persist(pack);
@@ -193,7 +194,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
         return ingest(bytes.toByteArray());
     }
 
-    private static IndexedPack ingest(byte[] bytes) throws IOException {
+    private static MutableIndexedPack ingest(byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, new InMemoryStorage().newPack())) {
             return ingestor.ingest();

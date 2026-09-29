@@ -64,14 +64,14 @@ public final class PackTestData {
         return new ObjectId(hash.digest(content));
     }
 
-    public static IndexedPack ingest(byte[] bytes, IndexedPack target) throws IOException {
+    public static MutableIndexedPack ingest(byte[] bytes, MutableIndexedPack target) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, target)) {
             return ingestor.ingest();
         }
     }
 
-    public static IndexedPack ingest(IndexedPack source, IndexedPack target) throws IOException {
+    public static MutableIndexedPack ingest(IndexedPack source, MutableIndexedPack target) throws IOException {
         try (BufferedByteInputV2 input = source.input(); PackIngestor ingestor = new PackIngestor(input, target)) {
             return ingestor.ingest();
         }
@@ -79,7 +79,7 @@ public final class PackTestData {
 
     public static ObjectId store(GitStorageApi storage,
                                  GitObjectType type, byte[] content) throws IOException {
-        IndexedPack target = ingest(pack(entry(type, content)), storage.newPack());
+        MutableIndexedPack target = ingest(pack(entry(type, content)), storage.newPack());
         new GitPackObjectResolver(target, storage).complete();
         storage.persist(target);
         return objectId(type, content);
@@ -90,7 +90,7 @@ public final class PackTestData {
             throws IOException {
         byte[] full = entry(type, base);
         ObjectId id = objectId(type, result);
-        IndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack());
+        MutableIndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack());
         new GitPackObjectResolver(target, storage).complete();
         storage.persist(target);
         return id;

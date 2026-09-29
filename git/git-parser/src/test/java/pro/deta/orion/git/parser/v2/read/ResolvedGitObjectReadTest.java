@@ -8,7 +8,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -74,7 +74,7 @@ class ResolvedGitObjectReadTest {
                     PackTestData.compressed(new byte[]{1, 1, 1, 20}));
             ObjectId offsetId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{20});
             ObjectId referenceId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{30});
-            IndexedPack pack = PackTestData.ingest(PackTestData.pack(full, offsetDelta,
+            MutableIndexedPack pack = PackTestData.ingest(PackTestData.pack(full, offsetDelta,
                     PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api.newPack());
             new GitPackObjectResolver(pack, api).complete();
             api.persist(pack);

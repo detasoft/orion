@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -39,7 +40,7 @@ class GitStorageApiTest {
             byte[] third = {6};
             ObjectId firstId = PackTestData.objectId(GitObjectType.BLOB, first);
             ObjectId secondId = PackTestData.objectId(GitObjectType.BLOB, second);
-            IndexedPack target = PackTestData.ingest(
+            MutableIndexedPack target = PackTestData.ingest(
                     PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage.newPack());
             new GitPackObjectResolver(target, storage).complete();
             PackId pair = storage.persist(target);

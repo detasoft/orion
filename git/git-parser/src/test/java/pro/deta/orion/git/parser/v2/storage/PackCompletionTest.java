@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -211,7 +211,7 @@ class PackCompletionTest {
         private final Path indexPath;
         private final Path temporaryPath;
         private final GitStorageApi storage;
-        private final IndexedPack pack;
+        private final MutableIndexedPack pack;
 
         private Attempt(byte[] bytes) throws IOException {
             Path parent = Files.createTempDirectory(directory, "attempt-");

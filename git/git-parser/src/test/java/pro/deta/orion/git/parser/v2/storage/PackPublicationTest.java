@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -47,7 +47,7 @@ class PackPublicationTest {
         byte[] wire = pack(blob(new byte[]{1, 2, 3}));
         ObjectId object = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
         try (BufferedByteInputV2 source = source(join(wire, new byte[]{42}));
-             IndexedPack target = storage.newPack();
+             MutableIndexedPack target = storage.newPack();
              PackIngestor ingestor = new PackIngestor(source, target)) {
             ingestor.ingest();
             assertThat(storage.exists(object)).isFalse();
@@ -68,8 +68,8 @@ class PackPublicationTest {
     @Test
     void discardingOneAttemptDoesNotRemoveAnother() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (IndexedPack first = ingest(pack(blob(new byte[]{1})), storage.newPack());
-             IndexedPack second = ingest(pack(blob(new byte[]{2})), storage.newPack())) {
+        try (MutableIndexedPack first = ingest(pack(blob(new byte[]{1})), storage.newPack());
+             MutableIndexedPack second = ingest(pack(blob(new byte[]{2})), storage.newPack())) {
             first.discard();
             first.discard();
             new GitPackObjectResolver(second, storage).complete();
@@ -84,8 +84,8 @@ class PackPublicationTest {
         byte[] wire = pack(blob(new byte[]{5}));
         GitStorageApi firstStorage = new LocalGitStorage(directory);
         GitStorageApi secondStorage = new LocalGitStorage(directory);
-        try (IndexedPack first = ingest(wire, firstStorage.newPack());
-             IndexedPack second = ingest(wire, secondStorage.newPack());
+        try (MutableIndexedPack first = ingest(wire, firstStorage.newPack());
+             MutableIndexedPack second = ingest(wire, secondStorage.newPack());
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             PackId expected = new GitPackObjectResolver(first, firstStorage).complete();
             new GitPackObjectResolver(second, secondStorage).complete();
@@ -115,7 +115,7 @@ class PackPublicationTest {
         byte[] wire = pack(blob(content));
         GitStorageApi storage = new LocalGitStorage(directory);
         PackId id;
-        try (IndexedPack first = ingest(wire, storage.newPack())) {
+        try (MutableIndexedPack first = ingest(wire, storage.newPack())) {
             id = new GitPackObjectResolver(first, storage).complete();
             storage.persist(first);
         }
@@ -125,7 +125,7 @@ class PackPublicationTest {
         Files.write(path(id, ".pack"), corrupt);
 
         GitStorageApi reopened = new LocalGitStorage(directory);
-        try (IndexedPack duplicate = ingest(wire, reopened.newPack())) {
+        try (MutableIndexedPack duplicate = ingest(wire, reopened.newPack())) {
             assertThat(new GitPackObjectResolver(duplicate, reopened).complete()).isEqualTo(id);
             assertThatThrownBy(() -> reopened.persist(duplicate))
                     .isInstanceOf(IOException.class).hasMessageContaining("checksum mismatch");
@@ -139,7 +139,7 @@ class PackPublicationTest {
     @Test
     void incompletePublicationIsInvisibleAndCanBeReplacedByVerifiedPack() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (IndexedPack target = ingest(pack(blob(new byte[]{7})), storage.newPack())) {
+        try (MutableIndexedPack target = ingest(pack(blob(new byte[]{7})), storage.newPack())) {
             PackId id = new GitPackObjectResolver(target, storage).complete();
             Files.createDirectories(path(id, ".pack").getParent());
             Files.write(path(id, ".pack"), new byte[]{0});
@@ -170,7 +170,7 @@ class PackPublicationTest {
         ObjectId secondBase = blobId((byte) 2);
         byte[] firstDelta = delta(firstBase, new byte[]{1, 1, 1, 3});
         byte[] thin = pack(firstDelta, delta(secondBase, new byte[]{1, 1, 1, 4}));
-        try (IndexedPack target = ingest(thin, storage.newPack())) {
+        try (MutableIndexedPack target = ingest(thin, storage.newPack())) {
             PackId received = new PackId(Arrays.copyOfRange(thin, thin.length - 20, thin.length));
             PackId completed = new GitPackObjectResolver(target, storage).complete();
             assertThat(storage.persist(target)).isEqualTo(completed);
@@ -201,7 +201,7 @@ class PackPublicationTest {
     @Test
     void publicationFailureCleansStagingWithoutDeletingExistingPaths() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (IndexedPack target = ingest(pack(blob(new byte[]{10})), storage.newPack())) {
+        try (MutableIndexedPack target = ingest(pack(blob(new byte[]{10})), storage.newPack())) {
             PackId id = new GitPackObjectResolver(target, storage).complete();
             Path obstacle = path(id, ".mv");
             Files.createDirectories(obstacle);
@@ -216,7 +216,7 @@ class PackPublicationTest {
     void resolvesAReferenceToAnotherObjectInTheSamePublishedPack() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         byte[] full = blob(new byte[]{1});
-        try (IndexedPack target = ingest(pack(full, delta(blobId((byte) 1), new byte[]{1, 1, 1, 2})),
+        try (MutableIndexedPack target = ingest(pack(full, delta(blobId((byte) 1), new byte[]{1, 1, 1, 2})),
                 storage.newPack())) {
             new GitPackObjectResolver(target, storage).complete();
             storage.persist(target);
@@ -237,7 +237,7 @@ class PackPublicationTest {
             entries.add(delta(objectId(GitObjectType.BLOB, previous),
                     new byte[]{2, 2, 2, (byte) (value >>> 8), (byte) value}));
         }
-        IndexedPack target = ingest(pack(entries.toArray(byte[][]::new)), storage.newPack());
+        MutableIndexedPack target = ingest(pack(entries.toArray(byte[][]::new)), storage.newPack());
         new GitPackObjectResolver(target, storage).complete();
         storage.persist(target);
         GitStorageApi reopened = memory ? storage : new LocalGitStorage(directory);
@@ -258,7 +258,7 @@ class PackPublicationTest {
 
     @Test
     void memoryPublicationTakesThePackAndDiscardsOnlyDuplicateAttempts() throws Exception {
-        IndexedPack target;
+        MutableIndexedPack target;
         ObjectId object = blobId((byte) 1);
         try (GitStorageApi storage = new InMemoryStorage()) {
             target = ingest(pack(blob(new byte[]{1})), storage.newPack());
@@ -266,7 +266,7 @@ class PackPublicationTest {
             assertThat(storage.persist(target)).isEqualTo(id);
             assertThat(target.id()).isEqualTo(id);
             assertThat(storage.persist(target)).isEqualTo(id);
-            IndexedPack duplicate = ingest(pack(blob(new byte[]{1})), storage.newPack());
+            MutableIndexedPack duplicate = ingest(pack(blob(new byte[]{1})), storage.newPack());
             new GitPackObjectResolver(duplicate, storage).complete();
             assertThat(storage.persist(duplicate)).isEqualTo(id);
             assertThatThrownBy(duplicate::size).isInstanceOf(ClosedChannelException.class);

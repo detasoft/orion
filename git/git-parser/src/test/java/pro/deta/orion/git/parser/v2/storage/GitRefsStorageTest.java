@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -245,7 +245,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         source = ByteBuffer.wrap(bytes.toByteArray());
         try (BufferedByteInputV2 input = new BufferedByteInputV2(this);
              PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
-            IndexedPack pack = ingestor.ingest();
+            MutableIndexedPack pack = ingestor.ingest();
             new GitPackObjectResolver(pack, storage).complete();
             storage.persist(pack);
         }

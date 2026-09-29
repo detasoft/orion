@@ -22,7 +22,7 @@ import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
@@ -129,7 +129,7 @@ class BootstrapGitRuntimeProxyTest {
 
     private static Optional<PackId> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
-            IndexedPack pack = repository.ingest(input);
+            MutableIndexedPack pack = repository.ingest(input);
             return Optional.of(repository.storage().persist(pack));
         }
     }

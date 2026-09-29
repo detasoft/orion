@@ -16,6 +16,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -208,7 +209,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         ByteBuffer bytes = ByteBuffer.allocate(deltaOffset + 2 + deltaZlib.length);
         bytes.putInt(0x5041434b).putInt(2).putInt(2).put((byte) 0x33).put(baseZlib);
         bytes.put((byte) 0x66).put((byte) (deltaOffset - 12)).put(deltaZlib);
-        IndexedPack stored = storage.newPack();
+        MutableIndexedPack stored = storage.newPack();
         stored.append(bytes.flip());
         stored.append(ByteBuffer.wrap(MessageDigest.getInstance("SHA-1").digest(bytes.array())));
         stored.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
@@ -338,7 +339,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             writer.writeObject(type, content.length, input);
             writer.finish();
         }
-        IndexedPack pack = pro.deta.orion.git.parser.v2.pack.PackTestData.ingest(
+        MutableIndexedPack pack = pro.deta.orion.git.parser.v2.pack.PackTestData.ingest(
                 bytes.toByteArray(), storage.newPack());
         new GitPackObjectResolver(pack, storage).complete();
         storage.persist(pack);

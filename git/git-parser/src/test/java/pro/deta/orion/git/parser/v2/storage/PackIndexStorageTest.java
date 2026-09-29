@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 
@@ -34,7 +35,7 @@ class PackIndexStorageTest {
         ObjectId object = new ObjectId("2".repeat(40));
         IndexedPack.EntryMetadata entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
                 OptionalLong.empty(), Optional.of(base));
-        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+        try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
             pack.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
                     entry.baseOffset(), entry.baseId());
@@ -75,7 +76,7 @@ class PackIndexStorageTest {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
-        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+        try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             Files.writeString(temporaryPath, "another attempt");
             assertThatThrownBy(pack::hasUnresolved).isInstanceOf(IOException.class);
             assertThat(Files.exists(indexPath)).isTrue();
@@ -89,7 +90,7 @@ class PackIndexStorageTest {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
-        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+        try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.exists(temporaryPath)).isTrue();
@@ -104,7 +105,7 @@ class PackIndexStorageTest {
     @Test
     void discardsPackWithActiveDependenciesAndRemovesItsDirectory() throws Exception {
         Path staging = directory.resolve("pack");
-        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+        try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.exists(staging.resolve("data.tmv"))).isTrue();

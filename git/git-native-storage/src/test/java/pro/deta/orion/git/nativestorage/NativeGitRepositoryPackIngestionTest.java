@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -20,8 +20,8 @@ class NativeGitRepositoryPackIngestionTest {
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-                IndexedPack first = repository.ingest(firstInput);
-                IndexedPack second = repository.ingest(secondInput);
+                MutableIndexedPack first = repository.ingest(firstInput);
+                MutableIndexedPack second = repository.ingest(secondInput);
                 assertThat(first).isNotSameAs(second);
                 assertThat(repository.storage().packIds()).isEmpty();
                 first.discard();

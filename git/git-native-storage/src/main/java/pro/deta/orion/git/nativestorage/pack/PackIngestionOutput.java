@@ -2,7 +2,7 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -53,11 +53,11 @@ public final class PackIngestionOutput implements BufferedByteOutput, AutoClosea
         output.flush();
     }
 
-    public IndexedPack complete() throws IOException {
+    public MutableIndexedPack complete() throws IOException {
         requireWritable();
         finished = true;
         output.close();
-        IndexedPack pack = null;
+        MutableIndexedPack pack = null;
         try (BufferedByteInputV2 input = new BufferedByteInputV2(Files.newInputStream(temporary));
              PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
             pack = ingestor.ingest();

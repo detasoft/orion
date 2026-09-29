@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
@@ -37,12 +38,12 @@ public final class InMemoryStorage implements GitStorageApi {
     private Head head = new Head.Symbolic(new RefId("refs/heads/main"));
     private boolean closed;
 
-    public synchronized IndexedPack newPack() throws IOException {
+    public synchronized MutableIndexedPack newPack() throws IOException {
         requireOpen();
         return new MemoryIndexedPack();
     }
 
-    public synchronized PackId persist(IndexedPack pack) throws IOException {
+    public synchronized PackId persist(MutableIndexedPack pack) throws IOException {
         Objects.requireNonNull(pack, "pack");
         if (!(pack instanceof MemoryIndexedPack memory)) {
             throw new IllegalArgumentException("Memory storage requires a memory pack");

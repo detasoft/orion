@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -57,14 +57,14 @@ class InMemoryStorageTest {
                 deltas[i] = PackTestData.delta(bases.get(i), new byte[]{1, 1, 1, (byte) (10 + i)});
             }
             byte[] source = PackTestData.pack(deltas);
-            try (IndexedPack memoryPack = PackTestData.ingest(source, memory.newPack());
-                 IndexedPack diskPack = PackTestData.ingest(source, disk.newPack())) {
+            try (MutableIndexedPack memoryPack = PackTestData.ingest(source, memory.newPack());
+                 MutableIndexedPack diskPack = PackTestData.ingest(source, disk.newPack())) {
                 PackId completed = new GitPackObjectResolver(memoryPack, memory).complete();
                 assertThat(new GitPackObjectResolver(diskPack, disk).complete()).isEqualTo(completed);
                 assertThat(PackTestData.bytes(memoryPack)).isEqualTo(PackTestData.bytes(diskPack));
-                IndexedPack toDisk = PackTestData.ingest(memoryPack, disk.newPack());
-                IndexedPack toMemory = PackTestData.ingest(diskPack, memory.newPack());
-                for (IndexedPack replay : List.of(toDisk, toMemory)) {
+                MutableIndexedPack toDisk = PackTestData.ingest(memoryPack, disk.newPack());
+                MutableIndexedPack toMemory = PackTestData.ingest(diskPack, memory.newPack());
+                for (MutableIndexedPack replay : List.of(toDisk, toMemory)) {
                     assertThat(new GitPackObjectResolver(replay, memory).complete()).isEqualTo(completed);
                     assertThat(replay.objectIds()).isEqualTo(memoryPack.objectIds());
                     assertThat(replay.checksumMatches(completed)).isTrue();
@@ -173,7 +173,7 @@ class InMemoryStorageTest {
                     throw new IOException(failure);
                 }
             })).contains(APPLIED);
-            IndexedPack unfinished = storage.newPack();
+            MutableIndexedPack unfinished = storage.newPack();
             assertThatThrownBy(() -> storage.persist(unfinished)).isInstanceOf(IOException.class);
             assertThatThrownBy(unfinished::size).isInstanceOf(ClosedChannelException.class);
             assertThat(storage.packIds()).containsExactly(published);
@@ -195,7 +195,7 @@ class InMemoryStorageTest {
             assertThat(second.packIds()).isEmpty();
             assertThatThrownBy(() -> first.updateHead(new Head.Symbolic(new RefId("HEAD"))))
                     .isInstanceOf(IllegalArgumentException.class);
-            IndexedPack attempt = PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
+            MutableIndexedPack attempt = PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
                     first.newPack());
             new GitPackObjectResolver(attempt, first).complete();
             first.close();

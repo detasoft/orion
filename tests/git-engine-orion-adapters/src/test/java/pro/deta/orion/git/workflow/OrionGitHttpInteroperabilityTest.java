@@ -27,7 +27,7 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -185,7 +185,7 @@ class OrionGitHttpInteroperabilityTest {
                     Files.createTempDirectory(directory, "received-"));
             try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy");
                  BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-                 IndexedPack pack = received.ingest(input)) {
+                 MutableIndexedPack pack = received.ingest(input)) {
                 received.storage().persist(pack);
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
                 assertThat(new String(received.loadFiles("main",

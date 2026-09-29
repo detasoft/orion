@@ -20,7 +20,7 @@ import java.util.zip.Inflater;
 
 public final class PackIngestor implements AutoCloseable {
     private final BufferedByteInputV2 input;
-    private final IndexedPack target;
+    private final MutableIndexedPack target;
     private final ByteBuffer retained = ByteBuffer.allocate(8192);
     private final byte[] inflated = new byte[8192];
     private final MessageDigest checksum = sha1();
@@ -30,12 +30,12 @@ public final class PackIngestor implements AutoCloseable {
     private boolean trailer;
     private boolean ownsTarget = true;
 
-    public PackIngestor(BufferedByteInputV2 input, IndexedPack target) {
+    public PackIngestor(BufferedByteInputV2 input, MutableIndexedPack target) {
         this.input = Objects.requireNonNull(input, "input");
         this.target = Objects.requireNonNull(target, "target");
     }
 
-    public IndexedPack ingest() throws IOException {
+    public MutableIndexedPack ingest() throws IOException {
         if (started) {
             throw new IllegalStateException("Pack ingestion has already started or closed");
         }

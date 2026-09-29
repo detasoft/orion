@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -24,7 +24,7 @@ import java.util.TreeMap;
 
 import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.*;
 
-final class MemoryIndexedPack implements IndexedPack {
+final class MemoryIndexedPack implements MutableIndexedPack {
     private final MemoryPackDataStorage bytes = new MemoryPackDataStorage();
     private final NavigableMap<Long, Record> entries = new TreeMap<>();
     private final Map<ObjectId, Long> objects = new HashMap<>();

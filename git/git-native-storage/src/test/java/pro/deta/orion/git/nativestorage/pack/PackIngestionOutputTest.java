@@ -8,7 +8,7 @@ import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
@@ -26,7 +26,7 @@ class PackIngestionOutputTest {
         try (GitStorageApi storage = new InMemoryStorage()) {
             NativeGitFileUpdate prepared = prepared();
             byte[] bytes = prepared.pack();
-            IndexedPack pack;
+            MutableIndexedPack pack;
             try (PackIngestionOutput output = new PackIngestionOutput(storage)) {
                 for (int offset = 0; offset < bytes.length; offset += 3) {
                     ByteBuf fragment = Unpooled.wrappedBuffer(bytes, offset, Math.min(3, bytes.length - offset));

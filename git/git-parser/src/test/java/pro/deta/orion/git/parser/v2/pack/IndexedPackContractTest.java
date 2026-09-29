@@ -48,13 +48,37 @@ class IndexedPackContractTest {
                 assertThat(pack.checksumMatches(completedId)).isTrue();
                 assertThat(pack.objectIds()).containsExactlyInAnyOrder(baseId, resultId);
                 assertThat(pack.closed).isFalse();
-                IndexedPack replay = PackTestData.ingest(PackTestData.bytes(pack), storage.newPack());
+                MutableIndexedPack replay = PackTestData.ingest(PackTestData.bytes(pack), storage.newPack());
                 assertThat(new GitPackObjectResolver(replay, storage).complete()).isEqualTo(completedId);
                 storage.persist(replay);
                 assertThat(storage.readObject(resultId, new ResolvedGitObjectRead<byte[]>(storage,
                         (type, size, baseObject, input) -> input.readBytes((int) size))))
                         .hasValueSatisfying(bytes -> assertThat(bytes).containsExactly(result));
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void readsResolvedDeltaThroughReadOnlyContract(boolean disk) throws Exception {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+             MutableIndexedPack working = storage.newPack()) {
+            byte[] base = {1, 2, 3};
+            ObjectId baseId = PackTestData.store(storage, GitObjectType.BLOB, base);
+            byte[] result = {1, 2, 3, 4};
+            ObjectId resultId = PackTestData.objectId(GitObjectType.BLOB, result);
+            PackTestData.ingest(PackTestData.pack(
+                    PackTestData.delta(baseId, new byte[]{3, 4, -112, 3, 1, 4})), working);
+            PackId completed = new GitPackObjectResolver(working, storage).complete();
+            IndexedPack readable = working;
+            assertThat(readable.id()).isEqualTo(completed);
+            assertThat(readable.checksumMatches(completed)).isTrue();
+            assertThat(readable.objectIds()).containsExactlyInAnyOrder(baseId, resultId);
+            assertThat(readable.find(resultId)).isPresent();
+            assertThat(readable.readObject(baseId, new ContentGitObjectRead<byte[]>(
+                    (type, size, unused, input) -> input.readBytes((int) size))))
+                    .hasValueSatisfying(content -> assertThat(content).containsExactly(base));
+            assertThat(readable.size()).isPositive();
         }
     }
 
@@ -110,12 +134,12 @@ class IndexedPackContractTest {
         }
     }
 
-    private static final class ContractPack implements IndexedPack {
-        private final IndexedPack delegate;
+    private static final class ContractPack implements MutableIndexedPack {
+        private final MutableIndexedPack delegate;
         private boolean closed;
         private boolean discarded;
 
-        private ContractPack(IndexedPack delegate) {
+        private ContractPack(MutableIndexedPack delegate) {
             this.delegate = delegate;
         }
 

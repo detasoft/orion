@@ -8,7 +8,7 @@ import org.h2.mvstore.type.LongDataType;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
@@ -31,7 +31,7 @@ import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.*;
 
-public final class LocalIndexedPack implements IndexedPack {
+public final class LocalIndexedPack implements MutableIndexedPack {
     private static final Set<String> MAP_NAMES = Set.of("entries", "objects");
     private final PackDataStorage bytes;
     private final MVStore store;

@@ -38,10 +38,10 @@ import java.util.zip.Deflater;
  * establish that the object index is complete or that all delta bases are present.
  */
 public final class GitPackObjectResolver {
-    private final IndexedPack pack;
+    private final MutableIndexedPack pack;
     private final GitStorageApi storage;
 
-    public GitPackObjectResolver(IndexedPack pack, GitStorageApi storage) {
+    public GitPackObjectResolver(MutableIndexedPack pack, GitStorageApi storage) {
         this.pack = Objects.requireNonNull(pack, "pack");
         this.storage = Objects.requireNonNull(storage, "storage");
     }
@@ -180,7 +180,7 @@ public final class GitPackObjectResolver {
         return input.readBytes((int) size);
     }
 
-    private static PackId complete(IndexedPack bytes, GitStorageApi storage) throws IOException {
+    private static PackId complete(MutableIndexedPack bytes, GitStorageApi storage) throws IOException {
         if (bytes.hasUnresolved()) {
             throw new IOException("Pack contains unresolved objects");
         }
@@ -220,7 +220,7 @@ public final class GitPackObjectResolver {
         return bytes.finish(dataEnd);
     }
 
-    private static IndexedPack.EntryMetadata appendBase(IndexedPack bytes, ObjectId expected,
+    private static IndexedPack.EntryMetadata appendBase(MutableIndexedPack bytes, ObjectId expected,
             GitObjectType type, long size, BufferedByteInputV2 content) throws IOException {
         String name = switch (type) {
             case COMMIT -> "commit";

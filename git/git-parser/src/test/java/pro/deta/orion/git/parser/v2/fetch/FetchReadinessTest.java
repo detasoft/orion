@@ -11,7 +11,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -164,7 +164,7 @@ class FetchReadinessTest {
             entries.add(PackTestData.entry(GitObjectType.COMMIT, bytes));
             tip = PackTestData.objectId(GitObjectType.COMMIT, bytes);
         }
-        try (IndexedPack pack = PackTestData.ingest(PackTestData.pack(entries.toArray(byte[][]::new)),
+        try (MutableIndexedPack pack = PackTestData.ingest(PackTestData.pack(entries.toArray(byte[][]::new)),
                 storage.newPack())) {
             new GitPackObjectResolver(pack, storage).complete();
             storage.persist(pack);

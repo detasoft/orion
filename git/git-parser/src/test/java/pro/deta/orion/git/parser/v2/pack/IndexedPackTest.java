@@ -42,7 +42,7 @@ class IndexedPackTest {
         byte[] content = {1, 2, 3};
         byte[] compressed = compressed(content);
         Path staging = directory.resolve("staging");
-        try (IndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(staging)) {
+        try (MutableIndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
             pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
@@ -88,7 +88,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readerFailureDoesNotPoisonThePack(boolean memory) throws Exception {
-        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
+        try (MutableIndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             writeBlob(pack);
             IOException failure = new IOException("reader failed");
@@ -102,7 +102,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportsTruncatedDataAndClosesBothResources(boolean memory) throws Exception {
-        IndexedPack pack = memory ? new InMemoryStorage().newPack()
+        MutableIndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"));
         try (pack) {
             pack.append(ByteBuffer.allocate(13));
@@ -125,7 +125,7 @@ class IndexedPackTest {
     void validatesUnreadPayloadAndClosesAnUnreturnedResult(boolean memory) throws Exception {
         byte[] compressed = compressed(new byte[]{1, 2, 3});
         compressed[compressed.length - 1] ^= 1;
-        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
+        try (MutableIndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
@@ -145,7 +145,7 @@ class IndexedPackTest {
     @ValueSource(booleans = {false, true})
     void persistPublishesThePreparedPackAndTransfersItsFilesToStorage(boolean memory) throws Exception {
         GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-        IndexedPack pack = storage.newPack();
+        MutableIndexedPack pack = storage.newPack();
         ObjectId id = writeBlob(pack);
         Path staging = memory ? null : ((LocalIndexedPack) pack).directory();
         PackId expected = new GitPackObjectResolver(pack, storage).complete();
@@ -168,14 +168,14 @@ class IndexedPackTest {
     @ValueSource(booleans = {false, true})
     void byteChangesInvalidateChecksumWhileIndexUpdatesPreserveIt(boolean memory) throws Exception {
         try (GitStorageApi storage = new InMemoryStorage();
-             IndexedPack pack = memory ? new InMemoryStorage().newPack()
+             MutableIndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             ObjectId object = writeBlob(pack);
             assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
             PackId id = new GitPackObjectResolver(pack, storage).complete();
             pack.addObject(12, object, GitObjectType.BLOB, 3);
             assertThat(pack.id()).isEqualTo(id);
-            try (IndexedPack diskCopy = LocalIndexedPack.create(directory.resolve("copy"));
+            try (MutableIndexedPack diskCopy = LocalIndexedPack.create(directory.resolve("copy"));
                  pro.deta.orion.net.io.BufferedByteInputV2 input = pack.input();
                  PackIngestor ingestor = new PackIngestor(input, diskCopy)) {
                 ingestor.ingest();
@@ -198,7 +198,7 @@ class IndexedPackTest {
     @ValueSource(booleans = {false, true})
     void persistRejectsAnUncompletedPackAndDiscardsOnlyTheAttempt(boolean memory) throws Exception {
         GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-        IndexedPack pack = storage.newPack();
+        MutableIndexedPack pack = storage.newPack();
         ObjectId id = writeBlob(pack);
         Path staging = memory ? null : ((LocalIndexedPack) pack).directory();
         assertThatThrownBy(() -> storage.persist(pack)).isInstanceOf(IOException.class);
@@ -211,7 +211,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsAndRewritesAcrossStorageBlocksAndTruncates(boolean memory) throws Exception {
-        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
+        try (MutableIndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             byte[] expected = new byte[20000];
             new Random(42).nextBytes(expected);
@@ -239,7 +239,7 @@ class IndexedPackTest {
 
     @Test
     void memoryStorageUsesLongOffsetsAndDoesNotRetainTruncatedBytes() throws Exception {
-        try (IndexedPack pack = new InMemoryStorage().newPack()) {
+        try (MutableIndexedPack pack = new InMemoryStorage().newPack()) {
             long offset = (long) Integer.MAX_VALUE + 100;
             pack.write(offset, ByteBuffer.wrap(new byte[]{1, 2, 3}));
             assertThat(pack.size()).isEqualTo(offset + 3);
@@ -260,7 +260,7 @@ class IndexedPackTest {
 
     @Test
     void completesTemporaryResolutionStateInMemoryWithoutClosingThePack() throws Exception {
-        try (IndexedPack pack = new InMemoryStorage().newPack()) {
+        try (MutableIndexedPack pack = new InMemoryStorage().newPack()) {
             ObjectId id = writeBlob(pack);
             assertThat(pack.hasUnresolved()).isFalse();
             pack.finish(pack.size());
@@ -272,7 +272,7 @@ class IndexedPackTest {
         }
     }
 
-    private static ObjectId writeBlob(IndexedPack pack) throws Exception {
+    private static ObjectId writeBlob(MutableIndexedPack pack) throws Exception {
         byte[] content = {1, 2, 3};
         byte[] compressed = compressed(content);
         ByteBuffer wire = ByteBuffer.allocate(13 + compressed.length);

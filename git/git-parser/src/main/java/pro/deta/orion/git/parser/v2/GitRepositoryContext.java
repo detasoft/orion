@@ -4,7 +4,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
@@ -37,7 +37,7 @@ public class GitRepositoryContext {
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
     }
 
-    public List<RefUpdateResult> publish(Optional<IndexedPack> pack, List<RefUpdate> updates, boolean atomic)
+    public List<RefUpdateResult> publish(Optional<MutableIndexedPack> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
         if (pack.isPresent()) {
             storage.persist(pack.orElseThrow());

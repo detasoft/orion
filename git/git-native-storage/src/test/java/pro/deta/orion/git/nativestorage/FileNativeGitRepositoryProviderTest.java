@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
@@ -241,7 +241,7 @@ class FileNativeGitRepositoryProviderTest {
 
     private static PackId persist(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            IndexedPack pack = repository.ingest(input);
+            MutableIndexedPack pack = repository.ingest(input);
             return repository.storage().persist(pack);
         }
     }

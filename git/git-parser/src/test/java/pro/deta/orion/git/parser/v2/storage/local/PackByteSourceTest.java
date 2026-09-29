@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.storage.local;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
@@ -69,7 +69,7 @@ class PackByteSourceTest {
             return FilePackDataStorage.open(directory.resolve("pack"),
                     StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
         }
-        IndexedPack pack = new InMemoryStorage().newPack();
+        MutableIndexedPack pack = new InMemoryStorage().newPack();
         return new PackDataStorage() {
             private boolean open = true;
 

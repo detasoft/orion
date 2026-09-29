@@ -43,13 +43,13 @@ class GitPackObjectResolverTest {
                 new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
         byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-        try (IndexedPack target = ingest(source, memory ? new InMemoryStorage().newPack() : storage.newPack())) {
+        try (MutableIndexedPack target = ingest(source, memory ? new InMemoryStorage().newPack() : storage.newPack())) {
             PackId received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(bytes(target)).containsExactly(source);
             assertThat(target.objectCount()).isEqualTo(5);
             if (memory) {
-                IndexedPack replay = ingest(target, storage.newPack());
+                MutableIndexedPack replay = ingest(target, storage.newPack());
                 assertThat(new GitPackObjectResolver(replay, storage).complete()).isEqualTo(received);
                 assertThat(bytes(replay)).containsExactly(source);
                 storage.persist(replay);
@@ -71,7 +71,7 @@ class GitPackObjectResolverTest {
         GitStorageApi storage = new LocalGitStorage(directory);
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
         byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
-        try (IndexedPack target = ingest(source, storage.newPack())) {
+        try (MutableIndexedPack target = ingest(source, storage.newPack())) {
             PackId received = target.id();
             PackId completed = new GitPackObjectResolver(target, storage).complete();
             assertThat(completed).isNotEqualTo(received);
@@ -92,7 +92,7 @@ class GitPackObjectResolverTest {
         ObjectId root = objectId(GitObjectType.BLOB, new byte[]{1});
         byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
                 delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-        try (IndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
+        try (MutableIndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
             PackId received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(target.objectCount()).isEqualTo(3);
@@ -111,7 +111,7 @@ class GitPackObjectResolverTest {
         }
         entries.add(blob(new byte[]{0, 0}));
         byte[] source = pack(entries.toArray(byte[][]::new));
-        try (IndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
+        try (MutableIndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
             assertTimeout(Duration.ofSeconds(30), () -> new GitPackObjectResolver(target, storage).complete());
             assertThat(target.objectCount()).isEqualTo(1101);
             assertThat(bytes(target)).containsExactly(source);
@@ -126,7 +126,7 @@ class GitPackObjectResolverTest {
         for (byte[] instructions : invalid) {
             byte[] source = pack(blob(new byte[]{1}),
                     delta(objectId(GitObjectType.BLOB, new byte[]{1}), instructions));
-            try (IndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
+            try (MutableIndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
                 assertThatThrownBy(() -> new GitPackObjectResolver(target, storage).complete())
                         .isInstanceOf(IOException.class);
             }
@@ -140,7 +140,7 @@ class GitPackObjectResolverTest {
         byte[] source = pack(base, delta(objectId(GitObjectType.BLOB, new byte[]{1}),
                 new byte[]{1, 1, 1, 2}));
         try (GitStorageApi storage = new InMemoryStorage();
-             IndexedPack target = ingest(source,
+             MutableIndexedPack target = ingest(source,
                      memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(directory.resolve("staging")))) {
             long offset = PackHeader.SIZE + (corruptBase ? 0 : base.length);
             long lastCompressedByte = target.dataEnd(offset) - 1;
