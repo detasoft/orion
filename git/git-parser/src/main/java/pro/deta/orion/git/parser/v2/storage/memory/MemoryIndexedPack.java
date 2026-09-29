@@ -127,10 +127,10 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         return Optional.of(base.objectId());
     }
 
-    public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
+    public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
                             OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
         requireMutable();
-        PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+        PackEntry entry = new PackEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
         validateEntry(entry);
         Record previous = entries.get(offset);
         if (previous != null) {

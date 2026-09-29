@@ -257,10 +257,10 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         return readBounded(bytes, entry, end, baseId, reader);
     }
 
-    public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
+    public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
                             OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
         requireOpen();
-        PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+        PackEntry entry = new PackEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
         try {
             requireMutable();
             validateEntry(entry);
@@ -475,7 +475,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
     private static byte[] encode(Record record) {
         PackEntry entry = record.entry();
         ByteBuffer bytes = ByteBuffer.allocate(67);
-        bytes.putLong(entry.dataOffset()).putLong(entry.inflatedSize()).put((byte) entry.type().code());
+        bytes.putLong(entry.packOffset()).putLong(entry.inflatedSize()).put((byte) entry.type().code());
         if (entry.baseOffset().isPresent()) {
             bytes.putLong(entry.baseOffset().getAsLong());
         } else if (entry.baseId().isPresent()) {
@@ -491,14 +491,14 @@ public final class LocalIndexedPack implements MutableIndexedPack {
     private static Record decode(long offset, byte[] value) throws IOException {
         ByteBuffer bytes = ByteBuffer.wrap(value);
         try {
-            long dataOffset = bytes.getLong();
+            long packOffset = bytes.getLong();
             long inflatedSize = bytes.getLong();
             GitObjectType type = GitObjectType.valueOf(bytes.get());
             OptionalLong baseOffset = type == GitObjectType.OFS_DELTA
                     ? OptionalLong.of(bytes.getLong()) : OptionalLong.empty();
             Optional<ObjectId> baseId = type == GitObjectType.REF_DELTA
                     ? Optional.of(readId(bytes)) : Optional.empty();
-            PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+            PackEntry entry = new PackEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
             validateEntry(entry);
             int resolved = bytes.get();
             if (resolved != 0 && resolved != 1) {

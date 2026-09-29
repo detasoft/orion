@@ -24,7 +24,7 @@ public interface MutableIndexedPack extends IndexedPack {
 
     void truncate(long size) throws IOException;
 
-    boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
+    boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
                      OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException;
 
     boolean addObject(long offset, ObjectId id, GitObjectType type, long size)

@@ -72,7 +72,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         try (IndexedPack indexed = ingest(pack)) {
             assertThat(indexed.objectCount()).isEqualTo(1);
             PackEntry entry = indexed.find(id).orElseThrow();
-            assertThat(Arrays.copyOfRange(pack, (int) entry.dataOffset(), pack.length - 20)).isEqualTo(stored);
+            assertThat(Arrays.copyOfRange(pack, (int) entry.packOffset(), pack.length - 20)).isEqualTo(stored);
         }
         if (disk) {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory.resolve("incoming"))) {

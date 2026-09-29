@@ -205,9 +205,9 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
+        public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
                                 OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
-            return delegate.addEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+            return delegate.addEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
         }
 
         @Override

@@ -46,7 +46,7 @@ class PackIngestorTest {
                 assertThat(received.array()).containsExactly(wire);
                 PackEntry entry = target.find(12).orElseThrow();
                 assertThat(entry.offset()).isEqualTo(12);
-                assertThat(entry.dataOffset()).isEqualTo(13);
+                assertThat(entry.packOffset()).isEqualTo(13);
                 assertThat(entry.inflatedSize()).isEqualTo(3);
                 assertThat(entry.type()).isEqualTo(GitObjectType.BLOB);
                 MessageDigest hash = MessageDigest.getInstance("SHA-1");

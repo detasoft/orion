@@ -8,8 +8,9 @@ import java.util.Optional;
 
 /**
  * Ordered results of reading a pack. Bytes are borrowed until the next reader operation and must be
- * consumed synchronously. EntryEnd follows all bytes of a validated entry; only full objects have an ID.
- * End follows the verified trailer bytes. Individual entries do not establish integrity of the whole pack.
+ * consumed synchronously. EntryEnd follows the entry bytes, End follows the verified trailer bytes.
+ * EntryEnd validates zlib and inflated size; only full objects have a computed ID.
+ * Delta semantics and base existence are not checked. End verifies the pack checksum, not resolvability.
  */
 public sealed interface PackReadStep {
     record Bytes(ByteBuffer data) implements PackReadStep {}

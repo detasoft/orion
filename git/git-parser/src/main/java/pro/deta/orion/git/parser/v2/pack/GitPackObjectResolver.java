@@ -207,7 +207,7 @@ public final class GitPackObjectResolver {
                 PackEntry entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
                         (type, length, unused, content) -> appendBase(bytes, base, type, length, content)))
                         .orElseThrow(() -> new IOException("Missing external base: " + base));
-                bytes.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+                bytes.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
                         entry.baseOffset(), entry.baseId());
                 bytes.addObject(entry.offset(), base, entry.type(), entry.inflatedSize());
                 objectCount++;
@@ -233,21 +233,21 @@ public final class GitPackObjectResolver {
             throw new IOException("Negative base object size");
         }
         long offset = bytes.size();
-        long dataOffset;
+        long packOffset;
         MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
         hash.update((name + " " + size + "\0").getBytes(StandardCharsets.US_ASCII));
         byte[] compressed = new byte[8192];
         Deflater deflater = new Deflater();
         try {
             PackEntryWriter entry = (buffer, start, length) -> bytes.append(ByteBuffer.wrap(buffer, start, length));
-            dataOffset = offset + entry.writeObject(type, size, content, deflater, compressed, hash::update);
+            packOffset = offset + entry.writeObject(type, size, content, deflater, compressed, hash::update);
             if (!MessageDigest.isEqual(hash.digest(), expected.toBytes())) {
                 throw new IOException("External base ObjectId does not match its content");
             }
         } finally {
             deflater.end();
         }
-        return new PackEntry(offset, dataOffset, size, type, OptionalLong.empty(), Optional.empty());
+        return new PackEntry(offset, packOffset, size, type, OptionalLong.empty(), Optional.empty());
     }
 
     private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {

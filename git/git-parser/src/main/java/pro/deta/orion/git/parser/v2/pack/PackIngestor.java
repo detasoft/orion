@@ -35,7 +35,7 @@ public final class PackIngestor implements AutoCloseable {
                     case PackReadStep.Bytes bytes -> target.append(bytes.data());
                     case PackReadStep.EntryEnd end -> {
                         PackEntry entry = end.metadata();
-                        target.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+                        target.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
                                 entry.baseOffset(), entry.baseId());
                         if (end.objectId().isPresent()) {
                             target.addObject(entry.offset(), end.objectId().orElseThrow(), entry.type(),

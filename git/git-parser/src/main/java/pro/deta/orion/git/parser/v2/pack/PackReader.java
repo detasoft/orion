@@ -125,7 +125,7 @@ public final class PackReader implements AutoCloseable {
         } else if (type == GitObjectType.REF_DELTA) {
             baseId = Optional.of(new ObjectId(readBytes(checksum.getDigestLength())));
         }
-        long dataOffset = position;
+        long packOffset = position;
         boolean full = type != GitObjectType.OFS_DELTA && type != GitObjectType.REF_DELTA;
         if (full) {
             objectHash.reset();
@@ -135,7 +135,7 @@ public final class PackReader implements AutoCloseable {
         inflater.reset();
         inflatedSize = 0;
         compressed = null;
-        entry = new PackEntry(offset, dataOffset, size, type, baseOffset, baseId);
+        entry = new PackEntry(offset, packOffset, size, type, baseOffset, baseId);
     }
 
     private boolean fullEntry() {

@@ -38,7 +38,7 @@ class PackIndexStorageTest {
                 OptionalLong.empty(), Optional.of(base));
         try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
-            pack.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+            pack.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
                     entry.baseOffset(), entry.baseId());
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.size(indexPath)).isPositive();
@@ -51,7 +51,7 @@ class PackIndexStorageTest {
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             PackEntry appended = new PackEntry(64, 65, 3, GitObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty());
-            pack.addEntry(appended.offset(), appended.dataOffset(), appended.inflatedSize(), appended.type(),
+            pack.addEntry(appended.offset(), appended.packOffset(), appended.inflatedSize(), appended.type(),
                     appended.baseOffset(), appended.baseId());
             pack.addObject(appended.offset(), base, GitObjectType.BLOB, 3);
             pack.finish(12);

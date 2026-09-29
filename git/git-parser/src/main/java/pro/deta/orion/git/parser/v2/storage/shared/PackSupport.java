@@ -22,15 +22,15 @@ public final class PackSupport {
 
     public static <R> R readBounded(PackDataStorage bytes, PackEntry entry, long end,
                                      Optional<ObjectId> baseId, GitObjectRead<R> reader) throws IOException {
-        if (entry.dataOffset() <= entry.offset() || entry.offset() < 12
-                || end <= entry.dataOffset() || end > bytes.size() - 20) {
+        if (entry.packOffset() <= entry.offset() || entry.offset() < 12
+                || end <= entry.packOffset() || end > bytes.size() - 20) {
             throw new EOFException("Invalid stored object boundary");
         }
         GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
                 ? GitObjectType.REF_DELTA : entry.type();
         R value = null;
         try (BufferedByteInputV2 input = new BufferedByteInputV2(
-                new PackByteSource(bytes, entry.dataOffset(), end))) {
+                new PackByteSource(bytes, entry.packOffset(), end))) {
             value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
                     "reader result");
             return value;
@@ -43,11 +43,11 @@ public final class PackSupport {
     public static <R> R readStored(PackEntry entry, PackDataStorage byteStore, long end,
                                    GitObjectRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
-        if (end < entry.dataOffset()) {
+        if (end < entry.packOffset()) {
             throw new EOFException("Truncated stored object");
         }
         R value = null;
-        try (BufferedByteInputV2 raw = new BufferedByteInputV2(new PackByteSource(byteStore, entry.dataOffset(), end));
+        try (BufferedByteInputV2 raw = new BufferedByteInputV2(new PackByteSource(byteStore, entry.packOffset(), end));
              BufferedByteInputV2 input = new BufferedByteInputV2(new ZlibBoundaryByteSource(raw, entry.inflatedSize()))) {
             value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
                     input), "reader result");
@@ -75,16 +75,16 @@ public final class PackSupport {
     }
 
     public static void validateEntry(PackEntry entry) throws IOException {
-        if (entry.offset() < 12 || entry.dataOffset() <= entry.offset() || entry.inflatedSize() < 0
+        if (entry.offset() < 12 || entry.packOffset() <= entry.offset() || entry.inflatedSize() < 0
                 || entry.type() == null || entry.baseOffset() == null || entry.baseId() == null) {
             throw new IOException("Invalid physical pack entry metadata");
         }
         boolean valid = switch (entry.type()) {
             case OFS_DELTA -> entry.baseId().isEmpty() && entry.baseOffset().isPresent()
                     && entry.baseOffset().getAsLong() >= 12 && entry.baseOffset().getAsLong() < entry.offset()
-                    && entry.dataOffset() - entry.offset() >= 2;
+                    && entry.packOffset() - entry.offset() >= 2;
             case REF_DELTA -> entry.baseOffset().isEmpty() && entry.baseId().isPresent()
-                    && entry.dataOffset() - entry.offset() >= 21;
+                    && entry.packOffset() - entry.offset() >= 21;
             case COMMIT, TREE, BLOB, TAG -> entry.baseId().isEmpty() && entry.baseOffset().isEmpty();
         };
         if (!valid) {

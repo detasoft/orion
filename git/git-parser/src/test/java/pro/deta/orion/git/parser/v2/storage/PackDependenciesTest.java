@@ -262,7 +262,7 @@ class PackDependenciesTest {
     }
 
     private static void addEntry(MutableIndexedPack pack, PackEntry entry) throws IOException {
-        pack.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+        pack.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
                 entry.baseOffset(), entry.baseId());
     }
 
