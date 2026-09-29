@@ -5,6 +5,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.ACLUtil;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.xpath.XPathConstants;
@@ -26,6 +27,100 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionXmlTest {
     private final OrionXmlSchema xmlSchema = new OrionXmlSchema();
+
+    @Test
+    void serializesVersionTwoWithSingularCollectionItemNames() throws Exception {
+        String xml = write(OrionDocument.withAccessControl(
+                ACLUtil.generateDefaultAccessControl("root-password-hash")));
+
+        assertThat(xml).contains("<orion schemaVersion=\"2\">");
+        assertThat(xml).contains("<system>");
+        assertThat(xml).contains("<accessControl>");
+        assertThat(xml).contains("<organizations/>");
+        assertThat(xml).doesNotContain("<AccessControl");
+
+        assertThat(xml).contains("<users>");
+        assertThat(xml).contains("<user id=\"root\">");
+        assertThat(xml).doesNotContain("<users>\n    <users>");
+
+        assertThat(xml).contains("<roles>");
+        assertThat(xml).contains("<role>ROOT</role>");
+        assertThat(xml).contains("<grantReferences>");
+        assertThat(xml).contains("<grantReference>CONNECT</grantReference>");
+        assertThat(xml).doesNotContain("<grantReferences>\n        <grantReferences>");
+
+        assertThat(xml).contains("<grants>");
+        assertThat(xml).contains("<grant id=\"ALL_REPOSITORY\">");
+        assertThat(xml).doesNotContain("<grants>\n    <grants>");
+
+        assertThat(xml).contains("<credentials>");
+        assertThat(xml).contains("<credential>");
+        assertThat(xml).doesNotContain("<credentials>\n        <credentials>");
+
+        assertThat(xml).contains("<info>");
+        assertThat(xml).contains("<expression>");
+        assertThat(xml).doesNotContain("<info>\n        <info>");
+    }
+
+    @Test
+    void readsLegacyPluralCollectionItemNames() throws Exception {
+        String legacyXml = """
+                <AccessControl>
+                  <users>
+                    <users>
+                      <id>root</id>
+                      <email>root@orion.pro</email>
+                      <credentials>
+                        <credentials>
+                          <type>SHA1</type>
+                          <value>root-password-hash</value>
+                        </credentials>
+                      </credentials>
+                      <roles>
+                        <roles>ROOT</roles>
+                      </roles>
+                      <grants/>
+                    </users>
+                  </users>
+                  <roles>
+                    <roles>
+                      <id>ROOT</id>
+                      <grantReferences>
+                        <grantReferences>CONNECT</grantReferences>
+                      </grantReferences>
+                      <grants/>
+                    </roles>
+                  </roles>
+                  <grants>
+                    <grants>
+                      <id>CONNECT</id>
+                      <info>
+                        <info>
+                          <key>NETWORK_SOURCE</key>
+                          <value>127.0.0.1</value>
+                        </info>
+                      </info>
+                    </grants>
+                  </grants>
+                </AccessControl>
+                """;
+
+        AccessControl acl = OrionXml.read(
+                new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8))).system().accessControl();
+
+        assertThat(acl.getUsers()).hasSize(1);
+        assertThat(acl.getUsers().getFirst().getId()).isEqualTo("root");
+        assertThat(acl.getUsers().getFirst().getCredentials()).hasSize(1);
+        assertThat(acl.getUsers().getFirst().getRoles()).containsExactly("ROOT");
+
+        assertThat(acl.getRoles()).hasSize(1);
+        assertThat(acl.getRoles().getFirst().getGrantReferences()).containsExactly("CONNECT");
+
+        assertThat(acl.getGrants()).hasSize(1);
+        assertThat(acl.getGrants().getFirst().getInfo()).hasSize(1);
+        assertThat(acl.getGrants().getFirst().getInfo().getFirst().getKey())
+                .isEqualTo(AccessControl.GrantKey.NETWORK_SOURCE);
+    }
 
     @Test
     void requiresEabSecretInSystemScopeAndRoundTripsItsReference() throws Exception {

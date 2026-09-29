@@ -6,7 +6,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.config.OrionDesiredState;
@@ -15,6 +14,8 @@ import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -45,11 +46,11 @@ class LocalSshCredentialPersistenceTest {
         alice.setEmail("alice@example.test");
         primary.getUsers().add(alice);
         try (OutputStream output = Files.newOutputStream(root.resolve("users.xml"))) {
-            new XmlService().serialize(primary.toAccessControl(), output);
+            OrionXml.write(OrionDocument.withAccessControl(primary.toAccessControl()), output);
         }
         Path secondary = root.resolve("roles.xml");
         try (OutputStream output = Files.newOutputStream(secondary)) {
-            new XmlService().serialize(new AccessControlDraft().toAccessControl(), output);
+            OrionXml.write(OrionDocument.withAccessControl(new AccessControlDraft().toAccessControl()), output);
         }
         byte[] unchanged = Files.readAllBytes(secondary);
         Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(secondary);

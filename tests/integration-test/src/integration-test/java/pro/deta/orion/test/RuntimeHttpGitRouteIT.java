@@ -10,7 +10,6 @@ import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.transport.TransportHttp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -34,6 +33,7 @@ import pro.deta.orion.schema.orion.RoleId;
 import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.ScopedRole;
 import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -70,7 +70,7 @@ class RuntimeHttpGitRouteIT {
             String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
-            OrionDocument base = new XmlService().deserializeDocument(new ByteArrayInputStream(
+            OrionDocument base = OrionXml.read(new ByteArrayInputStream(
                     initial.body().getBytes(StandardCharsets.UTF_8)));
             OrionDocument document = new OrionDocument(base.system(), List.of(
                     gitOrganization("acme"), gitOrganization("other")));
@@ -185,7 +185,7 @@ class RuntimeHttpGitRouteIT {
 
     private static byte[] serializeDocument(OrionDocument document) throws Exception {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serializeDocument(document, output);
+            OrionXml.write(document, output);
             return output.toByteArray();
         }
     }
@@ -528,7 +528,7 @@ class RuntimeHttpGitRouteIT {
 
     private static byte[] serialize(AccessControl accessControl) throws Exception {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serialize(accessControl, output);
+            OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
             return output.toByteArray();
         }
     }

@@ -26,7 +26,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -41,6 +40,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -1514,7 +1515,7 @@ class GitSshTransportEndToEndIT {
 
     private static String serializeAccessControl(AccessControl accessControl) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        new XmlService().serialize(accessControl, output);
+        OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
         return output.toString(StandardCharsets.UTF_8);
     }
 
@@ -1536,7 +1537,7 @@ class GitSshTransportEndToEndIT {
          * provider so the test writes the same on-disk format that production startup reads.
          */
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        new XmlService().serialize(accessControl, output);
+        OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
         new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")

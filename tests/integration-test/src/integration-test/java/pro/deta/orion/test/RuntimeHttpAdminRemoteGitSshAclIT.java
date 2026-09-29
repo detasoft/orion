@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
@@ -20,6 +19,7 @@ import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.test.integration.git.GitSshTestServer;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -111,7 +111,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                         assertThat(bootstrap.repositoryProvider().repositoryNames()).doesNotContain(cache);
 
                         if (launch == 0) {
-                            var current = new XmlService().deserializeDocument(new ByteArrayInputStream(
+                            var current = OrionXml.read(new ByteArrayInputStream(
                                     initialAcl.body().getBytes(StandardCharsets.UTF_8)));
                             var updated = current.replaceAccessControl(
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
@@ -155,13 +155,13 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
 
     private static byte[] serialize(OrionDocument document) throws IOException {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serializeDocument(document, output);
+            OrionXml.write(document, output);
             return output.toByteArray();
         }
     }
 
     private static List<String> userIds(byte[] content) throws IOException {
-        var accessControl = new XmlService().deserialize(new ByteArrayInputStream(content));
+        var accessControl = OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
         List<String> userIds = new ArrayList<>();
         for (AccessControl.User user : accessControl.getUsers()) {
             userIds.add(user.getId());

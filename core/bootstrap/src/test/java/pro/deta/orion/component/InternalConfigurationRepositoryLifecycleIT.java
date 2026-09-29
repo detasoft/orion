@@ -3,7 +3,6 @@ package pro.deta.orion.component;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
@@ -41,6 +40,8 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -100,8 +101,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                         CONFIGURATION_REF,
                         List.of(ACL_PATH));
                 firstVersion = snapshot.version().orElseThrow();
-                AccessControl acl = new XmlService().deserialize(
-                        new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
+                AccessControl acl = OrionXml.read(
+                        new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()))
+                                .system().accessControl();
                 assertThat(acl.getUsers()).extracting(AccessControl.User::getId).contains("root");
             } finally {
                 assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -165,8 +167,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             char[] rootPassword = component.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create());
             assertRecoveryPasswordOnly(component, new String(rootPassword));
-            AccessControl acl = new XmlService().deserialize(new ByteArrayInputStream(
-                    component.orionAccessControlService().accessControlConfigurationFile().content()));
+            AccessControl acl = OrionXml.read(new ByteArrayInputStream(
+                    component.orionAccessControlService().accessControlConfigurationFile().content()))
+                            .system().accessControl();
             assertThat(acl.getUsers().getFirst().getCredentials())
                     .singleElement()
                     .satisfies(credential -> assertThat(credential.getKeyId())
@@ -210,8 +213,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                     "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
-            AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile().content())).toDraft();
+            AccessControlDraft draft = OrionXml.read(new ByteArrayInputStream(
+                    first.orionAccessControlService().accessControlConfigurationFile().content()))
+                            .system().accessControl().toDraft();
             AccessControlDraft.User root = draft.getUsers().stream()
                     .filter(candidate -> "root".equalsIgnoreCase(candidate.getId()))
                     .findFirst()
@@ -233,8 +237,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             first.orionAccessControlService().saveAccessControlConfigurationFile(
                     accessControlBytes(draft.toAccessControl()),
                     first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
-            beforeReset = new XmlService().deserialize(new ByteArrayInputStream(
-                    first.orionAccessControlService().accessControlConfigurationFile().content()));
+            beforeReset = OrionXml.read(new ByteArrayInputStream(
+                    first.orionAccessControlService().accessControlConfigurationFile().content()))
+                            .system().accessControl();
             versionBeforeReset = repository(first)
                     .loadFiles(CONFIGURATION_REF, List.of(ACL_PATH))
                     .version()
@@ -281,8 +286,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                     List.of(ACL_PATH));
             assertThat(snapshot.version()).isPresent();
             assertThat(snapshot.version().orElseThrow()).isNotEqualTo(versionBeforeReset);
-            AccessControl acl = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
+            AccessControl acl = OrionXml.read(
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()))
+                            .system().accessControl();
             AccessControl.User root = acl.getUsers().stream()
                     .filter(user -> "root".equalsIgnoreCase(user.getId()))
                     .findFirst()
@@ -402,8 +408,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
 
-            AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile().content()));
+            AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
+                    reset.orionAccessControlService().accessControlConfigurationFile().content()))
+                            .system().accessControl();
             assertThat(recovered.getUsers())
                     .extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
@@ -495,10 +502,12 @@ class InternalConfigurationRepositoryLifecycleIT {
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(
                     CONFIGURATION_REF,
                     List.of(ACL_PATH, secondaryPath));
-            AccessControl primary = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()));
-            AccessControl secondary = new XmlService().deserialize(
-                    new ByteArrayInputStream(snapshot.files().get(secondaryPath).content()));
+            AccessControl primary = OrionXml.read(
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH).content()))
+                            .system().accessControl();
+            AccessControl secondary = OrionXml.read(
+                    new ByteArrayInputStream(snapshot.files().get(secondaryPath).content()))
+                            .system().accessControl();
             assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
             assertThat(secondary.getUsers()).isEmpty();
@@ -574,8 +583,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             assertThat(repository(reset).loadFiles(CONFIGURATION_REF, List.of(ACL_PATH)).version())
                     .hasValueSatisfying(version -> assertThat(version).isNotEqualTo(versionBeforeReset));
-            AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
-                    reset.orionAccessControlService().accessControlConfigurationFile().content()));
+            AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
+                    reset.orionAccessControlService().accessControlConfigurationFile().content()))
+                            .system().accessControl();
             assertThat(recovered.getUsers())
                     .filteredOn(user -> "root".equalsIgnoreCase(user.getId()))
                     .hasSize(1);
@@ -1023,9 +1033,10 @@ class InternalConfigurationRepositoryLifecycleIT {
             GitRepositoryFileSnapshot snapshot,
             String... paths) throws Exception {
         List<AccessControl.User> users = new java.util.ArrayList<>();
-        XmlService xmlService = new XmlService();
+
         for (String path : paths) {
-            AccessControl acl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(path).content()));
+            AccessControl acl = OrionXml.read(new ByteArrayInputStream(snapshot.files().get(path).content()))
+                    .system().accessControl();
             users.addAll(acl.getUsers());
         }
         return List.copyOf(users);
@@ -1033,7 +1044,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     private static byte[] accessControlBytes(AccessControl accessControl) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        new XmlService().serialize(accessControl, output);
+        OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
         return output.toByteArray();
     }
 
@@ -1124,8 +1135,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionComponent component,
             String userId,
             String... expectedKeys) throws Exception {
-        AccessControl accessControl = new XmlService().deserialize(new ByteArrayInputStream(
-                component.orionAccessControlService().accessControlConfigurationFile().content()));
+        AccessControl accessControl = OrionXml.read(new ByteArrayInputStream(
+                component.orionAccessControlService().accessControlConfigurationFile().content()))
+                        .system().accessControl();
         AccessControl.User user = accessControl.getUsers().stream()
                 .filter(candidate -> userId.equals(candidate.getId()))
                 .findFirst()

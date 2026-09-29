@@ -7,7 +7,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.eclipse.jgit.revwalk.RevCommit;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -19,6 +18,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -136,8 +136,8 @@ class RuntimeHttpAdminAclUpdateIT {
             String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
-            AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
-                    initial.body().getBytes(StandardCharsets.UTF_8))).toDraft();
+            AccessControlDraft draft = OrionXml.read(new ByteArrayInputStream(
+                    initial.body().getBytes(StandardCharsets.UTF_8))).system().accessControl().toDraft();
             AccessControlDraft.User operator = AccessControlDraft.User.from(
                     draft.getUsers().getFirst().toAccessControl());
             operator.setId("operator");
@@ -210,7 +210,7 @@ class RuntimeHttpAdminAclUpdateIT {
             String bearer = TestBearerTokens.bearer(token);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
-            OrionDocument base = new XmlService().deserializeDocument(new ByteArrayInputStream(
+            OrionDocument base = OrionXml.read(new ByteArrayInputStream(
                     initial.body().getBytes(StandardCharsets.UTF_8)));
             OrionDocument.Organization acme = new OrionDocument.Organization(new OrganizationId("acme"), "Acme",
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
@@ -231,7 +231,7 @@ class RuntimeHttpAdminAclUpdateIT {
             assertThat(saved.body()).doesNotContain("private-oidc-value");
             byte[] persisted = readFileFromAclRepository(orion);
             assertThat(new String(persisted, StandardCharsets.UTF_8)).doesNotContain("private-oidc-value");
-            OrionDocument stored = new XmlService().deserializeDocument(new ByteArrayInputStream(persisted));
+            OrionDocument stored = OrionXml.read(new ByteArrayInputStream(persisted));
             assertThat(stored.organizations().getFirst().secrets()).hasSize(1);
             assertThat(stored.organizations().getFirst().secrets().getFirst().envelope()).isNotBlank();
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
@@ -390,8 +390,9 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     private static byte[] withPasswordUser(String originalXml, String userId) throws IOException {
-        AccessControlDraft draft = new XmlService().deserialize(
-                new ByteArrayInputStream(originalXml.getBytes(StandardCharsets.UTF_8))).toDraft();
+        AccessControlDraft draft = OrionXml.read(
+                new ByteArrayInputStream(originalXml.getBytes(StandardCharsets.UTF_8)))
+                        .system().accessControl().toDraft();
         draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
                 .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
         return serialize(draft.toAccessControl());
@@ -399,20 +400,20 @@ class RuntimeHttpAdminAclUpdateIT {
 
     private static byte[] serialize(AccessControl accessControl) throws IOException {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serialize(accessControl, output);
+            OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
             return output.toByteArray();
         }
     }
 
     private static byte[] serializeDocument(OrionDocument document) throws IOException {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serializeDocument(document, output);
+            OrionXml.write(document, output);
             return output.toByteArray();
         }
     }
 
     private static List<String> userIds(byte[] content) throws IOException {
-        AccessControl accessControl = new XmlService().deserialize(new ByteArrayInputStream(content));
+        AccessControl accessControl = OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
         List<String> userIds = new ArrayList<>();
         for (AccessControl.User user : accessControl.getUsers()) {
             userIds.add(user.getId());

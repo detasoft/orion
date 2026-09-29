@@ -966,7 +966,8 @@ class OrionAccessControlServiceImplTest {
 
     private static AccessControlSnapshot defaultAclSnapshot() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        new XmlService().serialize(ACLUtil.generateDefaultAccessControl("old-password-hash"), output);
+        OrionXml.write(OrionDocument.withAccessControl(
+                ACLUtil.generateDefaultAccessControl("old-password-hash")), output);
         return new AccessControlSnapshot(Map.of(ACL_PATH, output.toByteArray()), Optional.of("initial"));
     }
 
@@ -1054,7 +1055,7 @@ class OrionAccessControlServiceImplTest {
 
     private static byte[] serialize(AccessControl accessControl) {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            new XmlService().serialize(accessControl, output);
+            OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
             return output.toByteArray();
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -1080,7 +1081,7 @@ class OrionAccessControlServiceImplTest {
 
     private static AccessControl parse(byte[] content) {
         try {
-            return new XmlService().deserialize(new java.io.ByteArrayInputStream(content));
+            return OrionXml.read(new java.io.ByteArrayInputStream(content)).system().accessControl();
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }

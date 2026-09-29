@@ -14,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
@@ -29,6 +28,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -143,12 +143,12 @@ class OrionStartupIT {
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
-        XmlService xmlService = new XmlService();
+
         OrionDocument loadedDocument;
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             ConfigurationFile configurationFile = orion.accessControlService().accessControlConfigurationFile();
-            loadedDocument = xmlService.deserializeDocument(new ByteArrayInputStream(configurationFile.content()));
+            loadedDocument = OrionXml.read(new ByteArrayInputStream(configurationFile.content()));
 
             assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
             assertThat(loadedDocument.system().proxies()).hasSize(1);
@@ -157,7 +157,7 @@ class OrionStartupIT {
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
                     accessControlWithUsers("root", "saved-remote-user"));
             ByteArrayOutputStream updatedContent = new ByteArrayOutputStream();
-            xmlService.serializeDocument(updatedDocument, updatedContent);
+            OrionXml.write(updatedDocument, updatedContent);
             orion.accessControlService().saveAccessControlConfigurationFile(
                     updatedContent.toByteArray(), configurationFile.revision().orElseThrow(), "");
 
@@ -165,14 +165,14 @@ class OrionStartupIT {
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
         }
 
-        OrionDocument savedDocument = xmlService.deserializeDocument(
+        OrionDocument savedDocument = OrionXml.read(
                 new ByteArrayInputStream(readFileFromRepository(remoteAclRepository, ACL_FILE)));
         assertThat(hasUser(savedDocument.system().accessControl(), "remote-user")).isFalse();
         assertThat(hasUser(savedDocument.system().accessControl(), "saved-remote-user")).isTrue();
         assertThat(savedDocument.system().proxies()).isEqualTo(loadedDocument.system().proxies());
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            OrionDocument restartedDocument = xmlService.deserializeDocument(new ByteArrayInputStream(
+            OrionDocument restartedDocument = OrionXml.read(new ByteArrayInputStream(
                     orion.accessControlService().accessControlConfigurationFile().content()));
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
@@ -368,7 +368,7 @@ class OrionStartupIT {
 
     private static AccessControl readAcl(Path orionRoot) throws IOException {
         byte[] content = readFileFromAclRepository(orionRoot);
-        return new XmlService().deserialize(new ByteArrayInputStream(content));
+        return OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
     }
 
     private static String aclHead(Path orionRoot) {
@@ -443,13 +443,13 @@ class OrionStartupIT {
 
     private static byte[] serialize(AccessControl accessControl) throws IOException {
         try (var output = new java.io.ByteArrayOutputStream()) {
-            new XmlService().serialize(accessControl, output);
+            OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
             return output.toByteArray();
         }
     }
 
     private static AccessControl deserialize(byte[] content) throws IOException {
-        return new XmlService().deserialize(new ByteArrayInputStream(content));
+        return OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
     }
 
     private static AccessControl accessControlWithUsers(String... userIds) {

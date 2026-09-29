@@ -10,11 +10,11 @@ import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.test.integration.git.GitHttpTestServer;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.net.HttpURLConnection;
 import java.io.ByteArrayInputStream;
@@ -60,7 +60,7 @@ class RuntimeHttpAdminApiIT {
                             List.of("orion.xml")).files().get("orion.xml").content();
             String xml = new String(persisted, StandardCharsets.UTF_8);
             assertThat(xml).doesNotContain("private-proxy-value");
-            OrionDocument stored = new XmlService().deserializeDocument(new ByteArrayInputStream(persisted));
+            OrionDocument stored = OrionXml.read(new ByteArrayInputStream(persisted));
             assertThat(stored.system().secrets()).hasSize(1);
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
                     orion.identity().material().configurationCipher());

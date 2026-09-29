@@ -58,6 +58,7 @@ import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -82,7 +83,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private static final String ROOT_AUTH_GENERATION_PREFIX = "root-auth-generation:";
     private static final String ROOT_LOCKED_GENERATION_PREFIX = "root-auth-locked:";
 
-    private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionRuntimeOptions runtimeOptions;
@@ -874,7 +874,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private OrionDocument parseOrionConfiguration(byte[] content, String sourceName) {
         try (ByteArrayInputStream input = new ByteArrayInputStream(content)) {
-            return xmlService.deserializeDocument(input);
+            return OrionXml.read(input);
         } catch (IOException e) {
             throw new IllegalArgumentException(
                     "Invalid ACL configuration file: Cannot parse ACL file " + sourceName,
@@ -903,7 +903,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private byte[] serializeOrionConfiguration(OrionDocument document) {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            xmlService.serializeDocument(document, output);
+            OrionXml.write(document, output);
             return output.toByteArray();
         } catch (IOException e) {
             throw new IllegalStateException("Cannot serialize ACL configuration file", e);
@@ -1622,7 +1622,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         OrionDocument primary = null;
         for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
             try (ByteArrayInputStream input = new ByteArrayInputStream(entry.getValue())) {
-                OrionDocument document = xmlService.deserializeDocument(input);
+                OrionDocument document = OrionXml.read(input);
                 mergeAccessControl(result, document.system().accessControl());
                 if (entry.getKey().equals(accessControlStorage.primaryPath())) {
                     primary = document;

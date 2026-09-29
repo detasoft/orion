@@ -5,7 +5,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
@@ -43,6 +42,7 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -65,8 +65,6 @@ class OrionRuntimeModuleTest {
 
     @TempDir
     private Path tempDir;
-
-    private final XmlService xmlService = new XmlService();
 
     @ParameterizedTest
     @NullSource
@@ -345,7 +343,7 @@ class OrionRuntimeModuleTest {
 
     private byte[] aclBytes(String userId) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        xmlService.serialize(accessControlWithUser(userId), output);
+        OrionXml.write(OrionDocument.withAccessControl(accessControlWithUser(userId)), output);
         return output.toByteArray();
     }
 
@@ -359,7 +357,8 @@ class OrionRuntimeModuleTest {
     private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {
         AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load from storage");
         AccessControl accessControl =
-                xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)));
+                OrionXml.read(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)))
+                        .system().accessControl();
         assertEquals(1, accessControl.getUsers().size());
         assertEquals(userId, accessControl.getUsers().getFirst().getId());
     }
