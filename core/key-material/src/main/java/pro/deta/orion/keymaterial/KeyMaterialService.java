@@ -525,7 +525,7 @@ public class KeyMaterialService implements AutoCloseable {
         KeyPair accountKeyPair = generateKeyIfMissing(account, accountKeySize);
         KeyPair domainKeyPair = generateKeyIfMissing(identity, domainKeySize);
         if (saveRequired) {
-            save();
+            saveAcmeMaterial();
         }
         return new AcmeKeyMaterial(accountKeyPair, domainKeyPair);
     }
@@ -541,7 +541,16 @@ public class KeyMaterialService implements AutoCloseable {
         if (issuerDescriptor.isPresent()) {
             setTrustedCertificate(issuerDescriptor.orElseThrow(), issuerCertificate.orElseThrow());
         }
-        save();
+        saveAcmeMaterial();
+    }
+
+    private void saveAcmeMaterial() throws IOException, GeneralSecurityException {
+        try {
+            save();
+        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+            close();
+            throw failure;
+        }
     }
 
     public synchronized String save() throws IOException, GeneralSecurityException {

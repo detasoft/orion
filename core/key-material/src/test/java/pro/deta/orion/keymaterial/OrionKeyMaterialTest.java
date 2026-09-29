@@ -1,10 +1,13 @@
 package pro.deta.orion.keymaterial;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.cert.X509Certificate;
 import java.security.KeyPair;
 import java.util.List;
 import java.util.Optional;
@@ -298,6 +301,99 @@ class OrionKeyMaterialTest {
         try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
             ConfigurationSecretEnvelope envelope = reopened.configurationCipher().seal(new byte[]{3}, context);
             assertThat(reopened.configurationCipher().open(envelope, context)).containsExactly((byte) 3);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closesAcmeKeysAfterFailedSaveAndReopensOnlyDurableMaterial(boolean committed) throws Exception {
+        AcmeFailingStore store = new AcmeFailingStore(committed);
+        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        AcmeMaterialConfiguration configuration = acmeConfiguration();
+        String afterFailure;
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+            String before = store.read().orElseThrow().version();
+            store.fail = true;
+            assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
+                    .isInstanceOf(IOException.class).hasMessage("ACME save failed");
+            afterFailure = store.read().orElseThrow().version();
+            assertThat(afterFailure.equals(before)).isEqualTo(!committed);
+            store.fail = false;
+            assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+            assertThatThrownBy(() -> material.acme().certificateChain(configuration))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        }
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+            AcmeKeyMaterial keys = reopened.acme().acquire(configuration, 2048, 2048);
+            assertThat(keys.accountKeyPair().getPrivate()).isNotNull();
+            assertThat(keys.domainKeyPair().getPrivate()).isNotNull();
+            assertThat(store.read().orElseThrow().version().equals(afterFailure)).isEqualTo(committed);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void failedAcmeCertificateSaveClosesTheOwnerWithoutExposingAnUnsavedChain(boolean committed)
+            throws Exception {
+        AcmeFailingStore store = new AcmeFailingStore(committed);
+        SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
+        AcmeMaterialConfiguration configuration = acmeConfiguration();
+        X509Certificate expected;
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+            AcmeKeyMaterial keys = material.acme().acquire(configuration, 2048, 2048);
+            TestCertificateChain.Authority issuer = TestCertificateChain.root("ACME issuer");
+            X509Certificate original = TestCertificateChain.leaf(
+                    "original.example", keys.domainKeyPair(), issuer);
+            X509Certificate replacement = TestCertificateChain.leaf(
+                    "replacement.example", keys.domainKeyPair(), issuer);
+            material.acme().installCertificateChain(configuration, List.of(original), Optional.empty());
+            assertThatThrownBy(() -> material.acme().installCertificateChain(
+                    configuration, List.of(), Optional.empty())).isInstanceOf(IllegalArgumentException.class);
+            assertThat(material.acme().certificateChain(configuration).orElseThrow()).containsExactly(original);
+            store.fail = true;
+            assertThatThrownBy(() -> material.acme().installCertificateChain(
+                    configuration, List.of(replacement), Optional.empty()))
+                    .isInstanceOf(IOException.class).hasMessage("ACME save failed");
+            store.fail = false;
+            assertThatThrownBy(() -> material.acme().certificateChain(configuration))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+            assertThatThrownBy(() -> material.acme().installCertificateChain(
+                    configuration, List.of(replacement), Optional.empty()))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+            expected = committed ? replacement : original;
+        }
+        String durableVersion = store.read().orElseThrow().version();
+        try (OrionKeyMaterial reopened = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+            assertThat(reopened.acme().certificateChain(configuration).orElseThrow()).containsExactly(expected);
+            assertThat(store.read().orElseThrow().version()).isEqualTo(durableVersion);
+        }
+    }
+
+    private static AcmeMaterialConfiguration acmeConfiguration() {
+        return new AcmeMaterialConfiguration(
+                descriptor("acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER),
+                descriptor("https-v1", KeyMaterialPurpose.TLS_IDENTITY, KeyMaterialAlgorithm.RSA, 1, CLUSTER),
+                Optional.empty());
+    }
+
+    private static final class AcmeFailingStore extends InMemoryKeyMaterialContentStore {
+        private final boolean committed;
+        private boolean fail;
+
+        private AcmeFailingStore(boolean committed) {
+            this.committed = committed;
+        }
+
+        @Override
+        public synchronized String write(byte[] bytes, String expectedVersion) throws IOException {
+            if (!fail) {
+                return super.write(bytes, expectedVersion);
+            }
+            if (committed) {
+                super.write(bytes, expectedVersion);
+            }
+            throw new IOException("ACME save failed");
         }
     }
 
