@@ -77,10 +77,13 @@ async function runScenario(source, observe = '0', environment = {}) {
 
 test('each scenario has clean storage and closes its pages', async () => {
   const completed = await runScenario(`
-    test('sets browser state', async ({ page, context }) => {
+    test('sets browser state', async ({ page, context, step }) => {
       await page.evaluate(() => localStorage.setItem('fixture-check', 'previous scenario'))
       await context.addCookies([{ name: 'fixture-check', value: 'previous', url: 'http://orion.test' }])
-      await page.getByRole('button', { name: 'Continue' }).click()
+      await step('Continue without presentation delays', page.getByRole('button'), async target => {
+        await expect(target).not.toHaveAttribute('data-orion-test-target', '')
+        await target.click()
+      })
       await expect(page.locator('[data-orion-test-observer]')).toHaveCount(0)
     })
     test('starts with clean browser state', async ({ page, context }) => {
@@ -108,6 +111,25 @@ test('observed scenarios show their name and click position', async () => {
       await expect(page.locator('[data-orion-test-observer]')).toHaveText('observed fixture check')
       await page.getByRole('button', { name: 'Continue' }).click()
       await expect(page.locator('[data-orion-test-click]')).toBeVisible()
+    })
+  `, '1')
+  assert.equal(completed.code, 0, completed.output)
+})
+
+test('observed steps explain and highlight the target before acting, then show the result', async () => {
+  const completed = await runScenario(`
+    test('explained action', async ({ page, step }) => {
+      const started = Date.now()
+      await step('Нажать Continue', page.getByRole('button'), async target => {
+        await expect(page.locator('[data-orion-test-observer]')).toContainText('Шаг 1: Нажать Continue')
+        await expect(target).toHaveAttribute('data-orion-test-target', '')
+        expect(Date.now() - started).toBeGreaterThanOrEqual(1900)
+        await target.click()
+      })
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2900)
+      await expect(page.locator('[data-orion-test-target]')).toHaveCount(0)
+      await step('Обновить страницу', null, () => page.reload())
+      await expect(page.locator('[data-orion-test-observer]')).toContainText('Шаг 2: Обновить страницу')
     })
   `, '1')
   assert.equal(completed.code, 0, completed.output)

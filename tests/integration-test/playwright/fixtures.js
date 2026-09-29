@@ -15,7 +15,51 @@ export const orionUrl = target.href.replace(/\/$/, '')
 if (['localhost', '127.0.0.1', '[::1]'].includes(target.hostname)) target.hostname = 'orion.test'
 export const browserUrl = target.href.replace(/\/$/, '')
 
+function showObservation({ title, description = '' }) {
+  const render = () => {
+    let label = document.querySelector('[data-orion-test-observer]')
+    if (!label) {
+      label = document.createElement('div')
+      label.setAttribute('data-orion-test-observer', '')
+      label.style.cssText = 'position:fixed;bottom:12px;left:12px;z-index:2147483647;' +
+        'padding:12px 16px;background:#17202a;color:white;font:18px/1.5 sans-serif;' +
+        'white-space:pre-line;max-width:85vw;pointer-events:none;border-left:6px solid #ffb300'
+      document.documentElement.append(label)
+      const style = document.createElement('style')
+      style.textContent = '[data-orion-test-target]{outline:4px solid #ffb300!important;' +
+        'outline-offset:5px!important}'
+      document.documentElement.append(style)
+    }
+    label.textContent = description ? `${title}\n${description}` : title
+  }
+  if (document.documentElement) render()
+  else document.addEventListener('DOMContentLoaded', render, { once: true })
+}
+
 export const test = base.extend({
+  step: async ({ page }, use, testInfo) => {
+    let number = 0
+    await use((title, target, action) => base.step(title, async () => {
+      if (!observe) return action(target)
+      const description = `Шаг ${++number}: ${title}`
+      console.log(description)
+      await page.evaluate(showObservation, { title: testInfo.title, description })
+      if (target) {
+        await target.scrollIntoViewIfNeeded()
+        await target.evaluate(element => element.setAttribute('data-orion-test-target', ''))
+        const bounds = await target.boundingBox()
+        if (bounds) await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+      }
+      await page.waitForTimeout(2000)
+      const result = await action(target)
+      await page.evaluate(showObservation, { title: testInfo.title, description })
+      await page.waitForTimeout(1000)
+      await page.locator('[data-orion-test-target]').evaluateAll(elements => {
+        for (const element of elements) element.removeAttribute('data-orion-test-target')
+      })
+      return result
+    }))
+  },
   adminToken: [async ({}, use) => {
     let token = process.env.ORION_TOKEN
     if (!token) {
@@ -37,9 +81,9 @@ export const test = base.extend({
   }, { scope: 'worker' }],
   browser: [async ({ playwright }, use) => {
     console.log(`Server URL: ${orionUrl}`)
-    console.log(`Browser URL: ${browserUrl}; mode: ${observe ? 'observe (1000 ms)' : 'unattended'}`)
+    console.log(`Browser URL: ${browserUrl}; mode: ${observe ? 'observe (2 s before, 1 s after)' : 'unattended'}`)
     const browser = await playwright.chromium.connectOverCDP(
-      process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222', { slowMo: observe ? 1000 : 0 })
+      process.env.BROWSER_CDP_URL || 'http://127.0.0.1:9222')
     try {
       await use(browser)
     } finally {
@@ -51,14 +95,9 @@ export const test = base.extend({
       if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
     }, { token: adminToken, origin: new URL(browserUrl).origin })
     if (observe) {
-      await context.addInitScript(title => {
+      await context.addInitScript(showObservation, { title: testInfo.title })
+      await context.addInitScript(() => {
         document.addEventListener('DOMContentLoaded', () => {
-          const label = document.createElement('div')
-          label.setAttribute('data-orion-test-observer', '')
-          label.textContent = title
-          label.style.cssText = 'position:fixed;bottom:12px;left:12px;z-index:2147483647;' +
-            'padding:8px 12px;background:#17202a;color:white;font:14px sans-serif;pointer-events:none'
-          document.documentElement.append(label)
           document.addEventListener('pointerdown', event => {
             const marker = document.createElement('div')
             marker.setAttribute('data-orion-test-click', '')
@@ -66,10 +105,10 @@ export const test = base.extend({
               'border:3px solid #ff7043;border-radius:50%;transform:translate(-50%,-50%);' +
               `left:${event.clientX}px;top:${event.clientY}px;pointer-events:none`
             document.documentElement.append(marker)
-            setTimeout(() => marker.remove(), 2000)
+            setTimeout(() => marker.remove(), 4000)
           }, true)
         }, { once: true })
-      }, testInfo.title)
+      })
     }
     await use(context)
   },

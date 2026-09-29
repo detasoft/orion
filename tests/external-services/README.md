@@ -135,7 +135,7 @@ make run-server
 # Fast: test plain HTTP without ACME or JVM CA configuration.
 make browser-test URL=http://localhost:8000 TEST='local repository'
 
-# Observe the same scenarios through noVNC, with a one-second action delay.
+# Observe through noVNC: show each target for two seconds, then act and pause for one second.
 make browser-test URL=http://localhost:8000 OBSERVE=1 TEST='local repository'
 
 # Run all ordinary scenarios, including the HTTPS Git proxy (see JVM CA trust below).
@@ -166,7 +166,10 @@ temporary upstream Gitea repository is removed after its scenario.
 
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.
-Observed tests bring their page forward, show the scenario name, and mark clicks.
+Observed tests bring their page forward and show the scenario name and numbered
+step description. Before each UI action, they outline its target, move the pointer
+onto it, and pause for two seconds. After the action they pause for one second;
+click markers remain visible for four seconds. Step descriptions omit credential values.
 Unattended tests use the same assertions without presentation delays. Results are
 shown in the terminal; the HTML report is in
 `tests/integration-test/target/playwright-report/`. Failed test traces are in

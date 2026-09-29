@@ -33,14 +33,14 @@ async function giteaRequest(method, path, password, data) {
   })
 }
 
-async function openOrion(page) {
+async function openOrion(page, step) {
   page.on('requestfailed', request => {
     console.log('Request failed:', request.url(), request.failure()?.errorText)
   })
   page.on('response', response => {
     if (response.status() >= 400) console.log('HTTP failure:', response.status(), response.url())
   })
-  await page.goto(browserUrl)
+  await step('Открыть Orion', null, () => page.goto(browserUrl))
   await expect(page.getByRole('button', { name: `${new URL(browserUrl).hostname} Connected` })).toBeVisible()
 }
 
@@ -53,15 +53,18 @@ async function remoteRefs(path, token) {
   return result.stdout
 }
 
-test('administrator creates a local repository in Orion', async ({ request, page, adminToken }) => {
-  await openOrion(page)
+test('administrator creates a local repository in Orion', async ({ request, page, adminToken, step }) => {
+  await openOrion(page, step)
   const name = `playwright-local-${randomUUID().slice(0, 8)}`
-  await page.getByRole('button', { name: 'New repository' }).click()
+  await step('Открыть создание репозитория', page.getByRole('button', { name: 'New repository' }),
+    target => target.click())
   const dialog = page.getByRole('dialog', { name: 'Create a repository' })
-  await dialog.getByLabel('Repository name').fill(name)
-  await dialog.getByRole('button', { name: 'Create repository' }).click()
+  await step('Ввести имя репозитория', dialog.getByLabel('Repository name'), target => target.fill(name))
+  await step('Создать репозиторий', dialog.getByRole('button', { name: 'Create repository' }),
+    target => target.click())
   await expect(page.getByText('Repository created', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Repositories', exact: true }).click()
+  await step('Открыть список репозиториев', page.getByRole('button', { name: 'Repositories', exact: true }),
+    target => target.click())
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 
   const listing = await request.get(`${orionUrl}/api/admin/repositories`, {
@@ -71,12 +74,13 @@ test('administrator creates a local repository in Orion', async ({ request, page
   expect((await listing.json()).repositories.map(repository => repository.name)).toContain(name)
   expect(await remoteRefs(`/r/${name}.git`, adminToken)).toBe('')
 
-  await page.reload()
-  await page.getByRole('button', { name: 'Repositories', exact: true }).click()
+  await step('Обновить страницу и проверить сохранение репозитория', null, () => page.reload())
+  await step('Снова открыть список репозиториев', page.getByRole('button', { name: 'Repositories', exact: true }),
+    target => target.click())
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 })
 
-test('administrator connects an HTTPS Git proxy to private Gitea', async ({ request, page, adminToken }) => {
+test('administrator connects an HTTPS Git proxy to private Gitea', async ({ request, page, adminToken, step }) => {
   const credentialsPath = new URL('../../external-services/.state/credentials.env', import.meta.url)
   const credentials = await readFile(credentialsPath, 'utf8')
   const password = credentials.match(/^GITEA_PASSWORD=(.+)$/m)?.[1]
@@ -91,17 +95,23 @@ test('administrator connects an HTTPS Git proxy to private Gitea', async ({ requ
     const branch = await giteaRequest('GET', `/api/v1/repos/fixture/${name}/branches/main`, password)
     expect(branch.status).toBe(200)
     const expectedCommit = JSON.parse(branch.body).commit.id
-    await openOrion(page)
-    await page.getByRole('button', { name: 'Remote aliases', exact: true }).click()
-    await page.getByRole('button', { name: 'Add alias', exact: true }).click()
+    await openOrion(page, step)
+    await step('Открыть удалённые репозитории', page.getByRole('button', { name: 'Remote aliases', exact: true }),
+      target => target.click())
+    await step('Добавить подключение к Gitea', page.getByRole('button', { name: 'Add alias', exact: true }),
+      target => target.click())
     const form = page.locator('.proxy-editor')
-    await form.getByLabel('Alias', { exact: true }).fill(aliasName)
-    await form.getByLabel('Upstream URL', { exact: true }).fill(`${giteaUrl}/fixture/${name}.git`)
-    await form.getByLabel('Selected ref').fill('main')
-    await form.getByLabel('Authentication').selectOption('PASSWORD')
-    await form.getByLabel('HTTP username').fill('fixture')
-    await form.getByLabel('New credential').fill(password)
-    await form.getByRole('button', { name: 'Save', exact: true }).click()
+    await step('Ввести имя подключения', form.getByLabel('Alias', { exact: true }),
+      target => target.fill(aliasName))
+    await step('Указать URL репозитория Gitea', form.getByLabel('Upstream URL', { exact: true }),
+      target => target.fill(`${giteaUrl}/fixture/${name}.git`))
+    await step('Выбрать ветку main', form.getByLabel('Selected ref'), target => target.fill('main'))
+    await step('Выбрать вход по паролю', form.getByLabel('Authentication'),
+      target => target.selectOption('PASSWORD'))
+    await step('Ввести пользователя Gitea', form.getByLabel('HTTP username'), target => target.fill('fixture'))
+    await step('Ввести пароль Gitea', form.getByLabel('New credential'), target => target.fill(password))
+    await step('Сохранить подключение', form.getByRole('button', { name: 'Save', exact: true }),
+      target => target.click())
     const alias = page.locator('.proxy-row').filter({ has: page.getByRole('heading', { name: aliasName }) })
     await expect(alias.getByText('Success', { exact: true })).toBeVisible({ timeout: 30_000 })
     await expect(alias.getByText(proxyPath, { exact: true })).toBeVisible()
@@ -112,8 +122,9 @@ test('administrator connects an HTTPS Git proxy to private Gitea', async ({ requ
     })
     expect(listing.status()).toBe(200)
     expect(await listing.text()).not.toContain(password)
-    await page.reload()
-    await page.getByRole('button', { name: 'Remote aliases', exact: true }).click()
+    await step('Обновить страницу и проверить сохранение подключения', null, () => page.reload())
+    await step('Снова открыть удалённые репозитории',
+      page.getByRole('button', { name: 'Remote aliases', exact: true }), target => target.click())
     await expect(page.getByRole('heading', { name: aliasName, exact: true })).toBeVisible()
   } finally {
     await giteaRequest('DELETE', `/api/v1/repos/fixture/${name}`, password)

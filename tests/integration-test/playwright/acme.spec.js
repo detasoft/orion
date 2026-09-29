@@ -12,7 +12,7 @@ function certificates(pem) {
 }
 
 test('administrator issues and inspects an HTTP-01 certificate in Orion', async ({
-  request, playwright, page, adminToken,
+  request, playwright, page, adminToken, step,
 }) => {
   const authorized = { Authorization: `Bearer ${adminToken}` }
   const before = await request.get(`${orionUrl}${certificatePath}`, { headers: authorized })
@@ -27,12 +27,14 @@ test('administrator issues and inspects an HTTP-01 certificate in Orion', async 
   expect(afterDenied.status()).toBe(before.status())
   if (previous !== null) expect(await afterDenied.text()).toBe(previous)
 
-  await page.goto(browserUrl)
+  await step('Открыть Orion', null, () => page.goto(browserUrl))
   await expect(page.getByRole('button', { name: 'Key material' })).toBeVisible()
-  await page.getByRole('button', { name: 'Key material' }).click()
+  await step('Открыть ключи и сертификаты', page.getByRole('button', { name: 'Key material' }),
+    target => target.click())
   await expect(page.getByText('acme-identity')).toBeVisible()
   await expect(page.getByText('No issued certificate').first()).toBeVisible()
-  await page.getByRole('button', { name: 'Issue ACME certificate' }).click()
+  await step('Запросить выпуск ACME-сертификата', page.getByRole('button', { name: 'Issue ACME certificate' }),
+    target => target.click())
   await expect(page.getByText('Certificate issued and saved.')).toBeVisible({ timeout: 150_000 })
   await expect(page.locator('.material-certificate').first()
     .getByText('orion.test', { exact: true })).toBeVisible()
