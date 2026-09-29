@@ -2,15 +2,18 @@
 
 - Owner: codex, session 01a0e9f3-3074-7992-89d5-cfa3075fd72d,
   branch `codex/maven-dependency-cleanup-3074`,
-  worktree `.worktrees/maven-dependency-cleanup-3074`, paused 2026-09-29 10:30 Europe/Amsterdam;
-  next: authorize integration of reviewed commit `4876dc4f1bbbcd89958b17f3a74711f56306c977`,
-  verify main, then remove the task worktree and branch.
+  worktree `.worktrees/maven-dependency-cleanup-3074`, resumed 2026-09-29 10:41 Europe/Amsterdam.
 
 ## Requirements
 
 - Remove explicit declarations already supplied transitively, including those
   directly used by source code, as explicitly requested by the user. Preserve
-  resolved artifact identities, versions, and scopes across the reactor.
+  resolved artifact identities, versions, and scopes across the reactor except
+  for the explicitly requested replacement of debug Bouncy Castle artifacts.
+- Replace Bouncy Castle debug artifacts with ordinary `jdk18on` artifacts at
+  version 1.79. Remove exclusions introduced to keep ordinary BC artifacts out
+  and obsolete commented debug alternatives. Keep one consistent BC version
+  across consumers, including ACME, and avoid redundant declarations.
 - Put `orion-dependency-cleanup-audit.py` in `build-tools/` and expose its report
   through `make dependency-audit`.
 - Add `build-tools/orion-dependency-minimize.py` and `make dependency-minimize`.
@@ -65,5 +68,9 @@ separate test-runtime optimization or product architecture review tasks.
 - Both scripts and their documented Make goals work on the actual reactor.
 - External and internal dependency relocation is covered by behavioral tests;
   the default command previews a valid patch and explicit application writes it.
+- Preserve effective dependency exclusions and inherited Java source roots;
+  cover the two reproduced review findings before approving the minimizer.
+- The resolved graph contains ordinary BC 1.79 without debug artifacts or
+  unnecessary BC exclusions; cryptographic behavior remains covered by tests.
 - All required checks pass and the dependency diagram reflects the resulting
   POM declarations.
