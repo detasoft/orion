@@ -16,6 +16,8 @@
 - Use `orion-minimal-implementation` for every implementation or review.
   Review, status, and explanation requests are read-only except that
   `orion-review` maintains and commits requested module reports.
+- Write all `MODULE_REVIEW.md` content in English, including titles, findings,
+  and supporting prose.
 - Preserve unrelated staged and unstaged changes. Never stage, discard, or
   commit work not produced by the current request.
 - Execution plans contain requirements, design, dependencies, and result

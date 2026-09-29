@@ -35,6 +35,9 @@ validates every finding and cross-module conclusion.
 
 ## Evidence rules
 
+Write all `MODULE_REVIEW.md` content in English, including titles, findings,
+and supporting prose.
+
 Treat every existing finding as a hypothesis. Remove it and dependent prose when
 its premise is fixed or disproved. Keep a partially unresolved finding only
 after rewriting it to the remaining current problem. Git history, a missing
