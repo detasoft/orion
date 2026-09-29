@@ -90,10 +90,12 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         requireConnectTimeout(options);
         HttpClient httpClient = client == null ? defaultClient(
                 options.connectTimeout()) : client;
+        GitClientTransportSession session = null;
         try {
             byte[] advertisement = discover(
                     httpClient, service, repositoryUri, options);
-            return openPost(httpClient, service, repositoryUri, options, advertisement);
+            session = openPost(httpClient, service, repositoryUri, options, advertisement);
+            return session;
         } catch (GitClientTransportException error) {
             throw error;
         } catch (InterruptedException error) {
@@ -109,6 +111,10 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                     true,
                     "Failed to open Git Smart HTTP session",
                     error);
+        } finally {
+            if (session == null && client == null) {
+                httpClient.shutdownNow();
+            }
         }
     }
 
@@ -218,6 +224,7 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                 requestOutput,
                 () -> httpClient.sendAsync(
                         builder.build(), HttpResponse.BodyHandlers.ofInputStream()),
+                client == null ? httpClient : null,
                 service,
                 options.readTimeout()), options);
     }
@@ -521,6 +528,7 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
         private final PipedInputStream requestInput;
         private final PipedOutputStream requestOutput;
         private final Supplier<CompletableFuture<HttpResponse<InputStream>>> responseSupplier;
+        private final HttpClient ownedClient;
         private final GitClientService service;
         private final Duration readTimeout;
         private final BufferedByteInputV2 input;
@@ -534,11 +542,13 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                 PipedInputStream requestInput,
                 PipedOutputStream requestOutput,
                 Supplier<CompletableFuture<HttpResponse<InputStream>>> responseSupplier,
+                HttpClient ownedClient,
                 GitClientService service,
                 Duration readTimeout) {
             this.requestInput = requestInput;
             this.requestOutput = requestOutput;
             this.responseSupplier = responseSupplier;
+            this.ownedClient = ownedClient;
             this.service = service;
             this.readTimeout = readTimeout;
             input = new BufferedByteInputV2(new SwitchingInput(
@@ -604,6 +614,9 @@ public final class GitSmartHttpClientTransport implements GitClientTransport {
                 } catch (IOException error) {
                     failure = combine(failure, error);
                 }
+            }
+            if (ownedClient != null) {
+                ownedClient.shutdownNow();
             }
             if (failure != null) {
                 throw failure;

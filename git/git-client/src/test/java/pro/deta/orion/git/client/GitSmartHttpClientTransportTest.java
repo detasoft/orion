@@ -14,11 +14,16 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.lang.ref.Reference;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.http.HttpClient;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitSmartHttpClientTransportTest {
     private static final String OLD_ID =
@@ -330,6 +336,176 @@ class GitSmartHttpClientTransportTest {
         assertThat(GitSmartHttpClientTransport.defaultClient(
                 Duration.ofSeconds(1)).followRedirects())
                 .isEqualTo(HttpClient.Redirect.NEVER);
+    }
+
+    @Test
+    void closesOwnedClientConnectionWhenDiscoverySessionCloses() throws Exception {
+        byte[] body = concat(packet("# service=git-upload-pack\n"), flush(),
+                advertisement(GitClientService.UPLOAD_PACK.command()));
+        try (KeepAlivePeer peer = new KeepAlivePeer(body)) {
+            GitSmartHttpClientTransport transport = new GitSmartHttpClientTransport(
+                    null, GitCredentials.none(), true);
+            GitClientTransportSession session = transport.open(
+                    GitClientService.UPLOAD_PACK, peer.repositoryUri(), GitClientOptions.defaults());
+            try (session) {
+                session.close();
+                session.close();
+
+                peer.awaitClientClose();
+            } finally {
+                Reference.reachabilityFence(session);
+            }
+        }
+    }
+
+    @Test
+    void closesOwnedClientConnectionAfterMalformedDiscovery() throws Exception {
+        try (KeepAlivePeer peer = new KeepAlivePeer(
+                "invalid advertisement".getBytes(StandardCharsets.US_ASCII))) {
+            GitSmartHttpClientTransport transport = new GitSmartHttpClientTransport(
+                    null, GitCredentials.none(), true);
+
+            assertThatThrownBy(() -> transport.open(
+                    GitClientService.UPLOAD_PACK, peer.repositoryUri(), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientTransportException.class)
+                    .hasMessage("Malformed Git Smart HTTP service advertisement");
+
+            peer.awaitClientClose();
+        }
+    }
+
+    @Test
+    void timesOutStalledPostWithAnOwnedClient() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger posts = new AtomicInteger();
+        try (TestHttpServer server = TestHttpServer.start(exchange -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                respond(exchange, 200, "application/x-git-upload-pack-advertisement",
+                        concat(packet("# service=git-upload-pack\n"), flush(),
+                                advertisement(GitClientService.UPLOAD_PACK.command())));
+                return;
+            }
+            exchange.getRequestBody().readAllBytes();
+            posts.incrementAndGet();
+            exchange.getResponseHeaders().set("Content-Type", "application/x-git-upload-pack-result");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(packet("NAK\n"));
+            exchange.getResponseBody().flush();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Stalled POST was interrupted", error);
+            } finally {
+                exchange.close();
+            }
+        })) {
+            GitSmartHttpClientTransport transport = new GitSmartHttpClientTransport(
+                    null, GitCredentials.none(), true);
+            GitClientOptions options = new GitClientOptions(
+                    GitClientOptions.defaults().connectTimeout(), Duration.ofMillis(300),
+                    Duration.ofSeconds(2), Duration.ofSeconds(10), 1);
+            long started = System.nanoTime();
+            try {
+                GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport).fetch(
+                        server.repositoryUri(), options,
+                        GitUploadPackRequest.of(OLD_ID,
+                                new OutputStreamBufferedByteOutput(new ByteArrayOutputStream())));
+
+                assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.TIMEOUT);
+                assertThat(posts).hasValue(1);
+                assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(3));
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void keepsInjectedClientUsableAfterFailedOpenAndSessionClose() throws Exception {
+        byte[] body = concat(packet("# service=git-upload-pack\n"), flush(),
+                advertisement(GitClientService.UPLOAD_PACK.command()));
+        try (KeepAlivePeer peer = new KeepAlivePeer(
+                "invalid advertisement".getBytes(StandardCharsets.US_ASCII), body, body);
+             HttpClient client = HttpClient.newBuilder()
+                     .connectTimeout(GitClientOptions.defaults().connectTimeout()).build()) {
+            GitSmartHttpClientTransport transport = new GitSmartHttpClientTransport(
+                    client, GitCredentials.none(), true);
+            assertThatThrownBy(() -> transport.open(
+                    GitClientService.UPLOAD_PACK, peer.repositoryUri(), GitClientOptions.defaults()))
+                    .isInstanceOf(GitClientTransportException.class);
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try (GitClientTransportSession session = transport.open(
+                        GitClientService.UPLOAD_PACK, peer.repositoryUri(), GitClientOptions.defaults())) {
+                    assertThat(session.input()).isNotNull();
+                }
+            }
+
+            assertThat(client.isTerminated()).isFalse();
+            assertThat(peer.requests).hasValue(3);
+        }
+    }
+
+    private static final class KeepAlivePeer implements AutoCloseable {
+        private final ServerSocket listener;
+        private final Thread server;
+        private final AtomicInteger requests = new AtomicInteger();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+        private final CountDownLatch clientClosed = new CountDownLatch(1);
+        private volatile Socket connection;
+
+        private KeepAlivePeer(byte[]... bodies) throws IOException {
+            listener = new ServerSocket();
+            listener.bind(new InetSocketAddress("127.0.0.1", 0));
+            server = Thread.ofPlatform().start(() -> {
+                try (Socket socket = listener.accept()) {
+                    connection = socket;
+                    socket.setSoTimeout(5000);
+                    BufferedReader input = new BufferedReader(new InputStreamReader(
+                            socket.getInputStream(), StandardCharsets.US_ASCII));
+                    String request;
+                    while ((request = input.readLine()) != null) {
+                        assertThat(request).startsWith("GET /repository.git/info/refs?");
+                        String header;
+                        while ((header = input.readLine()) != null && !header.isEmpty()) {
+                            // Consume the request headers before responding on the same connection.
+                        }
+                        byte[] body = bodies[requests.getAndIncrement()];
+                        socket.getOutputStream().write(("HTTP/1.1 200 OK\r\n"
+                                + "Content-Type: application/x-git-upload-pack-advertisement\r\n"
+                                + "Content-Length: " + body.length + "\r\n\r\n")
+                                .getBytes(StandardCharsets.US_ASCII));
+                        socket.getOutputStream().write(body);
+                        socket.getOutputStream().flush();
+                    }
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    clientClosed.countDown();
+                }
+            });
+        }
+
+        private URI repositoryUri() {
+            return URI.create("http://127.0.0.1:" + listener.getLocalPort() + "/repository.git");
+        }
+
+        private void awaitClientClose() throws InterruptedException {
+            assertThat(clientClosed.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(failure.get()).isNull();
+        }
+
+        @Override
+        public void close() throws Exception {
+            listener.close();
+            Socket socket = connection;
+            if (socket != null) {
+                socket.close();
+            }
+            server.join(Duration.ofSeconds(5));
+            assertThat(server.isAlive()).isFalse();
+        }
     }
 
     private static GitSmartHttpClientTransport transport(boolean allowHttp) {
