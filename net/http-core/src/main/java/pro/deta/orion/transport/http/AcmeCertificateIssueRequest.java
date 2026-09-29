@@ -14,11 +14,16 @@ public record AcmeCertificateIssueRequest(
         String organization,
         Duration authorizationTimeout,
         Duration orderTimeout,
-        boolean agreeToTermsOfService) {
+        boolean agreeToTermsOfService,
+        String eabKeyId,
+        char[] eabHmacKey) {
     private static final Duration DEFAULT_AUTHORIZATION_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration DEFAULT_ORDER_TIMEOUT = Duration.ofSeconds(60);
 
     public AcmeCertificateIssueRequest {
+        if ((eabKeyId == null) != (eabHmacKey == null)) {
+            throw new IllegalArgumentException("EAB requires both key id and HMAC key");
+        }
         requireNotBlank(directoryUrl, "ACME directory URL is required");
         requireNotBlank(accountEmail, "ACME account email is required");
         if (accountKeyPair == null) {
@@ -40,6 +45,11 @@ public record AcmeCertificateIssueRequest(
         if (orderTimeout.isZero() || orderTimeout.isNegative()) {
             throw new IllegalArgumentException("ACME order timeout must be positive");
         }
+    }
+
+    @Override
+    public String toString() {
+        return "AcmeCertificateIssueRequest[private material=<redacted>]";
     }
 
     private static List<String> validatedDomains(List<String> domains) {

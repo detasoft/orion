@@ -28,6 +28,24 @@ class OrionXmlTest {
     private final OrionXmlSchema xmlSchema = new OrionXmlSchema();
 
     @Test
+    void requiresEabSecretInSystemScopeAndRoundTripsItsReference() throws Exception {
+        String xml = testResource("pro/deta/orion/schema/orion/orion-v2.xml").replace("</acme>",
+                "<eabKeyId>external-account</eabKeyId><eabSecret>eab</eabSecret></acme>");
+        assertThatThrownBy(() -> read(xml)).isInstanceOf(IOException.class)
+                .hasMessageContaining("ACME EAB secret is unavailable in system scope");
+        String organizationOnly = xml.replace("</teams>",
+                "</teams><secrets><secret id=\"eab\"><envelope>encrypted</envelope></secret></secrets>");
+        assertThatThrownBy(() -> read(organizationOnly)).isInstanceOf(IOException.class)
+                .hasMessageContaining("ACME EAB secret is unavailable in system scope");
+        String valid = xml.replace("</system>",
+                "<secrets><secret id=\"eab\"><envelope>encrypted</envelope></secret></secrets></system>");
+        OrionDocument document = read(valid);
+        assertThat(document.system().https().orElseThrow().acme().orElseThrow().eabKeyId())
+                .contains("external-account");
+        assertThat(read(write(document))).isEqualTo(document);
+    }
+
+    @Test
     void roundTripsInvitationsAndOidcUserBindings() throws Exception {
         String xml = minimalV2("""
                 <organization id="acme">
@@ -190,7 +208,7 @@ class OrionXmlTest {
                 30,
                 40,
                 true,
-                false);
+                false, Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 true,
                 "127.0.0.1",
@@ -248,7 +266,7 @@ class OrionXmlTest {
                 30,
                 30,
                 false,
-                false))
+                false, Optional.empty(), Optional.empty()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate ACME domain");
     }

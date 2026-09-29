@@ -86,6 +86,37 @@ material references belong to the versioned `orion.xml` document. Enabling
 HTTPS requires an identity with an installed certificate chain in the
 protected material store; Orion does not create a self-signed fallback.
 
+Administrators can configure and issue ACME certificates in **Key material** in
+the web UI, or over SSH with `/acme help`, `/acme show`, `/acme configure`, and
+`/acme issue`. Presets include Let's Encrypt, ZeroSSL, and Google Trust Services;
+`custom` accepts another HTTPS ACME directory URL. Both interfaces use the same
+saved configuration and certificate store. HTTP-01 requires the CA to reach
+the requested domains on port 80.
+
+```sh
+ssh -p 8022 admin@localhost /acme show
+ssh -p 8022 admin@localhost /acme configure \
+  revision=<revision-from-show> provider=zerossl \
+  email=admin@example.com domains=example.com \
+  eab-kid=<id> eab-hmac-key=<base64url-secret>
+ssh -p 8022 admin@localhost /acme issue
+```
+
+For `custom`, also provide `directory-url=https://ca.example/directory`.
+ZeroSSL and Google require an EAB key ID and HMAC key from the provider. EAB
+secrets are encrypted in the system configuration and are never returned by the
+settings API or SSH commands; SSH auditing redacts the HMAC parameter. Omit the
+HMAC key when saving unchanged provider/account settings to retain it. Changing
+the provider or EAB key ID requires fresh credentials and selects a new local
+account key. Issuing confirms acceptance of the selected provider's terms; there
+is no separate checkbox.
+
+The ACME account key and settings survive restarts. Subsequent issuance reuses
+the registered account, without replaying EAB: some providers, including Google,
+invalidate EAB after registration. This supports future automatic renewal;
+there is currently no automatic renewal scheduler. Issuance saves the certificate
+but does not enable the HTTPS listener.
+
 Use `--config <location>` to point Orion at a different YAML or TOML
 configuration. Configuration paths can use `env:NAME`, for example
 `bootstrap.baseDir: env:ORION_ROOT`, to resolve a runtime directory from an

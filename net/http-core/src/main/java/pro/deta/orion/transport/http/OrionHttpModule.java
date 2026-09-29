@@ -11,6 +11,18 @@ import pro.deta.orion.util.LogInitializer;
 @Module
 public class OrionHttpModule {
     @Provides
+    @IntoSet
+    static OrionHttpRoute acmeConfigurationRoute(OrionAdminAcmeConfigurationRoute route) {
+        return route;
+    }
+
+    @Provides
+    @jakarta.inject.Named("acmeCommands")
+    static pro.deta.orion.command.CommandNode acmeCommands(AcmeCommandCatalog catalog) {
+        return catalog.commandTree();
+    }
+
+    @Provides
     static LogInitializer logInitializer() {
         return OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer();
     }

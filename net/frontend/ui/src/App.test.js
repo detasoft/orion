@@ -15,6 +15,8 @@ const client = {
   lifecycleState: vi.fn(),
   keyMaterial: vi.fn(),
   issueAcmeCertificate: vi.fn(),
+  acmeConfiguration: vi.fn(),
+  saveAcmeConfiguration: vi.fn(),
   repositories: vi.fn(),
   remoteAliases: vi.fn(),
   routes: vi.fn(),
@@ -81,6 +83,7 @@ beforeEach(() => {
   client.lifecycleState.mockResolvedValue('RUNNING')
   client.keyMaterial.mockResolvedValue({ entries: [] })
   client.issueAcmeCertificate.mockResolvedValue('-----BEGIN CERTIFICATE-----')
+  client.acmeConfiguration.mockResolvedValue({ revision: '1', provider: 'letsencrypt', domains: [], presets: [] })
   client.repositories.mockResolvedValue({ repositories: [] })
   client.remoteAliases.mockResolvedValue({ aliases: [] })
   client.decisions.mockResolvedValue({ decisions: [] })

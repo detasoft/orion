@@ -3,6 +3,8 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -24,6 +26,7 @@ import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +39,7 @@ public class AcmeCertificateService {
     private final OrionDesiredState desiredState;
     private final AcmeKeyMaterialCapability keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
+    private final ConfigurationSecrets secrets;
     private final AtomicBoolean issuanceInProgress = new AtomicBoolean();
 
     @Inject
@@ -43,13 +47,15 @@ public class AcmeCertificateService {
             OrionConfiguration bootstrapConfiguration,
             OrionDesiredState desiredState,
             AcmeKeyMaterialCapability keyMaterial,
-            AcmeCertificateIssuer certificateIssuer) {
+            AcmeCertificateIssuer certificateIssuer,
+            ConfigurationSecrets secrets) {
         this.clusterId = required(
                 bootstrapConfiguration.getBootstrap().getKeyMaterial().getClusterId(),
                 "Key material cluster id is required");
         this.desiredState = desiredState;
         this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
+        this.secrets = secrets;
     }
 
     public IssuedAcmeCertificate issue(IssueRequest request) {
@@ -71,16 +77,23 @@ public class AcmeCertificateService {
         } catch (IOException | GeneralSecurityException failure) {
             throw new AcmeCertificateIssueException("Cannot acquire ACME key material", failure);
         }
-        IssuedAcmeCertificate issued = certificateIssuer.issue(new AcmeCertificateIssueRequest(
-                settings.directoryUrl(),
-                settings.accountEmail(),
-                keys.accountKeyPair(),
-                keys.domainKeyPair(),
-                settings.domains(),
-                settings.organization(),
-                Duration.ofSeconds(settings.authorizationTimeoutSeconds()),
-                Duration.ofSeconds(settings.orderTimeoutSeconds()),
-                settings.agreeToTermsOfService()));
+        char[] eabKey = settings.eabSecret() == null ? null
+                : secrets.resolveSystem(settings.snapshot(), settings.eabSecret());
+        IssuedAcmeCertificate issued;
+        try {
+            issued = certificateIssuer.issue(new AcmeCertificateIssueRequest(
+                    settings.directoryUrl(),
+                    settings.accountEmail(),
+                    keys.accountKeyPair(),
+                    keys.domainKeyPair(),
+                    settings.domains(),
+                    settings.organization(),
+                    Duration.ofSeconds(settings.authorizationTimeoutSeconds()),
+                    Duration.ofSeconds(settings.orderTimeoutSeconds()),
+                    settings.agreeToTermsOfService(), settings.eabKeyId(), eabKey));
+        } finally {
+            if (eabKey != null) Arrays.fill(eabKey, '\0');
+        }
         try {
             CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
             keyMaterial.installCertificateChain(
@@ -122,8 +135,8 @@ public class AcmeCertificateService {
 
     private IssueSettings settingsFrom(IssueRequest request) {
         IssueRequest effectiveRequest = request == null ? IssueRequest.EMPTY : request;
-        OrionHttpsConfiguration https = desiredState.current()
-                .document()
+        OrionDocument snapshot = desiredState.current().document();
+        OrionHttpsConfiguration https = snapshot
                 .system()
                 .https()
                 .orElseThrow(() -> new ConfigurationUnavailableException("HTTPS desired state is not configured"));
@@ -131,21 +144,13 @@ public class AcmeCertificateService {
                 .filter(OrionAcmeConfiguration::enabled)
                 .orElseThrow(() -> new ConfigurationUnavailableException("ACME desired state is not enabled"));
 
+        if (acme.eabSecret().isPresent() && effectiveRequest.directoryUrl() != null
+                && !effectiveRequest.directoryUrl().equals(acme.directoryUrl().toString())) {
+            throw new HttpRequestValidationException("Save ACME provider settings before changing the directory URL");
+        }
+
         List<String> domains = domainsFrom(effectiveRequest, acme);
         requireRequestedDomainsAllowed(domains, effectiveRequest, acme);
-        KeyMaterialScope scope = KeyMaterialScope.cluster(clusterId);
-        KeyMaterialDescriptor account = descriptor(
-                acme.accountMaterial().orElseThrow(
-                        () -> new ConfigurationUnavailableException("ACME account material is not configured")),
-                KeyMaterialPurpose.ACME_ACCOUNT,
-                scope);
-        KeyMaterialDescriptor identity = descriptor(
-                https.identity().orElseThrow(
-                        () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
-                KeyMaterialPurpose.TLS_IDENTITY,
-                scope);
-        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
-                .map(reference -> trustedCertificate(reference, scope));
         return new IssueSettings(
                 firstNotBlank(
                         effectiveRequest.directoryUrl(),
@@ -168,7 +173,34 @@ public class AcmeCertificateService {
                 boolOrDefault(
                         effectiveRequest.agreeToTermsOfService(),
                         acme.agreeToTermsOfService()),
-                new AcmeMaterialConfiguration(account, identity, issuer));
+                materialFrom(https), snapshot,
+                acme.eabKeyId().orElse(null), acme.eabSecret().orElse(null));
+    }
+
+    void prepareMaterial(OrionHttpsConfiguration https) {
+        try {
+            keyMaterial.acquire(materialFrom(https), RSA_KEY_SIZE, RSA_KEY_SIZE);
+        } catch (IOException | GeneralSecurityException failure) {
+            throw new AcmeCertificateIssueException("Cannot prepare ACME key material", failure);
+        }
+    }
+
+    private AcmeMaterialConfiguration materialFrom(OrionHttpsConfiguration https) {
+        OrionAcmeConfiguration acme = https.acme().orElseThrow();
+        KeyMaterialScope scope = KeyMaterialScope.cluster(clusterId);
+        KeyMaterialDescriptor account = descriptor(
+                acme.accountMaterial().orElseThrow(
+                        () -> new ConfigurationUnavailableException("ACME account material is not configured")),
+                KeyMaterialPurpose.ACME_ACCOUNT,
+                scope);
+        KeyMaterialDescriptor identity = descriptor(
+                https.identity().orElseThrow(
+                        () -> new ConfigurationUnavailableException("ACME TLS identity material is not configured")),
+                KeyMaterialPurpose.TLS_IDENTITY,
+                scope);
+        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
+                .map(reference -> trustedCertificate(reference, scope));
+        return new AcmeMaterialConfiguration(account, identity, issuer);
     }
 
     private static KeyMaterialDescriptor descriptor(
@@ -303,7 +335,10 @@ public class AcmeCertificateService {
             long authorizationTimeoutSeconds,
             long orderTimeoutSeconds,
             boolean agreeToTermsOfService,
-            AcmeMaterialConfiguration material) {
+            AcmeMaterialConfiguration material,
+            OrionDocument snapshot,
+            String eabKeyId,
+            String eabSecret) {
     }
 
     private record CertificateMaterial(

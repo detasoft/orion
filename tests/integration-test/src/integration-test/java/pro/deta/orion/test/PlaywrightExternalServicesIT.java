@@ -123,7 +123,8 @@ class PlaywrightExternalServicesIT {
                 .version().orElseThrow();
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true, URI.create(DIRECTORY_URL), "orion@orion.test", List.of("orion.test"), "Orion",
-                Optional.of(new OrionMaterialReference("acme-account", 1)), 90, 120, true, false);
+                Optional.of(new OrionMaterialReference("acme-account", 1)), 90, 120, true, false,
+                Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 false, "0.0.0.0", 9443, URI.create("https://orion.test:9443"),
                 Optional.of(new OrionMaterialReference("acme-identity", 1)), Optional.empty(),

@@ -19,11 +19,20 @@ public record OrionAcmeConfiguration(
         long authorizationTimeoutSeconds,
         long orderTimeoutSeconds,
         boolean agreeToTermsOfService,
-        boolean allowRequestedDomains) {
+        boolean allowRequestedDomains,
+        Optional<String> eabKeyId,
+        Optional<String> eabSecret) {
     public OrionAcmeConfiguration {
         Objects.requireNonNull(directoryUrl, "ACME directory URL");
         accountMaterial = Objects.requireNonNullElseGet(accountMaterial, Optional::empty);
         domains = copyDomains(domains);
+        eabKeyId = Objects.requireNonNullElseGet(eabKeyId, Optional::empty);
+        eabSecret = Objects.requireNonNullElseGet(eabSecret, Optional::<String>empty)
+                .map(value -> IdentifierRules.requireCanonical(value, "ACME EAB secret"));
+        if (eabKeyId.isPresent() != eabSecret.isPresent()
+                || eabKeyId.filter(String::isBlank).isPresent()) {
+            throw new IllegalArgumentException("ACME EAB requires both key id and secret reference");
+        }
         if (authorizationTimeoutSeconds <= 0 || orderTimeoutSeconds <= 0) {
             throw new IllegalArgumentException("ACME timeouts must be positive");
         }

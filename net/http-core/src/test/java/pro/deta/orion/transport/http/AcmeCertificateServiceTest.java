@@ -63,7 +63,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(store)) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap, desiredState, owner.acme(), issuer);
+                    bootstrap, desiredState, owner.acme(), issuer, null);
 
             IssuedAcmeCertificate certificate = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
 
@@ -80,7 +80,7 @@ class AcmeCertificateServiceTest {
 
         try (OrionKeyMaterial owner = owner(store)) {
             AcmeCertificateService restarted = new AcmeCertificateService(
-                    bootstrap, desiredState, owner.acme(), new RecordingIssuer(false));
+                    bootstrap, desiredState, owner.acme(), new RecordingIssuer(false), null);
 
             assertThat(restarted.savedCertificate().orElseThrow().certificateChain()).hasSize(1);
         }
@@ -94,7 +94,7 @@ class AcmeCertificateServiceTest {
     void rejectsRequestedDomainsUnlessDesiredStateAllowsIt() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(false));
+                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(false), null);
 
             assertThatThrownBy(() -> service.issue(new AcmeCertificateService.IssueRequest(
                     null, null, List.of("other.example.test"), null, null, null, null)))
@@ -108,7 +108,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             RecordingIssuer issuer = new RecordingIssuer(false);
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(true), owner.acme(), issuer);
+                    bootstrap(), desiredState(true), owner.acme(), issuer, null);
 
             service.issue(new AcmeCertificateService.IssueRequest(
                     null, null, List.of("other.example.test"), null, null, null, null));
@@ -122,7 +122,7 @@ class AcmeCertificateServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (OrionKeyMaterial owner = owner(store)) {
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(true));
+                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(true), null);
 
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
@@ -138,7 +138,7 @@ class AcmeCertificateServiceTest {
             CountingAcmeKeyMaterial keyMaterial = new CountingAcmeKeyMaterial(owner.acme());
             BlockingFirstIssuer issuer = new BlockingFirstIssuer();
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), keyMaterial, issuer);
+                    bootstrap(), desiredState(false), keyMaterial, issuer, null);
             Future<IssuedAcmeCertificate> first = executor.submit(
                     () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
 
@@ -165,7 +165,7 @@ class AcmeCertificateServiceTest {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             FailFirstIssuer issuer = new FailFirstIssuer();
             AcmeCertificateService service = new AcmeCertificateService(
-                    bootstrap(), desiredState(false), owner.acme(), issuer);
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
 
             assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                     .isInstanceOf(AcmeCertificateIssueException.class)
@@ -194,7 +194,7 @@ class AcmeCertificateServiceTest {
                 30,
                 40,
                 true,
-                allowRequestedDomains);
+                allowRequestedDomains, Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 false,
                 "localhost",

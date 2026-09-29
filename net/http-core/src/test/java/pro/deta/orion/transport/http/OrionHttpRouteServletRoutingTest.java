@@ -262,7 +262,7 @@ class OrionHttpRouteServletRoutingTest {
 
     private static OrionHttpRoute acmeRoute(OrionDesiredState desired) {
         return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new OrionConfiguration(), desired,
-                AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null)), OBJECT_MAPPER);
+                AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null), null), OBJECT_MAPPER);
     }
 
     private static SecurityContext admin() {

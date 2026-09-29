@@ -120,7 +120,9 @@ public final class OrionV2Mapper {
                 source.getAuthorizationTimeoutSeconds(),
                 source.getOrderTimeoutSeconds(),
                 source.isAgreeToTermsOfService(),
-                source.isAllowRequestedDomains());
+                source.isAllowRequestedDomains(),
+                Optional.ofNullable(source.getEabKeyId()),
+                Optional.ofNullable(source.getEabSecret()));
     }
 
     private static OrionV2.Acme fromCurrent(OrionAcmeConfiguration source) {
@@ -134,7 +136,9 @@ public final class OrionV2Mapper {
                 source.authorizationTimeoutSeconds(),
                 source.orderTimeoutSeconds(),
                 source.agreeToTermsOfService(),
-                source.allowRequestedDomains());
+                source.allowRequestedDomains(),
+                source.eabKeyId().orElse(null),
+                source.eabSecret().orElse(null));
     }
 
     private static OrionMaterialReference toCurrent(OrionV2.MaterialReference source) {

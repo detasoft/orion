@@ -49,6 +49,22 @@ describe('createOrionClient', () => {
     ])
     expect(fetchImpl.mock.calls[1][1].method).toBe('POST')
     expect(fetchImpl.mock.calls[1][1].headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual({ agreeToTermsOfService: true })
+  })
+
+  it('reads and saves ACME settings with authentication and a configuration revision', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ revision: 'r2', eabConfigured: true }),
+      { headers: { 'Content-Type': 'application/json' } }))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    await client.acmeConfiguration()
+    const settings = { revision: 'r1', provider: 'zerossl', eabKeyId: 'id', eabHmacKey: 'secret' }
+    expect(await client.saveAcmeConfiguration(settings)).toEqual({ revision: 'r2', eabConfigured: true })
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      '/api/admin/acme/configuration', '/api/admin/acme/configuration',
+    ])
+    expect(fetchImpl.mock.calls[1][1].method).toBe('POST')
+    expect(fetchImpl.mock.calls[1][1].headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual(settings)
   })
 
   it('renews an expired OIDC token once for simultaneous requests after sleep', async () => {

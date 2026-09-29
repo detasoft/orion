@@ -64,6 +64,11 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             for (ConfigurationSecret secret : secrets) {
                 secretIds.add(secret.id());
             }
+            Optional<String> acmeSecret = https.flatMap(OrionHttpsConfiguration::acme)
+                    .flatMap(OrionAcmeConfiguration::eabSecret);
+            if (acmeSecret.isPresent() && !secretIds.contains(acmeSecret.orElseThrow())) {
+                throw new IllegalArgumentException("ACME EAB secret is unavailable in system scope");
+            }
             for (GitProxyBinding proxy : proxies) {
                 if (!upstreams.add(proxy.upstream().toASCIIString() + "#" + proxy.ref())) {
                     throw new IllegalArgumentException("duplicate proxy upstream/ref");

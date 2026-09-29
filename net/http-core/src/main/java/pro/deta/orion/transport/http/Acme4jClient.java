@@ -7,6 +7,7 @@ import org.shredzone.acme4j.Order;
 import org.shredzone.acme4j.Session;
 import org.shredzone.acme4j.Status;
 import org.shredzone.acme4j.challenge.Http01Challenge;
+import org.shredzone.acme4j.exception.AcmeServerException;
 
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
@@ -18,9 +19,22 @@ final class Acme4jClient implements AcmeCertificateIssuer.AcmeClient {
     @Override
     public AcmeCertificateIssuer.AcmeAccount createAccount(AcmeCertificateIssueRequest request) throws Exception {
         Session session = new Session(request.directoryUrl());
+        try {
+            Account existing = new AccountBuilder().useKeyPair(request.accountKeyPair())
+                    .onlyExisting().create(session);
+            return new Acme4jAccount(existing);
+        } catch (AcmeServerException failure) {
+            if (!"urn:ietf:params:acme:error:accountDoesNotExist".equals(failure.getType().toString())) {
+                throw failure;
+            }
+        }
         AccountBuilder builder = new AccountBuilder()
                 .addEmail(request.accountEmail())
                 .useKeyPair(request.accountKeyPair());
+        if (request.eabKeyId() != null) {
+            builder.withKeyIdentifier(request.eabKeyId(), new String(request.eabHmacKey()))
+                    .withMacAlgorithm("HS256");
+        }
         if (request.agreeToTermsOfService()) {
             builder.agreeToTermsOfService();
         }

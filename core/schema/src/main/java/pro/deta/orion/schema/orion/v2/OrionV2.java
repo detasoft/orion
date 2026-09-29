@@ -142,7 +142,9 @@ public class OrionV2 {
             "authorizationTimeoutSeconds",
             "orderTimeoutSeconds",
             "agreeToTermsOfService",
-            "allowRequestedDomains"
+            "allowRequestedDomains",
+            "eabKeyId",
+            "eabSecret"
     })
     public static final class Acme {
         private boolean enabled;
@@ -157,6 +159,8 @@ public class OrionV2 {
         private long orderTimeoutSeconds;
         private boolean agreeToTermsOfService;
         private boolean allowRequestedDomains;
+        private String eabKeyId;
+        private String eabSecret;
     }
 
     @Data

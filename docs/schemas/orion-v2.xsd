@@ -186,6 +186,8 @@
       <xs:element name="orderTimeoutSeconds" type="xs:long"/>
       <xs:element name="agreeToTermsOfService" type="xs:boolean"/>
       <xs:element name="allowRequestedDomains" type="xs:boolean"/>
+      <xs:element name="eabKeyId" type="xs:string" minOccurs="0"/>
+      <xs:element name="eabSecret" type="xs:string" minOccurs="0"/>
     </xs:sequence>
   </xs:complexType>
 

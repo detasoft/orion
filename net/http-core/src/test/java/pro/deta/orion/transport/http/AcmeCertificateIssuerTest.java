@@ -69,7 +69,7 @@ class AcmeCertificateIssuerTest {
                 "ORION",
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5),
-                true);
+                true, null, null);
     }
 
     private static KeyPair keyPair() throws Exception {

@@ -181,7 +181,15 @@ export function createOrionClient(options = {}) {
       return request('/api/admin/key-material')
     },
     issueAcmeCertificate() {
-      return request('/api/admin/acme/certificate', { method: 'POST' })
+      return request('/api/admin/acme/certificate', {
+        method: 'POST', body: JSON.stringify({ agreeToTermsOfService: true }),
+      })
+    },
+    acmeConfiguration() {
+      return request('/api/admin/acme/configuration')
+    },
+    saveAcmeConfiguration(settings) {
+      return request('/api/admin/acme/configuration', { method: 'POST', body: JSON.stringify(settings) })
     },
     remoteAliases() {
       return request('/api/admin/proxies')

@@ -164,7 +164,7 @@ class OrionAdminAcmeCertificateRouteTest {
                     new OrionConfiguration(),
                     new OrionDesiredState(),
                     AcmeKeyMaterialCapability.unavailable(),
-                    new AcmeCertificateIssuer(null));
+                    new AcmeCertificateIssuer(null), null);
             this.issued = issued;
             this.saved = saved;
         }
@@ -186,7 +186,7 @@ class OrionAdminAcmeCertificateRouteTest {
                     new OrionConfiguration(),
                     new OrionDesiredState(),
                     AcmeKeyMaterialCapability.unavailable(),
-                    new AcmeCertificateIssuer(null));
+                    new AcmeCertificateIssuer(null), null);
         }
 
         @Override

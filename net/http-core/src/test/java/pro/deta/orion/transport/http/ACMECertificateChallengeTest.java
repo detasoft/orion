@@ -55,7 +55,7 @@ public class ACMECertificateChallengeTest {
                 bootstrap(),
                 desiredStateWithAcme(),
                 new TestAcmeKeyMaterial(),
-                issuer);
+                issuer, null);
         try (AcmeHttpTestServer server = startHttp(
                 challengeService,
                 new TestAdminAcmeCertificateRoute(service));
@@ -179,7 +179,7 @@ public class ACMECertificateChallengeTest {
                 30,
                 40,
                 true,
-                false);
+                false, Optional.empty(), Optional.empty());
         OrionHttpsConfiguration https = new OrionHttpsConfiguration(
                 false,
                 "localhost",

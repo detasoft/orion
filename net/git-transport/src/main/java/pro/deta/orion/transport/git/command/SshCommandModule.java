@@ -47,8 +47,17 @@ public final class SshCommandModule {
 
     @Provides
     @Singleton
-    static CommandNode commandTree(LegacySshCommandCatalog catalog) {
-        return catalog.commandTree();
+    static CommandNode commandTree(LegacySshCommandCatalog catalog,
+            @jakarta.inject.Named("acmeCommands") CommandNode acmeCommands) {
+        CommandNode legacy = catalog.commandTree();
+        CommandNode.Builder tree = CommandNode.builder().child("acme", acmeCommands);
+        for (java.util.Map.Entry<String, CommandNode> child : legacy.children().entrySet()) {
+            tree.child(child.getKey(), child.getValue());
+        }
+        for (pro.deta.orion.command.CommandDefinition action : legacy.actions().values()) {
+            tree.action(action);
+        }
+        return tree.build();
     }
 
     @Provides
