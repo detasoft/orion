@@ -1245,6 +1245,9 @@ impl<G: CgroupOwnership> ActiveProcessTree<G> {
         }
         let backend_empty = match &mut self.backend {
             SelectedBackend::Cgroup { registry, cgroup } => {
+                if self.cleaned {
+                    return Ok(false);
+                }
                 registry.remove_exited(kernel)?;
                 !cgroup.populated()?
             }
@@ -2824,6 +2827,9 @@ mod tests {
         }
 
         fn populated(&self) -> io::Result<bool> {
+            if *self.removed.borrow() {
+                return Err(io::Error::from_raw_os_error(libc::ENOENT));
+            }
             let mut values = self.populated.borrow_mut();
             if values.len() > 1 {
                 return Ok(values.remove(0));
@@ -3044,6 +3050,8 @@ mod tests {
 
         assert_eq!(kernel.reaped_pids, vec![52]);
         assert!(*removed.borrow());
+        assert!(!tree.is_live_with(&mut kernel, &mut source).unwrap());
+        assert!(!tree.is_live_with(&mut kernel, &mut source).unwrap());
         assert_eq!(source.snapshot_calls, 0);
     }
 

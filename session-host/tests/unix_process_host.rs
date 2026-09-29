@@ -1542,6 +1542,8 @@ fn delegated_cgroup_contains_the_child_and_is_removed_after_host_exit() {
     drop(stream);
     assert!(host.wait_with_timeout(Duration::from_secs(3)).success());
     assert!(!cgroup_path.exists(), "session cgroup was not removed");
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    assert_eq!(events.last().unwrap().event_type, event_type::PROCESS_EXITED);
 }
 
 #[test]
