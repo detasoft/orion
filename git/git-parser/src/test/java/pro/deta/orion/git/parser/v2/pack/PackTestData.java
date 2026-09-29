@@ -71,6 +71,12 @@ public final class PackTestData {
         }
     }
 
+    public static IndexedPack ingest(IndexedPack source, IndexedPack target) throws IOException {
+        try (BufferedByteInputV2 input = source.input(); PackIngestor ingestor = new PackIngestor(input, target)) {
+            return ingestor.ingest();
+        }
+    }
+
     public static ObjectId store(GitStorageApi storage,
                                  GitObjectType type, byte[] content) throws IOException {
         IndexedPack target = ingest(pack(entry(type, content)), storage.newPack());

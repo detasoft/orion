@@ -23,7 +23,7 @@ import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -57,7 +57,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll, boolean disk) throws Exception {
-        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage();
+        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
         byte[] content = new byte[200000];
         new Random(17).nextBytes(content);
         ObjectId id = store(storage, GitObjectType.BLOB, content);
@@ -196,7 +196,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void reusesDeltaOnlyWithAnAvailableBaseAndOtherwiseWritesAFullObject(String mode, boolean disk) throws Exception {
         boolean thin = mode.equals("thin");
         boolean includeBase = mode.equals("base-in-pack");
-        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage();
+        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
         byte[] base = {1, 2, 3};
         byte[] target = {1, 2, 4};
         byte[] delta = {3, 3, 3, 1, 2, 4};
@@ -208,7 +208,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         ByteBuffer bytes = ByteBuffer.allocate(deltaOffset + 2 + deltaZlib.length);
         bytes.putInt(0x5041434b).putInt(2).putInt(2).put((byte) 0x33).put(baseZlib);
         bytes.put((byte) 0x66).put((byte) (deltaOffset - 12)).put(deltaZlib);
-        IndexedPack stored = LocalIndexedPack.create();
+        IndexedPack stored = storage.newPack();
         stored.append(bytes.flip());
         stored.append(ByteBuffer.wrap(MessageDigest.getInstance("SHA-1").digest(bytes.array())));
         stored.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
@@ -338,7 +338,8 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             writer.writeObject(type, content.length, input);
             writer.finish();
         }
-        IndexedPack pack = ingest(bytes.toByteArray());
+        IndexedPack pack = pro.deta.orion.git.parser.v2.pack.PackTestData.ingest(
+                bytes.toByteArray(), storage.newPack());
         new GitPackObjectResolver(pack, storage).complete();
         storage.persist(pack);
         return hash(type, content);
@@ -346,7 +347,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     private IndexedPack ingest(byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = input(bytes);
-             PackIngestor ingestor = new PackIngestor(input, LocalIndexedPack.create())) {
+             PackIngestor ingestor = new PackIngestor(input, new InMemoryStorage().newPack())) {
             return ingestor.ingest();
         }
     }
@@ -355,7 +356,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @CsvSource({"HTTP,'',true", "HTTP,00,false", "SSH,'',false"})
     void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
             throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage()) {
             ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
@@ -389,7 +390,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @EnumSource(GitProtocolVersion.class)
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage()) {
             ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             RefId main = new RefId("refs/heads/main");

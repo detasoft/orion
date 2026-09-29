@@ -2,7 +2,7 @@ package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
@@ -15,7 +15,7 @@ class NativeGitRepositoryPackIngestionTest {
     @Test
     void independentIngestionsRemainUnpublishedUntilPersisted() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", new LocalGitStorage(), "refs/heads/main")) {
+                "project.git", new InMemoryStorage(), "refs/heads/main")) {
             byte[] bytes = repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));

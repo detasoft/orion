@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -78,6 +78,6 @@ class NativeGitRepositoryShallowFetchTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository("demo", new LocalGitStorage(), "refs/heads/main");
+        return new NativeGitRepository("demo", new InMemoryStorage(), "refs/heads/main");
     }
 }

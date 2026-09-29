@@ -13,13 +13,14 @@ import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,7 +33,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void locatesOrderedUniqueObjectsAcrossPacksAndReadsExactCompressedRanges(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             byte[] third = {6};
@@ -69,7 +70,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsWholePackWithIndependentInputsAndClosesBorrowedInput(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
             byte[] content = new byte[40000];
             new Random(81).nextBytes(content);
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, content);
@@ -93,7 +94,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readerFailureClosesInputAndLeavesPublishedPackReadable(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
             PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
             PackId id = storage.packIds().getFirst();
             AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();

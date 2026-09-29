@@ -8,22 +8,21 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
-
-import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.nio.channels.ClosedChannelException;
-import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,7 +34,7 @@ class IndexedPackContractTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void completesExternalDeltaThroughPackContract(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
             byte[] base = {1, 2, 3};
             ObjectId baseId = PackTestData.store(storage, GitObjectType.BLOB, base);
             byte[] result = {1, 2, 3, 4};
@@ -64,7 +63,7 @@ class IndexedPackContractTest {
     void ingestsFullObjectAndLeavesSuccessfulTargetOwnedByCaller() throws Exception {
         byte[] content = {1, 2, 3};
         ObjectId id = PackTestData.objectId(GitObjectType.BLOB, content);
-        try (ContractPack pack = new ContractPack(LocalIndexedPack.create())) {
+        try (ContractPack pack = new ContractPack(new InMemoryStorage().newPack())) {
             assertThat(PackTestData.ingest(PackTestData.pack(PackTestData.blob(content)), pack)).isSameAs(pack);
             assertThat(pack.closed).isFalse();
             assertThat(pack.readObject(id, new ContentGitObjectRead<byte[]>(
@@ -77,7 +76,7 @@ class IndexedPackContractTest {
     void checksumFailureDiscardsIndependentTarget() throws Exception {
         byte[] bytes = PackTestData.pack(PackTestData.blob(new byte[]{1, 2, 3}));
         bytes[bytes.length - 1] ^= 1;
-        ContractPack pack = new ContractPack(LocalIndexedPack.create());
+        ContractPack pack = new ContractPack(new InMemoryStorage().newPack());
         assertThatThrownBy(() -> PackTestData.ingest(bytes, pack))
                 .isInstanceOf(IOException.class).hasMessageContaining("checksum mismatch");
         assertThat(pack.discarded).isTrue();
@@ -86,8 +85,8 @@ class IndexedPackContractTest {
 
     @Test
     void incompatiblePublicationLeavesThePackOwnedByCaller() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage();
-             ContractPack pack = new ContractPack(LocalIndexedPack.create())) {
+        try (GitStorageApi storage = new InMemoryStorage();
+             ContractPack pack = new ContractPack(new InMemoryStorage().newPack())) {
             PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{1, 2, 3})), pack);
             new GitPackObjectResolver(pack, storage).complete();
             assertThatThrownBy(() -> storage.persist(pack)).isInstanceOf(IllegalArgumentException.class);
@@ -100,9 +99,9 @@ class IndexedPackContractTest {
 
     @Test
     void missingDeltaBaseClosesResolutionStateAndPack() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage()) {
             ObjectId missing = PackTestData.objectId(GitObjectType.BLOB, new byte[]{1});
-            ContractPack pack = new ContractPack(LocalIndexedPack.create());
+            ContractPack pack = new ContractPack(new InMemoryStorage().newPack());
             PackTestData.ingest(PackTestData.pack(PackTestData.delta(missing, new byte[]{1, 1, 1, 2})), pack);
             assertThatThrownBy(() -> new GitPackObjectResolver(pack, storage).complete())
                     .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
@@ -277,7 +276,6 @@ class IndexedPackContractTest {
         public PackUploadIndex newUploadIndex() throws IOException {
             PackUploadIndex index = delegate.newUploadIndex();
             return new PackUploadIndex() {
-
                 @Override
                 public Optional<ObjectId> nextExternalBase() throws IOException {
                     return index.nextExternalBase();

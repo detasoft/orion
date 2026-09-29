@@ -9,8 +9,10 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -40,7 +42,7 @@ class IndexedPackTest {
         byte[] content = {1, 2, 3};
         byte[] compressed = compressed(content);
         Path staging = directory.resolve("staging");
-        try (LocalIndexedPack pack = memory ? LocalIndexedPack.create() : LocalIndexedPack.create(staging)) {
+        try (IndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
             pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
@@ -64,7 +66,7 @@ class IndexedPackTest {
         PackId packId;
         try (LocalIndexedPack pack = LocalIndexedPack.create(staging)) {
             id = writeBlob(pack);
-            packId = new GitPackObjectResolver(pack, new LocalGitStorage()).complete();
+            packId = new GitPackObjectResolver(pack, new InMemoryStorage()).complete();
         }
         try (LocalIndexedPack pack = LocalIndexedPack.open(staging.resolve("data.pack"), staging.resolve("data.mv"))) {
             assertThat(pack.id()).isEqualTo(packId);
@@ -86,7 +88,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readerFailureDoesNotPoisonThePack(boolean memory) throws Exception {
-        try (LocalIndexedPack pack = memory ? LocalIndexedPack.create()
+        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             writeBlob(pack);
             IOException failure = new IOException("reader failed");
@@ -100,7 +102,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportsTruncatedDataAndClosesBothResources(boolean memory) throws Exception {
-        LocalIndexedPack pack = memory ? LocalIndexedPack.create()
+        IndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"));
         try (pack) {
             pack.append(ByteBuffer.allocate(13));
@@ -123,7 +125,7 @@ class IndexedPackTest {
     void validatesUnreadPayloadAndClosesAnUnreturnedResult(boolean memory) throws Exception {
         byte[] compressed = compressed(new byte[]{1, 2, 3});
         compressed[compressed.length - 1] ^= 1;
-        try (LocalIndexedPack pack = memory ? LocalIndexedPack.create()
+        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
@@ -142,14 +144,16 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void persistPublishesThePreparedPackAndTransfersItsFilesToStorage(boolean memory) throws Exception {
-        LocalGitStorage storage = new LocalGitStorage(directory);
-        LocalIndexedPack pack = memory ? LocalIndexedPack.create() : storage.newPack();
+        GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
+        IndexedPack pack = storage.newPack();
         ObjectId id = writeBlob(pack);
-        Path staging = memory ? null : pack.directory();
+        Path staging = memory ? null : ((LocalIndexedPack) pack).directory();
         PackId expected = new GitPackObjectResolver(pack, storage).complete();
         assertThat(storage.persist(pack)).isEqualTo(expected);
-        pack.close();
-        pack.discard();
+        if (!memory) {
+            pack.close();
+            pack.discard();
+        }
         if (staging != null) {
             assertThat(staging).doesNotExist();
         }
@@ -163,15 +167,19 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void byteChangesInvalidateChecksumWhileIndexUpdatesPreserveIt(boolean memory) throws Exception {
-        try (LocalGitStorage storage = new LocalGitStorage();
-             LocalIndexedPack pack = memory ? LocalIndexedPack.create()
+        try (GitStorageApi storage = new InMemoryStorage();
+             IndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             ObjectId object = writeBlob(pack);
             assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
             PackId id = new GitPackObjectResolver(pack, storage).complete();
             pack.addObject(12, object, GitObjectType.BLOB, 3);
             assertThat(pack.id()).isEqualTo(id);
-            try (IndexedPack diskCopy = pack.copyTo(directory.resolve("copy"))) {
+            try (IndexedPack diskCopy = LocalIndexedPack.create(directory.resolve("copy"));
+                 pro.deta.orion.net.io.BufferedByteInputV2 input = pack.input();
+                 PackIngestor ingestor = new PackIngestor(input, diskCopy)) {
+                ingestor.ingest();
+                new GitPackObjectResolver(diskCopy, storage).complete();
                 assertThat(diskCopy.id()).isEqualTo(id);
                 diskCopy.truncate(12);
                 assertThatThrownBy(diskCopy::id).isInstanceOf(IOException.class);
@@ -189,10 +197,10 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void persistRejectsAnUncompletedPackAndDiscardsOnlyTheAttempt(boolean memory) throws Exception {
-        LocalGitStorage storage = new LocalGitStorage(directory);
-        LocalIndexedPack pack = memory ? LocalIndexedPack.create() : storage.newPack();
+        GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
+        IndexedPack pack = storage.newPack();
         ObjectId id = writeBlob(pack);
-        Path staging = memory ? null : pack.directory();
+        Path staging = memory ? null : ((LocalIndexedPack) pack).directory();
         assertThatThrownBy(() -> storage.persist(pack)).isInstanceOf(IOException.class);
         if (staging != null) {
             assertThat(staging).doesNotExist();
@@ -203,7 +211,7 @@ class IndexedPackTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsAndRewritesAcrossStorageBlocksAndTruncates(boolean memory) throws Exception {
-        try (LocalIndexedPack pack = memory ? LocalIndexedPack.create()
+        try (IndexedPack pack = memory ? new InMemoryStorage().newPack()
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             byte[] expected = new byte[20000];
             new Random(42).nextBytes(expected);
@@ -231,7 +239,7 @@ class IndexedPackTest {
 
     @Test
     void memoryStorageUsesLongOffsetsAndDoesNotRetainTruncatedBytes() throws Exception {
-        try (LocalIndexedPack pack = LocalIndexedPack.create()) {
+        try (IndexedPack pack = new InMemoryStorage().newPack()) {
             long offset = (long) Integer.MAX_VALUE + 100;
             pack.write(offset, ByteBuffer.wrap(new byte[]{1, 2, 3}));
             assertThat(pack.size()).isEqualTo(offset + 3);
@@ -243,7 +251,7 @@ class IndexedPackTest {
             data.clear();
             assertThat(pack.read(offset - 1, data)).isEqualTo(4);
             assertThat(data.array()).containsExactly(0, 0, 0, 9);
-            assertThat(pack.isInMemory()).isTrue();
+            assertThat(pack.size()).isEqualTo(offset + 3);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {
                 assertThat(files.iterator().hasNext()).isFalse();
             }
@@ -252,7 +260,7 @@ class IndexedPackTest {
 
     @Test
     void completesTemporaryResolutionStateInMemoryWithoutClosingThePack() throws Exception {
-        try (LocalIndexedPack pack = LocalIndexedPack.create()) {
+        try (IndexedPack pack = new InMemoryStorage().newPack()) {
             ObjectId id = writeBlob(pack);
             try (PackUploadIndex state = pack.newUploadIndex()) {
                 assertThat(state.hasUnresolved()).isFalse();

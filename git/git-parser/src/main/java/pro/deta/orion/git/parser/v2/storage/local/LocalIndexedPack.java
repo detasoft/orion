@@ -5,16 +5,16 @@ import org.h2.mvstore.MVStore;
 import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.type.ByteArrayDataType;
 import org.h2.mvstore.type.LongDataType;
-import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
+import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
@@ -25,11 +25,12 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+
+import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.*;
 
 public final class LocalIndexedPack implements IndexedPack {
     private static final Set<String> MAP_NAMES = Set.of("entries", "objects");
@@ -40,26 +41,6 @@ public final class LocalIndexedPack implements IndexedPack {
     private final Path directory;
     private int pendingChanges;
     private PackId packId;
-
-    public static LocalIndexedPack create() throws IOException {
-        PackDataStorage bytes = PackDataStorage.memory();
-        MVStore store = null;
-        try {
-            store = new MVStore.Builder().autoCommitDisabled().open();
-            store.setStoreVersion(2);
-            return new LocalIndexedPack(bytes, store, null);
-        } catch (RuntimeException | Error error) {
-            if (store != null) {
-                closeFailed(store, error);
-            }
-            try {
-                bytes.close();
-            } catch (IOException cleanup) {
-                error.addSuppressed(cleanup);
-            }
-            throw error;
-        }
-    }
 
     public static LocalIndexedPack create(Path directory) throws IOException {
         Files.createDirectory(directory);
@@ -85,8 +66,8 @@ public final class LocalIndexedPack implements IndexedPack {
 
     private static LocalIndexedPack load(Path packPath, Path indexPath, Path directory) throws IOException {
         PackDataStorage bytes = directory == null
-                ? PackDataStorage.open(packPath, StandardOpenOption.READ)
-                : PackDataStorage.open(packPath, StandardOpenOption.CREATE_NEW,
+                ? FilePackDataStorage.open(packPath, StandardOpenOption.READ)
+                : FilePackDataStorage.open(packPath, StandardOpenOption.CREATE_NEW,
                         StandardOpenOption.READ, StandardOpenOption.WRITE);
         MVStore store = null;
         try {
@@ -101,7 +82,7 @@ public final class LocalIndexedPack implements IndexedPack {
             }
             LocalIndexedPack pack = new LocalIndexedPack(bytes, store, directory);
             if (directory == null) {
-                pack.packId = pack.checksum();
+                pack.packId = checksum(pack.bytes);
             } else {
                 store.setStoreVersion(2);
                 store.commit();
@@ -185,96 +166,16 @@ public final class LocalIndexedPack implements IndexedPack {
     public PackId finish(long dataEnd) throws IOException {
         requireOpen();
         if (packId == null) {
-            byte[] checksum = digest(dataEnd);
+            byte[] checksum = digest(bytes, dataEnd);
             write(dataEnd, ByteBuffer.wrap(checksum));
             packId = new PackId(checksum);
         }
         return packId;
     }
 
-    PackId checksum() throws IOException {
-        long size = size();
-        if (size < 32) {
-            throw new EOFException("Truncated pack file");
-        }
-        ByteBuffer trailer = ByteBuffer.allocate(20);
-        while (trailer.hasRemaining()) {
-            int count = read(size - 20 + trailer.position(), trailer);
-            if (count <= 0) {
-                throw new EOFException("Truncated pack checksum");
-            }
-        }
-        return new PackId(trailer.array());
-    }
-
     public boolean checksumMatches(PackId expected) throws IOException {
-        return checksum().equals(expected)
-                && MessageDigest.isEqual(digest(size() - 20), expected.toBytes());
-    }
-
-    private byte[] digest(long length) throws IOException {
-        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
-        ByteBuffer buffer = ByteBuffer.allocate(8192);
-        long position = 0;
-        while (position < length) {
-            buffer.clear().limit((int) Math.min(buffer.capacity(), length - position));
-            int count = read(position, buffer);
-            if (count < 0) {
-                throw new EOFException("Truncated pack file during checksum calculation");
-            }
-            if (count == 0) {
-                throw new IOException("Pack file read made no progress");
-            }
-            hash.update(buffer.array(), 0, count);
-            position += count;
-        }
-        return hash.digest();
-    }
-
-    public boolean isInMemory() {
-        return store.getFileStore() == null;
-    }
-
-    public LocalIndexedPack copyTo(Path directory) throws IOException {
-        requireOpen();
-        return copyTo(create(directory));
-    }
-
-    private LocalIndexedPack copyTo(LocalIndexedPack copy) throws IOException {
-        try {
-            ByteBuffer buffer = ByteBuffer.allocate(8192);
-            long length = size();
-            long offset = 0;
-            while (offset < length) {
-                buffer.clear().limit((int) Math.min(buffer.capacity(), length - offset));
-                int count = read(offset, buffer);
-                if (count <= 0) {
-                    throw new EOFException("Cannot copy pack bytes");
-                }
-                copy.append(buffer.flip());
-                offset += count;
-            }
-            for (Map.Entry<Long, byte[]> entry : entries.entrySet()) {
-                copy.entries.put(entry.getKey(), entry.getValue());
-                copy.commitBatch();
-            }
-            for (Map.Entry<ObjectId, Long> entry : objects.entrySet()) {
-                copy.objects.put(entry.getKey(), entry.getValue());
-                copy.commitBatch();
-            }
-            copy.flush();
-            copy.packId = packId;
-            return copy;
-        } catch (IOException | RuntimeException | Error error) {
-            try {
-                copy.discard();
-            } catch (Throwable cleanup) {
-                if (cleanup != error) {
-                    error.addSuppressed(cleanup);
-                }
-            }
-            throw error;
-        }
+        return checksum(bytes).equals(expected)
+                && MessageDigest.isEqual(digest(bytes, size() - 20), expected.toBytes());
     }
 
     public Path directory() {
@@ -322,7 +223,7 @@ public final class LocalIndexedPack implements IndexedPack {
     public static <R> R readObject(Path path, EntryMetadata entry, long end, Optional<ObjectId> baseId,
                                    GitObjectRead<R> reader) throws IOException {
         R value = null;
-        try (PackDataStorage bytes = PackDataStorage.open(path, StandardOpenOption.READ)) {
+        try (PackDataStorage bytes = FilePackDataStorage.open(path, StandardOpenOption.READ)) {
             value = readBounded(bytes, entry, end, baseId, reader);
             return value;
         } catch (IOException | RuntimeException | Error error) {
@@ -335,26 +236,6 @@ public final class LocalIndexedPack implements IndexedPack {
                            GitObjectRead<R> reader) throws IOException {
         requireOpen();
         return readBounded(bytes, entry, end, baseId, reader);
-    }
-
-    private static <R> R readBounded(PackDataStorage bytes, EntryMetadata entry, long end,
-                                     Optional<ObjectId> baseId, GitObjectRead<R> reader) throws IOException {
-        if (entry.dataOffset() <= entry.offset() || entry.offset() < 12
-                || end <= entry.dataOffset() || end > bytes.size() - 20) {
-            throw new EOFException("Invalid stored object boundary");
-        }
-        GitObjectType type = entry.type() == GitObjectType.OFS_DELTA
-                ? GitObjectType.REF_DELTA : entry.type();
-        R value = null;
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(
-                new PackByteSource(bytes, entry.dataOffset(), end))) {
-            value = Objects.requireNonNull(reader.read(type, entry.inflatedSize(), baseId, input),
-                    "reader result");
-            return value;
-        } catch (IOException | RuntimeException | Error error) {
-            closeUnreturned(value, error);
-            throw error;
-        }
     }
 
     public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
@@ -556,69 +437,6 @@ public final class LocalIndexedPack implements IndexedPack {
             if (cleanup != error) {
                 error.addSuppressed(cleanup);
             }
-        }
-    }
-
-    private static <R> R readStored(EntryMetadata entry, PackDataStorage byteStore, long end,
-                                   GitObjectRead<R> reader) throws IOException {
-        Objects.requireNonNull(reader, "reader");
-        if (end < entry.dataOffset()) {
-            throw new EOFException("Truncated stored object");
-        }
-        R value = null;
-        try (BufferedByteInputV2 raw = new BufferedByteInputV2(new PackByteSource(byteStore, entry.dataOffset(), end));
-             BufferedByteInputV2 input = new BufferedByteInputV2(new ZlibBoundaryByteSource(raw, entry.inflatedSize()))) {
-            value = Objects.requireNonNull(reader.read(entry.type(), entry.inflatedSize(), entry.baseId(),
-                    input), "reader result");
-            ByteBuffer remaining;
-            while ((remaining = input.buffer()) != null) {
-                remaining.position(remaining.limit());
-            }
-            return value;
-        } catch (IOException | RuntimeException | Error failure) {
-            closeUnreturned(value, failure);
-            throw failure;
-        }
-    }
-
-    private static void closeUnreturned(Object value, Throwable failure) {
-        if (value instanceof AutoCloseable resource) {
-            try {
-                resource.close();
-            } catch (Throwable cleanup) {
-                if (cleanup != failure) {
-                    failure.addSuppressed(cleanup);
-                }
-            }
-        }
-    }
-
-    private static void validateEntry(EntryMetadata entry) throws IOException {
-        if (entry.offset() < 12 || entry.dataOffset() <= entry.offset() || entry.inflatedSize() < 0
-                || entry.type() == null || entry.baseOffset() == null || entry.baseId() == null) {
-            throw new IOException("Invalid physical pack entry metadata");
-        }
-        boolean valid = switch (entry.type()) {
-            case OFS_DELTA -> entry.baseId().isEmpty() && entry.baseOffset().isPresent()
-                    && entry.baseOffset().getAsLong() >= 12 && entry.baseOffset().getAsLong() < entry.offset()
-                    && entry.dataOffset() - entry.offset() >= 2;
-            case REF_DELTA -> entry.baseOffset().isEmpty() && entry.baseId().isPresent()
-                    && entry.dataOffset() - entry.offset() >= 21;
-            case COMMIT, TREE, BLOB, TAG -> entry.baseId().isEmpty() && entry.baseOffset().isEmpty();
-        };
-        if (!valid) {
-            throw new IOException("Invalid pack entry base reference");
-        }
-    }
-
-    private static void validateObject(EntryMetadata entry, GitObjectType type, long size)
-            throws IOException {
-        if (size < 0 || type == GitObjectType.OFS_DELTA || type == GitObjectType.REF_DELTA) {
-            throw new IOException("Object completion requires a logical type and non-negative size");
-        }
-        if (entry.type() != GitObjectType.OFS_DELTA && entry.type() != GitObjectType.REF_DELTA
-                && (type != entry.type() || size != entry.inflatedSize())) {
-            throw new IOException("Full object metadata differs from its physical pack entry");
         }
     }
 

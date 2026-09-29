@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage.local;
+package pro.deta.orion.git.parser.v2.storage.shared;
 
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -7,13 +7,13 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-final class PackByteSource implements BufferedByteInputV2.Source {
+public final class PackByteSource implements BufferedByteInputV2.Source {
     private final PackDataStorage storage;
     private final ByteBuffer buffer = ByteBuffer.allocate(8192);
     private final long end;
     private long position;
 
-    PackByteSource(PackDataStorage storage, long position, long end) {
+    public PackByteSource(PackDataStorage storage, long position, long end) {
         this.storage = Objects.requireNonNull(storage, "storage");
         if (position < 0 || end < position) {
             throw new IllegalArgumentException("Invalid pack byte range");

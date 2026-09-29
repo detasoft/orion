@@ -1,13 +1,15 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -23,12 +25,13 @@ class PackUploadIndexTest {
     @TempDir
     Path directory;
 
-    @Test
-    void registersPhysicalEntriesAndCompletesThemWithoutLosingDuplicateObjectOffsets() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void registersPhysicalEntriesAndCompletesThemWithoutLosingDuplicateObjectOffsets(boolean memory) throws Exception {
         Path path = directory.resolve("incoming.index");
         var first = full(12);
         var duplicate = full(64);
-        try (IndexedPack pack = create(path); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = create(memory, path); PackUploadIndex index = pack.newUploadIndex()) {
             assertThat(index.hasUnresolved()).isFalse();
             assertThat(pack.find(12)).isEmpty();
             assertThat(pack.find(id(1))).isEmpty();
@@ -47,16 +50,19 @@ class PackUploadIndexTest {
             assertThat(pack.find(64)).contains(duplicate);
             index.finish();
         }
-        try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
-            assertThat(pack.find(12)).contains(first);
-            assertThat(pack.find(64)).contains(duplicate);
-            assertThat(pack.find(id(1))).contains(first);
+        if (!memory) {
+            try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
+                assertThat(pack.find(12)).contains(first);
+                assertThat(pack.find(64)).contains(duplicate);
+                assertThat(pack.find(id(1))).contains(first);
+            }
         }
     }
 
-    @Test
-    void walksWaitingBranchesAndChainsOneDependentAtATime() throws Exception {
-        try (IndexedPack pack = create(directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void walksWaitingBranchesAndChainsOneDependentAtATime(boolean memory) throws Exception {
+        try (IndexedPack pack = create(memory, directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
             var base = full(12);
             var byId = ref(64, id(1));
             var byOffset = ofs(128, 12);
@@ -80,12 +86,13 @@ class PackUploadIndexTest {
         }
     }
 
-    @Test
-    void suppliesMissingBasesOneAtATimeAndRequiresTheirRegistrationBeforeFinalization() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void suppliesMissingBasesOneAtATimeAndRequiresTheirRegistrationBeforeFinalization(boolean memory) throws Exception {
         Path path = directory.resolve("incoming.mv");
         var lateInternal = full(256);
         var appendedBase = full(320);
-        try (IndexedPack pack = create(path); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = create(memory, path); PackUploadIndex index = pack.newUploadIndex()) {
             for (var entry : List.of(ref(12, id(10)), ref(64, id(20)), ref(128, id(20)))) {
                 index.addEntry(entry);
                 index.addObject(entry, id((int) entry.offset()), GitObjectType.BLOB, 99);
@@ -100,16 +107,19 @@ class PackUploadIndexTest {
             assertThat(index.nextExternalBase()).isEmpty();
             index.finish();
         }
-        try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
-            assertThat(pack.find(id(10))).contains(lateInternal);
-            assertThat(pack.find(id(20))).contains(appendedBase);
-            assertThat(pack.find(64).orElseThrow().baseId()).contains(id(20));
+        if (!memory) {
+            try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
+                assertThat(pack.find(id(10))).contains(lateInternal);
+                assertThat(pack.find(id(20))).contains(appendedBase);
+                assertThat(pack.find(64).orElseThrow().baseId()).contains(id(20));
+            }
         }
     }
 
-    @Test
-    void refusesToFinalizeCyclesWithoutEvidenceOfWhichExternalBaseBreaksThem() throws Exception {
-        try (IndexedPack pack = create(directory.resolve("self.index")); PackUploadIndex index = pack.newUploadIndex()) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void refusesToFinalizeCyclesWithoutEvidenceOfWhichExternalBaseBreaksThem(boolean memory) throws Exception {
+        try (IndexedPack pack = create(memory, directory.resolve("self.index")); PackUploadIndex index = pack.newUploadIndex()) {
             var self = ref(12, id(1));
             index.addEntry(self);
             index.addObject(self, id(1), GitObjectType.BLOB, 3);
@@ -117,7 +127,7 @@ class PackUploadIndexTest {
             assertThat(index.hasUnresolved()).isFalse();
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class).hasMessageContaining("cycle");
         }
-        try (IndexedPack pack = create(directory.resolve("mixed.index")); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = create(memory, directory.resolve("mixed.index")); PackUploadIndex index = pack.newUploadIndex()) {
             var first = ref(12, id(2));
             var second = ofs(64, 12);
             index.addEntry(first);
@@ -128,10 +138,11 @@ class PackUploadIndexTest {
         }
     }
 
-    @Test
-    void finalizesDeepForwardChainsWithoutAnInMemoryTraversalStack() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void finalizesDeepForwardChainsWithoutAnInMemoryTraversalStack(boolean memory) throws Exception {
         Path path = directory.resolve("deep.index");
-        try (IndexedPack pack = create(path); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = create(memory, path); PackUploadIndex index = pack.newUploadIndex()) {
             for (int i = 1; i <= 2000; i++) {
                 var entry = i == 2000 ? full(12L + 64L * i) : ref(12L + 64L * i, id(i + 1));
                 index.addEntry(entry);
@@ -139,14 +150,17 @@ class PackUploadIndexTest {
             }
             index.finish();
         }
-        try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
-            assertThat(pack.find(id(1))).contains(ref(76, id(2)));
+        if (!memory) {
+            try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
+                assertThat(pack.find(id(1))).contains(ref(76, id(2)));
+            }
         }
     }
 
-    @Test
-    void rejectsConflictingCompletionWithoutRemovingTheWaitingDependency() throws Exception {
-        try (IndexedPack pack = create(directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsConflictingCompletionWithoutRemovingTheWaitingDependency(boolean memory) throws Exception {
+        try (IndexedPack pack = create(memory, directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
             var base = full(12);
             var delta = ref(64, id(1));
             index.addEntry(base);
@@ -169,9 +183,10 @@ class PackUploadIndexTest {
         }
     }
 
-    @Test
-    void rejectsMalformedMetadataAndFullObjectCompletionWithDifferentTypeOrSize() throws Exception {
-        try (IndexedPack pack = create(directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsMalformedMetadataAndFullObjectCompletionWithDifferentTypeOrSize(boolean memory) throws Exception {
+        try (IndexedPack pack = create(memory, directory.resolve("incoming.index")); PackUploadIndex index = pack.newUploadIndex()) {
             for (var invalid : List.of(new IndexedPack.EntryMetadata(12, 12, 3, GitObjectType.BLOB,
                             OptionalLong.empty(), Optional.empty()),
                     new IndexedPack.EntryMetadata(12, 13, -1, GitObjectType.BLOB,
@@ -198,11 +213,12 @@ class PackUploadIndexTest {
         }
     }
 
-    @Test
-    void cannotFinalizeUnresolvedStateAndFreezesAllMutationsAfterSuccessfulFinalization() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cannotFinalizeUnresolvedStateAndFreezesAllMutationsAfterSuccessfulFinalization(boolean memory) throws Exception {
         Path path = directory.resolve("incoming.index");
         var entry = full(12);
-        try (IndexedPack pack = create(path); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = create(memory, path); PackUploadIndex index = pack.newUploadIndex()) {
             index.addEntry(entry);
             assertThatThrownBy(index::finish).isInstanceOf(IOException.class);
             index.addObject(entry, id(1), GitObjectType.BLOB, 3);
@@ -212,13 +228,15 @@ class PackUploadIndexTest {
             assertThatThrownBy(() -> index.addObject(entry, id(1), GitObjectType.BLOB, 3))
                     .isInstanceOf(IllegalStateException.class);
         }
-        try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
-            assertThat(pack.find(id(1))).contains(entry);
+        if (!memory) {
+            try (IndexedPack pack = LocalIndexedPack.open(path.resolve("data.pack"), path.resolve("data.mv"))) {
+                assertThat(pack.find(id(1))).contains(entry);
+            }
         }
     }
 
-    private static IndexedPack create(Path path) throws IOException {
-        IndexedPack pack = LocalIndexedPack.create(path);
+    private static IndexedPack create(boolean memory, Path path) throws IOException {
+        IndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(path);
         pack.append(ByteBuffer.wrap(PackTestData.pack()));
         return pack;
     }

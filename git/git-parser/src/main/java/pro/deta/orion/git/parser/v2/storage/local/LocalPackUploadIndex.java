@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
+import pro.deta.orion.git.parser.v2.storage.shared.PackSupport;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -33,17 +34,13 @@ final class LocalPackUploadIndex implements PackUploadIndex {
 
     static LocalPackUploadIndex create(LocalIndexedPack data) throws IOException {
         Objects.requireNonNull(data, "data").requireMutable();
-        Path temporaryPath = data.isInMemory() ? null : data.directory().resolve("data.tmv");
+        Path temporaryPath = data.directory().resolve("data.tmv");
         MVStore temporary = null;
-        if (temporaryPath != null) {
-            Files.createFile(temporaryPath);
-        }
+        Files.createFile(temporaryPath);
         try {
             MVStore.Builder builder = new MVStore.Builder()
                     .cacheSize(4).autoCommitDisabled().autoCommitBufferSize(0);
-            if (temporaryPath != null) {
-                builder.fileName(temporaryPath.toAbsolutePath().toString());
-            }
+            builder.fileName(temporaryPath.toAbsolutePath().toString());
             temporary = builder.open();
             LocalPackUploadIndex state = new LocalPackUploadIndex(data, temporary, temporaryPath);
             Iterator<Long> offsets = data.offsets();
@@ -68,9 +65,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
             if (temporary != null) {
                 LocalIndexedPack.closeFailed(temporary, error);
             }
-            if (temporaryPath != null) {
-                deleteFailed(temporaryPath, error);
-            }
+            deleteFailed(temporaryPath, error);
             if (error instanceof MVStoreException) {
                 throw new IOException("Cannot create temporary pack state", error);
             }
@@ -126,7 +121,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
                 visited.clear();
                 Iterator<Long> offsets = data.offsets();
                 while (offsets.hasNext()) {
-                    inspectChain(offsets.next());
+                    PackSupport.inspectChain(data, visited, offsets.next(), this::commitBatch);
                 }
                 data.flush();
                 finalized = true;
@@ -211,45 +206,8 @@ final class LocalPackUploadIndex implements PackUploadIndex {
     private void discardTemporary() throws IOException {
         if (!temporaryDeleted) {
             temporary.closeImmediately();
-            if (temporaryPath != null) {
-                Files.deleteIfExists(temporaryPath);
-            }
+            Files.deleteIfExists(temporaryPath);
             temporaryDeleted = true;
-        }
-    }
-
-    private void inspectChain(long start) throws IOException {
-        if (visited.containsKey(start)) {
-            return;
-        }
-        long offset = start;
-        while (true) {
-            Long previous = visited.get(offset);
-            if (previous != null) {
-                if (previous == start) {
-                    throw new IOException("Pack index contains a delta cycle requiring an external base");
-                }
-                return;
-            }
-            IndexedPack.Record record = data.record(offset);
-            if (record == null || record.objectId() == null) {
-                throw new IOException("Pack index contains a missing or unresolved base record");
-            }
-            visited.put(offset, start);
-            commitBatch();
-            IndexedPack.EntryMetadata entry = record.entry();
-            if (entry.baseId().isPresent()) {
-                ObjectId base = entry.baseId().orElseThrow();
-                Long baseOffset = data.objectOffset(base);
-                if (baseOffset == null) {
-                    throw new IOException("Pack still requires an external base");
-                }
-                offset = baseOffset;
-            } else if (entry.baseOffset().isPresent()) {
-                offset = entry.baseOffset().getAsLong();
-            } else {
-                return;
-            }
         }
     }
 

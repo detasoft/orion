@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayOutputStream;
@@ -35,7 +36,7 @@ class PackIngestorTest {
     void transfersOwnershipWithoutConsumingProtocolBytes(boolean memory) throws Exception {
         byte[] wire = pack();
         ByteBuffer source = ByteBuffer.allocate(wire.length + 1).put(wire).put((byte) 42).flip();
-        IndexedPack target = memory ? LocalIndexedPack.create() : LocalIndexedPack.create(directory.resolve("pack"));
+        IndexedPack target = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(directory.resolve("pack"));
         try (target; BufferedByteInputV2 input = input(source)) {
             try (PackIngestor ingestor = new PackIngestor(input, target)) {
                 assertThat(ingestor.ingest()).isSameAs(target);
@@ -62,7 +63,7 @@ class PackIngestorTest {
         byte[] wire = pack();
         wire[wire.length - 1] ^= 1;
         ByteBuffer source = ByteBuffer.allocate(wire.length + 1).put(wire).put((byte) 42).flip();
-        IndexedPack target = memory ? LocalIndexedPack.create() : LocalIndexedPack.create(directory.resolve("pack"));
+        IndexedPack target = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(directory.resolve("pack"));
         try (target; BufferedByteInputV2 input = input(source)) {
             try (PackIngestor ingestor = new PackIngestor(input, target)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
@@ -89,7 +90,7 @@ class PackIngestorTest {
             entries.add(PackTestData.entry(types[i], contents.get(i)));
         }
         byte[] wire = PackTestData.pack(entries.toArray(byte[][]::new));
-        try (IndexedPack target = LocalIndexedPack.create();
+        try (IndexedPack target = new InMemoryStorage().newPack();
              BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize);
              PackIngestor ingestor = new PackIngestor(input, target)) {
             ingestor.ingest();
@@ -115,7 +116,7 @@ class PackIngestorTest {
         byte[] ofs = PackTestData.join(new byte[]{0x64, (byte) base.length},
                 PackTestData.compressed(instructions));
         byte[] wire = PackTestData.pack(base, ofs, PackTestData.delta(baseId, instructions));
-        try (IndexedPack target = PackTestData.ingest(wire, LocalIndexedPack.create());
+        try (IndexedPack target = PackTestData.ingest(wire, new InMemoryStorage().newPack());
              PackUploadIndex state = target.newUploadIndex()) {
             assertThat(target.entryCount()).isEqualTo(3);
             assertThat(target.objectCount()).isEqualTo(1);
@@ -130,7 +131,7 @@ class PackIngestorTest {
     void rejectsEveryTruncatedPrefixWithoutAllowingASecondAttempt() throws Exception {
         byte[] wire = PackTestData.pack(PackTestData.delta(new ObjectId(new byte[20]), new byte[]{1, 1, 1, 9}));
         for (int length = 0; length < wire.length; length++) {
-            try (IndexedPack target = LocalIndexedPack.create();
+            try (IndexedPack target = new InMemoryStorage().newPack();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(Arrays.copyOf(wire, length)));
                  PackIngestor ingestor = new PackIngestor(input, target)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
@@ -162,7 +163,7 @@ class PackIngestorTest {
                 sizeOverflow, offsetOverflow, PackTestData.join(new byte[]{0x32}, valid),
                 PackTestData.join(new byte[]{0x34}, valid), PackTestData.join(new byte[]{0x33}, corrupt),
                 PackTestData.join(new byte[]{0x33}, dictionary.toByteArray())}) {
-            try (IndexedPack target = LocalIndexedPack.create();
+            try (IndexedPack target = new InMemoryStorage().newPack();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)));
                  PackIngestor ingestor = new PackIngestor(input, target)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
@@ -173,7 +174,7 @@ class PackIngestorTest {
 
     @Test
     void acceptsEmptyPacksAndRejectsInvalidHeaders() throws Exception {
-        try (IndexedPack target = PackTestData.ingest(PackTestData.pack(), LocalIndexedPack.create())) {
+        try (IndexedPack target = PackTestData.ingest(PackTestData.pack(), new InMemoryStorage().newPack())) {
             assertThat(target.entryCount()).isZero();
             assertThat(target.checksumMatches(target.id())).isTrue();
         }
@@ -182,7 +183,7 @@ class PackIngestorTest {
         byte[] version = PackTestData.pack(4);
         byte[] unsignedCount = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(-1).array();
         for (byte[] bytes : new byte[][]{magic, version, unsignedCount}) {
-            assertThatThrownBy(() -> PackTestData.ingest(bytes, LocalIndexedPack.create()))
+            assertThatThrownBy(() -> PackTestData.ingest(bytes, new InMemoryStorage().newPack()))
                     .isInstanceOf(IOException.class);
         }
     }
@@ -191,7 +192,7 @@ class PackIngestorTest {
     void rejectsCorruptVersionThreeChecksum() throws Exception {
         byte[] corrupt = PackTestData.pack(3, PackTestData.blob(new byte[]{1}));
         corrupt[corrupt.length - 1] ^= 1;
-        assertThatThrownBy(() -> PackTestData.ingest(corrupt, LocalIndexedPack.create()))
+        assertThatThrownBy(() -> PackTestData.ingest(corrupt, new InMemoryStorage().newPack()))
                 .isInstanceOf(IOException.class).hasMessage("Pack checksum mismatch");
     }
 

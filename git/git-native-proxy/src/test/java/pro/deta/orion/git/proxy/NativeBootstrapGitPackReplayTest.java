@@ -21,7 +21,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -56,7 +56,7 @@ class NativeBootstrapGitPackReplayTest {
             NativeGitRepository repository = disk
                     ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
                             .create("proxy").valueOrFailure("repository")
-                    : new NativeGitRepository("proxy", new LocalGitStorage(), "refs/heads/main");
+                    : new NativeGitRepository("proxy", new InMemoryStorage(), "refs/heads/main");
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -116,7 +116,7 @@ class NativeBootstrapGitPackReplayTest {
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
-                    "proxy", new LocalGitStorage(), "refs/heads/main");
+                    "proxy", new InMemoryStorage(), "refs/heads/main");
         repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
                 GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");

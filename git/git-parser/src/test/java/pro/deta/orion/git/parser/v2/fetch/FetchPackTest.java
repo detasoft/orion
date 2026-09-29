@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
@@ -68,7 +69,7 @@ class FetchPackTest {
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage()) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree));
             ObjectId boundary = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, root));
@@ -111,7 +112,7 @@ class FetchPackTest {
             }
             for (RecordedFrame frame : event.getStackTrace().getFrames()) {
                 if (frame.getMethod().getType().getName()
-                        .equals("pro.deta.orion.git.parser.v2.storage.local.PackByteSource")) {
+                        .equals("pro.deta.orion.git.parser.v2.storage.shared.PackByteSource")) {
                     count++;
                     break;
                 }

@@ -25,16 +25,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 final class GitPackStorage {
     private final Path packs;
     private final Path incoming;
     private final GitLock lock;
-    private final Map<PackId, IndexedPack> memory;
 
     GitPackStorage(Path repository) throws IOException {
-        memory = null;
         Path root = repository.toRealPath();
         packs = root.resolve("packs");
         incoming = root.resolve("incoming");
@@ -44,26 +41,7 @@ final class GitPackStorage {
         lock = new GitLock(root);
     }
 
-    GitPackStorage() {
-        packs = null;
-        incoming = null;
-        lock = new GitLock(this);
-        memory = new ConcurrentHashMap<>();
-    }
-
-    void close() throws IOException {
-        if (memory != null) {
-            for (IndexedPack pack : memory.values()) {
-                pack.discard();
-            }
-            memory.clear();
-        }
-    }
-
     List<PackId> ids() throws IOException {
-        if (memory != null) {
-            return List.copyOf(memory.keySet());
-        }
         List<PackId> ids = new ArrayList<>();
         scan((id, path) -> {
             ids.add(id);
@@ -73,10 +51,6 @@ final class GitPackStorage {
     }
 
     <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
-        if (memory != null) {
-            IndexedPack pack = memory.get(id);
-            return pack == null ? Optional.empty() : readPack(pack.size(), pack.input(), reader);
-        }
         Path path = packPath(id);
         Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
         if (!Files.exists(index)) {
@@ -101,38 +75,10 @@ final class GitPackStorage {
     }
 
     LocalIndexedPack createPack() throws IOException {
-        if (memory != null) {
-            return LocalIndexedPack.create();
-        }
         return LocalIndexedPack.create(incoming.resolve("pack-" + UUID.randomUUID()));
     }
 
     PackId persist(LocalIndexedPack pack) throws IOException {
-        if (memory != null) {
-            try {
-                PackId id = pack.id();
-                IndexedPack existing = memory.putIfAbsent(id, pack);
-                if (existing != null && existing != pack) {
-                    pack.discard();
-                }
-                return id;
-            } catch (IOException | RuntimeException | Error failure) {
-                closeFailed(pack::discard, failure);
-                throw failure;
-            }
-        }
-        if (pack.isInMemory()) {
-            try {
-                pack.id();
-                LocalIndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
-                PackId id = persist(staged);
-                pack.close();
-                return id;
-            } catch (IOException | RuntimeException | Error failure) {
-                closeFailed(pack::discard, failure);
-                throw failure;
-            }
-        }
         Path directory = pack.directory();
         try {
             PackId id = pack.id();
@@ -152,13 +98,6 @@ final class GitPackStorage {
     }
 
     <R> R read(PackObjectLocation location, GitObjectRead<R> reader) throws IOException {
-        if (memory != null) {
-            IndexedPack pack = memory.get(location.packId());
-            if (pack == null) {
-                throw new IOException("Missing source pack: " + location.packId());
-            }
-            return pack.readObject(location.entry(), location.end(), location.baseId(), reader);
-        }
         return LocalIndexedPack.readObject(packPath(location.packId()), location.entry(),
                 location.end(), location.baseId(), reader);
     }
@@ -171,23 +110,17 @@ final class GitPackStorage {
         if (found.isEmpty()) {
             return List.of();
         }
-        if (memory != null) {
-            for (Map.Entry<PackId, IndexedPack> pack : memory.entrySet()) {
-                if (locate(pack.getKey(), pack.getValue(), found)) {
-                    break;
+
+        scan((packId, path) -> {
+            try (GitLock.Lease lease = lockPack(packId);
+                 IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
+                if (!index.id().equals(packId)) {
+                    throw new IOException("Stored pack checksum does not match its identity");
                 }
+                return locate(packId, index, found) ? Optional.of(true) : Optional.empty();
             }
-        } else {
-            scan((packId, path) -> {
-                try (GitLock.Lease lease = lockPack(packId);
-                     IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
-                    if (!index.id().equals(packId)) {
-                        throw new IOException("Stored pack checksum does not match its identity");
-                    }
-                    return locate(packId, index, found) ? Optional.of(true) : Optional.empty();
-                }
-            });
-        }
+        });
+
         List<PackObjectLocation> result = new ArrayList<>(found.size());
         for (PackObjectLocation location : found.values()) {
             if (location != null) {
@@ -217,10 +150,6 @@ final class GitPackStorage {
     }
 
     Set<ObjectId> objectIds(PackId id) throws IOException {
-        if (memory != null) {
-            IndexedPack pack = memory.get(id);
-            return pack == null ? Set.of() : pack.objectIds();
-        }
         try (GitLock.Lease lease = lockPack(id)) {
             Path path = packPath(id);
             Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
@@ -238,16 +167,7 @@ final class GitPackStorage {
         for (ObjectId id : ids) {
             Objects.requireNonNull(id, "objectId");
         }
-        if (memory != null) {
-            for (Map.Entry<PackId, IndexedPack> pack : memory.entrySet()) {
-                for (ObjectId id : ids) {
-                    if (pack.getValue().find(id).isPresent()) {
-                        result.computeIfAbsent(id, ignored -> new ArrayList<>()).add(pack.getKey());
-                    }
-                }
-            }
-            return result;
-        }
+
         scan((packId, path) -> {
             try (GitLock.Lease lease = lockPack(packId); IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
                 for (ObjectId id : ids) {

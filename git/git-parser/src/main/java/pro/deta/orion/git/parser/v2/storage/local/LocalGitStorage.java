@@ -141,11 +141,6 @@ public final class LocalGitStorage implements GitStorageApi {
         return packs.find(Objects.requireNonNull(objectIds, "objectIds"));
     }
 
-    public LocalGitStorage() {
-        packs = new GitPackStorage();
-        refs = new GitRefsStorage();
-    }
-
     public List<PackId> packIds() throws IOException {
         return packs.ids();
     }
@@ -155,11 +150,5 @@ public final class LocalGitStorage implements GitStorageApi {
     }
 
     @Override
-    public void close() throws IOException {
-        try {
-            refs.close();
-        } finally {
-            packs.close();
-        }
-    }
+    public void close() {}
 }

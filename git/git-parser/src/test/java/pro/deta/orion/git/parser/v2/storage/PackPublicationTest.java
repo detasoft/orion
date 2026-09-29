@@ -13,6 +13,7 @@ import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
@@ -32,9 +33,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class PackPublicationTest {
     @TempDir
@@ -228,7 +229,7 @@ class PackPublicationTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsDeepPublishedDeltaChain(boolean memory) throws Exception {
-        GitStorageApi storage = memory ? new LocalGitStorage() : new LocalGitStorage(directory);
+        GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
         List<byte[]> entries = new ArrayList<>();
         entries.add(blob(new byte[]{0, 0}));
         for (int value = 1; value <= 1100; value++) {
@@ -259,7 +260,7 @@ class PackPublicationTest {
     void memoryPublicationTakesThePackAndDiscardsOnlyDuplicateAttempts() throws Exception {
         IndexedPack target;
         ObjectId object = blobId((byte) 1);
-        try (GitStorageApi storage = new LocalGitStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage()) {
             target = ingest(pack(blob(new byte[]{1})), storage.newPack());
             PackId id = new GitPackObjectResolver(target, storage).complete();
             assertThat(storage.persist(target)).isEqualTo(id);

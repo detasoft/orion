@@ -3,9 +3,14 @@ package pro.deta.orion.git.parser.v2.storage.local;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
+import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -60,7 +65,21 @@ class PackByteSourceTest {
     }
 
     private PackDataStorage storage(boolean memory) throws Exception {
-        return memory ? PackDataStorage.memory() : PackDataStorage.open(directory.resolve("pack"),
-                StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
+        if (!memory) {
+            return FilePackDataStorage.open(directory.resolve("pack"),
+                    StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
+        }
+        IndexedPack pack = new InMemoryStorage().newPack();
+        return new PackDataStorage() {
+            private boolean open = true;
+
+            public int read(long offset, ByteBuffer target) throws IOException { return pack.read(offset, target); }
+            public void write(long offset, ByteBuffer source) throws IOException { pack.write(offset, source); }
+            public long size() throws IOException { return pack.size(); }
+            public void truncate(long size) throws IOException { pack.truncate(size); }
+            public void flush() throws IOException { pack.flush(); }
+            public boolean isOpen() { return open; }
+            public void close() throws IOException { open = false; pack.close(); }
+        };
     }
 }

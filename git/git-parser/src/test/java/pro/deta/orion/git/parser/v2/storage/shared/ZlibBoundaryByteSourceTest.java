@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage.local;
+package pro.deta.orion.git.parser.v2.storage.shared;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

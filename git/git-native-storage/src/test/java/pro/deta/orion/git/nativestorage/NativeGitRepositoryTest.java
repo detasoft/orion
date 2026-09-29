@@ -9,7 +9,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -153,7 +153,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
 
         repository.saveFiles(
@@ -176,7 +176,7 @@ class NativeGitRepositoryTest {
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
 
         NativeGitFileUpdate update = repository.prepareFileUpdate(
@@ -199,7 +199,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
 
         repository.saveFiles(
@@ -233,7 +233,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
         repository.saveFiles(
                 "main",
@@ -315,7 +315,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
         repository.saveFiles(
                 "main",
@@ -350,7 +350,7 @@ class NativeGitRepositoryTest {
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 "refs/heads/main");
 
         repository.saveFiles(
@@ -364,6 +364,6 @@ class NativeGitRepositoryTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository("demo.git", new LocalGitStorage(), "refs/heads/main");
+        return new NativeGitRepository("demo.git", new InMemoryStorage(), "refs/heads/main");
     }
 }

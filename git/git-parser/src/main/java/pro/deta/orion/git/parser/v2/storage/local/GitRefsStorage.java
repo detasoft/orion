@@ -34,10 +34,8 @@ final class GitRefsStorage {
     private static final String SYMBOLIC = "ref: ";
     private final Path path;
     private final GitLock lock;
-    private final MVStore memory;
 
     GitRefsStorage(Path repository) throws IOException {
-        memory = null;
         Path root = repository.toRealPath();
         path = root.resolve("refs.mv");
         lock = new GitLock(root);
@@ -57,35 +55,16 @@ final class GitRefsStorage {
                     readHead(existingMap(store));
                 }
             } finally {
-                if (memory == null) {
-                    store.closeImmediately();
-                }
+                store.closeImmediately();
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
         }
     }
 
-    GitRefsStorage() {
-        path = null;
-        lock = new GitLock(this);
-        memory = new MVStore.Builder().autoCommitDisabled().open();
-        memory.setStoreVersion(1);
-        map(memory).put(HEAD.value(), SYMBOLIC + "refs/heads/main");
-        memory.commit();
-    }
-
-    void close() {
-        if (memory != null) {
-            memory.close();
-        }
-    }
-
     RefsSnapshot snapshot() throws IOException {
         try (GitLock.Lease lease = lockRefs(List.of(HEAD))) {
-            if (path != null) {
-                Files.size(path);
-            }
+            Files.size(path);
             MVStore store = open(true);
             try {
                 MVMap<String, String> values = existingMap(store);
@@ -100,9 +79,7 @@ final class GitRefsStorage {
                 }
                 return new RefsSnapshot(refs, head);
             } finally {
-                if (memory == null) {
-                    store.closeImmediately();
-                }
+                store.closeImmediately();
             }
         } catch (MVStoreException | IllegalArgumentException error) {
             throw storageFailure(error);
@@ -119,9 +96,7 @@ final class GitRefsStorage {
             case Head.Detached detached -> detached.target().toHex();
         };
         try (GitLock.Lease lease = lockRefs(List.of(HEAD))) {
-            if (path != null) {
-                Files.size(path);
-            }
+            Files.size(path);
             MVStore store = open(false);
             try {
                 MVMap<String, String> refs = existingMap(store);
@@ -130,9 +105,7 @@ final class GitRefsStorage {
                 store.commit();
                 store.sync();
             } finally {
-                if (memory == null) {
-                    store.closeImmediately();
-                }
+                store.closeImmediately();
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
@@ -148,9 +121,7 @@ final class GitRefsStorage {
             names.add(update.ref());
         }
         try (GitLock.Lease lease = lockRefs(names)) {
-            if (path != null) {
-                Files.size(path);
-            }
+            Files.size(path);
             MVStore store = open(false);
             try {
                 MVMap<String, String> refs = existingMap(store);
@@ -191,9 +162,7 @@ final class GitRefsStorage {
                 store.sync();
                 return List.copyOf(results);
             } finally {
-                if (memory == null) {
-                    store.closeImmediately();
-                }
+                store.closeImmediately();
             }
         } catch (MVStoreException error) {
             throw storageFailure(error);
@@ -201,9 +170,6 @@ final class GitRefsStorage {
     }
 
     private MVStore open(boolean readOnly) {
-        if (memory != null) {
-            return memory;
-        }
         MVStore.Builder builder = new MVStore.Builder().fileName(path.toString()).cacheSize(1)
                 .autoCommitDisabled().autoCommitBufferSize(0);
         if (readOnly) {

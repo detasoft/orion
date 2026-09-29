@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage.local;
+package pro.deta.orion.git.parser.v2.storage.shared;
 
 import pro.deta.orion.net.io.BufferedByteInputV2;
 

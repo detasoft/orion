@@ -1,6 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -43,7 +43,7 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
         String name = requireName(repositoryName);
         NativeGitRepository repository = new NativeGitRepository(
                 name,
-                new LocalGitStorage(),
+                new InMemoryStorage(),
                 DEFAULT_HEAD);
         NativeGitRepository previous = repositories.putIfAbsent(
                 name,
