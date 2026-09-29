@@ -3,6 +3,8 @@ package pro.deta.orion.git.workflow;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.CloneCommand;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -39,6 +41,7 @@ class ShallowFetchInteroperabilityTest {
 
     @ParameterizedTest(name = "{0} shallow fetch from Orion over {1}, boundary: {2}")
     @MethodSource("matrix")
+    @Execution(ExecutionMode.CONCURRENT)
     void clonesShallowHistoryThenDeepensAndUnshallows(String client, GitTransportScheme scheme, String boundary)
             throws Exception {
         GitServer selected = switch (scheme) {

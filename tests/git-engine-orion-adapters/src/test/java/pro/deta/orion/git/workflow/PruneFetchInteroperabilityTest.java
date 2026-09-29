@@ -3,6 +3,8 @@ package pro.deta.orion.git.workflow;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.ObjectId;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -35,6 +37,7 @@ class PruneFetchInteroperabilityTest {
 
     @ParameterizedTest(name = "{0} fetch --prune from Orion over {1}")
     @MethodSource("matrix")
+    @Execution(ExecutionMode.CONCURRENT)
     void prunesDeletedRemoteBranchWhilePreservingLocalBranchAndTags(String client,
                                                                    GitTransportScheme scheme) throws Exception {
         GitServer selected = switch (scheme) {

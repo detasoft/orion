@@ -6,6 +6,8 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.TagOpt;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -41,6 +43,7 @@ class TagFollowingInteroperabilityTest {
 
     @ParameterizedTest(name = "{0} fetch from Orion over {1}, follow tags: {2}")
     @MethodSource("matrix")
+    @Execution(ExecutionMode.CONCURRENT)
     void fetchesOnlyTagsOfTheRequestedHistoryWhenEnabled(String client, GitTransportScheme scheme,
                                                         boolean followTags) throws Exception {
         GitServer selected = switch (scheme) {
