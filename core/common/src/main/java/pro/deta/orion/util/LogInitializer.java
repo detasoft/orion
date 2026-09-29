@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +42,12 @@ public class LogInitializer {
     private final LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
     @Getter(AccessLevel.NONE)
     private final RecentLogs recentLogs = new RecentLogs();
+    private ScopedLogs scopedLogs;
+
+    public void configureScopedLogs(Path directory) {
+        scopedLogs = new ScopedLogs(directory);
+        reconfigure();
+    }
 
     public LogInitializer() {
         categoryLevels.add(":INFO");
@@ -70,7 +77,9 @@ public class LogInitializer {
         };
         encoder.setContext(context);
         encoder.setCharset(StandardCharsets.UTF_8);
-        encoder.setPattern("%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -%kvp- %msg%n");
+        String pattern = "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} "
+                + "[taskId=%X{taskId} userId=%X{userId}] -%kvp- %msg%n";
+        encoder.setPattern(pattern);
         encoder.start();
 
         // Create console appender
@@ -95,6 +104,7 @@ public class LogInitializer {
             }
         }
         getLogger(null).addAppender(consoleAppender);
+        if (scopedLogs != null) scopedLogs.attach(context, getLogger(null), pattern);
     }
 
     private Logger getLogger(String category) {

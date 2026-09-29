@@ -118,6 +118,7 @@ class OrionAdminAcmeCertificateRouteTest {
                 HttpServletRequest.class.getClassLoader(),
                 new Class<?>[]{HttpServletRequest.class},
                 (proxy, method, args) -> switch (method.getName()) {
+                    case "getAttribute" -> AcmeAdministrationTest.admin();
                     case "getInputStream" -> new ByteArrayServletInputStream(body);
                     case "toString" -> "ACME certificate request";
                     case "hashCode" -> System.identityHashCode(proxy);

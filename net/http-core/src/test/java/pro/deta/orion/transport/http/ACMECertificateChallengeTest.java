@@ -236,6 +236,12 @@ public class ACMECertificateChallengeTest {
         }
 
         @Override
+        protected OrionHttpResponse doPost(jakarta.servlet.http.HttpServletRequest request) throws IOException {
+            request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE, AcmeAdministrationTest.admin());
+            return super.doPost(request);
+        }
+
+        @Override
         public OrionHttpRouteDefinition definition() {
             return new OrionHttpRouteDefinition(
                     OrionAdminPaths.ACME_CERTIFICATE,

@@ -171,6 +171,14 @@ export function createOrionClient(options = {}) {
       const query = after === null ? '' : `?${new URLSearchParams({ after })}`
       return request(`/api/admin/logs${query}`, { signal })
     },
+    scopedLogFiles(scope, signal) {
+      return request(`/api/admin/logs?${new URLSearchParams({ scope })}`, { signal })
+    },
+    scopedLog(scope, id, file, offset, version, signal) {
+      const query = new URLSearchParams({ scope, id, file, offset: String(offset) })
+      if (version !== null) query.set('version', version)
+      return request(`/api/admin/logs?${query}`, { signal })
+    },
     transports() {
       return request('/api/admin/transports')
     },

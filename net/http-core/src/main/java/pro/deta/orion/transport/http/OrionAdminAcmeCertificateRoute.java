@@ -2,6 +2,8 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
+import pro.deta.orion.util.LogScope;
+import pro.deta.orion.auth.SecurityContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.ServletException;
 import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
@@ -54,7 +56,9 @@ public class OrionAdminAcmeCertificateRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
         AcmeCertificateService.IssueRequest request = issueRequest(req);
-        try {
+        SecurityContext context = (SecurityContext) req.getAttribute(
+                OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        try (LogScope ignored = LogScope.user(context.getUserIdentity().getUserId())) {
             IssuedAcmeCertificate certificate = certificateService.issue(request);
             return certificateResponse(
                     certificateChainPem(certificate.certificateChain()),

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.LogInitializer;
+import pro.deta.orion.util.LogScope;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -52,6 +53,45 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST
 
 class OrionHttpUnifiedRouteTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Test
+    void readsScopedFilesOnlyForAdministratorsAndRejectsUnsafeSelections(@TempDir Path root) throws Exception {
+        LogInitializer logging = new LogInitializer();
+        logging.configureScopedLogs(root);
+        try {
+            try (LogScope user = LogScope.user("alice"); LogScope task = LogScope.task("certificate")) {
+                LoggerFactory.getLogger("scoped.route").error("issuance failed",
+                        new IllegalStateException("test stack trace"));
+            }
+            OrionHttpRoute route = new OrionAdminLogsRoute(logging);
+            Map<String, String> selection = Map.of("scope", "tasks", "id", "certificate", "file", "current.log");
+            for (SecurityContext denied : List.of(SecurityContext.createContext(), authenticatedContext())) {
+                assertThat(service(route, scopedRequest(denied, selection)).status).isEqualTo(403);
+            }
+            ResponseRecorder read = service(route, scopedRequest(adminContext(), selection));
+            assertThat(read.status).isEqualTo(200);
+            assertThat(read.headers).containsEntry("Cache-Control", "no-store");
+            assertThat(OBJECT_MAPPER.readTree(read.bodyAsString()).get("text").asText())
+                    .contains("issuance failed", "IllegalStateException: test stack trace", "userId=alice");
+            ResponseRecorder list = service(route, scopedRequest(adminContext(), Map.of("scope", "users")));
+            assertThat(OBJECT_MAPPER.readTree(list.bodyAsString()).get(0).get("id").asText()).isEqualTo("alice");
+            assertThat(service(route, scopedRequest(adminContext(), Map.of("scope", "../../"))).status)
+                    .isEqualTo(400);
+            assertThat(service(route, scopedRequest(adminContext(), Map.of("scope", "tasks", "id", "missing",
+                    "file", "current.log"))).status).isEqualTo(404);
+            Map<String, String> stale = new LinkedHashMap<>(selection);
+            stale.put("version", "stale");
+            assertThat(service(route, scopedRequest(adminContext(), stale)).status).isEqualTo(409);
+        } finally {
+            new LogInitializer();
+        }
+    }
+
+    private static HttpServletRequest scopedRequest(SecurityContext context, Map<String, String> parameters) {
+        HttpServletRequest delegate = request("GET", "/api/admin/logs", context);
+        return stub(HttpServletRequest.class, (proxy, method, args) ->
+                method.getName().equals("getParameter") ? parameters.get(args[0]) : method.invoke(delegate, args));
+    }
 
     @Test
     void servesUnchangedLogbackRecordsOnlyThroughExistingAdminAuthorization() throws Exception {

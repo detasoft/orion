@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
+import pro.deta.orion.util.LogScope;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
@@ -77,7 +78,8 @@ public final class AcmeCommandCatalog {
         return new CommandDefinition(action, 0, 0, parameters, sensitive,
                 context -> admin(context.securityContext()).allowed(),
                 invocation -> admin(invocation.context().securityContext()), invocation -> {
-                    try {
+                    try (LogScope ignored = LogScope.user(invocation.context().securityContext()
+                            .getUserIdentity().getUserId())) {
                         return handler.handle(invocation);
                     } catch (AccessControlConcurrentUpdateException conflict) {
                         return failure("Configuration changed. Run /acme show and retry with its revision.");

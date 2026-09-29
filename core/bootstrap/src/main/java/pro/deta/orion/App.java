@@ -8,6 +8,7 @@ import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -71,6 +72,8 @@ public class App {
         ConfigurationProvider configurationProvider = configurationProvider(options);
         try {
             OrionConfiguration configuration = configurationProvider.readConfiguration();
+            OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
+                    ConfigurationContext.baseDirectory(configuration, System.getenv()).resolve("logs"));
             try (BootstrapContext bootstrap = BootstrapContext.open(
                     configuration, Map.copyOf(System.getenv()), options.createIfMissing())) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()

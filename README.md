@@ -779,6 +779,30 @@ HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 ACME account and domain private keys remain inside `material.p12`. The ACME
 admin route returns only the public certificate chain.
 
+### Task and user logs
+
+The administrator's **Logs** screen reads saved task and user journals, including
+multiline messages and exception traces. ACME issuance and automatic renewal share
+the stable task `acme-certificate`. Issuance initiated through the UI or SSH also
+writes to the initiating user's journal; automatic renewal has no user scope.
+
+Logback writes scoped events to both the normal output and
+`<bootstrap.baseDir>/logs/{tasks,users}/<encoded-id>/current.log`. Bucket names use
+URL-safe Base64; the UI shows the original IDs. Each bucket rotates at approximately
+10 MiB and keeps five archives. Buckets remain on disk across restarts. There is
+no global disk quota or automatic deletion of inactive buckets in this version.
+The normal in-memory log buffer remains limited to 1000 events and 1 MiB.
+
+Select **Tasks** or **Users**, choose a file, and use **Load more** or **Check for
+new text**. The viewer holds up to approximately 1 MiB at once; **Read next part**
+continues through larger files. Search operates on the loaded text. Rotation is
+reported explicitly so text from different files is not silently joined.
+
+Other operations can opt in with `LogScope.task(id)` or `LogScope.user(id)` in
+try-with-resources. IDs must fit in 180 UTF-8 bytes. Scope is local to the executing
+thread: establish it explicitly in asynchronous workers. A task scope preserves
+the current user, while a user scope starts a new operation without an inherited task.
+
 ### Local AgentD
 
 After `make run-server` and the one-time `make enroll-admin-key`, start the

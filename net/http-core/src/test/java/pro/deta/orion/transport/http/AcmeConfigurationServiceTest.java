@@ -93,6 +93,9 @@ class AcmeConfigurationServiceTest {
             AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
                 @Override
                 public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+                    assertThat(org.slf4j.MDC.get("taskId")).isEqualTo("acme-certificate");
+                    assertThat(org.slf4j.MDC.get("userId"))
+                            .isEqualTo(accountKeys.size() < 2 ? "admin" : null);
                     assertThat(request.eabKeyId()).isEqualTo("key-id");
                     assertThat(request.eabHmacKey()).containsExactly(
                             EAB_KEY.toCharArray());

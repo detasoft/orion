@@ -2,6 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import pro.deta.orion.util.LogScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.config.OrionDesiredState;
@@ -73,7 +74,8 @@ public class AcmeCertificateService {
         if (!issuanceInProgress.compareAndSet(false, true)) {
             throw new IssuanceBusyException();
         }
-        try {
+        try (LogScope ignored = LogScope.task("acme-certificate")) {
+            LOG.info("Starting ACME certificate issuance");
             return issueRecorded(settingsFrom(request), Instant.now(), false);
         } finally {
             issuanceInProgress.set(false);
@@ -87,10 +89,13 @@ public class AcmeCertificateService {
         try {
             IssuedAcmeCertificate issued = issueAdmitted(settings, automatic);
             renewalAttempt = new RenewalAttempt(settings.snapshot().system().https(), now, now, "");
+            LOG.info("ACME certificate issued and saved: domains={}, expiresAt={}",
+                    settings.domains(), issued.certificateChain().getFirst().getNotAfter().toInstant());
             return issued;
         } catch (RuntimeException failure) {
             renewalAttempt = new RenewalAttempt(settings.snapshot().system().https(), now, lastSuccess,
                     "Certificate renewal failed. Check ACME settings and CA availability.");
+            if (!automatic) LOG.warn("ACME certificate issuance failed; check settings and CA availability");
             throw failure;
         }
     }
@@ -155,32 +160,34 @@ public class AcmeCertificateService {
     }
 
     void maintainCertificate(Instant now, Runnable activate) {
-        if (maintenanceStopped) return;
-        if (issuanceInProgress.compareAndSet(false, true)) {
-            try {
-                IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
-                Optional<List<X509Certificate>> chain = keyMaterial.certificateChain(settings.material());
-                if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
-                    LOG.warn("Starting ACME certificate renewal: domains={}, expiresAt={}, attemptAt={}",
-                            settings.domains(), chain.orElseThrow().getFirst().getNotAfter().toInstant(), now);
-                    issueRecorded(settings, now, true);
+        try (LogScope user = LogScope.user(null); LogScope task = LogScope.task("acme-certificate")) {
+            if (maintenanceStopped) return;
+            if (issuanceInProgress.compareAndSet(false, true)) {
+                try {
+                    IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
+                    Optional<List<X509Certificate>> chain = keyMaterial.certificateChain(settings.material());
+                    if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
+                        LOG.warn("Starting ACME certificate renewal: domains={}, expiresAt={}, attemptAt={}",
+                                settings.domains(), chain.orElseThrow().getFirst().getNotAfter().toInstant(), now);
+                        issueRecorded(settings, now, true);
+                    }
+                } catch (ConfigurationUnavailableException disabled) {
+                    // Disabled or unconfigured ACME does not initiate issuance.
+                } catch (GeneralSecurityException | RuntimeException failure) {
+                    // The saved chain remains usable; status exposes a safe error and the next retry.
+                    LOG.warn("ACME renewal check failed; it will be retried automatically");
+                } finally {
+                    issuanceInProgress.set(false);
                 }
-            } catch (ConfigurationUnavailableException disabled) {
-                // Disabled or unconfigured ACME does not initiate issuance.
-            } catch (GeneralSecurityException | RuntimeException failure) {
-                // The saved chain remains usable; status exposes a safe error and the next retry.
-                LOG.warn("ACME renewal check failed; it will be retried automatically");
-            } finally {
-                issuanceInProgress.set(false);
             }
-        }
-        if (!maintenanceStopped && !Thread.currentThread().isInterrupted()) {
-            try {
-                activate.run();
-                activationError = "";
-            } catch (RuntimeException failure) {
-                activationError = "Could not activate the saved certificate. Retrying automatically.";
-                LOG.warn(activationError);
+            if (!maintenanceStopped && !Thread.currentThread().isInterrupted()) {
+                try {
+                    activate.run();
+                    activationError = "";
+                } catch (RuntimeException failure) {
+                    activationError = "Could not activate the saved certificate. Retrying automatically.";
+                    LOG.warn(activationError);
+                }
             }
         }
     }
