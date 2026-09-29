@@ -4,7 +4,9 @@ Status: active
 
 - Owner: codex, session 01a0ecdb-205e-7522-87dd-096112e78767,
   branch `codex/git-storage-interfaces-01a0ecdb`,
-  worktree `.worktrees/git-storage-interfaces-01a0ecdb`, started 2026-09-29 13:18 Europe/Amsterdam.
+  worktree `.worktrees/git-storage-interfaces-01a0ecdb`, paused 2026-09-29 13:35 Europe/Amsterdam;
+  next: await user authorization to integrate reviewed commit
+  `659a08911a98718d14b8eb060500043feef48396`, then verify integration and clean up.
 
 ## Requirements and accepted design
 
