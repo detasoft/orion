@@ -51,9 +51,14 @@ public final class CargoBuildMojo extends AbstractCargoMojo {
     }
 
     private void copyBinary(String resolvedTarget) throws MojoExecutionException {
-        String profileDirectory = release
+        String selectedProfile = release
                 ? "release"
-                : profile == null || profile.isBlank() ? "debug" : profile;
+                : profile == null || profile.isBlank() ? "dev" : profile;
+        String profileDirectory = switch (selectedProfile) {
+            case "dev", "test" -> "debug";
+            case "release", "bench" -> "release";
+            default -> selectedProfile;
+        };
         Path sourceDirectory = cargoTargetDirectory.toPath();
         if (target != null && !target.isBlank()) {
             sourceDirectory = sourceDirectory.resolve(target);
