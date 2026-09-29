@@ -54,13 +54,30 @@ make run-dev
 Keep `ORION_KEY_MATERIAL_PASSWORD` set to the existing store's password.
 `run-dev` starts the existing `run-server` and `run-frontend` goals concurrently:
 one Maven invocation runs Orion, and npm runs Vite at `http://localhost:4173`.
-Vite opens the browser automatically when it starts (also with `make run-frontend`);
-if that port is occupied, it opens the next available port. Set `BROWSER=none`
-to suppress opening the browser. Orion may still be compiling when the UI opens.
+Vite opens your normal default browser already signed in (also with `make run-frontend`).
+The opener waits up to two minutes for Orion, issues an admin token using your
+enrolled SSH key, and verifies it before opening the tab. If port 4173 is occupied,
+it uses Vite's actual port. Set `BROWSER=none` to suppress automatic opening.
+For an already running development server, open another signed-in tab with:
+
+```sh
+make open-ui URL=http://localhost:4173
+```
+
+`URL` defaults to `http://localhost:4173` and must point to the Vite development UI.
+The opener accepts `ORION_TOKEN`, or obtains a token through `make issue-token-raw`
+with `ORION_SSH_HOST` (defaults to the URL hostname), `ORION_SSH_PORT`, and
+`ORION_SSH_OPTIONS`. If SSH enrollment is missing, run `make enroll-admin-key` first.
+The token travels in a URL fragment, which is not sent in HTTP requests; the dev UI
+immediately removes it from the address and keeps it in the tab's session storage.
+Production builds do not accept these login links. No separate browser profile,
+Playwright session, or container is used. Node.js and Python 3 are required.
+
 `run-server` disables Maven build-cache restoration because the `process-classes`
 launch needs reactor dependency outputs that cached builds may not make available.
-It accepts the same `ORION_ARGS`, `ORION_ROOT`, `MAVEN`, and `NPM` overrides as
-those goals. Ctrl-C stops both process trees; processes that ignore shutdown
+`run-dev` forwards `ORION_ARGS`, `MAVEN`, and `NPM` to those goals. To select a
+base directory through `ORION_ROOT`, use `bootstrap.baseDir: env:ORION_ROOT`
+in your configuration. Ctrl-C stops both process trees; processes that ignore shutdown
 are killed after ten seconds. If either service exits, the other is stopped too.
 Use `make init-server` first for a new installation. Python 3 is required for
 the shared development launcher on macOS and Linux.

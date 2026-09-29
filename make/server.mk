@@ -30,10 +30,10 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-RUN_TEST_RESERVED_GOALS += run-frontend run-dev
+RUN_TEST_RESERVED_GOALS += run-frontend run-dev open-ui
 RUN_TEST_RESERVED_GOALS += browser-test browser-acme-test prepare-browser-test
 
-.PHONY: init-server run-server run-frontend run-dev run-agent enroll-admin-key require-key-material-password
+.PHONY: init-server run-server run-frontend run-dev open-ui run-agent enroll-admin-key require-key-material-password
 .PHONY: issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
@@ -71,7 +71,10 @@ run-server: require-key-material-password ## Run the Orion server
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
 run-frontend: ## Run Vite with automatic UI updates and open the browser
-	cd net/frontend/ui && $(NPM) run dev -- --open
+	cd net/frontend/ui && BROWSER="$${BROWSER:-$(CURDIR)/make/open-dev-ui.js}" $(NPM) run dev -- --open
+
+open-ui: ## Open the running development UI already signed in; optionally set URL (default localhost:4173)
+	node "$(CURDIR)/make/open-dev-ui.js" '$(if $(URL),$(URL),http://localhost:4173)'
 
 run-dev: require-key-material-password ## Run Orion and Vite together; Ctrl-C stops both
 	+python3 "$(CURDIR)/make/run-dev.py" $(MAKE)

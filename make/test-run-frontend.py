@@ -10,7 +10,7 @@ import unittest
 
 
 class RunFrontendTest(unittest.TestCase):
-    def run_frontend(self, npm_exit=0, target_file=False):
+    def run_frontend(self, npm_exit=0, target_file=False, browser=""):
         repository = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="orion-frontend-test-") as directory:
             root = Path(directory)
@@ -21,7 +21,7 @@ class RunFrontendTest(unittest.TestCase):
             if target_file:
                 (checkout / "run-frontend").touch()
             trace = root / "npm.json"
-            environment = dict(os.environ, NPM_TRACE=str(trace), NPM_EXIT=str(npm_exit))
+            environment = dict(os.environ, NPM_TRACE=str(trace), NPM_EXIT=str(npm_exit), BROWSER=browser)
             npm = " ".join(shlex.quote(part) for part in
                            [sys.executable, str(Path(__file__).resolve()), "--npm-double"])
 
@@ -36,6 +36,11 @@ class RunFrontendTest(unittest.TestCase):
             invocation = json.loads(trace.read_text(encoding="utf-8"))
             self.assertEqual(invocation["arguments"], ["run", "dev", "--", "--open"])
             self.assertEqual(Path(invocation["cwd"]).resolve(), frontend.resolve())
+            if browser:
+                self.assertEqual(invocation["browser"], browser)
+            else:
+                self.assertEqual(Path(invocation["browser"]).resolve(),
+                                 (checkout / "make/open-dev-ui.js").resolve())
             if npm_exit:
                 self.assertIn("Error " + str(npm_exit), result.stderr)
 
@@ -47,6 +52,9 @@ class RunFrontendTest(unittest.TestCase):
 
     def test_runs_even_when_a_file_matches_the_goal_name(self):
         self.run_frontend(target_file=True)
+
+    def test_can_suppress_browser_opening(self):
+        self.run_frontend(browser="none")
 
     def test_rejects_frontend_goal_as_a_positional_test_argument(self):
         result = subprocess.run(
@@ -60,7 +68,7 @@ class RunFrontendTest(unittest.TestCase):
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--npm-double"]:
         Path(os.environ["NPM_TRACE"]).write_text(json.dumps({
-            "arguments": sys.argv[2:], "cwd": os.getcwd(),
+            "arguments": sys.argv[2:], "cwd": os.getcwd(), "browser": os.environ.get("BROWSER"),
         }), encoding="utf-8")
         sys.exit(int(os.environ["NPM_EXIT"]))
     unittest.main()
