@@ -20,7 +20,6 @@ public final class SessionRegistryException extends Exception {
     }
 
     public enum Reason {
-        NOT_FOUND,
         CONFLICT,
         IO_FAILURE,
         INDETERMINATE,

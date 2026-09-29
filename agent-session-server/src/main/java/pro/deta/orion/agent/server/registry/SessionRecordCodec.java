@@ -25,7 +25,7 @@ import java.util.Optional;
 final class SessionRecordCodec {
     static final int MAX_RECORD_BYTES = 1_048_576;
     private static final int MAGIC = 0x4f525345;
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static final int MAX_TEXT_BYTES = 262_144;
 
     static String fileName(SessionId sessionId) {
@@ -44,13 +44,7 @@ final class SessionRecordCodec {
             output.writeInt(MAGIC);
             output.writeInt(VERSION);
             writeText(output, record.agentLabel().value());
-            writeDescriptor(output, record.reported());
-            output.writeBoolean(record.outcome().isPresent());
-            if (record.outcome().isPresent()) {
-                SessionRecord.Outcome outcome = record.outcome().orElseThrow();
-                output.writeInt(outcome.state().wireCode());
-                writeText(output, outcome.detail());
-            }
+            writeDescriptor(output, record.descriptor());
         }
         byte[] encoded = bytes.toByteArray();
         if (encoded.length > MAX_RECORD_BYTES) {
@@ -75,14 +69,11 @@ final class SessionRecordCodec {
                 throw corrupt("Session record has an unsupported version", null);
             }
             AgentLabel agentLabel = new AgentLabel(readText(input));
-            SessionDescriptor reported = readDescriptor(input);
-            Optional<SessionRecord.Outcome> outcome = input.readBoolean()
-                    ? Optional.of(new SessionRecord.Outcome(readState(input), readText(input)))
-                    : Optional.empty();
+            SessionDescriptor descriptor = readDescriptor(input);
             if (input.available() != 0) {
                 throw corrupt("Session record has trailing bytes", null);
             }
-            return new SessionRecord(agentLabel, reported, outcome);
+            return new SessionRecord(agentLabel, descriptor);
         } catch (SessionRegistryFileOperations.StoredRecordException failure) {
             throw failure;
         } catch (EOFException failure) {

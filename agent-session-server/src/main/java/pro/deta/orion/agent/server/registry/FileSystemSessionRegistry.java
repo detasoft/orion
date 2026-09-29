@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Durable owner of session identity, reported metadata, and authoritative process outcomes. */
+/** Durable owner of session identity and metadata reported by the owning agent. */
 public final class FileSystemSessionRegistry implements AutoCloseable {
     private final SessionRecordCodec codec = new SessionRecordCodec();
     private final SessionRegistryFileOperations operations;
@@ -75,7 +75,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
     private void load(Path preparedRoot) throws IOException {
         for (Path path : operations.recordFiles(preparedRoot)) {
             SessionRecord record = codec.decode(operations.readRecord(path));
-            SessionId sessionId = record.reported().sessionId();
+            SessionId sessionId = record.descriptor().sessionId();
             if (!path.getFileName().toString().equals(SessionRecordCodec.fileName(sessionId))) {
                 throw new SessionRegistryFileOperations.StoredRecordException(
                         "Session record file name does not match its session ID",
@@ -109,10 +109,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         Map<SessionId, SessionRecord> replacements = new LinkedHashMap<>();
         for (SessionDescriptor descriptor : reported.values()) {
             SessionRecord current = records.get(descriptor.sessionId());
-            SessionRecord replacement = new SessionRecord(
-                    agentLabel,
-                    descriptor,
-                    current == null ? Optional.empty() : current.outcome());
+            SessionRecord replacement = new SessionRecord(agentLabel, descriptor);
             if (!replacement.equals(current)) {
                 replacements.put(descriptor.sessionId(), replacement);
             }
@@ -130,33 +127,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         }
         SessionDescriptor starting = new SessionDescriptor(sessionId,
                 AgentMessage.SessionState.STARTING, Optional.empty(), Optional.empty(), "");
-        publish(Map.of(sessionId, new SessionRecord(agentLabel, starting, Optional.empty())));
-    }
-
-    public synchronized void recordOutcome(
-            AgentLabel agentLabel,
-            SessionId sessionId,
-            SessionRecord.Outcome outcome) throws SessionRegistryException {
-        requireOpen();
-        Objects.requireNonNull(agentLabel, "agentLabel");
-        Objects.requireNonNull(sessionId, "sessionId");
-        Objects.requireNonNull(outcome, "outcome");
-        SessionRecord current = records.get(sessionId);
-        if (current == null) {
-            throw new SessionRegistryException(
-                    SessionRegistryException.Reason.NOT_FOUND,
-                    "Session is not registered");
-        }
-        if (!current.agentLabel().equals(agentLabel)) {
-            throw conflict("Session belongs to another agent");
-        }
-        SessionRecord replacement = new SessionRecord(
-                agentLabel,
-                current.reported(),
-                Optional.of(outcome));
-        if (!replacement.equals(current)) {
-            publish(Map.of(sessionId, replacement));
-        }
+        publish(Map.of(sessionId, new SessionRecord(agentLabel, starting)));
     }
 
     public synchronized Optional<SessionRecord> find(SessionId sessionId)
@@ -168,7 +139,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
     public synchronized List<SessionRecord> snapshot() throws SessionRegistryException {
         requireOpen();
         List<SessionRecord> snapshot = new ArrayList<>(records.values());
-        snapshot.sort(Comparator.comparing(record -> record.reported().sessionId().value()));
+        snapshot.sort(Comparator.comparing(record -> record.descriptor().sessionId().value()));
         return List.copyOf(snapshot);
     }
 
@@ -182,7 +153,7 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
                 owned.add(record);
             }
         }
-        owned.sort(Comparator.comparing(record -> record.reported().sessionId().value()));
+        owned.sort(Comparator.comparing(record -> record.descriptor().sessionId().value()));
         return List.copyOf(owned);
     }
 

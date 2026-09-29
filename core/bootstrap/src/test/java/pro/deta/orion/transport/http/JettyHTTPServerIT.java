@@ -244,7 +244,7 @@ class JettyHTTPServerIT {
         try (FileSystemSessionRegistry sessions =
                      new FileSystemSessionRegistry(agentServerRoot.resolve("sessions"))) {
             assertThat(sessions.ownedBy(agentLabel))
-                    .extracting(record -> record.reported().sessionId().value())
+                    .extracting(record -> record.descriptor().sessionId().value())
                     .containsExactly("live-session", "offline-session");
         }
     }

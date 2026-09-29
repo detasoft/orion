@@ -10,7 +10,6 @@ import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
-import pro.deta.orion.agent.server.registry.SessionRecord;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 
@@ -29,7 +28,7 @@ class SessionListRouteTest {
     Path root;
 
     @Test
-    void listsDurableSessionsAcrossAgentsInStableOrderWithAuthoritativeOutcomes() throws Exception {
+    void listsDurableReportedSessionsAcrossAgentsInStableOrder() throws Exception {
         AgentLabel first = new AgentLabel("agent-a");
         AgentLabel second = new AgentLabel("agent-b");
         SessionId session = new SessionId("session-a");
@@ -37,7 +36,8 @@ class SessionListRouteTest {
             registry.reserveStart(first, new SessionId("session-z"));
             registry.reconcile(second, List.of(new SessionDescriptor(session, AgentMessage.SessionState.RUNNING,
                     Optional.empty(), Optional.empty(), "running")));
-            registry.recordOutcome(second, session, new SessionRecord.Outcome(AgentMessage.SessionState.EXITED, "0"));
+            registry.reconcile(second, List.of(new SessionDescriptor(session, AgentMessage.SessionState.EXITED,
+                    Optional.empty(), Optional.empty(), "0")));
         }
         AgentSessionServer server = new AgentSessionServer(root);
         server.onStart();

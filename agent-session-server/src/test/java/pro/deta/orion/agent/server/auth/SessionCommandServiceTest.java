@@ -243,9 +243,8 @@ class SessionCommandServiceTest {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(fixture.commands.resize(AGENT, new CommandId("valid"), SESSION, 80, 24)
                     .operationSequence()).isEqualTo(1);
-            fixture.sessions.recordOutcome(AGENT, SESSION,
-                    new pro.deta.orion.agent.server.registry.SessionRecord.Outcome(
-                            AgentMessage.SessionState.EXITED, "done"));
+            fixture.sessions.reconcile(AGENT, List.of(new SessionDescriptor(
+                    SESSION, AgentMessage.SessionState.EXITED, Optional.empty(), Optional.empty(), "done")));
             assertThatThrownBy(() -> fixture.commands.resize(
                     AGENT, new CommandId("exited"), SESSION, 80, 24))
                     .isInstanceOf(IllegalArgumentException.class);

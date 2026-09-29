@@ -199,7 +199,7 @@ class AgentSessionServerTest {
              FileSystemSessionRegistry sessions = new FileSystemSessionRegistry(root.resolve("sessions"))) {
             assertThat(sessions.ownedBy(AGENT_LABEL))
                     .singleElement()
-                    .extracting(record -> record.reported())
+                    .extracting(record -> record.descriptor())
                     .isEqualTo(reported);
         }
     }

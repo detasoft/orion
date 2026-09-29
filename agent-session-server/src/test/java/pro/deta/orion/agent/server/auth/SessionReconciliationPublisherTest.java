@@ -75,13 +75,13 @@ class SessionReconciliationPublisherTest {
 
             session.onMessage(new AgentMessage.SessionStatus(updated));
 
-            assertThat(registry.find(FIRST)).get().extracting(record -> record.reported())
+            assertThat(registry.find(FIRST)).get().extracting(record -> record.descriptor())
                     .isEqualTo(updated);
             assertThat(downstreamMessages).isEmpty();
             assertThat(connection.closed).isFalse();
         }
         try (FileSystemSessionRegistry recovered = registry()) {
-            assertThat(recovered.find(FIRST)).get().extracting(record -> record.reported())
+            assertThat(recovered.find(FIRST)).get().extracting(record -> record.descriptor())
                     .isEqualTo(updated);
         }
     }
@@ -147,7 +147,7 @@ class SessionReconciliationPublisherTest {
             session.onMessage(new AgentMessage.SessionStatus(descriptor(FIRST, "foreign update")));
 
             assertThat(connection.closed).isTrue();
-            assertThat(registry.find(FIRST)).get().extracting(record -> record.reported())
+            assertThat(registry.find(FIRST)).get().extracting(record -> record.descriptor())
                     .isEqualTo(owned);
         }
     }

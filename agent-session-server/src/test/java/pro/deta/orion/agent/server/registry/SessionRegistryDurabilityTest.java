@@ -3,6 +3,8 @@ package pro.deta.orion.agent.server.registry;
 import java.nio.ByteBuffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.agent.protocol.AgentLabel;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.EventId;
@@ -32,7 +34,7 @@ class SessionRegistryDurabilityTest {
     void truncatedUnpreparedCurrentRecordIsDiscardedDuringRecovery() throws Exception {
         Path transaction = Files.createDirectories(root.resolve(".session-transaction-crash"));
         byte[] encoded = new SessionRecordCodec().encode(new SessionRecord(
-                AGENT, descriptor(FIRST, "first"), Optional.empty()));
+                AGENT, descriptor(FIRST, "first")));
         Files.write(transaction.resolve(SessionRecordCodec.fileName(FIRST)), java.util.Arrays.copyOf(encoded, 11));
         try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
             assertThat(registry.find(FIRST)).isEmpty();
@@ -40,22 +42,28 @@ class SessionRegistryDurabilityTest {
         }
     }
 
-    @Test
-    void oldOwnershipFormatIsRejectedWithoutChangingItsFile() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void oldSessionFormatsAreRejectedWithoutChangingTheirFiles(int version) throws Exception {
         try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
             registry.reserveStart(AGENT, FIRST);
         }
         Path record = root.resolve(SessionRecordCodec.fileName(FIRST));
         byte[] oldFormat = Files.readAllBytes(record);
-        ByteBuffer.wrap(oldFormat).putInt(4, 1);
+        ByteBuffer.wrap(oldFormat).putInt(4, version);
         Files.write(record, oldFormat);
-        assertThatThrownBy(() -> new FileSystemSessionRegistry(root))
+        assertThatThrownBy(() -> {
+            try (FileSystemSessionRegistry ignored = new FileSystemSessionRegistry(root)) {
+                // Opening an unsupported format must fail before the registry can be used.
+            }
+        })
                 .isInstanceOf(SessionRegistryException.class).hasMessageContaining("unsupported version");
         assertThat(Files.readAllBytes(record)).isEqualTo(oldFormat);
     }
 
-    @Test
-    void oldPreparedOwnershipRecordsAreRejectedBeforeRecoveryMovesOrDeletesFiles() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void oldPreparedSessionRecordsAreRejectedBeforeRecoveryMovesOrDeletesFiles(int version) throws Exception {
         try (FileSystemSessionRegistry registry = FileSystemSessionRegistry.withOperations(
                 root, new FailAfterFirstMove())) {
             assertThatThrownBy(() -> registry.reconcile(AGENT,
@@ -67,13 +75,17 @@ class SessionRegistryDurabilityTest {
             for (Path file : files.filter(Files::isRegularFile).toList()) {
                 byte[] bytes = Files.readAllBytes(file);
                 if (file.toString().endsWith(".session")) {
-                    ByteBuffer.wrap(bytes).putInt(4, 1);
+                    ByteBuffer.wrap(bytes).putInt(4, version);
                     Files.write(file, bytes);
                 }
                 before.put(file, bytes);
             }
         }
-        assertThatThrownBy(() -> new FileSystemSessionRegistry(root))
+        assertThatThrownBy(() -> {
+            try (FileSystemSessionRegistry ignored = new FileSystemSessionRegistry(root)) {
+                // Recovery must not publish or discard unsupported records.
+            }
+        })
                 .isInstanceOf(SessionRegistryException.class).hasMessageContaining("unsupported version");
         for (var entry : before.entrySet()) {
             assertThat(Files.readAllBytes(entry.getKey())).isEqualTo(entry.getValue());

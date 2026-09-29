@@ -63,7 +63,7 @@ class FileSystemSessionRegistryTest {
 
         try (FileSystemSessionRegistry reopened = new FileSystemSessionRegistry(root)) {
             assertThat(reopened.find(SESSION)).contains(new SessionRecord(
-                    AGENT, running, Optional.empty()));
+                    AGENT, running));
             assertThat(reopened.ownedBy(AGENT)).hasSize(2);
         }
     }
@@ -98,32 +98,33 @@ class FileSystemSessionRegistryTest {
     }
 
     @Test
-    void authoritativeOutcomeSurvivesLaterTransientReports() throws Exception {
+    void reportedLifecycleAndMetadataAdvanceAndSurviveRestart() throws Exception {
         SessionDescriptor initial = descriptor(SESSION, RUNNING, 1, 4, "live");
-        SessionDescriptor stale = descriptor(SESSION, RUNNING, 2, 7, "stale process view");
-        SessionRecord.Outcome outcome = new SessionRecord.Outcome(FAILED, "exit 17");
+        SessionDescriptor failed = descriptor(SESSION, FAILED, 2, 7, "exit 17");
         try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
             registry.reconcile(AGENT, List.of(initial));
-            registry.recordOutcome(AGENT, SESSION, outcome);
-            registry.reconcile(AGENT, List.of(stale));
+            registry.reconcile(AGENT, List.of(failed));
 
             SessionRecord record = registry.find(SESSION).orElseThrow();
-            assertThat(record.reported()).isEqualTo(stale);
-            assertThat(record.outcome()).contains(outcome);
-            assertThat(record.descriptor()).isEqualTo(descriptor(SESSION, FAILED, 2, 7, "exit 17"));
+            assertThat(record.descriptor()).isEqualTo(failed);
+            assertThat(record.agentLabel()).isEqualTo(AGENT);
+        }
+        try (FileSystemSessionRegistry reopened = new FileSystemSessionRegistry(root)) {
+            assertThat(reopened.find(SESSION)).contains(new SessionRecord(AGENT, failed));
         }
     }
 
     @Test
-    void outcomeRequiresAKnownOwnedSessionAndTerminalState() throws Exception {
+    void terminalReportCannotChangeSessionOwnership() throws Exception {
+        SessionDescriptor running = descriptor(SESSION, RUNNING, 1, 4, "live");
         try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
-            assertThatThrownBy(() -> registry.recordOutcome(
-                    AGENT, SESSION, new SessionRecord.Outcome(EXITED, "exit 0")))
+            registry.reconcile(AGENT, List.of(running));
+            assertThatThrownBy(() -> registry.reconcile(OTHER_AGENT,
+                    List.of(descriptor(SESSION, EXITED, 1, 5, "exit 0"))))
                     .isInstanceOf(SessionRegistryException.class)
                     .extracting(failure -> ((SessionRegistryException) failure).reason())
-                    .isEqualTo(SessionRegistryException.Reason.NOT_FOUND);
-            assertThatThrownBy(() -> new SessionRecord.Outcome(RUNNING, "not terminal"))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isEqualTo(SessionRegistryException.Reason.CONFLICT);
+            assertThat(registry.find(SESSION)).contains(new SessionRecord(AGENT, running));
         }
     }
 
