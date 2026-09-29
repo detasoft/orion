@@ -133,8 +133,7 @@ rust-maven-plugin-install: ## Install Rust Maven Plugin 0.1.0 locally from its t
 		$(MAVEN_RUN) install -f "$$temporary/build-tools/rust-maven-plugin/pom.xml"
 
 rust-install: cargo-init ## Install the pinned Rust toolchain
-	@$(HOME)/.cargo/bin/rustup run 1.97.0 rustc --version >/dev/null 2>&1 \
-		|| $(HOME)/.cargo/bin/rustup toolchain install 1.97.0 --profile minimal
+	@cd session-host && $(HOME)/.cargo/bin/rustc --version
 
 session-host: rust-install ## Build the session host release binary
 	cd session-host && $(HOME)/.cargo/bin/cargo build --release
