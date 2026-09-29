@@ -134,6 +134,30 @@ class JournalConcurrencyTest {
     }
 
     @Test
+    void selectedReadExcludesAnEventAppendedAfterItsSnapshot() throws Exception {
+        SnapshotReadOperations operations = new SnapshotReadOperations("snapshot-reader");
+        try (FileSystemSessionJournalStorage storage = storage(operations);
+             ExecutorService reader = namedExecutor("snapshot-reader")) {
+            storage.append(SESSION_A, List.of(event(1), event(2)));
+            operations.arm();
+            Future<Optional<SessionEventRecord>> selected = reader.submit(() ->
+                    storage.findFirstMatching(SESSION_A, record -> record.eventId().equals(new EventId(3))));
+            try {
+                assertThat(operations.readStarted.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThat(storage.append(SESSION_A, List.of(event(3))).durableThrough())
+                        .contains(new EventId(3));
+                operations.releaseRead.countDown();
+                assertThat(selected.get(5, TimeUnit.SECONDS)).isEmpty();
+                assertThat(storage.findFirstMatching(SESSION_A,
+                        record -> record.eventId().equals(new EventId(3)))).contains(event(3));
+            } finally {
+                operations.releaseRead.countDown();
+                cancel(selected);
+            }
+        }
+    }
+
+    @Test
     void readSnapshotSurvivesClosedSegmentReplacementAndConcurrentAppend() throws Exception {
         CapturingExecutor maintenance = new CapturingExecutor();
         SnapshotReadOperations operations = new SnapshotReadOperations("snapshot-reader");

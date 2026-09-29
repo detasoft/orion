@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Predicate;
 
 import static pro.deta.orion.agent.server.journal.JournalStorageException.Reason.CLOSED;
 import static pro.deta.orion.agent.server.journal.JournalStorageException.Reason.IO_FAILURE;
@@ -119,6 +120,12 @@ public final class FileSystemSessionJournalStorage implements SessionJournalStor
     public JournalReadResult readAfter(SessionId sessionId, Optional<EventId> after)
             throws JournalStorageException {
         return execute(sessionId, journal -> journal.readAfter(Objects.requireNonNull(after, "after")));
+    }
+
+    @Override
+    public Optional<SessionEventRecord> findFirstMatching(
+            SessionId sessionId, Predicate<SessionEventRecord> matches) throws JournalStorageException {
+        return execute(sessionId, journal -> journal.findFirstMatching(Objects.requireNonNull(matches, "matches")));
     }
 
     @Override

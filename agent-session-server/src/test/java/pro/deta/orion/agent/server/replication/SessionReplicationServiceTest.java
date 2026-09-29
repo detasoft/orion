@@ -265,6 +265,12 @@ class SessionReplicationServiceTest {
         }
 
         @Override
+        public Optional<SessionEventRecord> findFirstMatching(
+                SessionId sessionId, java.util.function.Predicate<SessionEventRecord> matches) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void close() {
         }
     }

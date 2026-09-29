@@ -540,6 +540,13 @@ class JettySessionReplicationLivePeerTest {
         }
 
         @Override
+        public Optional<SessionEventRecord> findFirstMatching(
+                SessionId sessionId, java.util.function.Predicate<SessionEventRecord> matches)
+                throws JournalStorageException {
+            return delegate.findFirstMatching(sessionId, matches);
+        }
+
+        @Override
         public void close() {
             delegate.close();
         }

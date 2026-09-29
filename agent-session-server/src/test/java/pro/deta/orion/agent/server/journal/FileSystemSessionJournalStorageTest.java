@@ -407,6 +407,17 @@ class FileSystemSessionJournalStorageTest {
             operations.reset();
             assertThat(storage.readAfter(session, Optional.empty()).records()).hasSize(count + 1);
             assertThat(operations.retainedEventIds()).hasSize(count + 1);
+
+            operations.reset();
+            assertThat(storage.findFirstMatching(session, record -> record.eventId().equals(new EventId(1))))
+                    .contains(prefix.getFirst());
+            assertThat(operations.retainedEventIds()).containsExactly(new EventId(1));
+            assertThat(operations.bytesRead()).isEqualTo(historyBytes);
+
+            operations.reset();
+            assertThat(storage.findFirstMatching(session, record -> false)).isEmpty();
+            assertThat(operations.retainedEventIds()).isEmpty();
+            assertThat(operations.bytesRead()).isEqualTo(historyBytes);
         }
     }
 
@@ -432,6 +443,22 @@ class FileSystemSessionJournalStorageTest {
             Files.write(prefix, new byte[]{(byte) 0xff});
             assertThatExceptionOfType(JournalStorageException.class)
                     .isThrownBy(() -> storage.readAfter(session, Optional.of(last.eventId())));
+        }
+    }
+
+    @Test
+    void selectedReadStillRejectsCorruptionAfterTheFirstMatch() throws Exception {
+        SessionId session = new SessionId("selected-corruption");
+        SessionEventRecord first = event(1);
+        writeSegment(root, session.value(), 1, first);
+        writeSegment(root, session.value(), 2, event(2));
+        try (FileSystemSessionJournalStorage storage =
+                     new FileSystemSessionJournalStorage(root, testConfig())) {
+            assertThat(storage.lastEventId(session)).contains(new EventId(2));
+            Files.write(root.resolve(session.value()).resolve("00000002.cbor"), new byte[]{(byte) 0xff});
+            assertThatExceptionOfType(JournalStorageException.class)
+                    .isThrownBy(() -> storage.findFirstMatching(session, record ->
+                            record.eventId().equals(first.eventId())));
         }
     }
 

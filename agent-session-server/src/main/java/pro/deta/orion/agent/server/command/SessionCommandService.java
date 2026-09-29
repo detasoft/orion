@@ -144,11 +144,10 @@ public final class SessionCommandService implements AutoCloseable {
         if (record.descriptor().state() != AgentMessage.SessionState.RUNNING) {
             throw new IllegalArgumentException("Session is not running");
         }
-        for (SessionEventRecord event : journals.readAfter(sessionId, Optional.empty()).records()) {
-            if (event.eventType() == SessionEventType.PROCESS_EXITED
-                    || event.eventType() == SessionEventType.SESSION_START_FAILED) {
-                throw new IllegalArgumentException("Session has exited");
-            }
+        if (journals.findFirstMatching(sessionId, event ->
+                event.eventType() == SessionEventType.PROCESS_EXITED
+                        || event.eventType() == SessionEventType.SESSION_START_FAILED).isPresent()) {
+            throw new IllegalArgumentException("Session has exited");
         }
     }
 
@@ -204,45 +203,49 @@ public final class SessionCommandService implements AutoCloseable {
 
     private Status journalStatus(FileSystemCommandLedger.Entry entry)
             throws JournalStorageException {
-        for (SessionEventRecord event : journals.readAfter(entry.sessionId(), Optional.empty()).records()) {
-            if (entry.message() instanceof AgentMessage.StartSession) {
-                if (event.eventType() == SessionEventType.PROCESS_STARTED) {
-                    try {
-                        eventCodec.decodeKnownPayload(event);
-                        return confirmed(entry, SessionCommandOutcome.SUCCEEDED, "started");
-                    } catch (AgentProtocolException malformedStarted) {
-                        continue;
-                    }
+        return journals.findFirstMatching(entry.sessionId(), event -> statusForEvent(entry, event) != null)
+                .map(event -> statusForEvent(entry, event))
+                .orElse(null);
+    }
+
+    private Status statusForEvent(FileSystemCommandLedger.Entry entry, SessionEventRecord event) {
+        if (entry.message() instanceof AgentMessage.StartSession) {
+            if (event.eventType() == SessionEventType.PROCESS_STARTED) {
+                try {
+                    eventCodec.decodeKnownPayload(event);
+                    return confirmed(entry, SessionCommandOutcome.SUCCEEDED, "started");
+                } catch (AgentProtocolException malformedStarted) {
+                    return null;
                 }
-                if (event.eventType() == SessionEventType.SESSION_START_FAILED) {
-                    try {
-                        SessionEventPayload.SessionStartFailed failed =
-                                (SessionEventPayload.SessionStartFailed) eventCodec.decodeKnownPayload(event)
-                                        .orElseThrow();
-                        if (failed.commandId().equals(entry.commandId())) {
-                            return confirmed(entry, SessionCommandOutcome.FAILED, failed.diagnostic());
-                        }
-                    } catch (AgentProtocolException malformedFailure) {
-                        continue;
+            }
+            if (event.eventType() == SessionEventType.SESSION_START_FAILED) {
+                try {
+                    SessionEventPayload.SessionStartFailed failed =
+                            (SessionEventPayload.SessionStartFailed) eventCodec.decodeKnownPayload(event)
+                                    .orElseThrow();
+                    if (failed.commandId().equals(entry.commandId())) {
+                        return confirmed(entry, SessionCommandOutcome.FAILED, failed.diagnostic());
                     }
+                } catch (AgentProtocolException malformedFailure) {
+                    return null;
                 }
-                continue;
             }
-            if (event.eventType() != SessionEventType.COMMAND_RESULT) {
-                continue;
-            }
-            SessionEventPayload payload;
-            try {
-                payload = eventCodec.decodeKnownPayload(event).orElseThrow();
-            } catch (AgentProtocolException malformedResult) {
-                continue;
-            }
-            SessionEventPayload.CommandResult result = (SessionEventPayload.CommandResult) payload;
-            if (result.source() == SessionCommandSource.SERVER
-                    && result.operationSequence() == FileSystemCommandLedger.sequence(entry.message())
-                    && result.sourceEnvelope().equals(ProtocolBytes.copyOf(entry.encoded()))) {
-                return confirmed(entry, result.outcome(), result.detail());
-            }
+            return null;
+        }
+        if (event.eventType() != SessionEventType.COMMAND_RESULT) {
+            return null;
+        }
+        SessionEventPayload payload;
+        try {
+            payload = eventCodec.decodeKnownPayload(event).orElseThrow();
+        } catch (AgentProtocolException malformedResult) {
+            return null;
+        }
+        SessionEventPayload.CommandResult result = (SessionEventPayload.CommandResult) payload;
+        if (result.source() == SessionCommandSource.SERVER
+                && result.operationSequence() == FileSystemCommandLedger.sequence(entry.message())
+                && result.sourceEnvelope().equals(ProtocolBytes.copyOf(entry.encoded()))) {
+            return confirmed(entry, result.outcome(), result.detail());
         }
         return null;
     }

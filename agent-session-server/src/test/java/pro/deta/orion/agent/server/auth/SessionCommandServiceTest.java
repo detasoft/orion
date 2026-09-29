@@ -22,11 +22,16 @@ import pro.deta.orion.agent.protocol.SessionCommandSource;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionEventCodec;
 import pro.deta.orion.agent.protocol.SessionEventPayload;
+import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.command.SessionCommandService;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
+import pro.deta.orion.agent.server.journal.JournalAppendResult;
+import pro.deta.orion.agent.server.journal.JournalReadResult;
 import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.JournalStorageException;
+import pro.deta.orion.agent.server.journal.SessionJournalStorage;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.agent.server.replication.SessionReplicationService;
@@ -44,6 +49,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -59,6 +65,27 @@ class SessionCommandServiceTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void commandAdmissionAndStatusUseSelectedJournalReads() throws Exception {
+        try (Fixture fixture = new Fixture(root, true)) {
+            fixture.running(SESSION);
+            SessionEventRecord output = EVENTS.decode(EVENTS.encode(new EventId(1),
+                    new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{42}))));
+            fixture.journals.append(SESSION, List.of(output));
+
+            CommandId signal = new CommandId("selected-read");
+            fixture.commands.signal(AGENT, signal, SESSION, AgentMessage.SignalKind.INTERRUPT, -1);
+            assertThat(fixture.commands.status(signal).outcome()).isEmpty();
+
+            SessionEventRecord exit = EVENTS.decode(EVENTS.encode(new EventId(2),
+                    new SessionEventPayload.ProcessExited(0)));
+            fixture.journals.append(SESSION, List.of(exit));
+            assertThatThrownBy(() -> fixture.commands.resize(
+                    AGENT, new CommandId("after-exit"), SESSION, 80, 24))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
 
     @Test
     void oldLedgerFormatIsRejectedWithoutRewritingCommands() throws Exception {
@@ -340,11 +367,16 @@ class SessionCommandServiceTest {
         private final FileSystemAgentRegistry agents;
         private final FileSystemSessionRegistry sessions;
         private final FileSystemSessionJournalStorage journals;
+        private final SessionJournalStorage queryJournal;
         private final AuthenticatedAgentConnections connections;
         private final SessionReplicationService replication;
         private SessionCommandService commands;
 
         private Fixture(Path root) throws Exception {
+            this(root, false);
+        }
+
+        private Fixture(Path root, boolean requireSelectedReads) throws Exception {
             this.root = root;
             agents = new FileSystemAgentRegistry(root.resolve("agents"));
             agents.register(AGENT, "agent");
@@ -352,6 +384,7 @@ class SessionCommandServiceTest {
             sessions = new FileSystemSessionRegistry(root.resolve("sessions"));
             journals = new FileSystemSessionJournalStorage(root.resolve("journals"),
                     new JournalStorageConfig(AgentProtocolLimits.journalDefaults()));
+            queryJournal = requireSelectedReads ? new NoBulkReadJournal(journals) : journals;
             connections = new AuthenticatedAgentConnections(ignored -> new AgentControlHandler.Session() {
                 @Override
                 public void onMessage(AgentMessage message) {
@@ -366,7 +399,7 @@ class SessionCommandServiceTest {
         }
 
         private SessionCommandService newCommands() throws Exception {
-            return new SessionCommandService(root.resolve("commands"), agents, sessions, connections, journals);
+            return new SessionCommandService(root.resolve("commands"), agents, sessions, connections, queryJournal);
         }
 
         private void running(SessionId sessionId) throws Exception {
@@ -382,6 +415,45 @@ class SessionCommandServiceTest {
             journals.close();
             sessions.close();
             agents.close();
+        }
+    }
+
+    private static final class NoBulkReadJournal implements SessionJournalStorage {
+        private final SessionJournalStorage delegate;
+
+        private NoBulkReadJournal(SessionJournalStorage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Optional<EventId> firstEventId(SessionId sessionId) throws JournalStorageException {
+            return delegate.firstEventId(sessionId);
+        }
+
+        @Override
+        public Optional<EventId> lastEventId(SessionId sessionId) throws JournalStorageException {
+            return delegate.lastEventId(sessionId);
+        }
+
+        @Override
+        public JournalAppendResult append(SessionId sessionId, List<SessionEventRecord> records)
+                throws JournalStorageException {
+            return delegate.append(sessionId, records);
+        }
+
+        @Override
+        public JournalReadResult readAfter(SessionId sessionId, Optional<EventId> after) {
+            throw new AssertionError("Command queries must not load the whole journal");
+        }
+
+        @Override
+        public Optional<SessionEventRecord> findFirstMatching(
+                SessionId sessionId, Predicate<SessionEventRecord> matches) throws JournalStorageException {
+            return delegate.findFirstMatching(sessionId, matches);
+        }
+
+        @Override
+        public void close() {
         }
     }
 }

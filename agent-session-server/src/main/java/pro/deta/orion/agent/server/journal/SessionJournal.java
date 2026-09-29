@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 import static pro.deta.orion.agent.server.journal.JournalStorageException.Reason.INVALID_APPEND;
 import static pro.deta.orion.agent.server.journal.JournalStorageException.Reason.IO_FAILURE;
@@ -187,6 +188,19 @@ final class SessionJournal {
     }
 
     JournalReadResult readAfter(Optional<EventId> after) throws JournalStorageException {
+        Objects.requireNonNull(after, "after");
+        return new JournalReadResult(readSnapshot(snapshot ->
+                reader.readRecords(snapshot.catalog(), snapshot.contents(), after)));
+    }
+
+    Optional<SessionEventRecord> findFirstMatching(Predicate<SessionEventRecord> matches)
+            throws JournalStorageException {
+        Objects.requireNonNull(matches, "matches");
+        return readSnapshot(snapshot -> reader.findFirstMatching(
+                snapshot.catalog(), snapshot.contents(), matches));
+    }
+
+    private <T> T readSnapshot(SnapshotRead<T> read) throws JournalStorageException {
         JournalSnapshot snapshot;
         lock.lock();
         try {
@@ -209,9 +223,8 @@ final class SessionJournal {
             }
         }
 
-        List<SessionEventRecord> snapshotRecords;
         try {
-            snapshotRecords = reader.readRecords(snapshot.catalog(), snapshot.contents(), after);
+            return read.apply(snapshot);
         } catch (JournalStorageException e) {
             poison();
             operations.afterReadFailurePublished();
@@ -224,7 +237,11 @@ final class SessionJournal {
         } finally {
             releaseReadLease(snapshot.leases());
         }
-        return new JournalReadResult(snapshotRecords);
+    }
+
+    @FunctionalInterface
+    private interface SnapshotRead<T> {
+        T apply(JournalSnapshot snapshot) throws JournalStorageException;
     }
 
     private JournalAppendResult appendDurably(

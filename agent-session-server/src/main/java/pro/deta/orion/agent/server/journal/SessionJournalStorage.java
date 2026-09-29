@@ -6,6 +6,7 @@ import pro.deta.orion.agent.protocol.SessionId;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 public interface SessionJournalStorage extends AutoCloseable {
     Optional<EventId> firstEventId(SessionId sessionId) throws JournalStorageException;
@@ -17,6 +18,9 @@ public interface SessionJournalStorage extends AutoCloseable {
 
     JournalReadResult readAfter(SessionId sessionId, Optional<EventId> after)
             throws JournalStorageException;
+
+    Optional<SessionEventRecord> findFirstMatching(
+            SessionId sessionId, Predicate<SessionEventRecord> matches) throws JournalStorageException;
 
     @Override
     void close();
