@@ -1,30 +1,5 @@
 # Module Review: `tests/test-duration-recorder`
 
-## 2. Parameterized tests lose their method and class in the displayed ID
-
-**Problem.** Jupiter uses `test-template`, but the recorder only recognizes `method`.
-Parameterized invocations get an empty `methodName` and a fallback `testId` without the class.
-
-**Sources.** [Method extraction and IDs](src/main/java/pro/deta/orion/test/duration/TestDurationRecorder.java),
-[HTML output](src/main/java/pro/deta/orion/test/duration/TestAnalyticsReport.java), and
-[parameterized producer](../../connectors/acl-storage/src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java).
-The [launcher fixture](src/test/java/pro/deta/orion/test/duration/TestDurationRecorderTest.java)
-only emits ordinary and disabled sample tests. The enclosing parameterized verification is not a fixture case.
-
-**Documented behavior and contract.** The exact ID format is undocumented. The schema exposes class/method
-fields and ordinary IDs use `class#method`. Parameterized invocations must preserve their available method
-and class identity. Installed Jupiter 5.13.4 sources confirm `test-template` and `test-template-invocation`.
-
-**Minimal repair.** Recognize `test-template` in the existing extraction while preserving invocation suffixes.
-Add a real parameterized launcher fixture and check JSONL and JFR output.
-
-**Alternatives and consequences.** Using JUnit `MethodSource` is possible if ordinary IDs remain stable.
-Keeping fallback IDs leaves incomplete fields. No observed ID collision or JFR misattribution is claimed.
-
-**Confidence.** High from code, Jupiter sources and existing records; parameterized fixture coverage is absent.
-**Priority signals.** Medium importance: common test runs lose diagnostic identity. Easy local repair with no
-new concepts.
-
 ## 3. Carriage returns in display names break CSV records
 
 **Problem.** `csvValue` quotes commas, quotes and LF, but not CR. Parameters such as `/item\r` and `help\r`

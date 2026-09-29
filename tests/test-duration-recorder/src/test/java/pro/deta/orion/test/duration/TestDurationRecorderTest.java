@@ -49,16 +49,27 @@ class TestDurationRecorderTest {
             }
 
             List<String> jsonLines = Files.readAllLines(durations);
-            assertEquals(2, jsonLines.size());
+            assertEquals(4, jsonLines.size());
             assertTrue(jsonLines.stream().anyMatch(line -> line.contains("\"status\":\"SUCCESSFUL\"")));
             assertTrue(jsonLines.stream().anyMatch(line -> line.contains("\"status\":\"SKIPPED\"")));
             assertTrue(jsonLines.stream().allMatch(line -> line.contains("\"runId\":\"recorder-test-run\"")));
 
             List<RecordedEvent> events = readOrionTestEvents(recordingFile);
-            assertEquals(2, events.size());
+            assertEquals(4, events.size());
             assertTrue(events.stream().anyMatch(event -> hasStatus(event, "SUCCESSFUL")));
             assertTrue(events.stream().anyMatch(event -> hasStatus(event, "SKIPPED")));
             assertTrue(events.stream().allMatch(event -> "recorder-test-run".equals(event.getString("runId"))));
+            for (String invocation : List.of("successfulTest()", "skippedTest()",
+                    "parameterizedTest(int)[#1]", "parameterizedTest(int)[#2]")) {
+                String method = invocation.substring(0, invocation.indexOf(')') + 1);
+                String testId = SampleTests.class.getName() + "#" + invocation;
+                assertTrue(jsonLines.stream().anyMatch(line -> line.contains("\"testId\":\"" + testId + "\"")
+                        && line.contains("\"methodName\":\"" + method + "\"")
+                        && line.contains("\"className\":\"" + SampleTests.class.getName() + "\"")), testId);
+                assertTrue(events.stream().anyMatch(event -> testId.equals(event.getString("testId"))
+                        && method.equals(event.getString("methodName"))
+                        && SampleTests.class.getName().equals(event.getString("className"))), testId);
+            }
         } finally {
             restoreProperty(TestDurationRecorder.ENABLED_PROPERTY, originalEnabled);
             restoreProperty(TestDurationRecorder.OUTPUT_PROPERTY, originalOutput);
@@ -101,6 +112,12 @@ class TestDurationRecorderTest {
     }
 
     static class SampleTests {
+        @ParameterizedTest
+        @ValueSource(ints = {1, 2})
+        void parameterizedTest(int value) {
+            assertTrue(value > 0);
+        }
+
         @Test
         void successfulTest() {
         }

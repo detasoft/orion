@@ -213,7 +213,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
     }
 
     private static Optional<String> methodName(TestIdentifier testIdentifier) {
-        return uniqueIdSegment(testIdentifier.getUniqueId(), "method");
+        return uniqueIdSegment(testIdentifier.getUniqueId(), "method")
+                .or(() -> uniqueIdSegment(testIdentifier.getUniqueId(), "test-template"));
     }
 
     private static String legacyReportingName(TestIdentifier testIdentifier) {
