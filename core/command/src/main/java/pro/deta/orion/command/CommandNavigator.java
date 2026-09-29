@@ -349,6 +349,11 @@ public final class CommandNavigator {
             while (match < length && prefix.charAt(match) == value.charAt(match)) {
                 match++;
             }
+            if (match > 0 && match < prefix.length()
+                    && Character.isHighSurrogate(prefix.charAt(match - 1))
+                    && Character.isLowSurrogate(prefix.charAt(match))) {
+                match--;
+            }
             prefix = prefix.substring(0, match);
         }
         return prefix;

@@ -1,11 +1,14 @@
 package pro.deta.orion.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.resource.ScopedResourceCandidate;
 import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
+import pro.deta.orion.command.terminal.TerminalLineEditor;
 
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -172,6 +175,31 @@ class CommandNavigatorTest {
         assertThat(result.line()).isEqualTo("go😀now next");
         assertThat(result.cursor()).isEqualTo("go😀now".length());
         assertThat(result.line().codePointCount(0, result.cursor())).isEqualTo(6);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "go😀, go😁, go",
+            "go😀now, go😀next, go😀n",
+            "go😀😁, go😀😂, go😀"
+    })
+    void preservesWholeCodePointsInAmbiguousCompletion(String first, String second, String shared) {
+        CommandNavigator unicode = new CommandNavigator(CommandNode.builder()
+                .action(definition(first, true))
+                .action(definition(second, true)).build());
+        CommandCompletion.Result result = unicode.complete(context, CommandPath.root(), "gowrong next", 2);
+
+        assertThat(result.line()).isEqualTo(shared + " next");
+        assertThat(result.cursor()).isEqualTo(shared.length());
+        assertThat(result.candidates()).containsExactly(first, second);
+
+        TerminalLineEditor editor = new TerminalLineEditor(10, 100);
+        int codePointCursor = result.line().codePointCount(0, result.cursor());
+        editor.replace(result.line(), codePointCursor);
+        assertThat(editor.line()).isEqualTo(shared + " next");
+        assertThat(editor.cursor()).isEqualTo(shared.codePointCount(0, shared.length()));
+        editor.accept(new byte[] {'x'}, 0, 1);
+        assertThat(editor.line()).isEqualTo(shared + "x next");
     }
 
     @Test
