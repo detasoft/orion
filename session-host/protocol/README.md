@@ -251,6 +251,20 @@ effect, with the frame sequence in the response header. Validation
 and stale-sequence failures receive `RECEIVED` with the same sequence and an
 error payload. Journal append failures go only to stderr.
 
+Admission has a fixed capacity of 64 ordinary commands, shared by `SERVER` and
+`MANUAL`, plus one reserved `TERMINATE` slot. A slot covers receipt delivery,
+waiting for the effect lock, execution, and recording the result. It is released
+when processing finishes, including on failure; disconnecting after admission
+does not cancel the command or release its slot early. When the relevant capacity
+is full, the host returns `RECEIVED` with `ERROR_INVALID_STATE` (4) and UTF-8 detail
+`command queue is full`. The rejected command applies no effect, writes no
+`COMMAND_RESULT`, and does not advance the server sequence high-water mark; it may
+be submitted again once capacity is available, subject to the usual sequence
+checks. Status queries, journal acknowledgements, and other non-operation
+requests do not consume command slots. The termination slot remains available
+when all ordinary slots are occupied; another termination is rejected while that
+slot is occupied. These limits do not bound idle control connections.
+
 For `SERVER`, `operationSequence` identifies an operation and protects it from
 replay. For `MANUAL`, it is only a live response-correlation value and may
 repeat. It is not a FIFO position across control connections. `operation_order` serializes

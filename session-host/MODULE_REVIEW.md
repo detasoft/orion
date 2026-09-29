@@ -1,35 +1,30 @@
 # Module Review: `session-host`
 
-## 1. Detached connection workers form an unbounded pending-operation queue
+## 1. Idle control connections retain unbounded native workers
 
-**Problem.** Idle clients retain detached native threads indefinitely. When PTY input blocks, other connections
-receive admission receipts and accumulate workers behind the ordinary-effect mutex. Disconnect does not cancel
-admitted effects.
+**Problem.** Every accepted control connection gets a detached native thread. A client that sends no frame,
+or only part of one, can retain the thread and socket indefinitely. The command admission limit does not
+bound connections waiting to submit a command.
 
-**Sources.** [Accept loop](src/platform/unix.rs#L1035),
-[frame reads](src/platform/unix.rs#L1074),
-[admission before effects](src/platform/unix.rs#L1272), and
-[PTY input readiness](src/platform/unix.rs#L1428).
-[Blocked input](tests/unix_process_host.rs#L1589) and
-[termination coverage](tests/unix_process_host.rs#L1726) show independent admission and required termination
-bypass. AgentD's
-[persistent terminal connection](../agentd/src/main/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacher.java#L330)
+**Sources.** [Accept loop](src/platform/unix.rs), `spawn_accept_loop`, and
+[frame reads](src/host.rs), `read_control_frame`, called from `serve_connection`.
+AgentD's [persistent terminal connection](../agentd/src/main/java/pro/deta/orion/agentd/terminal/LocalTerminalAttacher.java)
 bounds that lane's connection use, while other clients remain unbounded.
 
-**Documented behavior.** The [protocol](protocol/README.md#L244) separates admission from effects.
-The [queue investigation](../docs/plans/tasks/05_native-session-host/12_control-request-queue.md) is deferred.
+**Documented behavior.** The [protocol](protocol/README.md) specifies command capacity and reserves
+termination admission, but does not specify connection capacity or idle/partial-frame deadlines.
 
-**Contract.** Preserve admission receipts, uncertainty after disconnect, and termination during blocked input.
-Maximum clients, pending effects, and overload outcomes remain unspecified and require a decision.
+**Contract.** Preserve persistent control connections and access to termination during blocked input.
+Connection limits and timeout behavior remain unspecified and require a decision.
 
-**Minimal repair.** Define those bounds, then constrain connection/admission resources in the existing blocking
-implementation while reserving termination capacity. Cover idle clients, overload, blocked input, and
-finalization.
+**Minimal repair.** Bound resources retained by idle or incomplete connections through the existing transport,
+while keeping termination reachable. Cover idle clients, partial frames, and termination under saturation.
 
-**Alternatives and consequences.** A global connection cap can block termination. A pool or async runtime does
-not independently bound admitted effects. Rejecting excess clients introduces an overload contract.
+**Alternatives and consequences.** A global connection cap can block termination. An idle timeout changes
+persistent-connection behavior and requires reconnect handling. A worker pool alone can leave every worker
+occupied by idle clients.
 
-**Confidence.** High in resource growth; production exhaustion frequency and appropriate capacity are unknown.
+**Confidence.** High in resource growth; production exhaustion frequency and appropriate limits are unknown.
 
-**Priority signals.** Importance: medium, potentially high under sustained blocked input. Repair ease: medium
-to low because capacity and termination availability must be designed together.
+**Priority signals.** Importance: medium under sustained connection growth. Repair ease: medium to low because
+connection admission and termination availability must be designed together.

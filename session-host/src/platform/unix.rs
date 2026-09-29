@@ -36,6 +36,7 @@ const CONTROL_ENDPOINT: &str = "control.sock";
 const DESCENDANT_ABSENCE_CONFIRMATIONS: usize = 3;
 const DESCENDANT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READ_BUFFER_LENGTH: usize = 64 * 1024;
+const MAX_PENDING_COMMANDS: usize = 64;
 const CONTROL_RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_SETUP_SANDBOX: u8 = 1;
 const CHILD_SETUP_CWD: u8 = 2;
@@ -879,6 +880,7 @@ struct OperationCoordinator {
 struct OperationState {
     admission_open: bool,
     active_operations: usize,
+    termination_active: bool,
 }
 
 impl OperationCoordinator {
@@ -887,6 +889,7 @@ impl OperationCoordinator {
             state: Mutex::new(OperationState {
                 admission_open: true,
                 active_operations: 0,
+                termination_active: false,
             }),
             changed: std::sync::Condvar::new(),
         }
@@ -898,15 +901,25 @@ impl OperationCoordinator {
             .map_err(|_| HostError::Thread("operation coordinator mutex is poisoned".to_owned()))
     }
 
-    fn register_operation(self: &Arc<Self>) -> Result<Option<ActiveOperation>, HostError> {
-        let mut state = self.lock_state()?;
+    fn register_operation(self: &Arc<Self>, termination: bool) -> Result<ActiveOperation, (u32, String)> {
+        let mut state = self.lock_state().map_err(|error| (ERROR_IO, error.to_string()))?;
         if !state.admission_open {
-            return Ok(None);
+            return Err((ERROR_INVALID_STATE, "session finalization has started".to_owned()));
+        }
+        let ordinary_operations = state.active_operations - usize::from(state.termination_active);
+        if (termination && state.termination_active)
+            || (!termination && ordinary_operations >= MAX_PENDING_COMMANDS)
+        {
+            return Err((ERROR_INVALID_STATE, "command queue is full".to_owned()));
         }
         state.active_operations += 1;
-        Ok(Some(ActiveOperation {
+        if termination {
+            state.termination_active = true;
+        }
+        Ok(ActiveOperation {
             operations: Arc::clone(self),
-        }))
+            termination,
+        })
     }
 
     fn close_admission(&self) -> Result<(), HostError> {
@@ -916,9 +929,12 @@ impl OperationCoordinator {
         Ok(())
     }
 
-    fn operation_done(&self) -> Result<(), HostError> {
+    fn operation_done(&self, termination: bool) -> Result<(), HostError> {
         let mut state = self.lock_state()?;
         state.active_operations = state.active_operations.saturating_sub(1);
+        if termination {
+            state.termination_active = false;
+        }
         self.changed.notify_all();
         Ok(())
     }
@@ -936,11 +952,12 @@ impl OperationCoordinator {
 
 struct ActiveOperation {
     operations: Arc<OperationCoordinator>,
+    termination: bool,
 }
 
 impl Drop for ActiveOperation {
     fn drop(&mut self) {
-        let _ = self.operations.operation_done();
+        let _ = self.operations.operation_done(self.termination);
     }
 }
 
@@ -1269,18 +1286,14 @@ fn handle_operation(
                     "operation sequence is stale".to_owned(),
                 ))
             } else {
-                match state.operations.register_operation() {
-                    Ok(Some(active_operation)) => {
+                match state.operations.register_operation(frame.message_type == control_message::TERMINATE) {
+                    Ok(active_operation) => {
                         if operation.source == protocol::OperationSource::Server {
                             state.accepted_sequence_high_watermark = Some(operation_sequence);
                         }
                         Ok((Arc::clone(&state.operation_order), active_operation))
                     }
-                    Ok(None) => Err((
-                        ERROR_INVALID_STATE,
-                        "session finalization has started".to_owned(),
-                    )),
-                    Err(error) => Err((ERROR_IO, error.to_string())),
+                    Err(rejection) => Err(rejection),
                 }
             }
         }
@@ -2260,7 +2273,7 @@ mod tests {
             let before = state.journal.latest_event_id();
             state.close_pty();
             assert_eq!(state.journal.latest_event_id(), before, "closure is not retried after append failure");
-            assert!(state.operations.register_operation().unwrap().is_some());
+            assert!(state.operations.register_operation(false).is_ok());
         }
         drop(state);
         fs::remove_dir_all(directory).unwrap();
@@ -2364,19 +2377,45 @@ mod tests {
     #[test]
     fn operation_admission_stays_open_until_finalization() {
         let coordinator = Arc::new(OperationCoordinator::new());
-        let first = coordinator.register_operation().unwrap().unwrap();
-        let second = coordinator.register_operation().unwrap().unwrap();
+        let first = coordinator.register_operation(false).unwrap();
+        let second = coordinator.register_operation(false).unwrap();
         coordinator.close_admission().unwrap();
-        assert!(coordinator.register_operation().unwrap().is_none());
+        assert_eq!(coordinator.register_operation(false).err(),
+            Some((ERROR_INVALID_STATE, "session finalization has started".to_owned())));
+        assert_eq!(coordinator.register_operation(true).err(),
+            Some((ERROR_INVALID_STATE, "session finalization has started".to_owned())));
         drop(first);
         drop(second);
         coordinator.wait_for_operations().unwrap();
     }
 
     #[test]
+    fn command_capacity_reserves_termination_and_releases_both_kinds_of_slots() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let mut ordinary = Vec::new();
+        for _ in 0..64 {
+            ordinary.push(coordinator.register_operation(false).unwrap());
+        }
+        let full = Some((ERROR_INVALID_STATE, "command queue is full".to_owned()));
+        assert_eq!(coordinator.register_operation(false).err(), full);
+        let termination = coordinator.register_operation(true).unwrap();
+        assert_eq!(coordinator.register_operation(true).err(), full);
+        assert_eq!(coordinator.register_operation(false).err(), full);
+        ordinary.pop();
+        ordinary.push(coordinator.register_operation(false).unwrap());
+        assert_eq!(coordinator.register_operation(false).err(), full);
+        drop(termination);
+        let termination = coordinator.register_operation(true).unwrap();
+        assert_eq!(coordinator.register_operation(false).err(), full);
+        drop(ordinary);
+        drop(termination);
+        coordinator.wait_for_operations().unwrap();
+    }
+
+    #[test]
     fn operation_guard_releases_coordinator_wait_after_registration() {
         let coordinator = Arc::new(OperationCoordinator::new());
-        let active = coordinator.register_operation().unwrap().unwrap();
+        let active = coordinator.register_operation(false).unwrap();
         let waiting = Arc::clone(&coordinator);
         let thread = thread::spawn(move || waiting.wait_for_operations().unwrap());
         thread::sleep(Duration::from_millis(10));

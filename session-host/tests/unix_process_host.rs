@@ -1672,6 +1672,50 @@ fn blocked_pty_input_does_not_block_admission_on_another_connection() {
 }
 
 #[test]
+fn full_command_queue_rejects_without_consuming_the_sequence_and_recovers() {
+    let directory = temporary_directory("full-command-queue");
+    let mut host = HostGuard::spawn(directory, &[
+        "/bin/sh", "-c", "stty raw -echo; printf READY; kill -STOP $$; exec cat >/dev/null",
+    ], "xterm-256color", 80, 24);
+    wait_for_output(host.directory(), b"READY");
+    let mut input_stream = connect(host.directory());
+    input_stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    let input = protocol::pty_input_payload([0x62; 16], &vec![b'x'; 1024 * 1024]).unwrap();
+    send_operation(&mut input_stream, control_message::INPUT, 1, b"blocked-input", &input);
+    wait_for_event(host.directory(), event_type::PTY_INPUT);
+    let resize = [80, 0, 0, 0, 24, 0, 0, 0];
+    for sequence in 2..=64 {
+        let mut stream = connect(host.directory());
+        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+        send_operation(&mut stream, control_message::RESIZE, sequence, b"queued-resize", &resize);
+        // Disconnecting must not release the slot of an already admitted command.
+    }
+    let mut stream = connect(host.directory());
+    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    let rejected = operation_request(&mut stream, control_message::RESIZE, 1000, b"retry-resize", &resize);
+    assert_received_error(&rejected, 1000, ERROR_INVALID_STATE);
+    assert_eq!(&rejected.payload[4..], b"command queue is full");
+    let manual = operation_request_from(&mut stream, control_message::RESIZE, 1,
+        protocol::OperationSource::Manual, None, &resize);
+    assert_received_error(&manual, 1, ERROR_INVALID_STATE);
+    assert_eq!(&manual.payload[4..], b"command queue is full");
+    assert_eq!(request(&mut stream, control_message::STATUS, 0, &[]).message_type,
+        control_message::STATUS_RESPONSE);
+
+    let child_pid = journal::read_metadata(host.directory()).unwrap().child_pid.unwrap();
+    assert_eq!(unsafe { libc::kill(child_pid as i32, libc::SIGCONT) }, 0);
+    for sequence in 1..=64 {
+        wait_for_command_result(host.directory(), sequence);
+    }
+    send_operation(&mut stream, control_message::RESIZE, 1000, b"retry-resize", &resize);
+    wait_for_command_result(host.directory(), 1000);
+    send_operation(&mut stream, control_message::TERMINATE, 1001, b"terminate", &[1, 0, 0, 0]);
+    assert!(host.wait_with_timeout(TIMEOUT).success());
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    assert_eq!(events.iter().filter(|event| event.event_type == event_type::COMMAND_RESULT).count(), 66);
+}
+
+#[test]
 fn pty_closure_releases_blocked_input_and_serializes_a_queued_resize() {
     let directory = temporary_directory("pty-control-closure-race");
     let close_file = directory.join("close-pty");
@@ -1725,7 +1769,7 @@ fn pty_closure_releases_blocked_input_and_serializes_a_queued_resize() {
 }
 
 #[test]
-fn terminate_bypasses_a_blocked_pty_input() {
+fn terminate_bypasses_a_full_queue_with_blocked_pty_input() {
     let directory = temporary_directory("terminate-blocked-input");
     let mut host = HostGuard::spawn(
         directory,
@@ -1754,11 +1798,18 @@ fn terminate_bypasses_a_blocked_pty_input() {
     });
     wait_for_event(host.directory(), event_type::PTY_INPUT);
 
+    for sequence in 2..=64 {
+        let mut stream = connect(host.directory());
+        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+        send_operation(&mut stream, control_message::RESIZE, sequence,
+            b"queued-resize", &[80, 0, 0, 0, 24, 0, 0, 0]);
+    }
     let mut terminate_stream = connect(host.directory());
+    terminate_stream.set_read_timeout(Some(TIMEOUT)).unwrap();
     send_operation(
         &mut terminate_stream,
         control_message::TERMINATE,
-        2,
+        65,
         b"server-envelope-terminate",
         &[1_u8, 0, 0, 0],
     );
@@ -1781,7 +1832,7 @@ fn terminate_bypasses_a_blocked_pty_input() {
         .unwrap();
     assert_eq!(&signal.payload[4..8], &(libc::SIGKILL as i32).to_le_bytes());
 
-    for operation_sequence in [1_u64, 2_u64] {
+    for operation_sequence in 1..=65 {
         assert!(result.events.iter().any(|event| {
             event.event_type == event_type::COMMAND_RESULT
                 && event.payload.len() >= 8
