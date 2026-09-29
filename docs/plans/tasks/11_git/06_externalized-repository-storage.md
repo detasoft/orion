@@ -23,7 +23,9 @@ local filesystem.
 
 ## Child Tasks
 
-- [ ] Extract storage interfaces for repository contents and ref state.
+- [ ] Build on the independently approved
+  [storage and pack interface extraction](15_storage-pack-interfaces.md) and
+  define any additional contracts required by the reviewed external backend.
 - [ ] Adapt the file-backed repository provider to the new storage boundary.
 - [ ] Define atomic publication and recovery semantics for external storage.
 - [ ] Implement an external storage backend candidate.

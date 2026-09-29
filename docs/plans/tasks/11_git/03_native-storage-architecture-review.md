@@ -50,5 +50,7 @@ the current filesystem layout as a set of premature interfaces.
   evidence and distinguishes verified behavior from inference.
 - The report defines one proposed ownership and publication model suitable for
   evaluating the externalized storage task.
-- External storage interface extraction does not begin before this review and
-  its accepted follow-up tasks are recorded.
+- External backend contract design does not begin before this review and its
+  accepted follow-up tasks are recorded. The separately user-approved,
+  behavior-preserving [storage and pack interface extraction](15_storage-pack-interfaces.md)
+  may proceed first; it does not settle external backend semantics.
