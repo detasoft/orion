@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 
 /**
@@ -39,12 +38,12 @@ public interface IndexedPack extends AutoCloseable {
 
     Optional<ObjectId> baseId(long offset) throws IOException;
 
-    <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
+    <R> R readObject(PackEntry entry, long end, Optional<ObjectId> baseId,
                      GitObjectRead<R> reader) throws IOException;
 
-    Optional<EntryMetadata> find(ObjectId id) throws IOException;
+    Optional<PackEntry> find(ObjectId id) throws IOException;
 
-    Optional<EntryMetadata> find(long offset) throws IOException;
+    Optional<PackEntry> find(long offset) throws IOException;
 
     void close() throws IOException;
 
@@ -62,10 +61,6 @@ public interface IndexedPack extends AutoCloseable {
 
     Record record(long offset) throws IOException;
 
-    record EntryMetadata(long offset, long dataOffset, long inflatedSize, GitObjectType type,
-                         OptionalLong baseOffset, Optional<ObjectId> baseId) {
-    }
-
-    record Record(EntryMetadata entry, ObjectId objectId, GitObjectType type, long size) {
+    record Record(PackEntry entry, ObjectId objectId, GitObjectType type, long size) {
     }
 }

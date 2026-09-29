@@ -42,7 +42,7 @@ public interface MutableIndexedPack extends IndexedPack {
 
     Optional<ObjectId> nextExternalBase() throws IOException;
 
-    Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException;
+    Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException;
 
     boolean hasUnresolved() throws IOException;
 }

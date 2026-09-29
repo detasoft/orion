@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
@@ -118,7 +119,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         return dependencies().nextExternalBase();
     }
 
-    public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+    public Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException {
         return dependencies().waitingFor(id, offset);
     }
 
@@ -204,13 +205,13 @@ public final class LocalIndexedPack implements MutableIndexedPack {
     }
 
     public <R> R readObject(long offset, GitObjectRead<R> reader) throws IOException {
-        EntryMetadata entry = find(offset).orElseThrow(() ->
+        PackEntry entry = find(offset).orElseThrow(() ->
                 new IllegalArgumentException("Unknown pack entry offset: " + offset));
         return readStored(entry, bytes, size(), reader);
     }
 
     public <R> Optional<R> readObject(ObjectId id, GitObjectRead<R> reader) throws IOException {
-        Optional<EntryMetadata> entry = find(id);
+        Optional<PackEntry> entry = find(id);
         return entry.isEmpty() ? Optional.empty()
                 : Optional.of(readObject(entry.orElseThrow().offset(), reader));
     }
@@ -227,7 +228,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         if (record == null) {
             throw new IOException("Unknown pack entry offset: " + offset);
         }
-        EntryMetadata entry = record.entry();
+        PackEntry entry = record.entry();
         if (entry.type() != GitObjectType.OFS_DELTA) {
             return entry.baseId();
         }
@@ -238,7 +239,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         return Optional.of(base.objectId());
     }
 
-    public static <R> R readObject(Path path, EntryMetadata entry, long end, Optional<ObjectId> baseId,
+    public static <R> R readObject(Path path, PackEntry entry, long end, Optional<ObjectId> baseId,
                                    GitObjectRead<R> reader) throws IOException {
         R value = null;
         try (PackDataStorage bytes = FilePackDataStorage.open(path, StandardOpenOption.READ)) {
@@ -250,7 +251,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         }
     }
 
-    public <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
+    public <R> R readObject(PackEntry entry, long end, Optional<ObjectId> baseId,
                            GitObjectRead<R> reader) throws IOException {
         requireOpen();
         return readBounded(bytes, entry, end, baseId, reader);
@@ -259,7 +260,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
     public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
                             OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
         requireOpen();
-        EntryMetadata entry = new EntryMetadata(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+        PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
         try {
             requireMutable();
             validateEntry(entry);
@@ -295,7 +296,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
             if (previous == null) {
                 throw new IOException("Object completion requires the registered physical entry");
             }
-            EntryMetadata entry = previous.entry();
+            PackEntry entry = previous.entry();
             validateObject(entry, type, size);
             if (previous.objectId() != null) {
                 if (!id.equals(previous.objectId()) || type != previous.type() || size != previous.size()) {
@@ -325,7 +326,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         }
     }
 
-    public Optional<EntryMetadata> find(ObjectId id) throws IOException {
+    public Optional<PackEntry> find(ObjectId id) throws IOException {
         requireOpen();
         Objects.requireNonNull(id, "id");
         try {
@@ -343,7 +344,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         }
     }
 
-    public Optional<EntryMetadata> find(long offset) throws IOException {
+    public Optional<PackEntry> find(long offset) throws IOException {
         requireOpen();
         try {
             Record record = record(offset);
@@ -472,7 +473,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
     }
 
     private static byte[] encode(Record record) {
-        EntryMetadata entry = record.entry();
+        PackEntry entry = record.entry();
         ByteBuffer bytes = ByteBuffer.allocate(67);
         bytes.putLong(entry.dataOffset()).putLong(entry.inflatedSize()).put((byte) entry.type().code());
         if (entry.baseOffset().isPresent()) {
@@ -497,7 +498,7 @@ public final class LocalIndexedPack implements MutableIndexedPack {
                     ? OptionalLong.of(bytes.getLong()) : OptionalLong.empty();
             Optional<ObjectId> baseId = type == GitObjectType.REF_DELTA
                     ? Optional.of(readId(bytes)) : Optional.empty();
-            EntryMetadata entry = new EntryMetadata(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+            PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
             validateEntry(entry);
             int resolved = bytes.get();
             if (resolved != 0 && resolved != 1) {

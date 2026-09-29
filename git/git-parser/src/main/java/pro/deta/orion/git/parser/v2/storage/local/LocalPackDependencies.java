@@ -8,6 +8,7 @@ import org.h2.mvstore.type.BasicDataType;
 import org.h2.mvstore.type.LongDataType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.storage.shared.PackSupport;
 
 import java.io.IOException;
@@ -43,7 +44,7 @@ final class LocalPackDependencies implements AutoCloseable {
             Iterator<Long> offsets = data.offsets();
             while (offsets.hasNext()) {
                 IndexedPack.Record record = data.record(offsets.next());
-                IndexedPack.EntryMetadata entry = record.entry();
+                PackEntry entry = record.entry();
                 if (record.objectId() == null) {
                     state.unresolved++;
                     WaitingKey key = waitingKey(entry);
@@ -121,7 +122,7 @@ final class LocalPackDependencies implements AutoCloseable {
         }
     }
 
-    void entryAdded(IndexedPack.EntryMetadata entry) throws IOException {
+    void entryAdded(PackEntry entry) throws IOException {
         try {
             unresolved++;
             WaitingKey key = waitingKey(entry);
@@ -137,7 +138,7 @@ final class LocalPackDependencies implements AutoCloseable {
         }
     }
 
-    void objectAdded(IndexedPack.EntryMetadata entry) throws IOException {
+    void objectAdded(PackEntry entry) throws IOException {
         try {
             unresolved--;
             WaitingKey key = waitingKey(entry);
@@ -150,10 +151,10 @@ final class LocalPackDependencies implements AutoCloseable {
         }
     }
 
-    Optional<IndexedPack.EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+    Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException {
         Objects.requireNonNull(id, "id");
         try {
-            Optional<IndexedPack.EntryMetadata> byId = waiting(new WaitingKey(id, 0, 0));
+            Optional<PackEntry> byId = waiting(new WaitingKey(id, 0, 0));
             return byId.isPresent() ? byId : waiting(new WaitingKey(null, offset, 0));
         } catch (MVStoreException error) {
             throw storageFailure(error);
@@ -181,7 +182,7 @@ final class LocalPackDependencies implements AutoCloseable {
         }
     }
 
-    private Optional<IndexedPack.EntryMetadata> waiting(WaitingKey prefix) throws IOException {
+    private Optional<PackEntry> waiting(WaitingKey prefix) throws IOException {
         WaitingKey key = waiting.ceilingKey(prefix);
         if (key == null || !key.sameBase(prefix)) {
             return Optional.empty();
@@ -214,7 +215,7 @@ final class LocalPackDependencies implements AutoCloseable {
         }
     }
 
-    private static WaitingKey waitingKey(IndexedPack.EntryMetadata entry) {
+    private static WaitingKey waitingKey(PackEntry entry) {
         if (entry.baseId().isPresent()) {
             return new WaitingKey(entry.baseId().orElseThrow(), 0, entry.offset());
         }

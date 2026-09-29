@@ -199,7 +199,7 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
+        public <R> R readObject(PackEntry entry, long end, Optional<ObjectId> baseId,
                                GitObjectRead<R> reader) throws IOException {
             return delegate.readObject(entry, end, baseId, reader);
         }
@@ -217,12 +217,12 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public Optional<EntryMetadata> find(ObjectId id) throws IOException {
+        public Optional<PackEntry> find(ObjectId id) throws IOException {
             return delegate.find(id);
         }
 
         @Override
-        public Optional<EntryMetadata> find(long offset) throws IOException {
+        public Optional<PackEntry> find(long offset) throws IOException {
             return delegate.find(offset);
         }
 
@@ -299,7 +299,7 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+        public Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException {
             return delegate.waitingFor(id, offset);
         }
 

@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -70,7 +71,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         assertChecksum(pack);
         try (IndexedPack indexed = ingest(pack)) {
             assertThat(indexed.objectCount()).isEqualTo(1);
-            IndexedPack.EntryMetadata entry = indexed.find(id).orElseThrow();
+            PackEntry entry = indexed.find(id).orElseThrow();
             assertThat(Arrays.copyOfRange(pack, (int) entry.dataOffset(), pack.length - 20)).isEqualTo(stored);
         }
         if (disk) {
@@ -347,8 +348,9 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     }
 
     private IndexedPack ingest(byte[] bytes) throws IOException {
-        try (BufferedByteInputV2 input = input(bytes);
-             PackIngestor ingestor = new PackIngestor(input, new InMemoryStorage().newPack())) {
+        try (InMemoryStorage storage = new InMemoryStorage();
+             BufferedByteInputV2 input = input(bytes);
+             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();
         }
     }

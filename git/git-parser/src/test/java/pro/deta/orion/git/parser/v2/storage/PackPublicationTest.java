@@ -48,11 +48,11 @@ class PackPublicationTest {
         ObjectId object = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
         try (BufferedByteInputV2 source = source(join(wire, new byte[]{42}));
              MutableIndexedPack target = storage.newPack();
-             PackIngestor ingestor = new PackIngestor(source, target)) {
+             PackIngestor ingestor = new PackIngestor(source, target, storage)) {
             ingestor.ingest();
             assertThat(storage.exists(object)).isFalse();
             assertThat(storage.findPacksByObjectIds(List.of(object))).isEmpty();
-            PackId id = new GitPackObjectResolver(target, storage).complete();
+            PackId id = target.id();
             assertThat(storage.persist(target)).isEqualTo(id);
             assertThat(Files.readAllBytes(path(id, ".pack"))).containsExactly(wire);
             assertThat(path(id, ".mv")).isRegularFile();

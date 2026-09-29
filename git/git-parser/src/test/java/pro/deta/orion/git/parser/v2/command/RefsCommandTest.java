@@ -15,7 +15,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -269,9 +268,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             writer.finish();
         }
         try (BufferedByteInputV2 input = input(bytes.toByteArray());
-             PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
+             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             MutableIndexedPack pack = ingestor.ingest();
-            new GitPackObjectResolver(pack, storage).complete();
             storage.persist(pack);
         }
         return id;

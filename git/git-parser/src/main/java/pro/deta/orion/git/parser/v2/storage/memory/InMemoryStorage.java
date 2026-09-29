@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
@@ -138,9 +139,9 @@ public final class InMemoryStorage implements GitStorageApi {
                 if (requested.getValue() != null) {
                     continue;
                 }
-                Optional<IndexedPack.EntryMetadata> candidate = pack.find(requested.getKey());
+                Optional<PackEntry> candidate = pack.find(requested.getKey());
                 if (candidate.isPresent()) {
-                    IndexedPack.EntryMetadata entry = candidate.orElseThrow();
+                    PackEntry entry = candidate.orElseThrow();
                     requested.setValue(new PackObjectLocation(requested.getKey(), stored.getKey(), entry,
                             pack.dataEnd(entry.offset()), pack.baseId(entry.offset())));
                 }

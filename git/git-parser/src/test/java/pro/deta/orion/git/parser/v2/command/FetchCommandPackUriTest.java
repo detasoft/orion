@@ -195,8 +195,9 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
     }
 
     private static MutableIndexedPack ingest(byte[] bytes) throws IOException {
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
-             PackIngestor ingestor = new PackIngestor(input, new InMemoryStorage().newPack())) {
+        try (InMemoryStorage storage = new InMemoryStorage();
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
+             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();
         }
     }

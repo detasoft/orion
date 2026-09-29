@@ -4,6 +4,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -87,18 +88,18 @@ final class MemoryIndexedPack implements MutableIndexedPack {
     }
 
     public <R> R readObject(long offset, GitObjectRead<R> reader) throws IOException {
-        EntryMetadata entry = find(offset).orElseThrow(() ->
+        PackEntry entry = find(offset).orElseThrow(() ->
                 new IllegalArgumentException("Unknown pack entry offset: " + offset));
         return readStored(entry, bytes, size(), reader);
     }
 
     public <R> Optional<R> readObject(ObjectId id, GitObjectRead<R> reader) throws IOException {
-        Optional<EntryMetadata> entry = find(id);
+        Optional<PackEntry> entry = find(id);
         return entry.isEmpty() ? Optional.empty()
                 : Optional.of(readObject(entry.orElseThrow().offset(), reader));
     }
 
-    public <R> R readObject(EntryMetadata entry, long end, Optional<ObjectId> baseId,
+    public <R> R readObject(PackEntry entry, long end, Optional<ObjectId> baseId,
                             GitObjectRead<R> reader) throws IOException {
         requireOpen();
         return readBounded(bytes, entry, end, baseId, reader);
@@ -115,7 +116,7 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         if (record == null) {
             throw new IOException("Unknown pack entry offset: " + offset);
         }
-        EntryMetadata entry = record.entry();
+        PackEntry entry = record.entry();
         if (entry.type() != GitObjectType.OFS_DELTA) {
             return entry.baseId();
         }
@@ -129,7 +130,7 @@ final class MemoryIndexedPack implements MutableIndexedPack {
     public boolean addEntry(long offset, long dataOffset, long inflatedSize, GitObjectType type,
                             OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
         requireMutable();
-        EntryMetadata entry = new EntryMetadata(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
+        PackEntry entry = new PackEntry(offset, dataOffset, inflatedSize, type, baseOffset, baseId);
         validateEntry(entry);
         Record previous = entries.get(offset);
         if (previous != null) {
@@ -178,13 +179,13 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         return true;
     }
 
-    public Optional<EntryMetadata> find(ObjectId id) throws IOException {
+    public Optional<PackEntry> find(ObjectId id) throws IOException {
         requireOpen();
         Long offset = objects.get(Objects.requireNonNull(id, "id"));
         return offset == null ? Optional.empty() : find(offset.longValue());
     }
 
-    public Optional<EntryMetadata> find(long offset) throws IOException {
+    public Optional<PackEntry> find(long offset) throws IOException {
         Record record = record(offset);
         return record == null ? Optional.empty() : Optional.of(record.entry());
     }
@@ -226,7 +227,7 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         return dependencies().nextExternalBase();
     }
 
-    public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+    public Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException {
         return dependencies().waitingFor(id, offset);
     }
 

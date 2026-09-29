@@ -75,7 +75,7 @@ public final class GitPackObjectResolver {
         pending.push(available);
         while (!pending.isEmpty()) {
             IndexedPack.Record base = pending.peek();
-            Optional<IndexedPack.EntryMetadata> waiting = pack.waitingFor(base.objectId(), base.entry().offset());
+            Optional<PackEntry> waiting = pack.waitingFor(base.objectId(), base.entry().offset());
             if (waiting.isEmpty()) {
                 pending.pop();
             } else {
@@ -88,7 +88,7 @@ public final class GitPackObjectResolver {
         }
     }
 
-    private IndexedPack.Record resolve(IndexedPack.EntryMetadata entry) throws IOException {
+    private IndexedPack.Record resolve(PackEntry entry) throws IOException {
         IndexedPack.Record base = baseRecord(entry);
         IndexedPack.Record resolved;
         if (base != null && base.objectId() != null) {
@@ -106,7 +106,7 @@ public final class GitPackObjectResolver {
         return resolved;
     }
 
-    private IndexedPack.Record baseRecord(IndexedPack.EntryMetadata entry) throws IOException {
+    private IndexedPack.Record baseRecord(PackEntry entry) throws IOException {
         if (entry.baseOffset().isPresent()) {
             return pack.record(entry.baseOffset().getAsLong());
         }
@@ -114,8 +114,8 @@ public final class GitPackObjectResolver {
         return offset == null ? null : pack.record(offset);
     }
 
-    private byte[] readContent(IndexedPack.EntryMetadata entry) throws IOException {
-        Deque<IndexedPack.EntryMetadata> deltas = new ArrayDeque<>();
+    private byte[] readContent(PackEntry entry) throws IOException {
+        Deque<PackEntry> deltas = new ArrayDeque<>();
         byte[] content;
         while (true) {
             if (entry.baseId().isEmpty() && entry.baseOffset().isEmpty()) {
@@ -139,7 +139,7 @@ public final class GitPackObjectResolver {
         }
         while (!deltas.isEmpty()) {
             byte[] base = content;
-            IndexedPack.EntryMetadata deltaEntry = deltas.pop();
+            PackEntry deltaEntry = deltas.pop();
             content = pack.readObject(deltaEntry, pack.dataEnd(deltaEntry.offset()), deltaEntry.baseId(),
                     new ContentGitObjectRead<>((type, size, unused, input) -> {
                         DeltaByteSource delta = new DeltaByteSource(input, base);
@@ -155,7 +155,7 @@ public final class GitPackObjectResolver {
         return content;
     }
 
-    private IndexedPack.Record resolve(IndexedPack.EntryMetadata entry, GitObjectType type, byte[] base)
+    private IndexedPack.Record resolve(PackEntry entry, GitObjectType type, byte[] base)
             throws IOException {
         return pack.readObject(entry, pack.dataEnd(entry.offset()), entry.baseId(),
                 new ContentGitObjectRead<>((physicalType, size, unused, input) -> {
@@ -204,7 +204,7 @@ public final class GitPackObjectResolver {
                     throw new IOException("Completed pack exceeds the object count limit");
                 }
                 ObjectId base = missing.orElseThrow();
-                IndexedPack.EntryMetadata entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
+                PackEntry entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
                         (type, length, unused, content) -> appendBase(bytes, base, type, length, content)))
                         .orElseThrow(() -> new IOException("Missing external base: " + base));
                 bytes.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
@@ -220,7 +220,7 @@ public final class GitPackObjectResolver {
         return bytes.finish(dataEnd);
     }
 
-    private static IndexedPack.EntryMetadata appendBase(MutableIndexedPack bytes, ObjectId expected,
+    private static PackEntry appendBase(MutableIndexedPack bytes, ObjectId expected,
             GitObjectType type, long size, BufferedByteInputV2 content) throws IOException {
         String name = switch (type) {
             case COMMIT -> "commit";
@@ -247,7 +247,7 @@ public final class GitPackObjectResolver {
         } finally {
             deflater.end();
         }
-        return new IndexedPack.EntryMetadata(offset, dataOffset, size, type, OptionalLong.empty(), Optional.empty());
+        return new PackEntry(offset, dataOffset, size, type, OptionalLong.empty(), Optional.empty());
     }
 
     private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {

@@ -11,7 +11,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -181,19 +180,8 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public MutableIndexedPack ingest(BufferedByteInputV2 input) throws IOException {
-        try (PackIngestor ingestor = new PackIngestor(input, storage().newPack())) {
-            MutableIndexedPack pack = ingestor.ingest();
-            try {
-                new GitPackObjectResolver(pack, storage()).complete();
-                return pack;
-            } catch (IOException | RuntimeException | Error failure) {
-                try {
-                    pack.discard();
-                } catch (Throwable cleanup) {
-                    failure.addSuppressed(cleanup);
-                }
-                throw failure;
-            }
+        try (PackIngestor ingestor = new PackIngestor(input, storage().newPack(), storage())) {
+            return ingestor.ingest();
         }
     }
 

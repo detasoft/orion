@@ -6,7 +6,6 @@ import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -71,21 +70,8 @@ public final class PushCommand implements GitCommand {
     }
 
     private MutableIndexedPack receivePack(BufferedByteInputV2 input) throws IOException {
-        try (PackIngestor ingestor = new PackIngestor(input, storage.newPack())) {
-            MutableIndexedPack pack = ingestor.ingest();
-            try {
-                new GitPackObjectResolver(pack, storage).complete();
-            } catch (IOException | RuntimeException | Error failure) {
-                try {
-                    pack.discard();
-                } catch (Throwable cleanup) {
-                    if (cleanup != failure) {
-                        failure.addSuppressed(cleanup);
-                    }
-                }
-                throw failure;
-            }
-            return pack;
+        try (PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
+            return ingestor.ingest();
         }
     }
 }

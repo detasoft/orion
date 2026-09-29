@@ -187,8 +187,9 @@ class FetchProtocolInteroperabilityTest {
         if (!packfile) {
             throw new IOException("Fetch ended without a packfile section");
         }
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-             PackIngestor ingestor = new PackIngestor(input, new InMemoryStorage().newPack())) {
+        try (InMemoryStorage storage = new InMemoryStorage();
+             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
+             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();
         }
     }

@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.storage.shared.PackSupport;
 
 import java.io.IOException;
@@ -35,7 +36,7 @@ final class MemoryPackDependencies {
         }
     }
 
-    void entryAdded(IndexedPack.EntryMetadata entry) {
+    void entryAdded(PackEntry entry) {
         unresolved++;
         if (entry.baseId().isPresent()) {
             ObjectId id = entry.baseId().orElseThrow();
@@ -47,7 +48,7 @@ final class MemoryPackDependencies {
         }
     }
 
-    void objectAdded(IndexedPack.EntryMetadata entry) {
+    void objectAdded(PackEntry entry) {
         unresolved--;
         if (entry.baseId().isPresent()) {
             remove(waitingIds, entry.baseId().orElseThrow(), entry.offset());
@@ -66,7 +67,7 @@ final class MemoryPackDependencies {
         }
     }
 
-    Optional<IndexedPack.EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+    Optional<PackEntry> waitingFor(ObjectId id, long offset) throws IOException {
         Objects.requireNonNull(id, "id");
         NavigableSet<Long> entries = waitingIds.get(id);
         if (entries == null) {

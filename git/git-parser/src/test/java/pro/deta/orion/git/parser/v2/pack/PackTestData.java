@@ -65,15 +65,45 @@ public final class PackTestData {
     }
 
     public static MutableIndexedPack ingest(byte[] bytes, MutableIndexedPack target) throws IOException {
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
-             PackIngestor ingestor = new PackIngestor(input, target)) {
-            return ingestor.ingest();
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+            return ingest(input, target);
         }
     }
 
     public static MutableIndexedPack ingest(IndexedPack source, MutableIndexedPack target) throws IOException {
-        try (BufferedByteInputV2 input = source.input(); PackIngestor ingestor = new PackIngestor(input, target)) {
-            return ingestor.ingest();
+        try (BufferedByteInputV2 input = source.input()) {
+            return ingest(input, target);
+        }
+    }
+
+    private static MutableIndexedPack ingest(BufferedByteInputV2 input, MutableIndexedPack target)
+            throws IOException {
+        try (PackReader reader = new PackReader(input)) {
+            while (true) {
+                switch (reader.next()) {
+                    case PackReadStep.Bytes bytes -> target.append(bytes.data());
+                    case PackReadStep.EntryEnd end -> {
+                        PackEntry entry = end.metadata();
+                        target.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+                                entry.baseOffset(), entry.baseId());
+                        if (end.objectId().isPresent()) {
+                            target.addObject(entry.offset(), end.objectId().orElseThrow(), entry.type(),
+                                    entry.inflatedSize());
+                        }
+                    }
+                    case PackReadStep.End end -> {
+                        target.setId(end.id());
+                        return target;
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                target.discard();
+            } catch (Throwable cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
         }
     }
 

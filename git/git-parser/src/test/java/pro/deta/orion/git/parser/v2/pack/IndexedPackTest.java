@@ -177,9 +177,8 @@ class IndexedPackTest {
             assertThat(pack.id()).isEqualTo(id);
             try (MutableIndexedPack diskCopy = LocalIndexedPack.create(directory.resolve("copy"));
                  pro.deta.orion.net.io.BufferedByteInputV2 input = pack.input();
-                 PackIngestor ingestor = new PackIngestor(input, diskCopy)) {
+                 PackIngestor ingestor = new PackIngestor(input, diskCopy, storage)) {
                 ingestor.ingest();
-                new GitPackObjectResolver(diskCopy, storage).complete();
                 assertThat(diskCopy.id()).isEqualTo(id);
                 diskCopy.truncate(12);
                 assertThatThrownBy(diskCopy::id).isInstanceOf(IOException.class);
@@ -287,8 +286,8 @@ class IndexedPackTest {
         return id;
     }
 
-    private static IndexedPack.EntryMetadata entry() {
-        return new IndexedPack.EntryMetadata(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+    private static PackEntry entry() {
+        return new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
     }
 
     private static byte[] compressed(byte[] content) throws IOException {

@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 
@@ -33,7 +34,7 @@ class PackIndexStorageTest {
         Path temporaryPath = staging.resolve("data.tmv");
         ObjectId base = new ObjectId("1".repeat(40));
         ObjectId object = new ObjectId("2".repeat(40));
-        IndexedPack.EntryMetadata entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
+        PackEntry entry = new PackEntry(12, 33, 4, GitObjectType.REF_DELTA,
                 OptionalLong.empty(), Optional.of(base));
         try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
@@ -48,7 +49,7 @@ class PackIndexStorageTest {
             pack.addObject(entry.offset(), object, GitObjectType.BLOB, 3);
             assertThat(pack.nextExternalBase()).contains(base);
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
-            IndexedPack.EntryMetadata appended = new IndexedPack.EntryMetadata(64, 65, 3, GitObjectType.BLOB,
+            PackEntry appended = new PackEntry(64, 65, 3, GitObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty());
             pack.addEntry(appended.offset(), appended.dataOffset(), appended.inflatedSize(), appended.type(),
                     appended.baseOffset(), appended.baseId());

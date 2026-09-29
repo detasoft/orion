@@ -4,8 +4,8 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack.EntryMetadata;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -20,7 +20,7 @@ import java.util.Optional;
 public final class PackSupport {
     private PackSupport() {}
 
-    public static <R> R readBounded(PackDataStorage bytes, EntryMetadata entry, long end,
+    public static <R> R readBounded(PackDataStorage bytes, PackEntry entry, long end,
                                      Optional<ObjectId> baseId, GitObjectRead<R> reader) throws IOException {
         if (entry.dataOffset() <= entry.offset() || entry.offset() < 12
                 || end <= entry.dataOffset() || end > bytes.size() - 20) {
@@ -40,7 +40,7 @@ public final class PackSupport {
         }
     }
 
-    public static <R> R readStored(EntryMetadata entry, PackDataStorage byteStore, long end,
+    public static <R> R readStored(PackEntry entry, PackDataStorage byteStore, long end,
                                    GitObjectRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
         if (end < entry.dataOffset()) {
@@ -74,7 +74,7 @@ public final class PackSupport {
         }
     }
 
-    public static void validateEntry(EntryMetadata entry) throws IOException {
+    public static void validateEntry(PackEntry entry) throws IOException {
         if (entry.offset() < 12 || entry.dataOffset() <= entry.offset() || entry.inflatedSize() < 0
                 || entry.type() == null || entry.baseOffset() == null || entry.baseId() == null) {
             throw new IOException("Invalid physical pack entry metadata");
@@ -92,7 +92,7 @@ public final class PackSupport {
         }
     }
 
-    public static void validateObject(EntryMetadata entry, GitObjectType type, long size)
+    public static void validateObject(PackEntry entry, GitObjectType type, long size)
             throws IOException {
         if (size < 0 || type == GitObjectType.OFS_DELTA || type == GitObjectType.REF_DELTA) {
             throw new IOException("Object completion requires a logical type and non-negative size");
@@ -157,7 +157,7 @@ public final class PackSupport {
             }
             visited.put(offset, start);
             changed.run();
-            IndexedPack.EntryMetadata entry = record.entry();
+            PackEntry entry = record.entry();
             if (entry.baseId().isPresent()) {
                 ObjectId base = entry.baseId().orElseThrow();
                 Long baseOffset = data.objectOffset(base);
