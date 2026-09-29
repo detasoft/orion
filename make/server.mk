@@ -149,7 +149,7 @@ clone-http-repo: ## Clone a named repository over HTTP
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	ORION_AUTH_HEADER="Authorization: Bearer $$token" \
 		git --config-env=http.extraHeader=ORION_AUTH_HEADER clone \
-		"http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(firstword $(CLONE_HTTP_REPO_ARGS))"
+		"http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(patsubst %.git,%,$(firstword $(CLONE_HTTP_REPO_ARGS))).git"
 
 admin-acl: ## Query the admin ACL with ORION_TOKEN
 	@test -n "$$ORION_TOKEN" || (echo 'ORION_TOKEN is required. Run: eval "$$(make -s issue-token)"' >&2; exit 1)
