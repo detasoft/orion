@@ -101,6 +101,9 @@
 
 ## Implementation rules
 
+- When creating new entities, always define their interfaces first to make the
+  contract explicit. Present those interfaces separately from their implementations;
+  add implementations in a subsequent step.
 - Add or extend tests whenever observable behavior changes, regardless of the
   selected workflow. Cover the straightforward path and at least one meaningful
   non-trivial scenario chosen from the actual risks.
