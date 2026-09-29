@@ -11,6 +11,8 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -65,6 +67,7 @@ class OrionGitHttpInteroperabilityTest {
     @ParameterizedTest(name = "{0} -> Orion HTTP, local divergence: {1}")
     @CsvSource({"git-v1,0", "git-v2,0", "jgit-v2,0", "orion-v1,0",
             "git-v1,160", "git-v2,160", "jgit-v2,160"})
+    @Execution(ExecutionMode.CONCURRENT)
     void discoversAndFetchesInitialAndUpdatedHistory(String engine, int divergence) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory.resolve("server"));
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
