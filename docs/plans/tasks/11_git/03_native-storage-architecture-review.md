@@ -51,6 +51,6 @@ the current filesystem layout as a set of premature interfaces.
 - The report defines one proposed ownership and publication model suitable for
   evaluating the externalized storage task.
 - External backend contract design does not begin before this review and its
-  accepted follow-up tasks are recorded. The separately user-approved,
-  behavior-preserving [storage and pack interface extraction](15_storage-pack-interfaces.md)
-  may proceed first; it does not settle external backend semantics.
+  accepted follow-up tasks are recorded. The behavior-preserving storage and
+  pack interface extraction was integrated in `33a75bfc` and passed full
+  verification; it does not settle external backend semantics.

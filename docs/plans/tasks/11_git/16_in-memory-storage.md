@@ -40,9 +40,8 @@ H2-backed memory mode. Shared Git parsing and resolution algorithms remain share
 
 The interfaces are available on main in commit
 `33a75bfc585fae9a2835e70cef9fde0d7875bbb0` (reviewed source commit `659a0891`).
-That result passed isolated full verification; its post-integration verification
-is being coordinated separately. This task may be prepared independently from
-that integrated source, but final delivery still requires both results' checks.
+That result passed isolated and post-integration full verification, and its
+temporary branch and worktree have been removed.
 
 No S3 backend, network service, persistence migration, broad storage architecture
 redesign, or unrelated module-review finding repair is included.
