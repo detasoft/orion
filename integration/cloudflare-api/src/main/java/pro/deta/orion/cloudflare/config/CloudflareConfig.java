@@ -34,22 +34,6 @@ public class CloudflareConfig {
      */
     private int writeTimeoutSeconds = 30;
 
-    /**
-     * Maximum number of retries for failed requests (default: 3)
-     */
-    private int maxRetries = 3;
-
-    /**
-     * Initial retry delay in milliseconds (default: 1000)
-     */
-    private long retryDelayMillis = 1000;
-
-    /**
-     * Maximum retry delay in milliseconds (default: 10000)
-     */
-    private long maxRetryDelayMillis = 10000;
-
-
     private static String getSystemToken() {
         if (System.getenv("CLOUDFLARE_API_TOKEN") != null) {
             return System.getenv("CLOUDFLARE_API_TOKEN");
