@@ -164,6 +164,8 @@ trusts that CA. Each run creates uniquely named Orion repositories and proxy
 aliases, which remain in the selected server's persistent configuration. The
 temporary upstream Gitea repository is removed after its scenario.
 
+`OBSERVE=1` opens noVNC in your computer's default browser before running tests.
+If automatic opening is unavailable, the command prints the URL and continues.
 Observed tests bring their page forward, show the scenario name, and mark clicks.
 Unattended tests use the same assertions without presentation delays. Results are
 shown in the terminal; the HTML report is in
