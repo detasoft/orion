@@ -2,6 +2,9 @@ package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -10,7 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +27,49 @@ class OrionServiceManagerTest {
 
     @TempDir
     private Path tempDir;
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" "})
+    void startUsesCurrentRuntimeWhenJavaCommandIsUnset(String javaCommand) throws Exception {
+        Map<String, String> environment = new HashMap<>(Map.of(
+                "ORION_HOME", tempDir.toString(),
+                "JAVA_OPTS", "-Xmx256m -Dservice.name='Orion Service'"));
+        if (javaCommand != null) {
+            environment.put("JAVA_CMD", javaCommand);
+        }
+        RecordingLauncher launcher = new RecordingLauncher(new RecordingProcess(42, true));
+        OrionServiceManager manager = new OrionServiceManager(
+                OrionServiceManager.settingsFrom(environment, artifact()), launcher, pid -> Optional.empty());
+
+        int exitCode = manager.start(List.of("--config", "config.yml"), output(), output());
+
+        assertEquals(0, exitCode);
+        assertEquals(List.of(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Xmx256m", "-Dservice.name=Orion Service",
+                "-jar", artifact().toString(), "run", "--config", "config.yml"), launcher.command);
+        assertEquals("42", Files.readString(pidFile()).trim());
+    }
+
+    @Test
+    void startPreservesExplicitJavaCommandWithSpaces() throws Exception {
+        String javaCommand = tempDir.resolve("custom java/bin/java").toString();
+        Map<String, String> environment = Map.of(
+                "ORION_HOME", tempDir.toString(),
+                "JAVA_CMD", javaCommand,
+                "JAVA_OPTS", "-Xmx256m");
+        RecordingLauncher launcher = new RecordingLauncher(new RecordingProcess(42, true));
+        OrionServiceManager manager = new OrionServiceManager(
+                OrionServiceManager.settingsFrom(environment, artifact()), launcher, pid -> Optional.empty());
+
+        int exitCode = manager.start(List.of("--config", "config with spaces.yml"), output(), output());
+
+        assertEquals(0, exitCode);
+        assertEquals(List.of(javaCommand, "-Xmx256m", "-jar", artifact().toString(),
+                "run", "--config", "config with spaces.yml"), launcher.command);
+        assertEquals("42", Files.readString(pidFile()).trim());
+    }
 
     @Test
     void startLaunchesRunCommandAndWritesPidFile() throws Exception {

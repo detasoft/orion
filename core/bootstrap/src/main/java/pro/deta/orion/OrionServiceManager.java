@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.lifecycle.state.TestOnly;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -164,9 +166,12 @@ final class OrionServiceManager {
         }
     }
 
-    private static Settings settingsFrom(Map<String, String> environment, Path artifact) {
+    @TestOnly
+    static Settings settingsFrom(Map<String, String> environment, Path artifact) {
         String appName = valueOrDefault(environment.get("APP_NAME"), DEFAULT_APP_NAME);
-        String javaCommand = valueOrDefault(environment.get("JAVA_CMD"), "java");
+        String javaCommand = valueOrDefault(
+                environment.get("JAVA_CMD"),
+                Path.of(System.getProperty("java.home"), "bin", "java").toString());
         String javaOptions = valueOrDefault(environment.get("JAVA_OPTS"), "");
         Duration stopTimeout = stopTimeout(environment.get("ORION_STOP_TIMEOUT"));
 
