@@ -128,7 +128,7 @@ class OrionGitHttpInteroperabilityTest {
                     assertThat(git(local, version, "ls-remote", remote.toString()))
                             .contains(commit + "\trefs/heads/main");
                     requestsBeforeFetch = uploadRequests.get();
-                    git(local, version, "fetch", remote.toString(),
+                    git(local, version, "fetch", "--no-auto-maintenance", remote.toString(),
                             "refs/heads/main:refs/remotes/origin/main");
                     assertThat(git(local, version, "rev-parse", "FETCH_HEAD").strip()).isEqualTo(commit);
                     assertThat(git(local, version, "show", "FETCH_HEAD:README.md")).isEqualTo(content);
