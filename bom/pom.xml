@@ -42,6 +42,11 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>pro.deta.orion</groupId>
+                <artifactId>agentd</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>schema</artifactId>
                 <version>${project.version}</version>
@@ -49,6 +54,16 @@
             <dependency>
                 <groupId>pro.deta.orion.core.ref</groupId>
                 <artifactId>reference</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.core.ref</groupId>
+                <artifactId>antlr-parser</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.core.ref</groupId>
+                <artifactId>resolvers</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -112,6 +127,11 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>pro.deta.orion.git</groupId>
+                <artifactId>git-sync</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.connectors</groupId>
                 <artifactId>bc</artifactId>
                 <version>${project.version}</version>
@@ -124,6 +144,11 @@
             <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
                 <artifactId>git-engine-test-support</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.tests</groupId>
+                <artifactId>git-engine-orion-adapters</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

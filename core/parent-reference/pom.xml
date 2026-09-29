@@ -21,21 +21,6 @@
         <module>resolvers</module>
     </modules>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>pro.deta.orion.core.ref</groupId>
-                <artifactId>antlr-parser</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core.ref</groupId>
-                <artifactId>reference</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
-
     <dependencies>
         <dependency>
             <groupId>org.assertj</groupId>

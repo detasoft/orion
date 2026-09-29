@@ -20,7 +20,6 @@
         <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>git-engine-orion-adapters</artifactId>
-            <version>${revision}</version>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.tests</groupId>

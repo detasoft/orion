@@ -38,7 +38,6 @@
         <dependency>
             <groupId>pro.deta.orion</groupId>
             <artifactId>agentd</artifactId>
-            <version>${revision}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
