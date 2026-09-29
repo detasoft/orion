@@ -24,6 +24,11 @@
   `--apply`. Prefer the nearest real consumer and reuse its transitive export
   for more distant consumers.
 - Ignore `build-tools/__pycache__/` in `.gitignore`.
+- Document in `AGENTS.md` the repository rule of minimum necessary dependency
+  scope and minimum duplication: do not add a direct dependency when a
+  transitive path already supplies the required version and scope, even when
+  code uses it directly. Keep explicit declarations only for a demonstrated
+  build/runtime contract; preserve version mediation, scope, and exclusions.
 - Present one dependency diagram from base modules towards bootstrap, with
   arrows indicating which consumer depends on the preceding module.
 
@@ -64,7 +69,8 @@ separate test-runtime optimization or product architecture review tasks.
 ## Acceptance
 
 - Cleanup preserves the effective dependency sets, versions, and scopes of all
-  reactor modules while reducing redundant declarations.
+  reactor modules while reducing redundant declarations, except for the
+  explicitly requested debug-to-ordinary BC replacement.
 - Both scripts and their documented Make goals work on the actual reactor.
 - External and internal dependency relocation is covered by behavioral tests;
   the default command previews a valid patch and explicit application writes it.
