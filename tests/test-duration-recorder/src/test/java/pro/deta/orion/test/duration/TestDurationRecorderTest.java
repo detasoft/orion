@@ -6,6 +6,8 @@ import jdk.jfr.consumer.RecordingFile;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.platform.launcher.Launcher;
 import org.junit.platform.launcher.LauncherDiscoveryRequest;
 import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
@@ -16,15 +18,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 
 class TestDurationRecorderTest {
-    @Test
-    void recordsJsonDurationsAndJfrEvents(@TempDir Path temp) throws Exception {
-        Path durations = temp.resolve("test-durations.jsonl");
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void recordsJsonDurationsAndJfrEvents(boolean basename, @TempDir Path temp) throws Exception {
+        Path durations = basename ? Path.of("recorder-" + UUID.randomUUID() + ".jsonl")
+                : temp.resolve("nested/test-durations.jsonl");
         String originalEnabled = System.getProperty(TestDurationRecorder.ENABLED_PROPERTY);
         String originalOutput = System.getProperty(TestDurationRecorder.OUTPUT_PROPERTY);
         String originalRunId = System.getProperty(TestDurationRecorder.RUN_ID_PROPERTY);
@@ -58,6 +63,7 @@ class TestDurationRecorderTest {
             restoreProperty(TestDurationRecorder.ENABLED_PROPERTY, originalEnabled);
             restoreProperty(TestDurationRecorder.OUTPUT_PROPERTY, originalOutput);
             restoreProperty(TestDurationRecorder.RUN_ID_PROPERTY, originalRunId);
+            Files.deleteIfExists(durations);
         }
     }
 

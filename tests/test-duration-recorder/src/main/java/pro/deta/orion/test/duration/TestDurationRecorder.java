@@ -100,7 +100,9 @@ public final class TestDurationRecorder implements TestExecutionListener {
 
         Path output = outputPath();
         try {
-            Files.createDirectories(output.getParent());
+            if (output.getParent() != null) {
+                Files.createDirectories(output.getParent());
+            }
             writeLocked(output, String.join(System.lineSeparator(), snapshot) + System.lineSeparator());
             System.out.printf("[orion-test-durations] recorded %d test durations to %s%n",
                     snapshot.size(), output.toAbsolutePath().normalize());
