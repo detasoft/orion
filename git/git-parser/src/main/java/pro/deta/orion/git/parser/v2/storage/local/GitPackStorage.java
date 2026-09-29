@@ -1,10 +1,11 @@
-package pro.deta.orion.git.parser.v2.storage;
+package pro.deta.orion.git.parser.v2.storage.local;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
+import pro.deta.orion.git.parser.v2.storage.PackObjectLocation;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -99,14 +100,14 @@ final class GitPackStorage {
         }
     }
 
-    IndexedPack createPack() throws IOException {
+    LocalIndexedPack createPack() throws IOException {
         if (memory != null) {
-            return IndexedPack.create();
+            return LocalIndexedPack.create();
         }
-        return IndexedPack.create(incoming.resolve("pack-" + UUID.randomUUID()));
+        return LocalIndexedPack.create(incoming.resolve("pack-" + UUID.randomUUID()));
     }
 
-    PackId persist(IndexedPack pack) throws IOException {
+    PackId persist(LocalIndexedPack pack) throws IOException {
         if (memory != null) {
             try {
                 PackId id = pack.id();
@@ -123,7 +124,7 @@ final class GitPackStorage {
         if (pack.isInMemory()) {
             try {
                 pack.id();
-                IndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
+                LocalIndexedPack staged = pack.copyTo(incoming.resolve("pack-" + UUID.randomUUID()));
                 PackId id = persist(staged);
                 pack.close();
                 return id;
@@ -158,7 +159,7 @@ final class GitPackStorage {
             }
             return pack.readObject(location.entry(), location.end(), location.baseId(), reader);
         }
-        return IndexedPack.readObject(packPath(location.packId()), location.entry(),
+        return LocalIndexedPack.readObject(packPath(location.packId()), location.entry(),
                 location.end(), location.baseId(), reader);
     }
 
@@ -179,7 +180,7 @@ final class GitPackStorage {
         } else {
             scan((packId, path) -> {
                 try (GitLock.Lease lease = lockPack(packId);
-                     IndexedPack index = IndexedPack.open(packPath(packId), path)) {
+                     IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
                     if (!index.id().equals(packId)) {
                         throw new IOException("Stored pack checksum does not match its identity");
                     }
@@ -226,7 +227,7 @@ final class GitPackStorage {
             if (!Files.exists(index)) {
                 return Set.of();
             }
-            try (IndexedPack pack = IndexedPack.open(path, index)) {
+            try (IndexedPack pack = LocalIndexedPack.open(path, index)) {
                 return pack.objectIds();
             }
         }
@@ -248,7 +249,7 @@ final class GitPackStorage {
             return result;
         }
         scan((packId, path) -> {
-            try (GitLock.Lease lease = lockPack(packId); IndexedPack index = IndexedPack.open(packPath(packId), path)) {
+            try (GitLock.Lease lease = lockPack(packId); IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
                 for (ObjectId id : ids) {
                     if (index.find(id).isPresent()) {
                         List<PackId> locations = result.computeIfAbsent(id, ignored -> new ArrayList<>());
@@ -302,7 +303,7 @@ final class GitPackStorage {
             Files.createDirectories(shard);
             forceDirectory(packs);
             if (Files.exists(index)) {
-                try (IndexedPack bytes = IndexedPack.open(target, index)) {
+                try (IndexedPack bytes = LocalIndexedPack.open(target, index)) {
                     if (!bytes.checksumMatches(id)) {
                         throw new IOException("Published pack checksum mismatch: " + id);
                     }

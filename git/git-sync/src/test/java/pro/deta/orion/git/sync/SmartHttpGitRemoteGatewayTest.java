@@ -17,7 +17,7 @@ import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
@@ -201,7 +201,7 @@ class SmartHttpGitRemoteGatewayTest {
         Files.createDirectories(gitDirectory);
         return new NativeGitRepository(
                 "project",
-                new GitStorageApi(gitDirectory),
+                new LocalGitStorage(gitDirectory),
                 "refs/heads/main");
     }
 
@@ -247,7 +247,7 @@ class SmartHttpGitRemoteGatewayTest {
         private RefUpdate concurrentUpdate;
 
         private RacingRepository(Path directory) throws IOException {
-            super("project", new GitStorageApi(Files.createDirectories(directory.resolve(".git"))),
+            super("project", new LocalGitStorage(Files.createDirectories(directory.resolve(".git"))),
                     "refs/heads/main");
         }
 

@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage;
+package pro.deta.orion.git.parser.v2.storage.local;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

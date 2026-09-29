@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -33,7 +34,7 @@ class PackIndexStorageTest {
         var object = new ObjectId("2".repeat(40));
         var entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
                 OptionalLong.empty(), Optional.of(base));
-        try (IndexedPack pack = IndexedPack.create(staging); PackUploadIndex index = PackUploadIndex.create(pack)) {
+        try (IndexedPack pack = LocalIndexedPack.create(staging); PackUploadIndex index = pack.newUploadIndex()) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
             index.addEntry(entry);
             assertThat(Files.size(indexPath)).isPositive();
@@ -55,7 +56,7 @@ class PackIndexStorageTest {
         }
         Path published = directory.resolve("published.mv");
         Files.move(indexPath, published, StandardCopyOption.ATOMIC_MOVE);
-        try (IndexedPack pack = IndexedPack.open(staging.resolve("data.pack"), published)) {
+        try (IndexedPack pack = LocalIndexedPack.open(staging.resolve("data.pack"), published)) {
             assertThat(pack.find(object)).contains(entry);
             assertThat(pack.find(12)).contains(entry);
             assertThat(pack.find(base)).isPresent();
@@ -71,9 +72,9 @@ class PackIndexStorageTest {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
-        try (IndexedPack pack = IndexedPack.create(staging)) {
+        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
             Files.writeString(temporaryPath, "another attempt");
-            assertThatThrownBy(() -> PackUploadIndex.create(pack)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> pack.newUploadIndex()).isInstanceOf(IOException.class);
             assertThat(Files.exists(indexPath)).isTrue();
             assertThat(Files.readString(temporaryPath)).isEqualTo("another attempt");
             assertThat(pack.entryCount()).isZero();
@@ -85,8 +86,8 @@ class PackIndexStorageTest {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
-        try (IndexedPack pack = IndexedPack.create(staging)) {
-            PackUploadIndex index = PackUploadIndex.create(pack);
+        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+            PackUploadIndex index = pack.newUploadIndex();
             index.addEntry(new IndexedPack.EntryMetadata(12, 13, 3, GitObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty()));
             index.close();

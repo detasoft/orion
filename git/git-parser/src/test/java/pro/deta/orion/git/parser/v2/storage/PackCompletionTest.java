@@ -9,6 +9,8 @@ import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
@@ -71,7 +73,7 @@ class PackCompletionTest {
             assertThat(appended.offset()).isEqualTo(original.length - 20);
             assertThat(appended.type()).isEqualTo(GitObjectType.BLOB);
             attempt.pack.close();
-            try (var index = IndexedPack.open(attempt.packPath, attempt.indexPath)) {
+            try (var index = LocalIndexedPack.open(attempt.packPath, attempt.indexPath)) {
                 assertThat(index.find(baseId)).contains(appended);
             }
             assertGitIndexes(attempt.packPath);
@@ -212,12 +214,12 @@ class PackCompletionTest {
 
         private Attempt(byte[] bytes) throws IOException {
             Path parent = Files.createTempDirectory(directory, "attempt-");
-            storage = new GitStorageApi(parent);
+            storage = new LocalGitStorage(parent);
             Path attempt = parent.resolve("pack");
             packPath = attempt.resolve("data.pack");
             indexPath = attempt.resolve("data.mv");
             temporaryPath = attempt.resolve("data.tmv");
-            pack = PackTestData.ingest(bytes, IndexedPack.create(attempt));
+            pack = PackTestData.ingest(bytes, LocalIndexedPack.create(attempt));
         }
 
         @Override

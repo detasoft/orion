@@ -48,7 +48,7 @@ public final class GitPackObjectResolver {
 
     public PackId complete() throws IOException {
         pack.requireMutable();
-        try (PackUploadIndex index = PackUploadIndex.create(pack)) {
+        try (PackUploadIndex index = pack.newUploadIndex()) {
             resolve(index);
             return complete(pack, index, storage);
         } catch (IOException | RuntimeException | Error failure) {

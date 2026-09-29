@@ -13,6 +13,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
@@ -187,7 +188,7 @@ class FetchProtocolInteroperabilityTest {
             throw new IOException("Fetch ended without a packfile section");
         }
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-             PackIngestor ingestor = new PackIngestor(input, IndexedPack.create())) {
+             PackIngestor ingestor = new PackIngestor(input, LocalIndexedPack.create())) {
             return ingestor.ingest();
         }
     }

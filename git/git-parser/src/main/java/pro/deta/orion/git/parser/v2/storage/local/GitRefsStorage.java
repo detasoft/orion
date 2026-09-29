@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage;
+package pro.deta.orion.git.parser.v2.storage.local;
 
 import org.h2.mvstore.MVMap;
 import org.h2.mvstore.MVStore;

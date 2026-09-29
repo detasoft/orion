@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.pack.mv;
+package pro.deta.orion.git.parser.v2.storage.local;
 
 import org.h2.mvstore.WriteBuffer;
 import org.h2.mvstore.type.BasicDataType;
@@ -8,8 +8,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 /** Encodes object IDs as twenty raw bytes, ordered by unsigned byte value for disk index lookups. */
-public final class ObjectIdDataType extends BasicDataType<ObjectId> {
-    public static final ObjectIdDataType INSTANCE = new ObjectIdDataType();
+final class ObjectIdDataType extends BasicDataType<ObjectId> {
+    static final ObjectIdDataType INSTANCE = new ObjectIdDataType();
 
     private ObjectIdDataType() {}
 

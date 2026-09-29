@@ -13,6 +13,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
@@ -36,7 +37,7 @@ class FetchPackTest {
 
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory)) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             byte[] rootBytes = commit(tree);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, rootBytes);
@@ -67,7 +68,7 @@ class FetchPackTest {
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi()) {
+        try (GitStorageApi storage = new LocalGitStorage()) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree));
             ObjectId boundary = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, root));
@@ -110,7 +111,7 @@ class FetchPackTest {
             }
             for (RecordedFrame frame : event.getStackTrace().getFrames()) {
                 if (frame.getMethod().getType().getName()
-                        .equals("pro.deta.orion.git.parser.v2.pack.PackByteSource")) {
+                        .equals("pro.deta.orion.git.parser.v2.storage.local.PackByteSource")) {
                     count++;
                     break;
                 }
@@ -136,7 +137,7 @@ class FetchPackTest {
 
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory)) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             ObjectId firstId = PackTestData.store(storage, GitObjectType.BLOB, first);

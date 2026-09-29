@@ -15,6 +15,8 @@ import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -44,7 +46,7 @@ class GitBlockingWireSessionTest {
 
     @BeforeEach
     void openStorage() throws Exception {
-        storage = new GitStorageApi(directory);
+        storage = new LocalGitStorage(directory);
     }
 
     @Test
@@ -135,7 +137,7 @@ class GitBlockingWireSessionTest {
         byte[] received = response.toByteArray();
         assertThat(new String(received, 0, 8, StandardCharsets.US_ASCII)).isEqualTo("0008NAK\n");
         try (IndexedPack pack = PackTestData.ingest(Arrays.copyOfRange(received, 8, received.length),
-                IndexedPack.create())) {
+                LocalIndexedPack.create())) {
             assertThat(pack.find(id)).isPresent();
         }
     }
@@ -304,7 +306,7 @@ class GitBlockingWireSessionTest {
             assertThat(data.content()[0]).isEqualTo((byte) 1);
             bytes.write(data.content(), 1, data.content().length - 1);
         }
-        try (IndexedPack pack = PackTestData.ingest(bytes.toByteArray(), IndexedPack.create())) {
+        try (IndexedPack pack = PackTestData.ingest(bytes.toByteArray(), LocalIndexedPack.create())) {
             assertThat(pack.objectCount()).isEqualTo(1);
             assertThat(pack.find(id)).isPresent();
         }

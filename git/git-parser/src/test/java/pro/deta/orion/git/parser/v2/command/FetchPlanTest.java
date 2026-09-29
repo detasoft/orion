@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -36,7 +37,7 @@ class FetchPlanTest {
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new GitStorageApi(directory);
+        storage = new LocalGitStorage(directory);
         PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
         command = new FetchCommand(storage, capabilities(GitCapability.values()));
     }

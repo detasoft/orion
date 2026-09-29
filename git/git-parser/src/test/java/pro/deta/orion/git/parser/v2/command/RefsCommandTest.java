@@ -22,6 +22,7 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -48,7 +49,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void listsRefsWithSymbolicHeadAndFiltersByAnyRequestedPrefix() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
         addRef(storage, "refs/heads/main", commit);
         addRef(storage, "refs/heads/ветка", commit);
@@ -64,7 +65,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
         List<RefUpdate> updates = new ArrayList<>();
         List<String> expected = new ArrayList<>();
@@ -97,7 +98,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void handlesUnbornAndDetachedHead() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         assertThat(execute(storage)).isEmpty();
         assertThat(execute(storage, "symrefs")).isEmpty();
         assertThat(execute(storage, "unborn")).isEmpty();
@@ -111,7 +112,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void peelsNestedTagsIncludingRefsOutsideTheTagsNamespace() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         ObjectId blob = publish(storage, GitObjectType.BLOB, "content");
         ObjectId inner = publish(storage, GitObjectType.TAG, tag(blob, "blob", "inner"));
         ObjectId outer = publish(storage, GitObjectType.TAG, tag(inner, "tag", "outer"));
@@ -129,7 +130,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void consumesOnlyThisRequestAndWritesNothingBeforeItsFlush() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         OutputStreamBufferedByteOutput request = new OutputStreamBufferedByteOutput(bytes);
         GitPktLine.Control.FLUSH.writeTo(request);
@@ -154,7 +155,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void rejectsInvalidArgumentsControlsAndUnadvertisedUnborn() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         for (String argument : List.of("peel extra", "ref-prefix", "unknown", "symrefs\t")) {
             assertThatThrownBy(() -> execute(storage, argument)).isInstanceOf(IOException.class);
         }
@@ -187,7 +188,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void omitsPeeledAttributeForMissingTagTarget() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         ObjectId missing = new ObjectId("f".repeat(40));
         ObjectId tag = publish(storage, GitObjectType.TAG, tag(missing, "blob", "broken"));
         addRef(storage, "refs/tags/broken", tag);
@@ -197,7 +198,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @Test
     void rejectsExcessivePrefixesAndMalformedUtf8BeforeResponding() throws Exception {
-        GitStorageApi storage = new GitStorageApi(repository);
+        GitStorageApi storage = new LocalGitStorage(repository);
         String[] prefixes = new String[257];
         Arrays.fill(prefixes, "ref-prefix refs/heads/");
         assertThatThrownBy(() -> execute(storage, prefixes)).isInstanceOf(IOException.class)

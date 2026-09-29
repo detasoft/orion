@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -23,7 +24,7 @@ class GitObjectGraphTest {
         objects.close();
     }
 
-    private final GitStorageApi objects = new GitStorageApi();
+    private final GitStorageApi objects = new LocalGitStorage();
     private final GitObjectGraph graph = new GitObjectGraph(objects);
 
     @Test

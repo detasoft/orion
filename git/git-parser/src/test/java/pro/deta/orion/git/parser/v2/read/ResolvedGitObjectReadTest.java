@@ -7,10 +7,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
@@ -32,7 +33,7 @@ class ResolvedGitObjectReadTest {
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new GitStorageApi(directory);
+        storage = new LocalGitStorage(directory);
     }
 
     @Test
@@ -66,7 +67,7 @@ class ResolvedGitObjectReadTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void resolvesMixedOffsetAndReferenceBasesFromPublishedIndex(boolean memory) throws Exception {
-        try (GitStorageApi api = memory ? new GitStorageApi() : new GitStorageApi(directory)) {
+        try (GitStorageApi api = memory ? new LocalGitStorage() : new LocalGitStorage(directory)) {
             byte[] full = PackTestData.blob(new byte[]{10});
             byte[] offsetDelta = PackTestData.join(new byte[]{0x64, (byte) full.length},
                     PackTestData.compressed(new byte[]{1, 1, 1, 20}));

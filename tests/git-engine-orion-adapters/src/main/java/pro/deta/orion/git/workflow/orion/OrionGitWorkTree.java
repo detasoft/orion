@@ -25,6 +25,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.workflow.GitClient;
 import pro.deta.orion.git.workflow.GitOperationResult;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
@@ -78,7 +79,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         Path workTree = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
         Path gitDirectory = workTree.resolve(".git");
         Files.createDirectories(gitDirectory);
-        GitStorageApi storage = new GitStorageApi(gitDirectory);
+        GitStorageApi storage = new LocalGitStorage(gitDirectory);
         storage.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
         NativeGitRepository repository = new NativeGitRepository(
                 workTree.getFileName().toString(), storage, MAIN_REF);

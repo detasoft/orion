@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PackIngestionOutputTest {
     @Test
     void ingestsFragmentedBytesAndTransfersPackOwnership() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi()) {
+        try (GitStorageApi storage = new LocalGitStorage()) {
             NativeGitFileUpdate prepared = prepared();
             byte[] bytes = prepared.pack();
             IndexedPack pack;
@@ -56,7 +57,7 @@ class PackIngestionOutputTest {
         corrupt[corrupt.length - 1] ^= 1;
         for (byte[] invalid : new byte[][]{
                 Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
-            try (GitStorageApi storage = new GitStorageApi();
+            try (GitStorageApi storage = new LocalGitStorage();
                  PackIngestionOutput output = new PackIngestionOutput(storage)) {
                 output.write(invalid);
                 assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
@@ -67,7 +68,7 @@ class PackIngestionOutputTest {
 
     @Test
     void closeAbandonsIncompleteBytesAndRejectsFurtherWrites() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi()) {
+        try (GitStorageApi storage = new LocalGitStorage()) {
             PackIngestionOutput output = new PackIngestionOutput(storage);
             output.write(new byte[]{'P', 'A'});
             output.close();
@@ -80,7 +81,7 @@ class PackIngestionOutputTest {
 
     private static NativeGitFileUpdate prepared() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository(
-                "source", new GitStorageApi(), "refs/heads/main")) {
+                "source", new LocalGitStorage(), "refs/heads/main")) {
             return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY);
         }

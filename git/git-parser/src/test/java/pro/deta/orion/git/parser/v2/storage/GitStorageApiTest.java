@@ -6,11 +6,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
+import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -30,7 +32,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void locatesOrderedUniqueObjectsAcrossPacksAndReadsExactCompressedRanges(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new GitStorageApi(directory) : new GitStorageApi()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             byte[] third = {6};
@@ -67,7 +69,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsWholePackWithIndependentInputsAndClosesBorrowedInput(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new GitStorageApi(directory) : new GitStorageApi()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
             byte[] content = new byte[40000];
             new Random(81).nextBytes(content);
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, content);
@@ -91,7 +93,7 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readerFailureClosesInputAndLeavesPublishedPackReadable(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new GitStorageApi(directory) : new GitStorageApi()) {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new LocalGitStorage()) {
             PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
             PackId id = storage.packIds().getFirst();
             AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
@@ -113,12 +115,12 @@ class GitStorageApiTest {
 
     @Test
     void rawPackReadDoesNotOpenAnAlreadyOpenDiskIndex() throws Exception {
-        try (GitStorageApi storage = new GitStorageApi(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory)) {
             PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
             PackId id = storage.packIds().getFirst();
             String hex = id.toHex();
             Path shard = directory.resolve("packs").resolve(hex.substring(0, 2));
-            try (IndexedPack index = IndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),
+            try (IndexedPack index = LocalIndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),
                     shard.resolve(hex.substring(2) + ".mv"))) {
                 byte[] expected = PackTestData.bytes(index);
                 assertThat(storage.readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
@@ -129,7 +131,7 @@ class GitStorageApiTest {
 
     @Test
     void absentObjectsDoNotInvokeTheReader() throws Exception {
-        var storage = new GitStorageApi(directory);
+        var storage = new LocalGitStorage(directory);
         assertThat(storage.exists(ID)).isFalse();
         assertThat(storage.readObject(ID, (type, size, baseId, input) -> {
             throw new AssertionError("An absent object must not invoke the reader");
@@ -138,7 +140,7 @@ class GitStorageApiTest {
 
     @Test
     void readsRealContentThroughTheSameFacadeUsedForPresenceChecks() throws Exception {
-        var storage = new GitStorageApi(directory);
+        var storage = new LocalGitStorage(directory);
         ObjectId id = PackTestData.store(storage,
                 GitObjectType.COMMIT, new byte[]{10, 20, 30});
         assertThat(storage.exists(id)).isTrue();

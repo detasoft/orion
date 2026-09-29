@@ -21,7 +21,8 @@ import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -43,7 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FetchCommandPackUriTest extends GitRepositoryContext {
     FetchCommandPackUriTest() {
-        super(new GitStorageApi());
+        super(new LocalGitStorage());
     }
 
     @Override
@@ -195,7 +196,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
 
     private static IndexedPack ingest(byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
-             PackIngestor ingestor = new PackIngestor(input, IndexedPack.create())) {
+             PackIngestor ingestor = new PackIngestor(input, LocalIndexedPack.create())) {
             return ingestor.ingest();
         }
     }

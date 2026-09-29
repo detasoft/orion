@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.pack;
+package pro.deta.orion.git.parser.v2.storage.local;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

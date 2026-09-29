@@ -10,6 +10,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -32,7 +34,7 @@ class GitPackObjectResolverTest {
     @CsvSource({"false, 2", "true, 2", "false, 3", "true, 3"})
     void resolvesForwardReferencesBranchesAndOffsetDeltasWithoutChangingEntryBytes(boolean memory, int version)
             throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = new LocalGitStorage(directory);
         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
         ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
         byte[] forward = delta(second, new byte[]{1, 1, 1, 3});
@@ -40,8 +42,8 @@ class GitPackObjectResolverTest {
                 new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
         byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-        try (IndexedPack target = ingest(source, memory ? IndexedPack.create() : storage.newPack())) {
-            PackId received = target.checksum();
+        try (IndexedPack target = ingest(source, memory ? LocalIndexedPack.create() : storage.newPack())) {
+            PackId received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(bytes(target)).containsExactly(source);
             assertThat(target.objectCount()).isEqualTo(5);
@@ -58,13 +60,14 @@ class GitPackObjectResolverTest {
     @ParameterizedTest
     @ValueSource(ints = {2, 3})
     void completesThinPackWithExternalBaseAndPersistsIt(int version) throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = new LocalGitStorage(directory);
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
         byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
         try (IndexedPack target = ingest(source, storage.newPack())) {
             PackId received = target.id();
             PackId completed = new GitPackObjectResolver(target, storage).complete();
-            assertThat(completed).isNotEqualTo(received).isEqualTo(target.checksum());
+            assertThat(completed).isNotEqualTo(received);
+            assertThat(target.checksumMatches(completed)).isTrue();
             assertThat(target.objectCount()).isEqualTo(2);
             assertThat(ByteBuffer.wrap(bytes(target)).getInt(4)).isEqualTo(version);
             storage.persist(target);
@@ -76,13 +79,13 @@ class GitPackObjectResolverTest {
 
     @Test
     void doesNotAppendAPublishedBaseThatLaterResolvesInsideThePack() throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = new LocalGitStorage(directory);
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{2});
         ObjectId root = objectId(GitObjectType.BLOB, new byte[]{1});
         byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
                 delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-        try (IndexedPack target = ingest(source, IndexedPack.create())) {
-            PackId received = target.checksum();
+        try (IndexedPack target = ingest(source, LocalIndexedPack.create())) {
+            PackId received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(target.objectCount()).isEqualTo(3);
             assertThat(bytes(target)).containsExactly(source);
@@ -91,7 +94,7 @@ class GitPackObjectResolverTest {
 
     @Test
     void resolvesADeepForwardChainWithoutRecursiveCalls() throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = new LocalGitStorage(directory);
         List<byte[]> entries = new ArrayList<>();
         for (int value = 1100; value > 0; value--) {
             byte[] previous = {(byte) ((value - 1) >>> 8), (byte) (value - 1)};
@@ -100,7 +103,7 @@ class GitPackObjectResolverTest {
         }
         entries.add(blob(new byte[]{0, 0}));
         byte[] source = pack(entries.toArray(byte[][]::new));
-        try (IndexedPack target = ingest(source, IndexedPack.create())) {
+        try (IndexedPack target = ingest(source, LocalIndexedPack.create())) {
             assertTimeout(Duration.ofSeconds(30), () -> new GitPackObjectResolver(target, storage).complete());
             assertThat(target.objectCount()).isEqualTo(1101);
             assertThat(bytes(target)).containsExactly(source);
@@ -109,13 +112,13 @@ class GitPackObjectResolverTest {
 
     @Test
     void rejectsInvalidDeltaInstructionsBeforePublication() throws Exception {
-        GitStorageApi storage = new GitStorageApi(directory);
+        GitStorageApi storage = new LocalGitStorage(directory);
         byte[][] invalid = {{2, 0}, {1, 1, 0}, {1, 1, 1}, {1, 1, (byte) 0x91, 1, 1},
                 {1, 1, (byte) 0x90, 2}, {1, 1}, {1, 0, 1, 42}, {1, 1, (byte) 0x91}};
         for (byte[] instructions : invalid) {
             byte[] source = pack(blob(new byte[]{1}),
                     delta(objectId(GitObjectType.BLOB, new byte[]{1}), instructions));
-            try (IndexedPack target = ingest(source, IndexedPack.create())) {
+            try (IndexedPack target = ingest(source, LocalIndexedPack.create())) {
                 assertThatThrownBy(() -> new GitPackObjectResolver(target, storage).complete())
                         .isInstanceOf(IOException.class);
             }
@@ -128,9 +131,9 @@ class GitPackObjectResolverTest {
         byte[] base = blob(new byte[]{1});
         byte[] source = pack(base, delta(objectId(GitObjectType.BLOB, new byte[]{1}),
                 new byte[]{1, 1, 1, 2}));
-        try (GitStorageApi storage = new GitStorageApi();
+        try (GitStorageApi storage = new LocalGitStorage();
              IndexedPack target = ingest(source,
-                     memory ? IndexedPack.create() : IndexedPack.create(directory.resolve("staging")))) {
+                     memory ? LocalIndexedPack.create() : LocalIndexedPack.create(directory.resolve("staging")))) {
             long offset = PackHeader.SIZE + (corruptBase ? 0 : base.length);
             long lastCompressedByte = target.dataEnd(offset) - 1;
             ByteBuffer corrupted = ByteBuffer.allocate(1);

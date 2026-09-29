@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,7 +36,7 @@ class FetchReadinessTest {
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new GitStorageApi(directory);
+        storage = new LocalGitStorage(directory);
         tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
     }
 
