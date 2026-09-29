@@ -1,6 +1,8 @@
 package pro.deta.orion.command.terminal;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandResult;
@@ -28,6 +30,35 @@ class TerminalCommandRendererTest {
                 .isEqualTo("NAME    STATE\nfirst   running\nsecond  completed\n");
         assertThat(renderer.render(rows, 9).stdout())
                 .isEqualTo("NAME\tSTATE\nfirst\trunning\nsecond\tcompleted\n");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"界界, 4", "é, 1", "👩‍💻, 2", "🇳🇱, 2", "👩‍💻🇳🇱, 4"})
+    void alignsUnicodeRowsAndUsesTheExactCellWidthBoundary(String value, int cells) {
+        CommandResult.Rows rows = textRows(
+                List.of("A", "B"), List.of(List.of(value, "z"), List.of("x", "z")));
+
+        assertThat(renderer.render(rows, cells + 3).stdout()).isEqualTo(
+                "A" + " ".repeat(cells + 1) + "B\n"
+                        + value + "  z\nx" + " ".repeat(cells + 1) + "z\n");
+        assertThat(renderer.render(rows, cells + 2).stdout()).isEqualTo(
+                "A\tB\n" + value + "\tz\nx\tz\n");
+
+        PlainCommandRenderer plain = new PlainCommandRenderer();
+        for (RowOutputFormat format : List.of(
+                RowOutputFormat.PLAIN, RowOutputFormat.TERSE, RowOutputFormat.JSON)) {
+            CommandResult.Rows automationRows = new CommandResult.Rows(
+                    rows.columns(), rows.values(), format, Optional.empty());
+            assertThat(renderer.render(automationRows, 80)).isEqualTo(plain.render(automationRows));
+        }
+    }
+
+    @Test
+    void measuresEscapedUnicodeTextRatherThanTheOriginalValue() {
+        CommandResult.Rows rows = textRows(List.of("A", "B"), List.of(List.of("界\n界", "z")));
+
+        assertThat(renderer.render(rows, 9).stdout()).isEqualTo("A       B\n界\\n界  z\n");
+        assertThat(renderer.render(rows, 8).stdout()).isEqualTo("A\tB\n界\\n界\tz\n");
     }
 
     @Test

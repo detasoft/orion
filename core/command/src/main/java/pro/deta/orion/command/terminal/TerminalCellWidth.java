@@ -1,12 +1,16 @@
 package pro.deta.orion.command.terminal;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
- * Screen-cell widths for a grapheme cluster. Ambiguous characters occupy one cell.
+ * Screen-cell widths for grapheme clusters and text. Ambiguous characters occupy one cell.
  * Wide/fullwidth ranges come from Unicode 17.0 EastAsianWidth.txt:
  * https://www.unicode.org/Public/17.0.0/ucd/EastAsianWidth.txt
  * Unicode data license: https://www.unicode.org/license.txt
  */
 final class TerminalCellWidth {
+    static final Pattern GRAPHEME = Pattern.compile("\\X");
     private static final int[] WIDE = {
             0x1100, 0x115F, 0x231A, 0x231B, 0x2329, 0x232A,
             0x23E9, 0x23EC, 0x23F0, 0x23F0, 0x23F3, 0x23F3,
@@ -52,6 +56,15 @@ final class TerminalCellWidth {
     };
 
     private TerminalCellWidth() {
+    }
+
+    static int textWidth(String text) {
+        int width = 0;
+        Matcher matcher = GRAPHEME.matcher(text);
+        while (matcher.find()) {
+            width += width(matcher.group());
+        }
+        return width;
     }
 
     static int width(String cluster) {

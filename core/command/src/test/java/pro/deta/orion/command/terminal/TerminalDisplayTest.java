@@ -1,6 +1,8 @@
 package pro.deta.orion.command.terminal;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.command.CommandPath;
 
 import java.io.ByteArrayOutputStream;
@@ -243,5 +245,16 @@ class TerminalDisplayTest {
                 .isEqualTo("one    three\nseven\n");
         assertThat(TerminalDisplay.columns(List.of("one", "three"), 4))
                 .isEqualTo("one\nthree\n");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"界界, 4", "é, 1", "👩‍💻, 2", "🇳🇱, 2", "👩‍💻🇳🇱, 4"})
+    void alignsUnicodeCandidatesAndWrapsAtTheCellWidthBoundary(String value, int cells) {
+        List<String> candidates = List.of(value, "x", "z");
+
+        assertThat(TerminalDisplay.columns(candidates, 2 * (cells + 2)))
+                .isEqualTo(value + "  x\nz\n");
+        assertThat(TerminalDisplay.columns(candidates, 2 * (cells + 2) - 1))
+                .isEqualTo(value + "\nx\nz\n");
     }
 }

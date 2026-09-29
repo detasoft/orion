@@ -28,7 +28,7 @@ public final class TerminalCommandRenderer {
                 String value = row.get(column);
                 output.append(value);
                 if (column < row.size() - 1) {
-                    output.append(" ".repeat(widths[column] + 2 - value.length()));
+                    output.append(" ".repeat(widths[column] + 2 - TerminalCellWidth.textWidth(value)));
                 }
             }
             output.append('\n');
@@ -60,7 +60,7 @@ public final class TerminalCommandRenderer {
         int[] widths = new int[columns];
         for (List<String> row : rows) {
             for (int column = 0; column < row.size(); column++) {
-                widths[column] = Math.max(widths[column], row.get(column).length());
+                widths[column] = Math.max(widths[column], TerminalCellWidth.textWidth(row.get(column)));
             }
         }
         return widths;

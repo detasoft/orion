@@ -11,11 +11,9 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class TerminalDisplay {
     private static final String CLEAR_LINE = "\u001b[2K";
-    private static final Pattern GRAPHEME = Pattern.compile("\\X");
     private final OutputStream output;
     private final boolean ansi;
     private final ReentrantLock outputLock = new ReentrantLock();
@@ -155,7 +153,7 @@ public final class TerminalDisplay {
 
     private static List<Cell> cells(String value) {
         List<Cell> result = new ArrayList<>();
-        Matcher matcher = GRAPHEME.matcher(value);
+        Matcher matcher = TerminalCellWidth.GRAPHEME.matcher(value);
         while (matcher.find()) {
             String cluster = matcher.group();
             StringBuilder safe = new StringBuilder();
@@ -218,7 +216,7 @@ public final class TerminalDisplay {
         }
         int longest = 0;
         for (String value : values) {
-            longest = Math.max(longest, value.length());
+            longest = Math.max(longest, TerminalCellWidth.textWidth(value));
         }
         int cellWidth = longest + 2;
         int columnCount = Math.max(1, width / cellWidth);
@@ -230,7 +228,7 @@ public final class TerminalDisplay {
             if (rowEnd) {
                 result.append('\n');
             } else {
-                result.append(" ".repeat(cellWidth - value.length()));
+                result.append(" ".repeat(cellWidth - TerminalCellWidth.textWidth(value)));
             }
         }
         return result.toString();
