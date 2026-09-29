@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -67,7 +67,7 @@ class GitBlockingWireSessionTest {
             }
 
             @Override
-            public List<RefUpdateResult> publish(NativeGitRepository selected, Optional<PackId> received,
+            public List<RefUpdateResult> publish(NativeGitRepository selected, Optional<PackChecksum> received,
                     List<RefUpdate> updates, boolean atomic) {
                 try {
                     assertThat(selected.storage().readPack(received.orElseThrow(),

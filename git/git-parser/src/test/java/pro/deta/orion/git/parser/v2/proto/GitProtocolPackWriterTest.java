@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
@@ -35,7 +35,7 @@ import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
 class GitProtocolPackWriterTest implements BufferedByteOutput {
     private static final ObjectId SHALLOW = new ObjectId("1".repeat(40));
     private static final ObjectId UNSHALLOW = new ObjectId("2".repeat(40));
-    private static final PackId PACK = new PackId("3".repeat(40));
+    private static final PackChecksum PACK = new PackChecksum("3".repeat(40));
     private static final RefId MAIN = new RefId("refs/heads/main");
     private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
     private IOException failure;

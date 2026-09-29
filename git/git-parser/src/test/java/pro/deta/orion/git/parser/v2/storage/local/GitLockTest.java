@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.local;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.shared.GitLock;
 
@@ -22,7 +22,7 @@ class GitLockTest {
     void interruptingAWaiterDoesNotReleaseTheOwnerOrCancelItsSignal() throws Exception {
         var lock = new GitLock(directory);
         var other = new GitLock(directory);
-        var id = new PackId(new byte[20]);
+        var id = new PackChecksum(new byte[20]);
         var started = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);
         var acquired = new CountDownLatch(1);
@@ -61,9 +61,9 @@ class GitLockTest {
         var first = new GitLock(directory);
         var second = new GitLock(directory.resolve("another"));
         byte[] bytes = new byte[20];
-        try (GitLock.Lease pack = first.lockPack(new PackId(bytes));
+        try (GitLock.Lease pack = first.lockPack(new PackChecksum(bytes));
              GitLock.Lease refs = first.lockRefs(List.of(new RefId("refs/heads/main")));
-             GitLock.Lease otherRepository = second.lockPack(new PackId(bytes))) {
+             GitLock.Lease otherRepository = second.lockPack(new PackChecksum(bytes))) {
             assertThat(pack).isNotNull();
             assertThat(refs).isNotNull();
             assertThat(otherRepository).isNotNull();

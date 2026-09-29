@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
@@ -39,7 +39,7 @@ public final class PackReader implements AutoCloseable {
     private long inflatedSize;
     private PackEntry entry;
     private ByteBuffer compressed;
-    private PackId id;
+    private PackChecksum id;
 
     public PackReader(BufferedByteInputV2 input) {
         this.input = Objects.requireNonNull(input, "input");
@@ -81,7 +81,7 @@ public final class PackReader implements AutoCloseable {
                     if (!MessageDigest.isEqual(expected, received)) {
                         throw new IOException("Pack checksum mismatch");
                     }
-                    id = new PackId(received);
+                    id = new PackChecksum(received);
                     state = State.END;
                     yield new PackReadStep.Bytes(header.flip().asReadOnlyBuffer());
                 }

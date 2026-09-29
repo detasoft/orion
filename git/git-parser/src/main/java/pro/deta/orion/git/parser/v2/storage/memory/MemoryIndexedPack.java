@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -28,7 +28,7 @@ final class MemoryIndexedPack implements MutableIndexedPack {
     private final MemoryPackDataStorage bytes = new MemoryPackDataStorage();
     private final NavigableMap<Long, Record> entries = new TreeMap<>();
     private final Map<ObjectId, Long> objects = new HashMap<>();
-    private PackId packId;
+    private PackChecksum packId;
     private MemoryPackDependencies dependencies;
     private boolean published;
 
@@ -56,7 +56,7 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         bytes.truncate(size);
     }
 
-    public PackId id() throws IOException {
+    public PackChecksum id() throws IOException {
         requireOpen();
         if (packId == null) {
             throw new IOException("Pack checksum is not calculated");
@@ -64,24 +64,24 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         return packId;
     }
 
-    public void setId(PackId id) throws IOException {
+    public void setId(PackChecksum id) throws IOException {
         requireMutable();
         packId = Objects.requireNonNull(id, "id");
     }
 
-    public PackId finish(long dataEnd) throws IOException {
+    public PackChecksum finish(long dataEnd) throws IOException {
         requireMutable();
         if (packId == null) {
             byte[] checksum = digest(bytes, dataEnd);
             write(dataEnd, ByteBuffer.wrap(checksum));
-            packId = new PackId(checksum);
+            packId = new PackChecksum(checksum);
         }
         dependencies().finish();
         dependencies = null;
         return packId;
     }
 
-    public boolean checksumMatches(PackId expected) throws IOException {
+    public boolean checksumMatches(PackChecksum expected) throws IOException {
         return checksum(bytes).equals(expected)
                 && MessageDigest.isEqual(digest(bytes, size() - 20), expected.toBytes());
     }

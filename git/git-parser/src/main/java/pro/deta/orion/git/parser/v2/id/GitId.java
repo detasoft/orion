@@ -5,11 +5,11 @@ import java.util.HexFormat;
 import java.util.Objects;
 
 /**
- * Immutable SHA-1 identity stored as twenty bytes, with canonical hexadecimal formatting.
+ * Immutable Git hash stored as twenty or thirty-two bytes, with canonical hexadecimal formatting.
+ * The repository selects the hash algorithm and validates the corresponding length.
  * Equality includes the concrete ID type so pack, commit, and general object IDs remain distinct.
  */
-public abstract sealed class GitId permits PackId, CommitId, ObjectId {
-    private static final int BYTE_LENGTH = 20;
+public abstract sealed class GitId permits PackChecksum, CommitId, ObjectId {
     private final byte[] bytes;
 
     GitId(String hex) {
@@ -18,10 +18,14 @@ public abstract sealed class GitId permits PackId, CommitId, ObjectId {
 
     GitId(byte[] bytes) {
         Objects.requireNonNull(bytes, "bytes");
-        if (bytes.length != BYTE_LENGTH) {
-            throw new IllegalArgumentException("Git SHA-1 ID must contain 20 bytes");
+        if (bytes.length != 20 && bytes.length != 32) {
+            throw new IllegalArgumentException("Git ID must contain 20 or 32 bytes");
         }
         this.bytes = bytes.clone();
+    }
+
+    public final int byteLength() {
+        return bytes.length;
     }
 
     public final byte[] toBytes() {
@@ -50,8 +54,8 @@ public abstract sealed class GitId permits PackId, CommitId, ObjectId {
 
     private static byte[] parseHex(String hex) {
         Objects.requireNonNull(hex, "hex");
-        if (hex.length() != BYTE_LENGTH * 2) {
-            throw new IllegalArgumentException("Git SHA-1 ID must contain 40 hexadecimal characters");
+        if (hex.length() != 40 && hex.length() != 64) {
+            throw new IllegalArgumentException("Git ID must contain 40 or 64 hexadecimal characters");
         }
         return HexFormat.of().parseHex(hex);
     }

@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -41,8 +41,8 @@ class IndexedPackContractTest {
             byte[] received = PackTestData.pack(PackTestData.delta(baseId, new byte[]{3, 4, -112, 3, 1, 4}));
             try (ContractPack pack = new ContractPack(storage.newPack())) {
                 assertThat(PackTestData.ingest(received, pack)).isSameAs(pack);
-                PackId receivedId = pack.id();
-                PackId completedId = new GitPackObjectResolver(pack, storage).complete();
+                PackChecksum receivedId = pack.id();
+                PackChecksum completedId = new GitPackObjectResolver(pack, storage).complete();
                 assertThat(completedId).isNotEqualTo(receivedId);
                 assertThat(pack.checksumMatches(completedId)).isTrue();
                 assertThat(pack.objectIds()).containsExactlyInAnyOrder(baseId, resultId);
@@ -68,7 +68,7 @@ class IndexedPackContractTest {
             ObjectId resultId = PackTestData.objectId(GitObjectType.BLOB, result);
             PackTestData.ingest(PackTestData.pack(
                     PackTestData.delta(baseId, new byte[]{3, 4, -112, 3, 1, 4})), working);
-            PackId completed = new GitPackObjectResolver(working, storage).complete();
+            PackChecksum completed = new GitPackObjectResolver(working, storage).complete();
             IndexedPack readable = working;
             assertThat(readable.id()).isEqualTo(completed);
             assertThat(readable.checksumMatches(completed)).isTrue();
@@ -168,12 +168,12 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public PackId id() throws IOException {
+        public PackChecksum id() throws IOException {
             return delegate.id();
         }
 
         @Override
-        public boolean checksumMatches(PackId expected) throws IOException {
+        public boolean checksumMatches(PackChecksum expected) throws IOException {
             return delegate.checksumMatches(expected);
         }
 
@@ -262,12 +262,12 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public void setId(PackId id) throws IOException {
+        public void setId(PackChecksum id) throws IOException {
             delegate.setId(id);
         }
 
         @Override
-        public PackId finish(long dataEnd) throws IOException {
+        public PackChecksum finish(long dataEnd) throws IOException {
             return delegate.finish(dataEnd);
         }
 

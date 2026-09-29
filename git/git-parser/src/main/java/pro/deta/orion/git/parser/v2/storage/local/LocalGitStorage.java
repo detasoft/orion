@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.local;
 
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -31,7 +31,7 @@ public final class LocalGitStorage implements GitStorageApi {
         return packs.createPack();
     }
 
-    public PackId persist(MutableIndexedPack pack) throws IOException {
+    public PackChecksum persist(MutableIndexedPack pack) throws IOException {
         Objects.requireNonNull(pack, "pack");
         if (!(pack instanceof LocalIndexedPack local)) {
             throw new IllegalArgumentException("Local storage requires a LocalIndexedPack");
@@ -51,7 +51,7 @@ public final class LocalGitStorage implements GitStorageApi {
         return packs.read(Objects.requireNonNull(location, "location"), Objects.requireNonNull(reader, "reader"));
     }
 
-    public Set<ObjectId> packObjectIds(PackId id) throws IOException {
+    public Set<ObjectId> packObjectIds(PackChecksum id) throws IOException {
         return packs.objectIds(Objects.requireNonNull(id, "packId"));
     }
 
@@ -70,15 +70,15 @@ public final class LocalGitStorage implements GitStorageApi {
      * @return containing pack IDs grouped by object ID
      * @throws IOException if a published pack or index cannot be read
      */
-    public Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException {
+    public Map<ObjectId, List<PackChecksum>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException {
         return packs.find(Objects.requireNonNull(objectIds, "objectIds"));
     }
 
-    public List<PackId> packIds() throws IOException {
+    public List<PackChecksum> packIds() throws IOException {
         return packs.ids();
     }
 
-    public <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
+    public <R> Optional<R> readPack(PackChecksum id, GitPackRead<R> reader) throws IOException {
         return packs.readPack(Objects.requireNonNull(id, "packId"), Objects.requireNonNull(reader, "reader"));
     }
 

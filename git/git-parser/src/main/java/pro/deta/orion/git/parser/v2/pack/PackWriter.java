@@ -5,7 +5,7 @@ import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -79,7 +79,7 @@ public final class PackWriter implements AutoCloseable {
         }
     }
 
-    public PackId finish() throws IOException {
+    public PackChecksum finish() throws IOException {
         requireOpen();
         if (writtenObjects != objectCount) {
             failed = true;
@@ -90,7 +90,7 @@ public final class PackWriter implements AutoCloseable {
             output.write(digest);
             position += digest.length;
             finished = true;
-            return new PackId(digest);
+            return new PackChecksum(digest);
         } catch (IOException | RuntimeException | Error error) {
             failed = true;
             throw error;

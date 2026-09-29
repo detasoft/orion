@@ -20,7 +20,7 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -203,7 +203,7 @@ class NativeGitFileModesTest {
 
     private static void copyPacks(NativeGitRepository source, InMemoryRepository destination) throws Exception {
         try (ObjectInserter inserter = destination.newObjectInserter()) {
-            for (PackId packId : source.storage().packIds()) {
+            for (PackChecksum packId : source.storage().packIds()) {
                 byte[] pack = source.storage().readPack(packId,
                         (size, input) -> input.readBytes(Math.toIntExact(size))).orElseThrow();
                 inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);

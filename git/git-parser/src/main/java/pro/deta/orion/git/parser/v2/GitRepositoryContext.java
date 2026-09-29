@@ -4,7 +4,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -42,7 +42,7 @@ public class GitRepositoryContext {
         return index;
     }
 
-    public Optional<URI> packUri(PackId id) {
+    public Optional<URI> packUri(PackChecksum id) {
         return Optional.empty();
     }
 

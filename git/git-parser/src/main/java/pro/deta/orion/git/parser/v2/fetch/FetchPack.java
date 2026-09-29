@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -39,7 +39,7 @@ public final class FetchPack {
     private final Set<ObjectId> unshallow = new LinkedHashSet<>();
     private final boolean thin;
     private List<PackObjectLocation> entries = List.of();
-    private Map<PackId, URI> packUris = Map.of();
+    private Map<PackChecksum, URI> packUris = Map.of();
 
     private FetchPack(GitStorageApi storage, GitIndexApi index, boolean thin) {
         this.storage = Objects.requireNonNull(storage, "storage");
@@ -248,13 +248,13 @@ public final class FetchPack {
         throw new IOException("Missing commit timestamp");
     }
 
-    private Map<PackId, URI> selectPackUris(GitRepositoryContext repository, Set<String> protocols)
+    private Map<PackChecksum, URI> selectPackUris(GitRepositoryContext repository, Set<String> protocols)
             throws IOException {
-        Map<PackId, URI> selected = new LinkedHashMap<>();
+        Map<PackChecksum, URI> selected = new LinkedHashMap<>();
         if (protocols.isEmpty() || objects.isEmpty()) {
             return selected;
         }
-        for (PackId id : storage.packIds()) {
+        for (PackChecksum id : storage.packIds()) {
             Optional<URI> uri = repository.packUri(id);
             if (uri.isEmpty() || !protocols.contains(uri.orElseThrow().getScheme())) {
                 continue;
@@ -272,7 +272,7 @@ public final class FetchPack {
         return selected;
     }
 
-    public Map<PackId, URI> packUris() {
+    public Map<PackChecksum, URI> packUris() {
         return packUris;
     }
 

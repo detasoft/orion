@@ -7,11 +7,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Describes a conditional ref update submitted through GitStorageApi.
+ * Describes a conditional ref update submitted through GitIndexApi.
  * An empty expectedOld requires the ref to be absent (creation); an empty newId requests deletion.
  * With both IDs present, replace the value only if it matches expectedOld, including for force updates.
  * The ref and both Optional containers must be non-null; both IDs cannot be absent at once.
- * Storage checks the expected value under the ref lock. A failed ref update does not undo pack publication.
+ * The index checks the expected value under the ref lock. A failed ref update does not undo pack publication.
  */
 public record RefUpdate(RefId ref, Optional<ObjectId> expectedOld, Optional<ObjectId> newId) {
     public RefUpdate {
@@ -26,7 +26,10 @@ public record RefUpdate(RefId ref, Optional<ObjectId> expectedOld, Optional<Obje
     public static RefUpdate fromWire(String ref, String expectedOld, String newId) {
         ObjectId oldObject = new ObjectId(expectedOld);
         ObjectId newObject = new ObjectId(newId);
-        String zero = "0".repeat(40);
+        if (oldObject.byteLength() != newObject.byteLength()) {
+            throw new IllegalArgumentException("Ref update cannot mix object hash algorithms");
+        }
+        String zero = "0".repeat(expectedOld.length());
         return new RefUpdate(new RefId(ref), expectedOld.equals(zero) ? Optional.empty() : Optional.of(oldObject),
                 newId.equals(zero) ? Optional.empty() : Optional.of(newObject));
     }

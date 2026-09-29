@@ -2,7 +2,7 @@ package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import java.util.Optional;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -74,7 +74,7 @@ public interface NativeGitRepositoryProvider {
 
     default List<RefUpdateResult> publish(
             NativeGitRepository repository,
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         return repository.publishReceivedPack(received, updates, atomic);

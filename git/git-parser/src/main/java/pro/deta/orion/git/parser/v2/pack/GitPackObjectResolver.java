@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.DeltaByteSource;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -27,14 +27,14 @@ import java.util.zip.Deflater;
 /**
  * Completes the object index and makes a received pack self-contained before publication.
  * {@link PackIngestor} first verifies the checksum of the received bytes against the trailer and
- * assigns their {@link PackId}, before resolving any deltas, whether their bases are present or missing.
+ * assigns their {@link PackChecksum}, before resolving any deltas, whether their bases are present or missing.
  * At that point every entry boundary and the trailer are stored, so local content reads use indexed
  * compressed bounds and decompress only in the content reader.
  * Resolving OFS/REF deltas against bases in the same pack adds object IDs, logical types and sizes
- * to the index; the stored delta instructions and pack bytes remain unchanged, so the PackId is retained.
- * Adding external bases changes the pack bytes and object count, invalidating the cached PackId.
+ * to the index; the stored delta instructions and pack bytes remain unchanged, so the PackChecksum is retained.
+ * Adding external bases changes the pack bytes and object count, invalidating the cached PackChecksum.
  * Completion then calculates and writes a new checksum only if the pack bytes changed.
- * The caller must complete resolution before persisting the pack: a verified PackId alone does not
+ * The caller must complete resolution before persisting the pack: a verified PackChecksum alone does not
  * establish that the object index is complete or that all delta bases are present.
  */
 public final class GitPackObjectResolver {
@@ -46,7 +46,7 @@ public final class GitPackObjectResolver {
         this.storage = Objects.requireNonNull(storage, "storage");
     }
 
-    public PackId complete() throws IOException {
+    public PackChecksum complete() throws IOException {
         pack.requireMutable();
         try {
             resolve();
@@ -180,7 +180,7 @@ public final class GitPackObjectResolver {
         return input.readBytes((int) size);
     }
 
-    private static PackId complete(MutableIndexedPack bytes, GitStorageApi storage) throws IOException {
+    private static PackChecksum complete(MutableIndexedPack bytes, GitStorageApi storage) throws IOException {
         if (bytes.hasUnresolved()) {
             throw new IOException("Pack contains unresolved objects");
         }

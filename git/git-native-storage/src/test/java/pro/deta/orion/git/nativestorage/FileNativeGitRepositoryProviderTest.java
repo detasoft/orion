@@ -7,7 +7,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -161,7 +161,7 @@ class FileNativeGitRepositoryProviderTest {
         byte[] first = "published-one".getBytes(StandardCharsets.UTF_8);
         byte[] second = "published-two".getBytes(StandardCharsets.UTF_8);
         byte[] bytes = pack(first, second);
-        PackId id = persist(repository, bytes);
+        PackChecksum id = persist(repository, bytes);
         assertThat(id.toHex()).isEqualTo(packChecksum(bytes));
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
@@ -186,7 +186,7 @@ class FileNativeGitRepositoryProviderTest {
         if (reference) {
             persist(repository, pack(base));
         }
-        PackId id = persist(repository, reference
+        PackChecksum id = persist(repository, reference
                 ? packWithReferenceDelta(blobId(base), base, target) : packWithOffsetDelta(base, target));
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
@@ -218,7 +218,7 @@ class FileNativeGitRepositoryProviderTest {
                 bytes[bytes.length - 1] ^= 1;
                 Files.write(path, bytes);
             }
-            List<PackId> before = repository.storage().packIds();
+            List<PackChecksum> before = repository.storage().packIds();
             assertThatThrownBy(() -> persist(repository, packWithReferenceDelta(blobId(base), base, target)))
                     .isInstanceOf(IOException.class);
             assertThat(repository.storage().packIds()).containsExactlyElementsOf(before);
@@ -239,7 +239,7 @@ class FileNativeGitRepositoryProviderTest {
         }
     }
 
-    private static PackId persist(NativeGitRepository repository, byte[] bytes) throws IOException {
+    private static PackChecksum persist(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             MutableIndexedPack pack = repository.ingest(input);
             return repository.storage().persist(pack);

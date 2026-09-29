@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLineOutput;
@@ -138,7 +138,7 @@ public class GitProtocolContext {
         }
 
         public BufferedByteOutput beginPack(GitCapabilities capabilities, Map<RefId, ObjectId> wantedRefs,
-                                             Map<PackId, URI> packfileUris)
+                                             Map<PackChecksum, URI> packfileUris)
                 throws IOException {
             if (version == GitProtocolVersion.V2) {
                 SideBand sideBand = capabilities.has(GitCapability.SIDEBAND_ALL) ? SideBand.DATA : SideBand.NONE;
@@ -151,7 +151,7 @@ public class GitProtocolContext {
                 }
                 if (!packfileUris.isEmpty()) {
                     writeText("packfile-uris\n", sideBand);
-                    for (Map.Entry<PackId, URI> pack : packfileUris.entrySet()) {
+                    for (Map.Entry<PackChecksum, URI> pack : packfileUris.entrySet()) {
                         writeText(pack.getKey().toHex() + " " + pack.getValue().toASCIIString() + "\n", sideBand);
                     }
                     GitPktLine.Control.DELIMITER.writeTo(output);

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
@@ -37,7 +37,7 @@ class PackCompletionTest {
     void leavesSelfContainedAndEmptyPacksUnchanged() throws Exception {
         for (byte[] pack : new byte[][]{pack(), pack(full(new byte[]{1, 2, 3}))}) {
             try (var attempt = new Attempt(pack)) {
-                PackId received = checksum(Files.readAllBytes(attempt.packPath));
+                PackChecksum received = checksum(Files.readAllBytes(attempt.packPath));
                 assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
                         .isEqualTo(received);
                 assertThat(Files.readAllBytes(attempt.packPath)).containsExactly(pack);
@@ -59,8 +59,8 @@ class PackCompletionTest {
         try (var attempt = new Attempt(original)) {
             PackTestData.store(attempt.storage, GitObjectType.BLOB, base);
 
-            PackId received = checksum(Files.readAllBytes(attempt.packPath));
-            PackId completed = new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
+            PackChecksum received = checksum(Files.readAllBytes(attempt.packPath));
+            PackChecksum completed = new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
             assertThat(attempt.pack.find(objectId(result))).isPresent();
             assertThat(attempt.pack.find(objectId(otherResult))).isPresent();
             byte[] output = Files.readAllBytes(attempt.packPath);
@@ -121,7 +121,7 @@ class PackCompletionTest {
     @Test
     void recalculatesChecksumAfterAnAcceptedPackIsChanged() throws Exception {
         try (Attempt attempt = new Attempt(pack())) {
-            PackId received = attempt.pack.id();
+            PackChecksum received = attempt.pack.id();
             attempt.pack.write(attempt.pack.size() - 1, ByteBuffer.wrap(new byte[]{42}));
             assertThatThrownBy(attempt.pack::id).isInstanceOf(IOException.class);
             assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete()).isEqualTo(received);
@@ -192,10 +192,10 @@ class PackCompletionTest {
         return join(body, MessageDigest.getInstance("SHA-1").digest(body));
     }
 
-    private static PackId checksum(byte[] pack) throws Exception {
+    private static PackChecksum checksum(byte[] pack) throws Exception {
         byte[] expected = MessageDigest.getInstance("SHA-1").digest(Arrays.copyOf(pack, pack.length - 20));
         assertThat(Arrays.copyOfRange(pack, pack.length - 20, pack.length)).containsExactly(expected);
-        return new PackId(expected);
+        return new PackChecksum(expected);
     }
 
     private static byte[] join(byte[]... parts) {

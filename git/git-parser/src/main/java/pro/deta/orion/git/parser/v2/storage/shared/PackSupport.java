@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.storage.shared;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -103,7 +103,7 @@ public final class PackSupport {
         }
     }
 
-    public static PackId checksum(PackDataStorage bytes) throws IOException {
+    public static PackChecksum checksum(PackDataStorage bytes) throws IOException {
         long size = bytes.size();
         if (size < 32) {
             throw new EOFException("Truncated pack file");
@@ -115,7 +115,7 @@ public final class PackSupport {
                 throw new EOFException("Truncated pack checksum");
             }
         }
-        return new PackId(trailer.array());
+        return new PackChecksum(trailer.array());
     }
 
     public static byte[] digest(PackDataStorage bytes, long length) throws IOException {

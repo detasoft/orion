@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackEntry;
@@ -29,7 +29,7 @@ import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.closeUnret
 
 /** Owns published packs for one transient repository. */
 public final class InMemoryStorage implements GitStorageApi {
-    private final Map<PackId, MemoryIndexedPack> packs = new LinkedHashMap<>();
+    private final Map<PackChecksum, MemoryIndexedPack> packs = new LinkedHashMap<>();
     private boolean closed;
 
     public synchronized MutableIndexedPack newPack() throws IOException {
@@ -37,12 +37,12 @@ public final class InMemoryStorage implements GitStorageApi {
         return new MemoryIndexedPack();
     }
 
-    public synchronized PackId persist(MutableIndexedPack pack) throws IOException {
+    public synchronized PackChecksum persist(MutableIndexedPack pack) throws IOException {
         Objects.requireNonNull(pack, "pack");
         if (!(pack instanceof MemoryIndexedPack memory)) {
             throw new IllegalArgumentException("Memory storage requires a memory pack");
         }
-        PackId id;
+        PackChecksum id;
         try {
             id = memory.id();
         } catch (IOException failure) {
@@ -69,26 +69,26 @@ public final class InMemoryStorage implements GitStorageApi {
         }
     }
 
-    private synchronized Map<PackId, MemoryIndexedPack> packsSnapshot() throws IOException {
+    private synchronized Map<PackChecksum, MemoryIndexedPack> packsSnapshot() throws IOException {
         requireOpen();
         return new LinkedHashMap<>(packs);
     }
 
-    private synchronized MemoryIndexedPack pack(PackId id) throws IOException {
+    private synchronized MemoryIndexedPack pack(PackChecksum id) throws IOException {
         requireOpen();
         return packs.get(Objects.requireNonNull(id, "packId"));
     }
 
-    public List<PackId> packIds() throws IOException {
+    public List<PackChecksum> packIds() throws IOException {
         return List.copyOf(packsSnapshot().keySet());
     }
 
-    public Set<ObjectId> packObjectIds(PackId id) throws IOException {
+    public Set<ObjectId> packObjectIds(PackChecksum id) throws IOException {
         MemoryIndexedPack pack = pack(id);
         return pack == null ? Set.of() : pack.objectIds();
     }
 
-    public <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
+    public <R> Optional<R> readPack(PackChecksum id, GitPackRead<R> reader) throws IOException {
         Objects.requireNonNull(reader, "reader");
         MemoryIndexedPack pack = pack(id);
         if (pack == null) {
@@ -126,7 +126,7 @@ public final class InMemoryStorage implements GitStorageApi {
         for (ObjectId id : ids) {
             found.put(Objects.requireNonNull(id, "objectId"), null);
         }
-        for (Map.Entry<PackId, MemoryIndexedPack> stored : packsSnapshot().entrySet()) {
+        for (Map.Entry<PackChecksum, MemoryIndexedPack> stored : packsSnapshot().entrySet()) {
             IndexedPack pack = stored.getValue();
             for (Map.Entry<ObjectId, PackObjectLocation> requested : found.entrySet()) {
                 if (requested.getValue() != null) {
@@ -149,13 +149,13 @@ public final class InMemoryStorage implements GitStorageApi {
         return List.copyOf(result);
     }
 
-    public Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> ids) throws IOException {
+    public Map<ObjectId, List<PackChecksum>> findPacksByObjectIds(Collection<ObjectId> ids) throws IOException {
         Set<ObjectId> requested = new HashSet<>(ids);
         for (ObjectId id : requested) {
             Objects.requireNonNull(id, "objectId");
         }
-        Map<ObjectId, List<PackId>> result = new LinkedHashMap<>();
-        for (Map.Entry<PackId, MemoryIndexedPack> stored : packsSnapshot().entrySet()) {
+        Map<ObjectId, List<PackChecksum>> result = new LinkedHashMap<>();
+        for (Map.Entry<PackChecksum, MemoryIndexedPack> stored : packsSnapshot().entrySet()) {
             for (ObjectId id : requested) {
                 if (stored.getValue().find(id).isPresent()) {
                     result.computeIfAbsent(id, ignored -> new ArrayList<>()).add(stored.getKey());

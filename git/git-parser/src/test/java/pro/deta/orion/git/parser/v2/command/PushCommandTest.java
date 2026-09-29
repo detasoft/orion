@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
@@ -83,7 +83,7 @@ class PushCommandTest {
         assertThat(reopened.readObject(result, new ResolvedGitObjectRead<>(reopened,
                 (type, size, unused, input) -> input.readBytes((int) size))))
                 .hasValueSatisfying(content -> assertThat(content).containsExactly(1, 2, 3, 4));
-        PackId id = reopened.findPacksByObjectIds(List.of(result)).get(result).getFirst();
+        PackChecksum id = reopened.findPacksByObjectIds(List.of(result)).get(result).getFirst();
         String hex = id.toHex();
         Path shard = directory.resolve("packs").resolve(hex.substring(0, 2));
         try (IndexedPack published = LocalIndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),

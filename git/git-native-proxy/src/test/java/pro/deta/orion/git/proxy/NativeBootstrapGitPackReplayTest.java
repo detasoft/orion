@@ -18,7 +18,7 @@ import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -83,7 +83,7 @@ class NativeBootstrapGitPackReplayTest {
                 writer.finish();
             }
             byte[] original = bytes.toByteArray();
-            Optional<PackId> received = ingest(repository, original);
+            Optional<PackChecksum> received = ingest(repository, original);
             byte[] completed = repository.storage().readPack(received.orElseThrow(),
                     (size, input) -> input.newInputStream().readAllBytes()).orElseThrow();
             assertThat(repository.storage().packObjectIds(received.orElseThrow()))
@@ -127,7 +127,7 @@ class NativeBootstrapGitPackReplayTest {
         var unrelated = repository.files().prepareFileUpdate("other",
                 Map.of("other.txt", GitFile.regular(new byte[]{2})), Set.of(),
                 "unrelated", GitCommitAuthor.EMPTY);
-        Optional<PackId> received = ingest(repository, unrelated.pack());
+        Optional<PackChecksum> received = ingest(repository, unrelated.pack());
         Path bare = directory.resolve("missing-objects.git");
 
         try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
@@ -139,7 +139,7 @@ class NativeBootstrapGitPackReplayTest {
         }
     }
 
-    private static Optional<PackId> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
+    private static Optional<PackChecksum> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             MutableIndexedPack pack = repository.ingest(input);
             return Optional.of(repository.storage().persist(pack));

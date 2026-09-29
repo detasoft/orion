@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class GitIdTest {
     private static final String HEX = "0123456789abcdef0123456789abcdef01234567";
     private static final List<Function<String, GitId>> HEX_FACTORIES =
-            List.of(PackId::new, CommitId::new, ObjectId::new);
+            List.of(PackChecksum::new, CommitId::new, ObjectId::new);
     private static final List<Function<byte[], GitId>> BYTE_FACTORIES =
-            List.of(PackId::new, CommitId::new, ObjectId::new);
+            List.of(PackChecksum::new, CommitId::new, ObjectId::new);
 
     @Test
     void formatsEveryIdTypeAsCanonicalHex() {
@@ -65,7 +65,7 @@ class GitIdTest {
             assertNotEquals(first, null);
             assertNotEquals(first, HEX);
         }
-        List<GitId> ids = List.of(new PackId(HEX), new CommitId(HEX), new ObjectId(HEX));
+        List<GitId> ids = List.of(new PackChecksum(HEX), new CommitId(HEX), new ObjectId(HEX));
         for (int first = 0; first < ids.size(); first++) {
             for (int second = 0; second < ids.size(); second++) {
                 assertEquals(first == second, ids.get(first).equals(ids.get(second)));
@@ -74,9 +74,24 @@ class GitIdTest {
     }
 
     @Test
+    void supportsSha256WithoutStoringAnAlgorithmInEachId() {
+        byte[] bytes = HexFormat.of().parseHex("0123456789abcdef".repeat(4));
+        for (int position = 0; position < BYTE_FACTORIES.size(); position++) {
+            GitId id = BYTE_FACTORIES.get(position).apply(bytes);
+            assertEquals(32, id.byteLength());
+            assertEquals(id, HEX_FACTORIES.get(position).apply(id.toHex()));
+            assertArrayEquals(bytes, id.toBytes());
+            byte[] returned = id.toBytes();
+            returned[0] ^= 1;
+            assertArrayEquals(bytes, id.toBytes());
+            assertNotEquals(id, BYTE_FACTORIES.get(position).apply(java.util.Arrays.copyOf(bytes, 20)));
+        }
+    }
+
+    @Test
     void rejectsInvalidBinaryLengthsAndNull() {
         for (Function<byte[], GitId> factory : BYTE_FACTORIES) {
-            for (int length : new int[] {0, 8, 19, 21, 32}) {
+            for (int length : new int[] {0, 8, 19, 21, 31, 33}) {
                 assertThrows(IllegalArgumentException.class, () -> factory.apply(new byte[length]));
             }
             assertThrows(NullPointerException.class, () -> factory.apply(null));
@@ -87,7 +102,7 @@ class GitIdTest {
     void rejectsMalformedHexAndNull() {
         for (Function<String, GitId> factory : HEX_FACTORIES) {
             for (String invalid : List.of("", HEX.substring(1), HEX + "0", "g" + HEX.substring(1),
-                    " " + HEX.substring(1), "0".repeat(64))) {
+                    " " + HEX.substring(1), "0".repeat(62))) {
                 assertThrows(IllegalArgumentException.class, () -> factory.apply(invalid));
             }
             assertThrows(NullPointerException.class, () -> factory.apply(null));

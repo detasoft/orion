@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 
@@ -37,7 +37,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             BootstrapGitLocation location,
             GitClientTransport transport,
             NativeGitRepository repository,
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         List<GitReceivePackRequest.Command> commands = new ArrayList<>(updates.size());
@@ -87,7 +87,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
 
     private static void writePack(
             NativeGitRepository repository,
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             pro.deta.orion.net.io.BufferedByteOutput output) throws IOException {
         Set<ObjectId> wants = new LinkedHashSet<>();
@@ -107,7 +107,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             GitObjectGraph graph = new GitObjectGraph(repository.storage());
             Set<ObjectId> required = graph.reachableObjects(wants, false);
             required.removeAll(graph.reachableObjects(haves, true));
-            PackId id = received.orElseThrow();
+            PackChecksum id = received.orElseThrow();
             if (repository.storage().packObjectIds(id).containsAll(required)) {
                 Optional<Boolean> sent = repository.storage().readPack(id, (size, input) -> {
                     byte[] buffer = new byte[8192];

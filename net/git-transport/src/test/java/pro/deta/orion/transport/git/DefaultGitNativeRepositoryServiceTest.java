@@ -29,7 +29,7 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.CommitId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -439,7 +439,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     }
 
     @Override
-    public List<RefUpdateResult> publish(NativeGitRepository repository, Optional<PackId> received,
+    public List<RefUpdateResult> publish(NativeGitRepository repository, Optional<PackChecksum> received,
             List<RefUpdate> updates, boolean atomic) {
         publishCalls++;
         if (!rejectPublication) {

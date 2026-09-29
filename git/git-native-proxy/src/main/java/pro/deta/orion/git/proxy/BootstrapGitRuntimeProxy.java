@@ -3,7 +3,7 @@ package pro.deta.orion.git.proxy;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus;
 
@@ -68,7 +68,7 @@ final class BootstrapGitRuntimeProxy {
     }
 
     public synchronized List<RefUpdateResult> publish(
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         try {
@@ -85,7 +85,7 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private List<RefUpdateResult> publishUpdates(
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         Objects.requireNonNull(received, "received");
@@ -137,7 +137,7 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private List<Boolean> push(
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         try {

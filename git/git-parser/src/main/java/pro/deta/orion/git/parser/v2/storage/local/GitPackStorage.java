@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage.local;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -43,8 +43,8 @@ final class GitPackStorage {
         lock = new GitLock(root);
     }
 
-    List<PackId> ids() throws IOException {
-        List<PackId> ids = new ArrayList<>();
+    List<PackChecksum> ids() throws IOException {
+        List<PackChecksum> ids = new ArrayList<>();
         scan((id, path) -> {
             ids.add(id);
             return Optional.empty();
@@ -52,7 +52,7 @@ final class GitPackStorage {
         return List.copyOf(ids);
     }
 
-    <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException {
+    <R> Optional<R> readPack(PackChecksum id, GitPackRead<R> reader) throws IOException {
         Path path = packPath(id);
         Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
         if (!Files.exists(index)) {
@@ -80,10 +80,10 @@ final class GitPackStorage {
         return LocalIndexedPack.create(incoming.resolve("pack-" + UUID.randomUUID()));
     }
 
-    PackId persist(LocalIndexedPack pack) throws IOException {
+    PackChecksum persist(LocalIndexedPack pack) throws IOException {
         Path directory = pack.directory();
         try {
-            PackId id = pack.id();
+            PackChecksum id = pack.id();
             pack.close();
             publish(directory, id);
             pack.discard();
@@ -132,7 +132,7 @@ final class GitPackStorage {
         return List.copyOf(result);
     }
 
-    private static boolean locate(PackId packId, IndexedPack pack,
+    private static boolean locate(PackChecksum packId, IndexedPack pack,
                                   Map<ObjectId, PackObjectLocation> found) throws IOException {
         boolean complete = true;
         for (Map.Entry<ObjectId, PackObjectLocation> requested : found.entrySet()) {
@@ -151,7 +151,7 @@ final class GitPackStorage {
         return complete;
     }
 
-    Set<ObjectId> objectIds(PackId id) throws IOException {
+    Set<ObjectId> objectIds(PackChecksum id) throws IOException {
         try (GitLock.Lease lease = lockPack(id)) {
             Path path = packPath(id);
             Path index = path.resolveSibling(id.toHex().substring(2) + ".mv");
@@ -164,8 +164,8 @@ final class GitPackStorage {
         }
     }
 
-    Map<ObjectId, List<PackId>> find(Collection<ObjectId> ids) throws IOException {
-        Map<ObjectId, List<PackId>> result = new LinkedHashMap<>();
+    Map<ObjectId, List<PackChecksum>> find(Collection<ObjectId> ids) throws IOException {
+        Map<ObjectId, List<PackChecksum>> result = new LinkedHashMap<>();
         for (ObjectId id : ids) {
             Objects.requireNonNull(id, "objectId");
         }
@@ -175,7 +175,7 @@ final class GitPackStorage {
                  IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
                 for (ObjectId id : ids) {
                     if (index.find(id).isPresent()) {
-                        List<PackId> locations = result.computeIfAbsent(id, ignored -> new ArrayList<>());
+                        List<PackChecksum> locations = result.computeIfAbsent(id, ignored -> new ArrayList<>());
                         if (!locations.contains(packId)) {
                             locations.add(packId);
                         }
@@ -196,7 +196,7 @@ final class GitPackStorage {
                         if (!name.matches("[0-9a-f]{38}\\.mv")) {
                             throw new IOException("Invalid published pack index name: " + index);
                         }
-                        PackId id = new PackId(shard.getFileName() + name.substring(0, 38));
+                        PackChecksum id = new PackChecksum(shard.getFileName() + name.substring(0, 38));
                         if (!Files.isRegularFile(packPath(id))) {
                             throw new IOException("Published pack is missing: " + id);
                         }
@@ -213,12 +213,12 @@ final class GitPackStorage {
         }
     }
 
-    private Path packPath(PackId id) {
+    private Path packPath(PackChecksum id) {
         String hex = id.toHex();
         return packs.resolve(hex.substring(0, 2)).resolve(hex.substring(2) + ".pack");
     }
 
-    void publish(Path directory, PackId id) throws IOException {
+    void publish(Path directory, PackChecksum id) throws IOException {
         try (GitLock.Lease lease = lockPack(id)) {
             Path target = packPath(id);
             Path shard = target.getParent();
@@ -242,7 +242,7 @@ final class GitPackStorage {
         }
     }
 
-    private GitLock.Lease lockPack(PackId id) throws IOException {
+    private GitLock.Lease lockPack(PackChecksum id) throws IOException {
         try {
             return lock.lockPack(id);
         } catch (InterruptedException interrupted) {
@@ -258,7 +258,7 @@ final class GitPackStorage {
     }
 
     private interface PublishedIndexRead<R> {
-        Optional<R> read(PackId id, Path index) throws IOException;
+        Optional<R> read(PackChecksum id, Path index) throws IOException;
     }
 
     static void closeFailed(AutoCloseable resource, Throwable failure) {

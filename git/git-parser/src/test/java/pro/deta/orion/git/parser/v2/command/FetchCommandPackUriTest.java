@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
@@ -49,7 +49,7 @@ class FetchCommandPackUriTest {
     private final GitIndexApi index = new InMemoryIndex();
     private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
         @Override
-        public Optional<URI> packUri(PackId id) {
+        public Optional<URI> packUri(PackChecksum id) {
             return Optional.of(URI.create("https://git.example/project/objects/pack/" + id.toHex() + ".pack"));
         }
     };
@@ -64,14 +64,14 @@ class FetchCommandPackUriTest {
     @ValueSource(booleans = {false, true})
     void preparationReturnsFinalUrisAndInlineCount(boolean mixed) throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackId externalPack = storage.packIds().getFirst();
+        PackChecksum externalPack = storage.packIds().getFirst();
         Set<ObjectId> wanted = new LinkedHashSet<>(external);
         Set<ObjectId> inlineIds = mixed ? Set.of(store(new byte[]{3}, new byte[]{4}).getFirst()) : Set.of();
         wanted.addAll(inlineIds);
         FetchPlan plan = new FetchPlan(wanted, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of("https"));
         FetchPack pack = FetchPack.prepare(repository, plan);
-        Map<PackId, URI> expectedUris = Map.of(externalPack, repository.packUri(externalPack).orElseThrow());
+        Map<PackChecksum, URI> expectedUris = Map.of(externalPack, repository.packUri(externalPack).orElseThrow());
         assertThat(pack.packUris()).isEqualTo(expectedUris);
         assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
         store(new byte[]{9});
@@ -90,7 +90,7 @@ class FetchCommandPackUriTest {
     @Test
     void sendsPublishedPackChecksumAndUriAndAnEmptyInlinePack() throws Exception {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
-        PackId packId = storage.packIds().getFirst();
+        PackChecksum packId = storage.packIds().getFirst();
         byte[] response = fetch(ids, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains("packfile-uris\n", packId.toHex() + " " + repository.packUri(packId).orElseThrow() + "\n");
@@ -103,7 +103,7 @@ class FetchCommandPackUriTest {
     @Test
     void mixesUriPackWithOnlyRequestedEntriesFromAnotherPack() throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackId externalPack = storage.packIds().getFirst();
+        PackChecksum externalPack = storage.packIds().getFirst();
         List<ObjectId> shared = store(new byte[]{3}, new byte[]{4});
         List<ObjectId> wanted = new ArrayList<>(external);
         wanted.add(shared.getFirst());

@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 
 import java.nio.ByteBuffer;
 import java.util.Optional;
@@ -17,5 +17,5 @@ public sealed interface PackReadStep {
 
     record EntryEnd(PackEntry metadata, Optional<ObjectId> objectId) implements PackReadStep {}
 
-    record End(PackId id) implements PackReadStep {}
+    record End(PackChecksum id) implements PackReadStep {}
 }

@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -43,7 +43,7 @@ class GitStorageApiTest {
             MutableIndexedPack target = PackTestData.ingest(
                     PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage.newPack());
             new GitPackObjectResolver(target, storage).complete();
-            PackId pair = storage.persist(target);
+            PackChecksum pair = storage.persist(target);
             ObjectId thirdId = PackTestData.store(storage, GitObjectType.BLOB, third);
             List<PackObjectLocation> locations = storage.locateObjects(List.of(thirdId, secondId, firstId, thirdId, ID));
             assertThat(locations).extracting(PackObjectLocation::objectId)
@@ -75,7 +75,7 @@ class GitStorageApiTest {
             byte[] content = new byte[40000];
             new Random(81).nextBytes(content);
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, content);
-            PackId id = storage.packIds().getFirst();
+            PackChecksum id = storage.packIds().getFirst();
             byte[] expected = PackTestData.pack(PackTestData.blob(content));
             AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
             byte[] actual = storage.readPack(id, (size, input) -> {
@@ -97,7 +97,7 @@ class GitStorageApiTest {
     void readerFailureClosesInputAndLeavesPublishedPackReadable(boolean disk) throws Exception {
         try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
             PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
-            PackId id = storage.packIds().getFirst();
+            PackChecksum id = storage.packIds().getFirst();
             AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
             IOException failure = new IOException("consumer failed");
             assertThatThrownBy(() -> storage.readPack(id, (size, input) -> {
@@ -109,7 +109,7 @@ class GitStorageApiTest {
             byte[] expected = PackTestData.pack(PackTestData.blob(new byte[]{42}));
             assertThat(storage.readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
                     .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(expected));
-            assertThat(storage.readPack(new PackId("f".repeat(40)), (size, input) -> {
+            assertThat(storage.readPack(new PackChecksum("f".repeat(40)), (size, input) -> {
                 throw new AssertionError("An absent pack must not invoke the reader");
             })).isEmpty();
         }
@@ -119,7 +119,7 @@ class GitStorageApiTest {
     void rawPackReadDoesNotOpenAnAlreadyOpenDiskIndex() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory)) {
             PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
-            PackId id = storage.packIds().getFirst();
+            PackChecksum id = storage.packIds().getFirst();
             String hex = id.toHex();
             Path shard = directory.resolve("packs").resolve(hex.substring(0, 2));
             try (IndexedPack index = LocalIndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),

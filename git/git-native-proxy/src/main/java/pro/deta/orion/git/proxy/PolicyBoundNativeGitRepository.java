@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.util.List;
@@ -81,7 +81,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
 
     @Override
     public List<RefUpdateResult> publishReceivedPack(
-            Optional<PackId> received,
+            Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
         return provider.requireBinding(repositoryName, repository.name()).publish(received, updates, atomic);

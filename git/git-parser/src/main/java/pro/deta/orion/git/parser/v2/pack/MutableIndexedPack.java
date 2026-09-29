@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -32,9 +32,9 @@ public interface MutableIndexedPack extends IndexedPack {
 
     void flush() throws IOException;
 
-    void setId(PackId id) throws IOException;
+    void setId(PackChecksum id) throws IOException;
 
-    PackId finish(long dataEnd) throws IOException;
+    PackChecksum finish(long dataEnd) throws IOException;
 
     void requireMutable() throws IOException;
 

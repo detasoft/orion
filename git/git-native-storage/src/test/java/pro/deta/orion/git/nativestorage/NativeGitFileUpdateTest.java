@@ -12,7 +12,7 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -66,7 +66,7 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository")) {
             repository.files().saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
             Map<String, String> refs = repository.refs();
-            Set<PackId> packs = Set.copyOf(repository.storage().packIds());
+            Set<PackChecksum> packs = Set.copyOf(repository.storage().packIds());
             for (String path : List.of("../config.txt", "./config.txt")) {
                 assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
                         "invalid", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalArgumentException.class);
@@ -84,7 +84,7 @@ class NativeGitFileUpdateTest {
         repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
 
         assertThat(repository.storage().packIds()).hasSize(1);
-        PackId packId = repository.storage().packIds().iterator().next();
+        PackChecksum packId = repository.storage().packIds().iterator().next();
         assertThat(repository.storage().readPack(packId, (size, input) -> input.readBytes(4)))
                 .hasValueSatisfying(header -> assertThat(header).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII)));
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)

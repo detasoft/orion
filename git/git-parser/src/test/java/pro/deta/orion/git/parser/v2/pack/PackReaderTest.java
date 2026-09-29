@@ -5,7 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayOutputStream;
@@ -47,7 +47,7 @@ class PackReaderTest {
                         ids.add(end.objectId().orElseThrow());
                     }
                     case PackReadStep.End end -> {
-                        assertThat(end.id()).isEqualTo(new PackId(Arrays.copyOfRange(wire, wire.length - 20,
+                        assertThat(end.id()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, wire.length - 20,
                                 wire.length)));
                         ended = true;
                     }
@@ -152,7 +152,7 @@ class PackReaderTest {
             }
             assertThat(copied.toByteArray()).containsExactly(wire);
             PackReadStep.End end = (PackReadStep.End) step;
-            assertThat(end.id()).isEqualTo(new PackId(Arrays.copyOfRange(wire, PackHeader.SIZE, wire.length)));
+            assertThat(end.id()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, PackHeader.SIZE, wire.length)));
             assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
             assertThat(input.readUnsignedByte()).isEqualTo(42);
         }

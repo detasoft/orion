@@ -9,7 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -48,7 +48,7 @@ class FetchPackTest {
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, rootBytes);
             byte[] tipBytes = commit(tree, root);
             ObjectId tip = PackTestData.store(storage, GitObjectType.COMMIT, tipBytes);
-            PackId rootPack = storage.findPacksByObjectIds(List.of(root)).get(root).getFirst();
+            PackChecksum rootPack = storage.findPacksByObjectIds(List.of(root)).get(root).getFirst();
             String hex = rootPack.toHex();
             Path rootPath = directory.resolve("packs").resolve(hex.substring(0, 2))
                     .resolve(hex.substring(2) + ".pack");
@@ -153,7 +153,7 @@ class FetchPackTest {
                     new GitCapabilities(), Set.of());
             FetchPack pack = FetchPack.prepare(storage, index, plan);
             assertThat(pack.objectCount()).isEqualTo(2);
-            for (PackId id : storage.packIds()) {
+            for (PackChecksum id : storage.packIds()) {
                 String hex = id.toHex();
                 Path indexPath = directory.resolve("packs").resolve(hex.substring(0, 2))
                         .resolve(hex.substring(2) + ".mv");

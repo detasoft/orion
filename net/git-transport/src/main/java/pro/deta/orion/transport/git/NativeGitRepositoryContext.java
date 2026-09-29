@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
@@ -46,7 +46,7 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     }
 
     @Override
-    public Optional<URI> packUri(PackId id) {
+    public Optional<URI> packUri(PackChecksum id) {
         return packUriBase.map(base -> {
             while (base.endsWith("/")) {
                 base = base.substring(0, base.length() - 1);
@@ -106,7 +106,7 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     @Override
     public List<RefUpdateResult> publish(Optional<MutableIndexedPack> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
-        Optional<PackId> received = pack.isPresent()
+        Optional<PackChecksum> received = pack.isPresent()
                 ? Optional.of(storage().persist(pack.orElseThrow())) : Optional.empty();
         return NativeGitReceivePack.complete(name, repository, updates, atomic, accessHook,
                 accepted -> provider.publish(repository, received, accepted, atomic));

@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage.shared;
 
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.util.Collection;
@@ -46,7 +46,7 @@ public final class GitLock {
         return acquire("refs");
     }
 
-    public Lease lockPack(PackId packId) throws InterruptedException {
+    public Lease lockPack(PackChecksum packId) throws InterruptedException {
         return acquire(packId);
     }
 

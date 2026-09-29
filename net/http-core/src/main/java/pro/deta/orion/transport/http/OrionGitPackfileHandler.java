@@ -8,7 +8,7 @@ import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -66,7 +66,7 @@ final class OrionGitPackfileHandler {
             exchange.sendError(SC_NOT_FOUND);
             return;
         }
-        Optional<Long> sent = repository.get().storage().readPack(new PackId(packId),
+        Optional<Long> sent = repository.get().storage().readPack(new PackChecksum(packId),
                 (size, input) -> {
                     OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, PACK_CONTENT_TYPE)
                             .withHeader("Cache-Control", "no-cache")

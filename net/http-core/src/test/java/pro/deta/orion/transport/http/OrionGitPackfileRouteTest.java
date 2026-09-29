@@ -13,7 +13,7 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -259,7 +259,7 @@ class OrionGitPackfileRouteTest {
     }
 
     private record PublishedPackFixture(
-            PackId packId,
+            PackChecksum packId,
             byte[] packBytes) {
         private PublishedPackFixture {
             packBytes = packBytes.clone();

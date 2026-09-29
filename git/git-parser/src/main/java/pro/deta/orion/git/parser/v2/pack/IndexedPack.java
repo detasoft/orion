@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -26,9 +26,9 @@ public interface IndexedPack extends AutoCloseable {
 
     long size() throws IOException;
 
-    PackId id() throws IOException;
+    PackChecksum id() throws IOException;
 
-    boolean checksumMatches(PackId expected) throws IOException;
+    boolean checksumMatches(PackChecksum expected) throws IOException;
 
     <R> R readObject(long offset, GitObjectRead<R> reader) throws IOException;
 

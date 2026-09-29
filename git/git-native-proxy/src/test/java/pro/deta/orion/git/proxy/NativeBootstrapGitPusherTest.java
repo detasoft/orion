@@ -17,7 +17,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
@@ -98,7 +98,7 @@ class NativeBootstrapGitPusherTest {
                 Map.of("orion.xml", GitFile.regular("proxy change".getBytes())), Set.of(),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
-        Optional<PackId> received = ingest(repository, update);
+        Optional<PackChecksum> received = ingest(repository, update);
         Files.writeString(upstream.worktree().resolve("orion.xml"), "upstream change");
         upstream.git().add().addFilepattern("orion.xml").call();
         upstream.git().commit().setMessage("upstream update")
@@ -215,7 +215,7 @@ class NativeBootstrapGitPusherTest {
     private record Upstream(Git git, Path worktree, Path bare) {
     }
 
-    private static Optional<PackId> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
+    private static Optional<PackChecksum> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             MutableIndexedPack pack = repository.ingest(input);
             return Optional.of(repository.storage().persist(pack));

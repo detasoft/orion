@@ -7,7 +7,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -44,7 +44,7 @@ class GitPackObjectResolverTest {
         byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
                 delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
         try (MutableIndexedPack target = ingest(source, memory ? new InMemoryStorage().newPack() : storage.newPack())) {
-            PackId received = target.id();
+            PackChecksum received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(bytes(target)).containsExactly(source);
             assertThat(target.objectCount()).isEqualTo(5);
@@ -72,8 +72,8 @@ class GitPackObjectResolverTest {
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
         byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
         try (MutableIndexedPack target = ingest(source, storage.newPack())) {
-            PackId received = target.id();
-            PackId completed = new GitPackObjectResolver(target, storage).complete();
+            PackChecksum received = target.id();
+            PackChecksum completed = new GitPackObjectResolver(target, storage).complete();
             assertThat(completed).isNotEqualTo(received);
             assertThat(target.checksumMatches(completed)).isTrue();
             assertThat(target.objectCount()).isEqualTo(2);
@@ -93,7 +93,7 @@ class GitPackObjectResolverTest {
         byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
                 delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
         try (MutableIndexedPack target = ingest(source, new InMemoryStorage().newPack())) {
-            PackId received = target.id();
+            PackChecksum received = target.id();
             assertThat(new GitPackObjectResolver(target, storage).complete()).isEqualTo(received);
             assertThat(target.objectCount()).isEqualTo(3);
             assertThat(bytes(target)).containsExactly(source);

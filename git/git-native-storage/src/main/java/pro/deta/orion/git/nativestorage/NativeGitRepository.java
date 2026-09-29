@@ -11,7 +11,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -63,6 +63,10 @@ public class NativeGitRepository implements AutoCloseable {
 
     public GitIndexApi index() {
         return index;
+    }
+
+    public GitHashAlgorithm hashAlgorithm() {
+        return index().hashAlgorithm();
     }
 
     public String name() {
@@ -140,7 +144,7 @@ public class NativeGitRepository implements AutoCloseable {
         accessHook.beforeReceive(name());
         accessHook.beforeWrite(name());
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            PackId id = storage().persist(ingest(input));
+            PackChecksum id = storage().persist(ingest(input));
             return NativeGitReceivePack.complete(name(), this, updates, atomic, accessHook,
                     valid -> publishReceivedPack(Optional.of(id), valid, atomic));
         } catch (IOException failure) {
@@ -148,7 +152,7 @@ public class NativeGitRepository implements AutoCloseable {
         }
     }
 
-    public List<RefUpdateResult> publishReceivedPack(Optional<PackId> pack, List<RefUpdate> updates, boolean atomic) {
+    public List<RefUpdateResult> publishReceivedPack(Optional<PackChecksum> pack, List<RefUpdate> updates, boolean atomic) {
         return publishRefs(updates, atomic);
     }
 

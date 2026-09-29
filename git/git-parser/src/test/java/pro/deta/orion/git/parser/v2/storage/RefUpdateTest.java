@@ -33,6 +33,22 @@ class RefUpdateTest {
     }
 
     @Test
+    void parsesCreationAndDeletionForBothHashLengths() {
+        for (int length : new int[] {40, 64}) {
+            String id = "a".repeat(length);
+            String zero = "0".repeat(length);
+            RefUpdate creation = RefUpdate.fromWire(REF.value(), zero, id);
+            RefUpdate deletion = RefUpdate.fromWire(REF.value(), id, zero);
+            assertEquals(Optional.empty(), creation.expectedOld());
+            assertEquals(Optional.of(new ObjectId(id)), creation.newId());
+            assertEquals(Optional.of(new ObjectId(id)), deletion.expectedOld());
+            assertEquals(Optional.empty(), deletion.newId());
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> RefUpdate.fromWire(REF.value(), "a".repeat(40), "b".repeat(64)));
+    }
+
+    @Test
     void rejectsAnUpdateWithNeitherExpectedNorNewValue() {
         assertThrows(IllegalArgumentException.class,
                 () -> new RefUpdate(REF, Optional.empty(), Optional.empty()));

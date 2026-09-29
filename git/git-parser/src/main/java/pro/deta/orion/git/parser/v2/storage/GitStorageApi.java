@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
@@ -27,7 +27,7 @@ import java.util.Set;
 public interface GitStorageApi extends AutoCloseable {
     MutableIndexedPack newPack() throws IOException;
 
-    PackId persist(MutableIndexedPack pack) throws IOException;
+    PackChecksum persist(MutableIndexedPack pack) throws IOException;
 
     <R> Optional<R> readObject(ObjectId objectId, GitObjectRead<R> reader) throws IOException;
 
@@ -35,15 +35,15 @@ public interface GitStorageApi extends AutoCloseable {
 
     <R> R readObject(PackObjectLocation location, GitObjectRead<R> reader) throws IOException;
 
-    Set<ObjectId> packObjectIds(PackId id) throws IOException;
+    Set<ObjectId> packObjectIds(PackChecksum id) throws IOException;
 
     boolean exists(ObjectId objectId) throws IOException;
 
-    Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException;
+    Map<ObjectId, List<PackChecksum>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException;
 
-    List<PackId> packIds() throws IOException;
+    List<PackChecksum> packIds() throws IOException;
 
-    <R> Optional<R> readPack(PackId id, GitPackRead<R> reader) throws IOException;
+    <R> Optional<R> readPack(PackChecksum id, GitPackRead<R> reader) throws IOException;
 
     void close() throws IOException;
 }

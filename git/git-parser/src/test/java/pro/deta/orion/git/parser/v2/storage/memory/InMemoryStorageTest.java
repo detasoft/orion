@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -63,7 +63,7 @@ class InMemoryStorageTest {
             byte[] source = PackTestData.pack(deltas);
             try (MutableIndexedPack memoryPack = PackTestData.ingest(source, memory.newPack());
                  MutableIndexedPack diskPack = PackTestData.ingest(source, disk.newPack())) {
-                PackId completed = new GitPackObjectResolver(memoryPack, memory).complete();
+                PackChecksum completed = new GitPackObjectResolver(memoryPack, memory).complete();
                 assertThat(new GitPackObjectResolver(diskPack, disk).complete()).isEqualTo(completed);
                 assertThat(PackTestData.bytes(memoryPack)).isEqualTo(PackTestData.bytes(diskPack));
                 MutableIndexedPack toDisk = PackTestData.ingest(memoryPack, disk.newPack());
@@ -174,7 +174,7 @@ class InMemoryStorageTest {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            PackId published = storage.packIds().getFirst();
+            PackChecksum published = storage.packIds().getFirst();
             assertThat(storage.readObject(object, (type, size, base, input) -> {
                 try {
                     return executor.submit(() -> index.updateRefs(List.of(update(FIRST, null, object)), true))

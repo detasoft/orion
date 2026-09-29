@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -63,7 +63,7 @@ class IndexedPackTest {
     void reopensBytesAndObjectIndexTogetherAndRejectsMutations() throws Exception {
         Path staging = directory.resolve("staging");
         ObjectId id;
-        PackId packId;
+        PackChecksum packId;
         try (LocalIndexedPack pack = LocalIndexedPack.create(staging)) {
             id = writeBlob(pack);
             packId = new GitPackObjectResolver(pack, new InMemoryStorage()).complete();
@@ -148,7 +148,7 @@ class IndexedPackTest {
         MutableIndexedPack pack = storage.newPack();
         ObjectId id = writeBlob(pack);
         Path staging = memory ? null : ((LocalIndexedPack) pack).directory();
-        PackId expected = new GitPackObjectResolver(pack, storage).complete();
+        PackChecksum expected = new GitPackObjectResolver(pack, storage).complete();
         assertThat(storage.persist(pack)).isEqualTo(expected);
         if (!memory) {
             pack.close();
@@ -172,7 +172,7 @@ class IndexedPackTest {
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             ObjectId object = writeBlob(pack);
             assertThatThrownBy(pack::id).isInstanceOf(IOException.class);
-            PackId id = new GitPackObjectResolver(pack, storage).complete();
+            PackChecksum id = new GitPackObjectResolver(pack, storage).complete();
             pack.addObject(12, object, GitObjectType.BLOB, 3);
             assertThat(pack.id()).isEqualTo(id);
             try (MutableIndexedPack diskCopy = LocalIndexedPack.create(directory.resolve("copy"));
