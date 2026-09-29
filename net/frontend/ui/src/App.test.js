@@ -649,7 +649,7 @@ describe('Orion connection', () => {
     expect(wrapper.text()).toContain('platform/my-repo')
     expect(wrapper.text()).toContain('reported by Orion')
     expect(wrapper.text()).toContain('ssh://alice@git.example:2222/platform/my-repo.git')
-    expect(wrapper.text()).toContain('https://git.example/r/platform/my-repo')
+    expect(wrapper.text()).toContain('https://git.example/r/platform/my-repo.git')
     expect(wrapper.text()).toContain('git://git.example:9418/platform/my-repo')
     expect(wrapper.findAll('.clone-url')).toHaveLength(3)
   })
@@ -762,7 +762,15 @@ describe('Orion connection', () => {
     expect(wrapper.text()).toContain('Repository already exists')
   })
 
-  it('copies an authenticated HTTP clone command without exposing the Admin token', async () => {
+  it.each([
+    ['HTTP', 'http', 'project', 'project'],
+    ['HTTPS', 'https', 'project', 'project'],
+    ['HTTP', 'http', 'platform/my repo', 'platform/my%20repo'],
+    ['HTTPS', 'https', 'platform/my repo', 'platform/my%20repo'],
+  ])('copies a token-free %s clone command for %s %s', async (label, scheme, name, path) => {
+    client.transports.mockResolvedValue({
+      [scheme]: { enabled: true, url: `${scheme}://git.example` },
+    })
     const writeText = vi.fn()
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -771,16 +779,17 @@ describe('Orion connection', () => {
     const wrapper = mountApp()
     await connect(wrapper)
     await wrapper.get('.primary-button.compact').trigger('click')
-    await wrapper.get('input[placeholder="team/project"]').setValue('platform/console')
+    await wrapper.get('input[placeholder="team/project"]').setValue(name)
     await wrapper.get('form.modal').trigger('submit')
     await flushPromises()
     await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
 
-    await wrapper.get('[aria-label="Copy token-free HTTP clone command"]').trigger('click')
+    expect(wrapper.get('.clone-url code').text()).toBe(`${scheme}://git.example/r/${path}.git`)
+    await wrapper.get(`[aria-label="Copy token-free ${label} clone command"]`).trigger('click')
 
     expect(writeText).toHaveBeenCalledWith(
       'git --config-env=http.extraHeader=ORION_AUTH_HEADER'
-        + ' clone "http://localhost:8000/r/platform/console"',
+        + ` clone "${scheme}://git.example/r/${path}.git"`,
     )
     expect(writeText.mock.calls[0][0]).not.toContain('token')
     expect(wrapper.text()).toContain('POSIX shells and PowerShell')

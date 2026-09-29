@@ -221,8 +221,8 @@ function cloneUrls(repository) {
 
   const urls = [
     cloneUrl('SSH', transports.ssh, `/${name}.git`),
-    cloneUrl('HTTP', transports.http, `/r/${name}`),
-    cloneUrl('HTTPS', transports.https, `/r/${name}`),
+    cloneUrl('HTTP', transports.http, `/r/${name}.git`),
+    cloneUrl('HTTPS', transports.https, `/r/${name}.git`),
     cloneUrl('Native', transports.nativeGit, `/${name}`),
   ].filter(Boolean)
   const seen = new Set()

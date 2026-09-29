@@ -169,7 +169,7 @@ using the secret-prompt facilities of your shell. The UI then copies this
 token-free command:
 
 ```sh
-git --config-env=http.extraHeader=ORION_AUTH_HEADER clone "https://host/r/repository"
+git --config-env=http.extraHeader=ORION_AUTH_HEADER clone "https://host/r/repository.git"
 ```
 
 Unset `ORION_AUTH_HEADER` after the clone. The command is supported by current
