@@ -22,6 +22,7 @@ import pro.deta.orion.agent.server.registry.AgentRegistryException;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.agent.server.registry.SessionRegistryException;
+import pro.deta.orion.agent.server.registry.SessionRecord;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
@@ -30,6 +31,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -186,6 +188,13 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             throw new IllegalStateException("Agent session server is not running");
         }
         return commandService;
+    }
+
+    public synchronized List<SessionRecord> sessions() throws SessionRegistryException {
+        if (sessionRegistry == null) {
+            throw new IllegalStateException("Agent session server is not running");
+        }
+        return sessionRegistry.snapshot();
     }
 
     public synchronized Optional<AgentLabel> sessionOwner(SessionId sessionId)

@@ -26,13 +26,16 @@ const allNavItems = [
 const identity = ref(null)
 const navItems = computed(() => identity.value?.organization
   ? allNavItems.filter((item) => item.id === 'repositories')
-  : allNavItems.filter((item) => !['key-material', 'logs'].includes(item.id) || identity.value?.admin))
+  : allNavItems.filter((item) => item.id === 'terminal'
+    ? !identity.value || identity.value.admin
+    : !['key-material', 'logs'].includes(item.id) || identity.value?.admin))
 const signIn = ref(null)
 const providerRevision = ref(0)
 const OrganizationOidc = defineAsyncComponent(() => import('./components/OrganizationOidc.vue'))
 const OrganizationInvitations = defineAsyncComponent(() => import('./components/OrganizationInvitations.vue'))
 const OrganizationSignIn = defineAsyncComponent(() => import('./components/OrganizationSignIn.vue'))
 const activeView = ref('overview')
+const selectedSession = ref('')
 const search = ref('')
 const darkMode = ref(false)
 const sidebarOpen = ref(false)
@@ -117,16 +120,25 @@ function selectView(view, event) {
 }
 
 function readRoute() {
-  const requested = window.location.hash.slice(2)
+  const [requested, query = ''] = window.location.hash.slice(2).split('?')
   const available = identity.value ? navItems.value : allNavItems
   const view = window.location.hash.startsWith('#/') && available.some((item) => item.id === requested)
     ? requested : identity.value?.organization ? 'repositories' : 'overview'
-  if (window.location.hash !== `#/${view}`) {
-    window.history.replaceState(null, '', `#/${view}`)
+  const session = view === 'terminal' ? new URLSearchParams(query).get('session') ?? '' : ''
+  const hash = `#/${view}${session ? `?${new URLSearchParams({ session })}` : ''}`
+  if (window.location.hash !== hash) {
+    window.history.replaceState(null, '', hash)
   }
   activeView.value = view
+  selectedSession.value = session
   search.value = ''
   sidebarOpen.value = false
+}
+
+function selectSession(session) {
+  const hash = `#/terminal${session ? `?${new URLSearchParams({ session })}` : ''}`
+  if (window.location.hash !== hash) window.history.pushState(null, '', hash)
+  readRoute()
 }
 
 watch(identity, readRoute)
@@ -715,13 +727,15 @@ onUnmounted(() => {
 
         <template v-else-if="activeView === 'terminal'">
           <SessionTerminal
-            v-if="isConnected"
+            v-if="isConnected && identity?.admin"
             :token="settings.token"
+            :session-id="selectedSession"
+            @select-session="selectSession"
             @authorization-error="clearExpiredCredentials"
           />
           <div v-else class="empty-state panel">
             <h3>Connect to Orion first</h3>
-            <p>Click the server card to connect, then enter a Session ID.</p>
+            <p>Connect as an administrator using the server card, then choose a session.</p>
           </div>
         </template>
 

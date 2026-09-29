@@ -9,6 +9,20 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('loads sessions through the authenticated endpoint with cancellation', async () => {
+    const result = { sessions: [{ id: 'one', agent: 'agent-a', state: 'RUNNING' }] }
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const signal = new AbortController().signal
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    expect(await client.sessions(signal)).toEqual(result)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/sessions')
+    expect(init.headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(init.signal).toBe(signal)
+  })
+
   it('sends key creation through the authenticated admin endpoint', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
     const client = createOrionClient({ token: 'admin-token', fetchImpl })

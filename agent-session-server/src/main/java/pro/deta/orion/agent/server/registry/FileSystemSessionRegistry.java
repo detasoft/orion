@@ -165,6 +165,13 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
         return Optional.ofNullable(records.get(Objects.requireNonNull(sessionId, "sessionId")));
     }
 
+    public synchronized List<SessionRecord> snapshot() throws SessionRegistryException {
+        requireOpen();
+        List<SessionRecord> snapshot = new ArrayList<>(records.values());
+        snapshot.sort(Comparator.comparing(record -> record.reported().sessionId().value()));
+        return List.copyOf(snapshot);
+    }
+
     public synchronized List<SessionRecord> ownedBy(AgentLabel agentLabel)
             throws SessionRegistryException {
         requireOpen();

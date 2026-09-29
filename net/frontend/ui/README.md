@@ -74,7 +74,14 @@ connections, or leaving the page cancels the current polling operation.
 
 ## Session terminal
 
-Open **Terminal** after connecting and enter a Session ID. The view replays
+Connect as an application administrator and open **Terminal**. Choose a session
+from the list, which shows its ID, agent, and state, then click **Open session**.
+Use **Refresh** to reload the list. The list, terminal events, and commands all
+require administrator access; other users cannot access sessions.
+The selected session is included in the URL (`#/terminal?session=…`), so reloads,
+direct links, and browser Back/Forward restore it after authentication. **Close**
+removes the selection from the URL without stopping the server-side session.
+The view replays
 historical PTY output, then follows new committed events after the replay cursor.
 Input stays disabled during history replay so old terminal queries cannot send
 commands. Type or paste into the terminal after it starts following the session.

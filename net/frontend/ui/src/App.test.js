@@ -23,6 +23,7 @@ const client = {
   remoteAliases: vi.fn(),
   routes: vi.fn(),
   serverLogs: vi.fn(),
+  sessions: vi.fn(),
   transports: vi.fn(),
 }
 
@@ -102,6 +103,42 @@ beforeEach(() => {
 })
 
 describe('Orion navigation', () => {
+  it('restores a selected terminal session only after administrator authentication', async () => {
+    window.history.replaceState(null, '', '/#/terminal?session=session-1')
+    sessionStorage.setItem('orion.ui.token', 'token')
+    const identity = deferred()
+    client.me.mockReturnValueOnce(identity.promise)
+    const wrapper = mount(App, { global: { stubs: { SessionTerminal: {
+      props: ['token', 'sessionId'], template: '<div class="terminal-stub" />',
+    } } } })
+    expect(wrapper.find('.terminal-stub').exists()).toBe(false)
+    identity.resolve({ userId: 'admin', organization: '', admin: true })
+    await flushPromises()
+    const terminal = wrapper.getComponent('.terminal-stub')
+    expect(terminal.props('sessionId')).toBe('session-1')
+    terminal.vm.$emit('select-session', 'session-2')
+    await flushPromises()
+    expect(window.location.hash).toBe('#/terminal?session=session-2')
+    const changed = new Promise((resolve) => window.addEventListener('hashchange', resolve, { once: true }))
+    window.history.back()
+    await changed
+    await flushPromises()
+    expect(terminal.props('sessionId')).toBe('session-1')
+    terminal.vm.$emit('select-session', '')
+    await flushPromises()
+    expect(window.location.hash).toBe('#/terminal')
+  })
+
+  it('does not offer the terminal to an authenticated non-administrator', async () => {
+    window.history.replaceState(null, '', '/#/terminal?session=session-1')
+    client.me.mockResolvedValue({ userId: 'reader', organization: '', admin: false })
+    const wrapper = mountApp()
+    await connect(wrapper)
+    expect(wrapper.findAll('.primary-nav .nav-item').map((item) => item.text())).not.toContain('Terminal')
+    expect(window.location.hash).toBe('#/overview')
+    expect(client.sessions).not.toHaveBeenCalled()
+  })
+
   it('exposes section URLs as links and marks the current page', async () => {
     const wrapper = mountApp()
     const repositories = wrapper.get('.primary-nav a[href="#/repositories"]')
@@ -631,7 +668,8 @@ describe('Orion connection', () => {
     expect(terminal).toBeDefined()
     await terminal.trigger('click')
     expect(wrapper.text()).toContain('Connect to Orion first')
-    expect(wrapper.find('input[aria-label="Session ID"]').exists()).toBe(false)
+    expect(wrapper.find('select[aria-label="Session"]').exists()).toBe(false)
+    expect(client.sessions).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

@@ -6,9 +6,12 @@ import { createOrionClient } from '../lib/orion-api.js'
 import { followSessionTerminal } from '../lib/session-terminal.js'
 import { createSessionCommands } from '../lib/session-commands.js'
 
-const props = defineProps({ token: { type: String, required: true } })
-const emit = defineEmits(['authorization-error'])
+const props = defineProps({ token: { type: String, required: true }, sessionId: { type: String, default: '' } })
+const emit = defineEmits(['authorization-error', 'select-session'])
 const sessionId = ref('')
+const sessions = ref([])
+const listLoading = ref(false)
+const listError = ref('')
 const openedSession = ref('')
 const container = ref(null)
 const status = ref('')
@@ -17,6 +20,26 @@ const available = ref(false)
 const columns = ref(80)
 const rows = ref(24)
 let active
+let listRequest
+
+async function loadSessions() {
+  listRequest?.abort()
+  const request = new AbortController()
+  listRequest = request
+  sessions.value = []
+  listLoading.value = true
+  listError.value = ''
+  try {
+    const result = await createOrionClient({ token: props.token }).sessions(request.signal)
+    if (!request.signal.aborted) sessions.value = result.sessions
+  } catch (error) {
+    if (request.signal.aborted) return
+    listError.value = error.message || 'Could not load sessions'
+    if (error.status === 401 || error.status === 403) emit('authorization-error')
+  } finally {
+    if (!request.signal.aborted) listLoading.value = false
+  }
+}
 
 function detach() {
   active?.abort.abort()
@@ -42,8 +65,12 @@ function resize() {
   active.commands.send({ operation: 'resize', columns: columns.value, rows: rows.value })
 }
 
-async function openSession() {
-  const id = sessionId.value.trim()
+function selectSession() {
+  if (sessionId.value === props.sessionId) openSession(sessionId.value)
+  else emit('select-session', sessionId.value)
+}
+
+async function openSession(id) {
   if (!id) return
   detach()
   const terminal = new Terminal({ disableStdin: true, cursorBlink: false, scrollback: 10000 })
@@ -86,16 +113,38 @@ async function openSession() {
 }
 
 watch(() => props.token, detach)
-onBeforeUnmount(detach)
+watch(() => props.token, loadSessions, { immediate: true })
+watch(() => props.sessionId, (id) => {
+  sessionId.value = id
+  if (id) openSession(id)
+  else detach()
+}, { immediate: true })
+onBeforeUnmount(() => {
+  listRequest?.abort()
+  detach()
+})
 </script>
 
 <template>
   <section class="panel content-panel session-terminal">
-    <form class="terminal-controls" @submit.prevent="openSession">
-      <label>Session ID <input v-model="sessionId" aria-label="Session ID" required /></label>
+    <form class="terminal-controls" @submit.prevent="selectSession">
+      <label>Session
+        <select v-model="sessionId" aria-label="Session" required :disabled="listLoading">
+          <option disabled value="">Choose a session</option>
+          <option v-for="session in sessions" :key="session.id" :value="session.id">
+            {{ session.id }} — {{ session.agent }} — {{ session.state }}
+          </option>
+        </select>
+      </label>
       <button class="primary-button" :disabled="!sessionId.trim()">Open session</button>
-      <button v-if="openedSession" type="button" class="secondary-button" @click="detach">Close</button>
+      <button v-if="openedSession" type="button" class="secondary-button" aria-label="Close session"
+        @click="emit('select-session', '')">Close</button>
+      <button type="button" class="secondary-button" aria-label="Refresh sessions" :disabled="listLoading"
+        @click="loadSessions">Refresh</button>
     </form>
+    <p v-if="listLoading">Loading sessions…</p>
+    <p v-else-if="listError" role="alert">{{ listError }}</p>
+    <p v-else-if="sessions.length === 0">No sessions available.</p>
     <p v-if="!openedSession">Open a session to view its terminal history and live output.</p>
     <p v-else>Session {{ openedSession }}</p>
     <form v-if="openedSession" class="terminal-controls" @submit.prevent="resize">
@@ -117,6 +166,8 @@ onBeforeUnmount(detach)
 .session-terminal { padding: 24px; }
 .terminal-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
 .terminal-controls label { display: grid; gap: 8px; }
-.terminal-controls input { padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.terminal-controls input, .terminal-controls select {
+  padding: 8px; border: 1px solid var(--border); border-radius: 6px;
+}
 .terminal-viewport { overflow: auto; background: #000; padding: 12px; }
 </style>

@@ -4,7 +4,7 @@ import { encode } from 'cbor2'
 
 const { terminals, client } = vi.hoisted(() => ({
   terminals: [],
-  client: { sessionEvents: vi.fn(), sendSessionCommand: vi.fn(), sessionCommandStatus: vi.fn() },
+  client: { sessions: vi.fn(), sessionEvents: vi.fn(), sendSessionCommand: vi.fn(), sessionCommandStatus: vi.fn() },
 }))
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
@@ -30,6 +30,10 @@ const sources = []
 beforeEach(() => {
   terminals.length = 0
   sources.length = 0
+  client.sessions.mockReset().mockResolvedValue({ sessions: [
+    { id: 'session-1', agent: 'agent-a', state: 'RUNNING' },
+    { id: 'session-2', agent: 'agent-b', state: 'EXITED' },
+  ] })
   client.sendSessionCommand.mockReset().mockResolvedValue({ phase: 'CONFIRMED', outcome: 'SUCCEEDED' })
   client.sessionCommandStatus.mockReset()
   client.sessionEvents.mockReset().mockImplementation((id, after, signal, follow) => {
@@ -40,7 +44,9 @@ beforeEach(() => {
       },
     }), { headers: { 'Content-Type': 'application/cbor-seq' } }))
   })
-  wrapper = mount(SessionTerminal, { props: { token: 'token' } })
+  wrapper = mount(SessionTerminal, { props: {
+    token: 'token', onSelectSession: (sessionId) => wrapper.setProps({ sessionId }),
+  } })
 })
 
 afterEach(() => {
@@ -49,12 +55,83 @@ afterEach(() => {
 })
 
 async function open(id = 'session-1') {
-  await wrapper.get('input').setValue(id)
+  await flushPromises()
+  await wrapper.get('select[aria-label="Session"]').setValue(id)
   await wrapper.get('form').trigger('submit')
   await flushPromises()
 }
 
 describe('terminal view lifecycle', () => {
+  it('allows retrying the selected session after its initial open failed', async () => {
+    client.sessionEvents.mockRejectedValueOnce(Object.assign(new Error('Session not found'), { status: 404 }))
+    await open()
+    expect(wrapper.get('[role="status"]').text()).toBe('Session not found')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(terminals).toHaveLength(2)
+    expect(terminals[0].dispose).toHaveBeenCalledOnce()
+    expect(wrapper.get('[role="status"]').text()).toBe('Following session')
+  })
+
+  it('lists sessions with their agent and state without opening one automatically', async () => {
+    await flushPromises()
+    expect(wrapper.get('select').text()).toContain('session-1 — agent-a — RUNNING')
+    expect(wrapper.get('select').text()).toContain('session-2 — agent-b — EXITED')
+    expect(client.sessionEvents).not.toHaveBeenCalled()
+  })
+
+  it('opens the session selected by the route and follows route changes', async () => {
+    await wrapper.setProps({ sessionId: 'session-1' })
+    await flushPromises()
+    const signal = client.sessionEvents.mock.calls[0][2]
+    await wrapper.setProps({ sessionId: 'session-2' })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.text()).toContain('Session session-2')
+    await wrapper.setProps({ sessionId: '' })
+    expect(terminals[1].dispose).toHaveBeenCalledOnce()
+  })
+
+  it('shows an empty list and allows it to be refreshed', async () => {
+    client.sessions.mockResolvedValueOnce({ sessions: [] })
+    await flushPromises()
+    await wrapper.get('[aria-label="Refresh sessions"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No sessions available')
+    await wrapper.get('[aria-label="Refresh sessions"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('select').text()).toContain('session-1')
+  })
+
+  it.each([403, 503])('reports list failure %s and allows retry', async (status) => {
+    await flushPromises()
+    client.sessions.mockRejectedValueOnce(Object.assign(new Error('List unavailable'), { status }))
+    await wrapper.get('[aria-label="Refresh sessions"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('List unavailable')
+    expect(Boolean(wrapper.emitted('authorization-error'))).toBe(status === 403)
+    await wrapper.get('[aria-label="Refresh sessions"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('List unavailable')
+  })
+
+  it('ignores list results from replaced credentials and cancels on unmount', async () => {
+    await flushPromises()
+    let reject
+    client.sessions.mockImplementationOnce(() => new Promise((resolve, fail) => { reject = fail }))
+    await wrapper.get('[aria-label="Refresh sessions"]').trigger('click')
+    const signal = client.sessions.mock.lastCall[0]
+    await wrapper.setProps({ token: 'new-token' })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    reject(Object.assign(new Error('Old token expired'), { status: 403 }))
+    await flushPromises()
+    expect(wrapper.emitted('authorization-error')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('Old token expired')
+    const currentSignal = client.sessions.mock.lastCall[0]
+    wrapper.unmount()
+    expect(currentSignal.aborted).toBe(true)
+  })
   it('suppresses terminal replies during history and enables input after the cursor handoff', async () => {
     let history
     client.sessionEvents.mockImplementationOnce(() => Promise.resolve(new Response(new ReadableStream({
@@ -194,7 +271,7 @@ describe('terminal view lifecycle', () => {
     expect(oldSignal.aborted).toBe(true)
     expect(terminals[0].dispose).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('Session session-2')
-    await wrapper.get('button[type="button"]').trigger('click')
+    await wrapper.get('[aria-label="Close session"]').trigger('click')
     expect(client.sessionEvents.mock.calls[3][2].aborted).toBe(true)
     expect(terminals[1].dispose).toHaveBeenCalledOnce()
     expect(wrapper.get('[role="status"]').text()).toBe('')

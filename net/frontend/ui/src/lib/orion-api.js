@@ -150,6 +150,9 @@ export function createOrionClient(options = {}) {
         method: 'POST', body: JSON.stringify({ id, action }), signal,
       })
     },
+    sessions(signal) {
+      return request('/api/admin/sessions', { signal })
+    },
     sessionEvents(sessionId, after, signal, follow) {
       const query = new URLSearchParams({ follow: String(follow) })
       if (after !== null) query.set('after', after)
