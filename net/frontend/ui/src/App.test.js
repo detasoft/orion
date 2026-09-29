@@ -94,6 +94,45 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it.each(['', '   '])('requires a token before testing the connection with %j', async (token) => {
+    const wrapper = mountApp()
+    try {
+      await wrapper.get('.server-card').trigger('click')
+      await wrapper.get('input[placeholder="Bearer token"]').setValue(token)
+      await wrapper.get('form.modal .secondary-button').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('.toast').text()).toBe('Enter an Admin API token before testing the connection.')
+      expect(wrapper.get('.connection-result').text()).toBe('Connection failed')
+      expect(client.routes).not.toHaveBeenCalled()
+      expect(client.lifecycleState).not.toHaveBeenCalled()
+      expect(client.transports).not.toHaveBeenCalled()
+      expect(wrapper.get('.server-card').text()).toContain('Not connected')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('verifies a supplied token without saving the draft connection', async () => {
+    const wrapper = mountApp()
+    try {
+      await wrapper.get('.server-card').trigger('click')
+      await wrapper.get('input[placeholder="Bearer token"]').setValue('  candidate-token  ')
+      await wrapper.get('form.modal .secondary-button').trigger('click')
+      await flushPromises()
+
+      expect(createOrionClient).toHaveBeenLastCalledWith({ token: 'candidate-token' })
+      expect(client.routes).toHaveBeenCalledOnce()
+      expect(client.lifecycleState).toHaveBeenCalledOnce()
+      expect(client.transports).toHaveBeenCalledOnce()
+      expect(wrapper.get('.connection-result').text()).toBe('Connection verified')
+      expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+      expect(wrapper.get('.server-card').text()).toContain('Not connected')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('opens a token-only connection form from either connection entry point', async () => {
     const wrapper = mountApp()
     for (const entry of [wrapper.get('.connection-empty .primary-button'), wrapper.get('.server-card')]) {

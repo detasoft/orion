@@ -9,6 +9,20 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it.each([
+    [401, 'text/html;charset=iso-8859-1', 'Authentication required. Enter a valid token.'],
+    [403, 'text/html;charset=iso-8859-1', 'Access denied. Check your token and permissions.'],
+    [502, 'application/xhtml+xml', 'Orion returned 502'],
+  ])('reports HTML errors for status %i as readable messages', async (status, contentType, message) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(
+      `<html><head><title>Error ${status}</title></head><body>Server error</body></html>`,
+      { status, headers: { 'Content-Type': contentType } },
+    ))
+    const client = createOrionClient({ fetchImpl })
+
+    await expect(client.routes()).rejects.toMatchObject({ status, message })
+  })
+
   it('lists public key material and starts ACME issuance with the administrator token', async () => {
     const fetchImpl = vi.fn(async (url) => url.endsWith('/key-material')
       ? new Response(JSON.stringify({ entries: [] }), { headers: { 'Content-Type': 'application/json' } })

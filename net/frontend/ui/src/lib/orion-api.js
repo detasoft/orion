@@ -86,8 +86,16 @@ export function createOrionClient(options = {}) {
 
     const response = await fetchImpl(`${baseUrl}${path}`, { ...init, headers })
     if (!response.ok) {
-      const detail = await response.text()
-      const error = new Error(detail || `Orion returned ${response.status}`)
+      const contentType = (response.headers.get('content-type') ?? '').toLowerCase()
+      const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml+xml')
+      const detail = isHtml ? '' : await response.text()
+      let message = detail || `Orion returned ${response.status}`
+      if (!detail && response.status === 401) {
+        message = 'Authentication required. Enter a valid token.'
+      } else if (!detail && response.status === 403) {
+        message = 'Access denied. Check your token and permissions.'
+      }
+      const error = new Error(message)
       error.status = response.status
       throw error
     }

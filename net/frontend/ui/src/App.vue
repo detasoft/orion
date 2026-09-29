@@ -307,6 +307,11 @@ async function createRepository() {
 async function testConnection() {
   const attempt = ++draftConnectionAttempt
   const token = settingsDraft.value.token.trim()
+  if (!token) {
+    draftConnectionState.value = 'error'
+    showToast('Enter an Admin API token before testing the connection.', 'error')
+    return
+  }
   draftConnectionState.value = 'checking'
   const candidate = createOrionClient({ token })
   try {
