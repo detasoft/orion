@@ -161,6 +161,8 @@ public class AcmeCertificateService {
                 IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
                 Optional<List<X509Certificate>> chain = keyMaterial.certificateChain(settings.material());
                 if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
+                    LOG.warn("Starting ACME certificate renewal: domains={}, expiresAt={}, attemptAt={}",
+                            settings.domains(), chain.orElseThrow().getFirst().getNotAfter().toInstant(), now);
                     issueRecorded(settings, now, true);
                 }
             } catch (ConfigurationUnavailableException disabled) {

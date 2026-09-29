@@ -7,6 +7,11 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.SSLContext;
 import java.net.ServerSocket;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.OrionDesiredState;
@@ -182,6 +187,46 @@ class AcmeCertificateServiceTest {
 
             assertThat(service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain()).hasSize(1);
             assertThat(issuer.issueCalls()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void warnsForEachActualRenewalAttemptWithoutLoggingIdleChecks() throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(AcmeCertificateService.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        logger.setLevel(Level.WARN);
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            Instant due = Instant.parse(service.renewalStatus().nextAttempt());
+            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            assertThat(appender.list).isEmpty();
+            issuer.failure = new AcmeCertificateIssueException("private provider response");
+            service.maintainCertificate(due, () -> {});
+            assertThat(appender.list).hasSize(2);
+            assertThat(appender.list.getFirst().getLevel()).isEqualTo(Level.WARN);
+            assertThat(appender.list.getFirst().getFormattedMessage())
+                    .contains("Starting ACME certificate renewal", "example.test",
+                            initial.getNotAfter().toInstant().toString(), due.toString())
+                    .doesNotContain("private provider response", "admin@example.test", "eab");
+            service.maintainCertificate(due.plusSeconds(60), () -> {});
+            assertThat(appender.list).hasSize(2);
+            issuer.failure = null;
+            service.maintainCertificate(due.plusSeconds(3600), () -> {});
+            assertThat(appender.list).hasSize(3);
+            assertThat(appender.list.getLast().getLevel()).isEqualTo(Level.WARN);
+            assertThat(appender.list.getLast().getFormattedMessage())
+                    .contains("Starting ACME certificate renewal", due.plusSeconds(3600).toString());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+            logger.setLevel(previousLevel);
         }
     }
 
