@@ -52,11 +52,16 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
             }
             try {
                 ServerSocket listener = new ServerSocket();
-                listener.bind(
-                        new InetSocketAddress(
-                                config.getAddress(),
-                                config.getPort()),
-                        config.getBacklog());
+                try {
+                    listener.bind(
+                            new InetSocketAddress(
+                                    config.getAddress(),
+                                    config.getPort()),
+                            config.getBacklog());
+                } catch (IOException error) {
+                    closeListener(listener);
+                    throw error;
+                }
                 serverSocket = listener;
                 acceptThread = new Thread(
                         () -> acceptLoop(listener),

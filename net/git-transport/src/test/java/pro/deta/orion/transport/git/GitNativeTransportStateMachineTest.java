@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import com.sun.management.UnixOperatingSystemMXBean;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,11 @@ import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.util.Result;
 
 import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
+import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.AFTER_STATE_ENTERED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
@@ -76,6 +82,70 @@ class GitNativeTransportStateMachineTest {
         }
 
         assertFalse(service.isRunning());
+    }
+
+    @Test
+    void occupiedPortFailureCanBeStoppedAndStartedAfterThePortIsReleased() throws Exception {
+        GitTransportConfig config = config(true);
+        GitNativeTransportService service = new GitNativeTransportService(
+                config, new DefaultGitNativeRepositoryService(new InMemoryNativeGitRepositoryProvider()));
+
+        try {
+            try (ServerSocket occupied = new ServerSocket()) {
+                occupied.bind(new InetSocketAddress("127.0.0.1", 0));
+                config.setPort(occupied.getLocalPort());
+
+                IllegalStateException failure = assertThrows(IllegalStateException.class, service::onStart);
+                assertTrue(failure.getCause() instanceof BindException);
+                assertFalse(service.isRunning());
+                assertEquals(0, service.boundPort());
+                service.onStop();
+                service.onStop();
+            }
+
+            service.onStart();
+            assertTrue(service.isRunning());
+            assertEquals(config.getPort(), service.boundPort());
+        } finally {
+            service.onStop();
+        }
+
+        assertFalse(service.isRunning());
+        assertEquals(0, service.boundPort());
+        try (ServerSocket rebound = new ServerSocket()) {
+            rebound.bind(new InetSocketAddress("127.0.0.1", config.getPort()));
+            assertEquals(config.getPort(), rebound.getLocalPort());
+        }
+    }
+
+    @Test
+    void failedBindsDoNotRetainFileDescriptors() throws Exception {
+        OperatingSystemMXBean operatingSystem = ManagementFactory.getOperatingSystemMXBean();
+        assumeTrue(operatingSystem instanceof UnixOperatingSystemMXBean,
+                "The runtime does not expose the open file descriptor count");
+        UnixOperatingSystemMXBean unix = (UnixOperatingSystemMXBean) operatingSystem;
+        GitTransportConfig config = config(true);
+        GitNativeTransportService service = new GitNativeTransportService(
+                config, new DefaultGitNativeRepositoryService(new InMemoryNativeGitRepositoryProvider()));
+
+        try (ServerSocket occupied = new ServerSocket()) {
+            occupied.bind(new InetSocketAddress("127.0.0.1", 0));
+            config.setPort(occupied.getLocalPort());
+            assertThrows(IllegalStateException.class, service::onStart);
+            service.onStop();
+            long before = unix.getOpenFileDescriptorCount();
+
+            for (int attempt = 0; attempt < 32; attempt++) {
+                assertThrows(IllegalStateException.class, service::onStart);
+                service.onStop();
+            }
+
+            long after = unix.getOpenFileDescriptorCount();
+            assertTrue(after <= before,
+                    () -> "Failed binds retained descriptors: before=" + before + ", after=" + after);
+        } finally {
+            service.onStop();
+        }
     }
 
     @Test
