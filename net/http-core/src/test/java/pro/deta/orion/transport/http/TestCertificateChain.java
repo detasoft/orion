@@ -30,6 +30,12 @@ final class TestCertificateChain {
         return issue(subject, keyPair, subject, keyPair, false);
     }
 
+    static X509Certificate selfSignedLeaf(String commonName, KeyPair keyPair, Instant before, Instant after)
+            throws Exception {
+        X500Principal subject = new X500Principal("CN=" + commonName);
+        return issue(subject, keyPair, subject, keyPair, false, before, after);
+    }
+
     static Authority root(String commonName) throws Exception {
         KeyPair keyPair = keyPair();
         X500Principal subject = new X500Principal("CN=" + commonName);
@@ -58,11 +64,18 @@ final class TestCertificateChain {
             KeyPair subjectKeyPair,
             boolean authority) throws Exception {
         Instant now = Instant.now();
+        return issue(issuer, issuerKeyPair, subject, subjectKeyPair, authority,
+                now.minus(1, ChronoUnit.DAYS), now.plus(30, ChronoUnit.DAYS));
+    }
+
+    private static X509Certificate issue(X500Principal issuer, KeyPair issuerKeyPair,
+            X500Principal subject, KeyPair subjectKeyPair, boolean authority, Instant before, Instant after)
+            throws Exception {
         X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
                 issuer,
                 BigInteger.valueOf(SERIAL.getAndIncrement()),
-                Date.from(now.minus(1, ChronoUnit.DAYS)),
-                Date.from(now.plus(30, ChronoUnit.DAYS)),
+                Date.from(before),
+                Date.from(after),
                 subject,
                 subjectKeyPair.getPublic());
         builder.addExtension(Extension.basicConstraints, true, new BasicConstraints(authority));

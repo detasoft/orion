@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import java.time.Instant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
@@ -60,7 +62,9 @@ class AcmeConfigurationServiceTest {
         OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.of(https), List.of(), List.of()), List.of());
         desired.publish(initial, Optional.of("r1"));
-        AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null, null);
+        AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null,
+                new AcmeCertificateService(new OrionConfiguration(), desired,
+                        AcmeKeyMaterialCapability.unavailable(), null, null));
         AcmeConfigurationService.View view = service.view();
         assertThat(view.enabled()).isFalse();
         assertThat(view.directoryUrl()).isEqualTo("https://acme-staging-v02.api.letsencrypt.org/directory");
@@ -135,7 +139,17 @@ class AcmeConfigurationServiceTest {
             assertThat(new OrionAdminAcmeCertificateRoute(restarted, new ObjectMapper())
                     .doPost(AcmeAdministrationTest.httpRequest("POST", "/api/admin/acme/certificate", "",
                             AcmeAdministrationTest.admin())).status()).isEqualTo(200);
-            assertThat(accountKeys).hasSize(2);
+            Instant due = Instant.parse(restarted.renewalStatus().nextAttempt());
+            restarted.maintainCertificate(due, () -> {});
+            assertThat(accountKeys).hasSize(3);
+            assertThat(service.view().renewal().state()).isEqualTo("stopped");
+            assertThat(dispatcher.dispatch(AcmeAdministrationTest.request("/acme show",
+                    AcmeAdministrationTest.admin())))
+                    .isInstanceOfSatisfying(CommandResult.ObjectValue.class, shown ->
+                            assertThat(shown.fields().get("nextAttempt").asText()).isNotBlank());
+            assertThat(new ObjectMapper().writeValueAsString(service.view()))
+                    .contains("lastSuccess", "nextAttempt", "stopped").doesNotContain(EAB_KEY);
+            assertThat(accountKeys.get(2).getPrivate()).isEqualTo(accountKeys.get(0).getPrivate());
             assertThat(accountKeys.get(0).getPrivate()).isEqualTo(accountKeys.get(1).getPrivate());
             assertThat(restarted.savedCertificate()).isPresent();
             assertThatThrownBy(() -> restarted.issue(new AcmeCertificateService.IssueRequest(
@@ -154,7 +168,8 @@ class AcmeConfigurationServiceTest {
         try (OrionKeyMaterial owner = owner(store)) {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.current().document(), owner.configurationCipher());
-            AcmeConfigurationService service = new AcmeConfigurationService(desired, secrets, null, null);
+            AcmeConfigurationService service = new AcmeConfigurationService(desired, secrets, null,
+                    new AcmeCertificateService(new OrionConfiguration(), desired, owner.acme(), null, secrets));
             saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             desired.publish(saved, Optional.of("r2"));
             OrionAcmeConfiguration acme = saved.system().https().orElseThrow().acme().orElseThrow();
@@ -184,7 +199,9 @@ class AcmeConfigurationServiceTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
         desired.publish(initial, Optional.of("r1"));
-        AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null, null);
+        AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null,
+                new AcmeCertificateService(new OrionConfiguration(), desired,
+                        AcmeKeyMaterialCapability.unavailable(), null, null));
         assertThatThrownBy(() -> service.updated(initial, settings("zerossl", "", "")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.updated(initial, settings("custom", "id", "")))

@@ -113,9 +113,19 @@ is no separate checkbox.
 
 The ACME account key and settings survive restarts. Subsequent issuance reuses
 the registered account, without replaying EAB: some providers, including Google,
-invalidate EAB after registration. This supports future automatic renewal;
-there is currently no automatic renewal scheduler. Issuance saves the certificate
-but does not enable the HTTPS listener.
+invalidate EAB after registration. After the first manual issuance, Orion checks
+for renewal every minute while its HTTP server is running and ACME is enabled.
+Renewal begins when one third of the certificate's lifetime remains, capped at
+30 days before expiry. Failed attempts retry after one hour; manual issuance is
+still available. HTTP-01 must remain reachable on port 80.
+
+The running HTTPS listener picks up a changed certificate on the next check,
+without restarting Orion or disconnecting existing clients. Activation failures
+retry without ordering another certificate. Issuance does not enable a disabled
+HTTPS listener or change its listener and client-authentication settings.
+**Key material** (Refresh) and `/acme show` report expiry, the next attempt, the
+last result, and activation errors. Attempt history is process-local; after a
+restart the renewal date is reconstructed from the saved certificate.
 
 Use `--config <location>` to point Orion at a different YAML or TOML
 configuration. Configuration paths can use `env:NAME`, for example

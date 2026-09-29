@@ -35,6 +35,8 @@ import pro.deta.orion.schema.orion.OrionMaterialReference;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.GeneralSecurityException;
+import java.security.cert.X509Certificate;
+import javax.net.ssl.SSLContext;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -57,6 +59,8 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private final OrionHttpRouteServlet rootServlet;
     private final OrionAuthorizationFilter authorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
+    @Getter(lombok.AccessLevel.NONE)
+    private volatile ActiveTls activeTls;
 
     @Inject
     public JettyHTTPServer(
@@ -113,6 +117,33 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         return boundPort("https");
     }
 
+    void reloadHttpsCertificate() {
+        ActiveTls current = activeTls;
+        if (current == null || !isRunning()) return;
+        try {
+            List<X509Certificate> chain = tls.certificateChain(current.material());
+            if (chain.equals(current.chain())) return;
+            SSLContext replacement = tls.createContext(current.material());
+            SSLContext previous = current.factory().getSslContext();
+            try {
+                current.factory().reload(factory -> factory.setSslContext(replacement));
+            } catch (Exception failure) {
+                try {
+                    current.factory().reload(factory -> factory.setSslContext(previous));
+                } catch (Exception rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
+            }
+            activeTls = new ActiveTls(current.material(), current.factory(), List.copyOf(chain));
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot activate the saved HTTPS certificate", failure);
+        }
+    }
+
+    private record ActiveTls(TlsMaterialConfiguration material, SslContextFactory.Server factory,
+                             List<X509Certificate> chain) {}
+
     private Server getNewServer() {
         try {
             QueuedThreadPool threadPool = new QueuedThreadPool(10, 2, 120);
@@ -165,7 +196,9 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         OrionHttpsConfiguration https = configured.orElseThrow();
         TlsMaterialConfiguration material = tlsMaterial(https);
         SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+        List<X509Certificate> chain = tls.certificateChain(material);
         sslContextFactory.setSslContext(tls.createContext(material));
+        activeTls = new ActiveTls(material, sslContextFactory, List.copyOf(chain));
         sslContextFactory.setWantClientAuth(
                 material.clientAuthentication() == TlsClientAuthentication.WANT);
         sslContextFactory.setNeedClientAuth(
@@ -217,6 +250,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     private void destroyFailedServer() {
+        activeTls = null;
         Server server = jettyServer.getAndSet(null);
         if (server == null) {
             return;
@@ -234,6 +268,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     public void onStop() {
+        activeTls = null;
         Server server = jettyServer.getAndSet(null);
         if (server == null) {
             return;

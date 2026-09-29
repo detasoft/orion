@@ -159,7 +159,8 @@ class TransportLifecycleStateMachineTest {
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
-                disabled, desiredState, TlsCapability.unavailable(), null, null, null));
+                disabled, desiredState, TlsCapability.unavailable(), null, null, null),
+                () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); });
     }
 
     private static Throwable rootCause(Throwable error) {

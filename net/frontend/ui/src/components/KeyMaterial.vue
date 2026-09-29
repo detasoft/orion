@@ -11,6 +11,7 @@ const message = ref('')
 const error = ref('')
 const configurationLoading = ref(false)
 const configured = ref(false)
+const renewal = ref(null)
 const form = reactive({ revision: '', enabled: false, provider: 'letsencrypt', directoryUrl: '',
   accountEmail: '', domains: '', eabKeyId: '', eabHmacKey: '', eabConfigured: false })
 const presets = ref([])
@@ -33,6 +34,7 @@ async function loadConfiguration() {
     const response = await createOrionClient({ token: props.token }).acmeConfiguration()
     if (current !== attempt) return
     Object.assign(form, response, { domains: response.domains.join(', '), eabHmacKey: '' })
+    renewal.value = response.renewal
     presets.value = response.presets
     savedSettings = settingsKey()
     configured.value = true
@@ -91,7 +93,17 @@ async function saveConfiguration(issue = false) {
     if (issue) await client.issueAcmeCertificate()
     if (current !== attempt) return
     message.value = issue ? 'Certificate issued and saved.' : 'ACME settings saved.'
+    const statusAttempt = issue ? current + 1 : current
     if (issue) await loadEntries()
+    if (statusAttempt !== attempt) return
+    try {
+      const response = await client.acmeConfiguration()
+      if (statusAttempt === attempt) renewal.value = response.renewal
+    } catch (failure) {
+      if (statusAttempt !== attempt) return
+      error.value = 'Could not refresh renewal status.'
+      if (failure?.status === 401 || failure?.status === 403) emit('authorization-error')
+    }
   } catch (failure) {
     if (current !== attempt) return
     if (failure?.status === 401 || failure?.status === 403) {
@@ -105,7 +117,12 @@ async function saveConfiguration(issue = false) {
   }
 }
 
-watch(() => props.token, () => { entries.value = []; loadEntries(); loadConfiguration() }, { immediate: true })
+watch(() => props.token, () => {
+  entries.value = []
+  renewal.value = null
+  loadEntries()
+  loadConfiguration()
+}, { immediate: true })
 onBeforeUnmount(() => { attempt += 1 })
 </script>
 
@@ -157,6 +174,16 @@ onBeforeUnmount(() => { attempt += 1 })
         </div>
       </fieldset>
     </form>
+    <div v-if="renewal" class="renewal-status" aria-label="Automatic certificate renewal">
+      <p>Automatic renewal: {{ renewal.state.replaceAll('_', ' ') }}</p>
+      <p v-if="renewal.expiresAt">Certificate expires: {{ renewal.expiresAt }}</p>
+      <p v-if="renewal.nextAttempt">Next attempt: {{ renewal.nextAttempt }}</p>
+      <p v-if="renewal.lastAttempt">Last attempt: {{ renewal.lastAttempt }}</p>
+      <p v-if="renewal.lastSuccess">Last successful issuance: {{ renewal.lastSuccess }}</p>
+      <p v-if="renewal.message" role="status">{{ renewal.message }}</p>
+      <p v-if="renewal.activationError" class="material-error" role="alert">{{ renewal.activationError }}</p>
+      <p>Checks run every minute after the first certificate is issued. Failed renewals retry after one hour.</p>
+    </div>
     <p v-if="message" class="material-message" role="status">{{ message }}</p>
     <p v-if="error" class="material-error" role="alert">{{ error }}</p>
     <div v-if="loading && !entries.length" class="empty-state" role="status">Loading key material…</div>

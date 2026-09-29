@@ -53,7 +53,8 @@ public final class AcmeConfigurationService {
         }
         return new View(snapshot.revision().orElse(""), acme != null && acme.enabled(), provider, directory,
                 acme == null || acme.accountEmail() == null ? "" : acme.accountEmail(), acme == null ? List.of() : acme.domains(),
-                acme == null ? "" : acme.eabKeyId().orElse(""), acme != null && acme.eabSecret().isPresent(), PRESETS);
+                acme == null ? "" : acme.eabKeyId().orElse(""), acme != null && acme.eabSecret().isPresent(), PRESETS,
+                certificates.renewalStatus());
     }
 
     public View save(Settings settings, String userId) {
@@ -152,7 +153,8 @@ public final class AcmeConfigurationService {
     public record Preset(String id, String label, String directoryUrl, boolean requiresEab) {}
 
     public record View(String revision, boolean enabled, String provider, String directoryUrl, String accountEmail,
-                       List<String> domains, String eabKeyId, boolean eabConfigured, List<Preset> presets) {}
+                       List<String> domains, String eabKeyId, boolean eabConfigured, List<Preset> presets,
+                       AcmeCertificateService.RenewalStatus renewal) {}
 
     public record Settings(String revision, String provider, String directoryUrl, String accountEmail,
                            List<String> domains, String eabKeyId, char[] eabHmacKey) {

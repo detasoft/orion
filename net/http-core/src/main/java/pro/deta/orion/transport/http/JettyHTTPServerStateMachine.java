@@ -14,7 +14,34 @@ public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMach
 
     @Inject
     public JettyHTTPServerStateMachine(
-            Provider<JettyHTTPServer> serverProvider) {
-        super("http", serverProvider);
+            Provider<JettyHTTPServer> serverProvider, Provider<AcmeCertificateService> certificatesProvider) {
+        super("http", new ServiceLifecycle() {
+            private AcmeCertificateService certificates;
+
+            @Override
+            public void onStart() {
+                JettyHTTPServer server = serverProvider.get();
+                server.onStart();
+                if (server.isRunning()) {
+                    certificates = certificatesProvider.get();
+                    certificates.startMaintenance(server::reloadHttpsCertificate);
+                }
+            }
+
+            @Override
+            public void onStop() throws Exception {
+                try {
+                    if (certificates != null) certificates.stopMaintenance();
+                } finally {
+                    serverProvider.get().onStop();
+                }
+            }
+
+            @Override
+            public boolean isEnabled() { return serverProvider.get().isEnabled(); }
+
+            @Override
+            public boolean isRunning() { return serverProvider.get().isRunning(); }
+        });
     }
 }

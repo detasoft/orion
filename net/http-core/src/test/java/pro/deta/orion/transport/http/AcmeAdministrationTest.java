@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -69,17 +71,20 @@ class AcmeAdministrationTest {
     void listsPresetsAndSettingsThroughUiApiAndSsh() throws Exception {
         OrionDesiredState desired = new OrionDesiredState();
         desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("revision"));
-        AcmeConfigurationService configuration = new AcmeConfigurationService(desired, null, null, null);
+        AcmeConfigurationService configuration = new AcmeConfigurationService(desired, null, null,
+                new AcmeCertificateService(new OrionConfiguration(), desired,
+                        AcmeKeyMaterialCapability.unavailable(), null, null));
         ObjectMapper mapper = new ObjectMapper();
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(
                 new OrionAdminAcmeConfigurationRoute(configuration, mapper))), new OrionHttpResponseWriter(mapper));
         Response response = new Response();
         servlet.service(httpRequest("GET", "/api/admin/acme/configuration", "", admin()), response.proxy());
         assertThat(response.status).isEqualTo(200);
-        assertThat(response.body.toString()).contains("letsencrypt", "zerossl", "google", "custom", "revision")
+        assertThat(response.body.toString()).contains("letsencrypt", "zerossl", "google", "custom", "revision", "renewal", "disabled")
                 .doesNotContain("eabHmacKey");
         assertThat(dispatcher(new AcmeCommandCatalog(configuration, null)).dispatch(request("/acme show", admin())))
-                .isInstanceOf(CommandResult.ObjectValue.class);
+                .isInstanceOfSatisfying(CommandResult.ObjectValue.class, result ->
+                        assertThat(result.fields().get("renewalState").asText()).isEqualTo("disabled"));
     }
 
     static DefaultCommandDispatcher dispatcher(AcmeCommandCatalog catalog) {

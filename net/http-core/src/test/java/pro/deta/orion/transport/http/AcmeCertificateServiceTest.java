@@ -1,5 +1,12 @@
 package pro.deta.orion.transport.http;
 
+import java.util.Set;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.X509TrustManager;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.SSLContext;
+import java.net.ServerSocket;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.OrionDesiredState;
@@ -33,6 +40,7 @@ import java.security.KeyPairGenerator;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -147,6 +155,7 @@ class AcmeCertificateServiceTest {
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
                         () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
                         .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
+                service.maintainCertificate(Instant.now().plus(Duration.ofDays(90)), () -> {});
                 assertThat(keyMaterial.acquireCalls()).isEqualTo(1);
                 assertThat(issuer.issueCalls()).isEqualTo(1);
             } finally {
@@ -173,6 +182,260 @@ class AcmeCertificateServiceTest {
 
             assertThat(service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain()).hasSize(1);
             assertThat(issuer.issueCalls()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void renewsOnlyWhenDueAndReusesTheStoredAccount() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            service.maintainCertificate(Instant.now(), () -> {});
+            assertThat(issuer.lastRequest).isNull();
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            KeyPair account = issuer.lastRequest.accountKeyPair();
+            Instant due = initial.getNotAfter().toInstant().minus(
+                    Duration.between(initial.getNotBefore().toInstant(), initial.getNotAfter().toInstant())
+                            .dividedBy(3));
+            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isEqualTo(initial);
+            service.maintainCertificate(due, () -> {});
+            assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isNotEqualTo(initial);
+            assertThat(issuer.lastRequest.accountKeyPair().getPublic()).isEqualTo(account.getPublic());
+        }
+    }
+
+    @Test
+    void retriesFailureAfterOneHourKeepsOldCertificateAndRetriesActivationWithoutReissuing() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            Instant due = Instant.parse(service.renewalStatus().nextAttempt());
+            issuer.failure = new AcmeCertificateIssueException("private provider response");
+            service.maintainCertificate(due, () -> {});
+            assertThat(service.savedCertificate().orElseThrow().certificateChain().getFirst()).isEqualTo(initial);
+            assertThat(service.renewalStatus().state()).isEqualTo("stopped");
+            assertThat(service.renewalStatus().message()).doesNotContain("private provider response");
+            assertThat(service.renewalStatus().nextAttempt()).isEqualTo(due.plusSeconds(3600).toString());
+            assertThat(issuer.calls).isEqualTo(2);
+            service.maintainCertificate(due.plusSeconds(3599), () -> {});
+            assertThat(issuer.calls).isEqualTo(2);
+            issuer.failure = null;
+            service.maintainCertificate(due.plusSeconds(3600), () -> {
+                throw new IllegalStateException("private TLS error");
+            });
+            assertThat(issuer.calls).isEqualTo(3);
+            assertThat(service.renewalStatus().state()).isEqualTo("stopped");
+            assertThat(service.renewalStatus().activationError()).contains("Could not activate")
+                    .doesNotContain("private TLS error");
+            service.maintainCertificate(due.plusSeconds(3660), () -> {});
+            assertThat(service.renewalStatus().activationError()).isEmpty();
+            assertThat(issuer.calls).isEqualTo(3);
+            service.stopMaintenance();
+            service.maintainCertificate(due.plusSeconds(7200), () -> { throw new AssertionError(); });
+            assertThat(issuer.calls).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void disablesRenewalWhenConfigurationIsRemoved() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            OrionDesiredState desired = desiredState(false);
+            AcmeCertificateService service = new AcmeCertificateService(bootstrap(), desired, owner.acme(), issuer, null);
+            service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+            Instant due = Instant.parse(service.renewalStatus().nextAttempt());
+            desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("removed"));
+            service.maintainCertificate(due, () -> {});
+            assertThat(issuer.calls).isEqualTo(1);
+            assertThat(service.renewalStatus().state()).isEqualTo("disabled");
+        }
+    }
+
+    @Test
+    void activatesRenewedCertificateOnTheRunningHttpsListener() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            OrionConfiguration bootstrap = bootstrap();
+            bootstrap.getTransport().getHttp().setEnabled(false);
+            OrionDesiredState desired = desiredState(false);
+            OrionHttpsConfiguration old = desired.current().document().system().https().orElseThrow();
+            int availablePort;
+            try (ServerSocket probe = new ServerSocket(0)) { availablePort = probe.getLocalPort(); }
+            OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "127.0.0.1", availablePort, old.publicUrl(),
+                    old.identity(), old.serverIssuerTrustAnchor(), old.clientAuthentication(), List.of(), old.acme());
+            desired.publish(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
+                    Optional.of(https), List.of(), List.of()), List.of()), Optional.of("https"));
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap, desired, owner.acme(), new RecordingIssuer(false), null);
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            ObjectMapper mapper = new ObjectMapper();
+            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired, owner.tls(),
+                    new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
+                            new OrionHttpResponseWriter(mapper)), null, null);
+            server.onStart();
+            try {
+                int port = server.boundHttpsPort();
+                assertThat(servedCertificate(port)).isEqualTo(initial);
+                Instant due = Instant.parse(service.renewalStatus().nextAttempt());
+                service.maintainCertificate(due, server::reloadHttpsCertificate);
+                X509Certificate renewed = service.savedCertificate().orElseThrow().certificateChain().getFirst();
+                assertThat(renewed).isNotEqualTo(initial);
+                assertThat(server.boundHttpsPort()).isEqualTo(port);
+                assertThat(servedCertificate(port)).isEqualTo(renewed);
+                assertThat(service.renewalStatus().activationError()).isEmpty();
+            } finally {
+                server.onStop();
+            }
+        }
+    }
+
+    private static X509Certificate servedCertificate(int port) throws Exception {
+        SSLContext client = SSLContext.getInstance("TLS");
+        client.init(null, new TrustManager[]{new X509TrustManager() {
+            @Override public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+            @Override public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+            @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+        }}, null);
+        try (SSLSocket socket = (SSLSocket)
+                client.getSocketFactory().createSocket("127.0.0.1", port)) {
+            socket.setSoTimeout(5000);
+            socket.startHandshake();
+            return (X509Certificate) socket.getSession().getPeerCertificates()[0];
+        }
+    }
+
+    @Test
+    void lifecycleRunsRenewalAndCancelsAnOutstandingOrderBeforeInstallation() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch blocked = new CountDownLatch(1);
+            AtomicInteger calls = new AtomicInteger();
+            AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
+                @Override
+                public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+                    int call = calls.incrementAndGet();
+                    try {
+                        if (call > 1) {
+                            started.countDown();
+                            try {
+                                blocked.await(5, TimeUnit.SECONDS);
+                            } catch (InterruptedException ignored) {
+                                // Simulates a transport that clears interruption before returning a certificate.
+                            }
+                        }
+                        return new IssuedAcmeCertificate(request.domains(), List.of(
+                                TestCertificateChain.selfSignedLeaf("example.test", request.domainKeyPair(),
+                                        Instant.now().minus(Duration.ofDays(80)),
+                                        Instant.now().plus(Duration.ofDays(10)))));
+                    } catch (Exception failure) {
+                        throw new AssertionError(failure);
+                    }
+                }
+            };
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            // A restart reconstructs the due date from the persisted certificate.
+            AcmeCertificateService restarted = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            restarted.startMaintenance(() -> { throw new AssertionError("Stopped maintenance must not activate"); });
+            try {
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                restarted.stopMaintenance();
+                blocked.countDown();
+            }
+            assertThat(calls).hasValue(2);
+            assertThat(restarted.renewalStatus().state()).isEqualTo("stopped");
+            assertThat(restarted.savedCertificate().orElseThrow().certificateChain().getFirst()).isEqualTo(initial);
+        }
+    }
+
+    @Test
+    void discardsCertificateIfSettingsChangeDuringIssuance() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore());
+                ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            OrionDesiredState desired = desiredState(false);
+            OrionDocument initial = desired.current().document();
+            BlockingFirstIssuer issuer = new BlockingFirstIssuer();
+            AcmeCertificateService service = new AcmeCertificateService(bootstrap(), desired, owner.acme(), issuer, null);
+            Future<IssuedAcmeCertificate> issuance = executor.submit(
+                    () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
+            assertThat(issuer.awaitStarted()).isTrue();
+            desired.publish(OrionDocument.withAccessControl(new AccessControl()), Optional.of("changed"));
+            issuer.release();
+            assertThatThrownBy(() -> issuance.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(AcmeCertificateIssueException.class);
+            desired.publish(initial, Optional.of("restored"));
+            assertThat(service.savedCertificate()).isEmpty();
+        }
+    }
+
+    @Test
+    void capsRenewalLeadTimeAtThirtyDays() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            issuer.before = Instant.now().minus(Duration.ofDays(90));
+            issuer.after = Instant.now().plus(Duration.ofDays(90));
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer, null);
+            X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
+                    .certificateChain().getFirst();
+            Instant due = initial.getNotAfter().toInstant().minus(Duration.ofDays(30));
+            assertThat(service.renewalStatus().nextAttempt()).isEqualTo(due.toString());
+            service.maintainCertificate(due.minusSeconds(1), () -> {});
+            assertThat(issuer.calls).isEqualTo(1);
+            service.maintainCertificate(due, () -> {});
+            assertThat(issuer.calls).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void startsAndStopsRenewalWithTheHttpTransport() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            OrionConfiguration bootstrap = bootstrap();
+            bootstrap.getTransport().getHttp().setEnabled(true);
+            bootstrap.getTransport().getHttp().setPort(0);
+            OrionDesiredState desired = desiredState(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap, desired, owner.acme(), new RecordingIssuer(false), null);
+            service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+            assertThat(service.renewalStatus().state()).isEqualTo("stopped");
+            CountDownLatch checked = new CountDownLatch(1);
+            ObjectMapper mapper = new ObjectMapper();
+            JettyHTTPServer server = new JettyHTTPServer(bootstrap, desired, owner.tls(),
+                    new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of()),
+                            new OrionHttpResponseWriter(mapper)), null, null) {
+                @Override
+                void reloadHttpsCertificate() {
+                    super.reloadHttpsCertificate();
+                    checked.countDown();
+                }
+            };
+            JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server, () -> service);
+            try {
+                assertThat(machine.start().failed()).isFalse();
+                assertThat(checked.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(service.renewalStatus().state()).isEqualTo("scheduled");
+            } finally {
+                assertThat(machine.stop().failed()).isFalse();
+            }
+            assertThat(server.isRunning()).isFalse();
+            assertThat(service.renewalStatus().state()).isEqualTo("stopped");
+            bootstrap.getTransport().getHttp().setEnabled(false);
+            JettyHTTPServerStateMachine disabled = new JettyHTTPServerStateMachine(() -> server,
+                    () -> { throw new AssertionError("Disabled HTTP must not resolve ACME maintenance"); });
+            assertThat(disabled.start().failed()).isFalse();
+            assertThat(server.isRunning()).isFalse();
+            assertThat(disabled.stop().failed()).isFalse();
+            assertThat(service.renewalStatus().state()).isEqualTo("stopped");
         }
     }
 
@@ -233,6 +496,10 @@ class AcmeCertificateServiceTest {
     private static final class RecordingIssuer extends AcmeCertificateIssuer {
         private final boolean wrongKey;
         private AcmeCertificateIssueRequest lastRequest;
+        private RuntimeException failure;
+        private int calls;
+        private Instant before;
+        private Instant after;
 
         private RecordingIssuer(boolean wrongKey) {
             super(new AcmeHttpChallengeService());
@@ -241,10 +508,13 @@ class AcmeCertificateServiceTest {
 
         @Override
         public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+            calls++;
+            if (failure != null) throw failure;
             lastRequest = request;
             try {
                 KeyPair keyPair = wrongKey ? keyPair() : request.domainKeyPair();
-                X509Certificate leaf = TestCertificateChain.selfSignedLeaf("example.test", keyPair);
+                X509Certificate leaf = before == null ? TestCertificateChain.selfSignedLeaf("example.test", keyPair)
+                        : TestCertificateChain.selfSignedLeaf("example.test", keyPair, before, after);
                 return new IssuedAcmeCertificate(request.domains(), List.of(leaf));
             } catch (Exception failure) {
                 throw new AssertionError(failure);

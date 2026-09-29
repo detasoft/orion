@@ -22,7 +22,7 @@ class JettyHTTPServerStateMachineTest {
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 new OrionConfiguration(), desiredState, TlsCapability.unavailable(), null, null, null);
-        JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server);
+        JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server, () -> { throw new AssertionError(); });
 
         assertEquals("http", machine.stateMachine().name());
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());

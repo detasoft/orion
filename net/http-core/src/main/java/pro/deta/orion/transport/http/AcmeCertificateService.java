@@ -2,6 +2,8 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -25,14 +27,19 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Singleton
 public class AcmeCertificateService {
+    private static final Logger LOG = LoggerFactory.getLogger(AcmeCertificateService.class);
     private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
     private final String clusterId;
@@ -41,6 +48,10 @@ public class AcmeCertificateService {
     private final AcmeCertificateIssuer certificateIssuer;
     private final ConfigurationSecrets secrets;
     private final AtomicBoolean issuanceInProgress = new AtomicBoolean();
+    private volatile RenewalAttempt renewalAttempt;
+    private volatile String activationError = "";
+    private volatile boolean maintenanceStopped;
+    private volatile ScheduledExecutorService maintenance;
 
     @Inject
     public AcmeCertificateService(
@@ -63,14 +74,28 @@ public class AcmeCertificateService {
             throw new IssuanceBusyException();
         }
         try {
-            return issueAdmitted(request);
+            return issueRecorded(settingsFrom(request), Instant.now(), false);
         } finally {
             issuanceInProgress.set(false);
         }
     }
 
-    private IssuedAcmeCertificate issueAdmitted(IssueRequest request) {
-        IssueSettings settings = settingsFrom(request);
+    private IssuedAcmeCertificate issueRecorded(IssueSettings settings, Instant now, boolean automatic) {
+        RenewalAttempt previous = currentAttempt(settings);
+        Instant lastSuccess = previous == null ? null : previous.lastSuccess();
+        renewalAttempt = new RenewalAttempt(settings.snapshot().system().https(), now, lastSuccess, "");
+        try {
+            IssuedAcmeCertificate issued = issueAdmitted(settings, automatic);
+            renewalAttempt = new RenewalAttempt(settings.snapshot().system().https(), now, now, "");
+            return issued;
+        } catch (RuntimeException failure) {
+            renewalAttempt = new RenewalAttempt(settings.snapshot().system().https(), now, lastSuccess,
+                    "Certificate renewal failed. Check ACME settings and CA availability.");
+            throw failure;
+        }
+    }
+
+    private IssuedAcmeCertificate issueAdmitted(IssueSettings settings, boolean automatic) {
         AcmeKeyMaterial keys;
         try {
             keys = keyMaterial.acquire(settings.material(), RSA_KEY_SIZE, RSA_KEY_SIZE);
@@ -94,6 +119,10 @@ public class AcmeCertificateService {
         } finally {
             if (eabKey != null) Arrays.fill(eabKey, '\0');
         }
+        if (Thread.currentThread().isInterrupted() || (automatic && maintenanceStopped)
+                || !settings.snapshot().system().https().equals(desiredState.current().document().system().https())) {
+            throw new AcmeCertificateIssueException("Certificate issuance cancelled or ACME settings changed");
+        }
         try {
             CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
             keyMaterial.installCertificateChain(
@@ -105,6 +134,99 @@ public class AcmeCertificateService {
             throw new AcmeCertificateIssueException("Cannot store issued ACME certificate", failure);
         }
     }
+
+    synchronized void startMaintenance(Runnable activate) {
+        if (maintenance != null) throw new IllegalStateException("ACME maintenance is already running");
+        maintenanceStopped = false;
+        maintenance = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon(true).name("acme-renewal").factory());
+        maintenance.scheduleWithFixedDelay(() -> maintainCertificate(Instant.now(), activate),
+                0, 60, TimeUnit.SECONDS);
+    }
+
+    synchronized void stopMaintenance() throws InterruptedException {
+        maintenanceStopped = true;
+        if (maintenance == null) return;
+        maintenance.shutdownNow();
+        if (!maintenance.awaitTermination(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("ACME maintenance has not stopped");
+        }
+        maintenance = null;
+    }
+
+    void maintainCertificate(Instant now, Runnable activate) {
+        if (maintenanceStopped) return;
+        if (issuanceInProgress.compareAndSet(false, true)) {
+            try {
+                IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
+                Optional<List<X509Certificate>> chain = keyMaterial.certificateChain(settings.material());
+                if (chain.isPresent() && !now.isBefore(nextAttempt(settings, chain.orElseThrow().getFirst()))) {
+                    issueRecorded(settings, now, true);
+                }
+            } catch (ConfigurationUnavailableException disabled) {
+                // Disabled or unconfigured ACME does not initiate issuance.
+            } catch (GeneralSecurityException | RuntimeException failure) {
+                // The saved chain remains usable; status exposes a safe error and the next retry.
+                LOG.warn("ACME renewal check failed; it will be retried automatically");
+            } finally {
+                issuanceInProgress.set(false);
+            }
+        }
+        if (!maintenanceStopped && !Thread.currentThread().isInterrupted()) {
+            try {
+                activate.run();
+                activationError = "";
+            } catch (RuntimeException failure) {
+                activationError = "Could not activate the saved certificate. Retrying automatically.";
+                LOG.warn(activationError);
+            }
+        }
+    }
+
+    public RenewalStatus renewalStatus() {
+        try {
+            IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
+            Optional<List<X509Certificate>> chain = keyMaterial.certificateChain(settings.material());
+            RenewalAttempt attempt = currentAttempt(settings);
+            String state = maintenance == null || maintenanceStopped ? "stopped"
+                    : issuanceInProgress.get() ? "issuing"
+                    : chain.isEmpty() ? "awaiting_certificate"
+                    : attempt != null && !attempt.error().isEmpty() ? "retrying" : "scheduled";
+            return new RenewalStatus(state, chain.map(c -> c.getFirst().getNotAfter().toInstant().toString())
+                    .orElse(""), chain.map(c -> nextAttempt(settings, c.getFirst()).toString()).orElse(""),
+                    attempt == null ? "" : attempt.started().toString(),
+                    attempt == null || attempt.lastSuccess() == null ? "" : attempt.lastSuccess().toString(),
+                    attempt == null ? "" : attempt.error(), activationError);
+        } catch (ConfigurationUnavailableException disabled) {
+            return new RenewalStatus("disabled", "", "", "", "", "", activationError);
+        } catch (GeneralSecurityException | RuntimeException failure) {
+            return new RenewalStatus("unavailable", "", "", "", "",
+                    "Could not read certificate renewal status. Check ACME settings and key material.", activationError);
+        }
+    }
+
+    private Instant nextAttempt(IssueSettings settings, X509Certificate leaf) {
+        Duration remaining = Duration.between(leaf.getNotBefore().toInstant(), leaf.getNotAfter().toInstant())
+                .dividedBy(3);
+        if (remaining.compareTo(Duration.ofDays(30)) > 0) remaining = Duration.ofDays(30);
+        Instant due = leaf.getNotAfter().toInstant().minus(remaining);
+        RenewalAttempt attempt = currentAttempt(settings);
+        if (attempt != null && due.isBefore(attempt.started().plus(Duration.ofHours(1)))) {
+            due = attempt.started().plus(Duration.ofHours(1));
+        }
+        return due;
+    }
+
+    private RenewalAttempt currentAttempt(IssueSettings settings) {
+        RenewalAttempt attempt = renewalAttempt;
+        return attempt != null && attempt.configuration().equals(settings.snapshot().system().https()) ? attempt : null;
+    }
+
+    public record RenewalStatus(String state, String expiresAt, String nextAttempt, String lastAttempt,
+                                String lastSuccess, String message, String activationError) {}
+
+    private record RenewalAttempt(Optional<OrionHttpsConfiguration> configuration, Instant started,
+                                  Instant lastSuccess, String error) {}
 
     public Optional<IssuedAcmeCertificate> savedCertificate() {
         IssueSettings settings = settingsFrom(IssueRequest.EMPTY);

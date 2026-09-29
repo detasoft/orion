@@ -19,6 +19,7 @@ import pro.deta.orion.command.CommandValue;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,6 +53,7 @@ public final class AcmeCommandCatalog {
                         EAB credentials are stored encrypted. Omit the HMAC key to keep saved credentials.
                         Issuing confirms acceptance of the selected provider's terms of service.
                         Domain verification uses HTTP-01 on port 80.
+                        /acme show includes automatic renewal status; keep HTTP-01 reachable for renewals.
                         """)))
                 .build();
     }
@@ -102,14 +104,22 @@ public final class AcmeCommandCatalog {
     }
 
     private static CommandResult view(AcmeConfigurationService.View view) {
-        return new CommandResult.ObjectValue(Map.of(
-                "revision", CommandValue.text(view.revision()),
-                "enabled", CommandValue.bool(view.enabled()),
-                "provider", CommandValue.text(view.provider()),
-                "directoryUrl", CommandValue.text(view.directoryUrl()),
-                "accountEmail", CommandValue.text(view.accountEmail()),
-                "domains", CommandValue.text(String.join(",", view.domains())),
-                "eabKeyId", CommandValue.text(view.eabKeyId()),
-                "eabConfigured", CommandValue.bool(view.eabConfigured())));
+        Map<String, CommandValue> fields = new LinkedHashMap<>();
+        fields.put("revision", CommandValue.text(view.revision()));
+        fields.put("enabled", CommandValue.bool(view.enabled()));
+        fields.put("provider", CommandValue.text(view.provider()));
+        fields.put("directoryUrl", CommandValue.text(view.directoryUrl()));
+        fields.put("accountEmail", CommandValue.text(view.accountEmail()));
+        fields.put("domains", CommandValue.text(String.join(",", view.domains())));
+        fields.put("eabKeyId", CommandValue.text(view.eabKeyId()));
+        fields.put("eabConfigured", CommandValue.bool(view.eabConfigured()));
+        fields.put("renewalState", CommandValue.text(view.renewal().state()));
+        fields.put("expiresAt", CommandValue.text(view.renewal().expiresAt()));
+        fields.put("nextAttempt", CommandValue.text(view.renewal().nextAttempt()));
+        fields.put("lastAttempt", CommandValue.text(view.renewal().lastAttempt()));
+        fields.put("lastSuccess", CommandValue.text(view.renewal().lastSuccess()));
+        fields.put("renewalMessage", CommandValue.text(view.renewal().message()));
+        fields.put("activationError", CommandValue.text(view.renewal().activationError()));
+        return new CommandResult.ObjectValue(fields);
     }
 }
