@@ -31,6 +31,7 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <orion.classes.suffix></orion.classes.suffix>
     <maven.compiler.release>21</maven.compiler.release>
     <jgit.version>7.0.0.202409031743-r</jgit.version>
     <dagger.version>2.59.2</dagger.version>
@@ -258,6 +259,8 @@
   </dependencies>
 
   <build>
+    <outputDirectory>${project.build.directory}/classes${orion.classes.suffix}</outputDirectory>
+    <testOutputDirectory>${project.build.directory}/test-classes${orion.classes.suffix}</testOutputDirectory>
     <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (maybe moved to parent pom) -->
       <plugins>
         <!-- clean lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#clean_Lifecycle -->

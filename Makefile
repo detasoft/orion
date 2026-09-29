@@ -50,12 +50,17 @@ build-processes: ## Show running Maven builds and Make test processes
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-test: ## Run Maven tests; optionally set MODULE and TEST for focused tests, LOG for a log file
+# The build cache attaches unsuffixed class directories, so these runs bypass it.
+test: SHELL := /bin/bash
+test: ## Run tests with random classes-[a-z]; MODULE+TEST select tests, LOG sets a log file
 	@if { [ -n '$(strip $(value MODULE))' ] && [ -z '$(strip $(value TEST))' ]; } \
 		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
 		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
 	fi
-	$(MAVEN) package -Pdev -T 4 -q \
+	@letters=abcdefghijklmnopqrstuvwxyz; \
+	slot=$${letters:RANDOM%26:1}; \
+	printf 'Test classes slot: %s\n' "$$slot"; \
+	$(MAVEN) package -Pdev -T 4 -q -Dorion.classes.suffix=-$$slot -Dmaven.build.cache.enabled=false \
 		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am -Dtest='$(value TEST)' \
 		-Dsurefire.failIfNoSpecifiedTests=false) $(if $(strip $(value LOG)),-l '$(value LOG)')
 
