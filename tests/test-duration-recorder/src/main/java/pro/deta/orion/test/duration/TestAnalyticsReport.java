@@ -1201,7 +1201,8 @@ public final class TestAnalyticsReport {
 
     private static String csvValue(String value) {
         String safeValue = Objects.toString(value, "");
-        if (safeValue.contains(",") || safeValue.contains("\"") || safeValue.contains("\n")) {
+        if (safeValue.contains(",") || safeValue.contains("\"")
+                || safeValue.contains("\n") || safeValue.contains("\r")) {
             return "\"" + safeValue.replace("\"", "\"\"") + "\"";
         }
         return safeValue;

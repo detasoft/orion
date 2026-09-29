@@ -6,12 +6,36 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TestAnalyticsReportTest {
+    @Test
+    void preservesCsvDisplayNamesWithRecordAndFieldDelimiters(@TempDir Path temp) throws Exception {
+        for (String[] example : List.of(
+                new String[]{"plain", "plain"},
+                new String[]{"before\\rafter", "\"before\rafter\""},
+                new String[]{"before\\nafter", "\"before\nafter\""},
+                new String[]{"before,after", "\"before,after\""},
+                new String[]{"before\\\"after", "\"before\"\"after\""})) {
+            String input = testDurationLine("A#case", "SUCCESSFUL", 12, "")
+                    .replace("\"displayName\":\"A#case\"", "\"displayName\":\"" + example[0] + "\"");
+            Files.writeString(temp.resolve("test-durations.jsonl"), input, StandardCharsets.UTF_8);
+
+            TestAnalyticsReport.ReportFiles files = TestAnalyticsReport.generate(temp, 10);
+
+            String expected = "runId,module,status,durationMillis,className,methodName,testId,"
+                    + "displayName,startedAt,finishedAt,reason" + System.lineSeparator()
+                    + "run-1,core/git-parser,SUCCESSFUL,12,A,case,A#case," + example[1]
+                    + ",2026-08-06T00:00:00Z,2026-08-06T00:00:00Z," + System.lineSeparator();
+            assertEquals(expected, Files.readString(files.testsCsv()), example[0]);
+        }
+    }
+
     @Test
     void writesSummaryCsvFilesAndEmptyFlameGraphs(@TempDir Path temp) throws Exception {
         Files.writeString(temp.resolve("test-durations.jsonl"), testDurationLine("A#fast", "SUCCESSFUL", 12, "")
