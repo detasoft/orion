@@ -95,7 +95,7 @@ class BootstrapProxyEndpointIT {
             }
             var xml = new ByteArrayOutputStream();
             OrionXml.write(document.replaceAccessControl(aclDraft.toAccessControl()), xml);
-            repository.saveFiles(REF, Map.of(
+            repository.files().saveFiles(REF, Map.of(
                     "orion.xml", GitFile.regular(xml.toByteArray()),
                     "material.p12", GitFile.regular(materialBytes(target, environment))), Set.of(),
                     "seed inputs", GitCommitAuthor.EMPTY);
@@ -118,7 +118,8 @@ class BootstrapProxyEndpointIT {
                             }
                             acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
-                                    .saveFiles(REF, Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
+                                    .files().saveFiles(
+                                            REF, Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                                             "ordinary seed", GitCommitAuthor.EMPTY);
                         }
                         String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
@@ -173,7 +174,7 @@ class BootstrapProxyEndpointIT {
                                             .extracting(RemoteRefUpdate::getStatus).isEqualTo(RemoteRefUpdate.Status.OK);
                                 }
                                 assertThat(repository.refs()).containsEntry(REF, commit.name());
-                                assertThat(repository.loadFiles(REF, List.of("client-marker")).files())
+                                assertThat(repository.files().loadFiles(REF, List.of("client-marker")).files())
                                         .containsEntry("client-marker",
                                                 GitFile.regular(("launch " + launch).getBytes(StandardCharsets.UTF_8)));
                                 assertThat(Git.lsRemoteRepository().setRemote(reader.uri(ENDPOINT))

@@ -45,7 +45,7 @@ public interface NativeGitRepositoryProvider {
             GitCommitAuthor author) throws GitOperationException {
         openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .saveFiles(refName, files, deletedPaths, message, author);
+                .files().saveFiles(refName, files, deletedPaths, message, author);
     }
 
     default NativeGitFileUpdate prepareFileUpdate(
@@ -58,7 +58,7 @@ public interface NativeGitRepositoryProvider {
             GitCommitAuthor author) throws GitOperationException {
         return openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .prepareFileUpdate(refName, expectedRefRevision, files, deletedPaths, message, author);
+                .files().prepareFileUpdate(refName, expectedRefRevision, files, deletedPaths, message, author);
     }
 
     default List<RefUpdateResult> publishPack(

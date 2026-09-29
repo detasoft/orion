@@ -79,7 +79,7 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.saveFiles(
+                local.files().saveFiles(
                         "main",
                         Map.of("orion.txt", GitFile.regular("outbound\n".getBytes())), Set.of(),
                         "Orion outbound",
@@ -131,7 +131,7 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.saveFiles(
+                local.files().saveFiles(
                         "main", Map.of("outbound.txt", GitFile.regular("outbound\n".getBytes())), Set.of(),
                         "Outbound", new GitCommitAuthor("Orion", "orion@example.invalid"));
                 String desired = local.refs().get("refs/heads/main");
@@ -202,7 +202,7 @@ class SmartHttpGitRemoteGatewayTest {
         Files.createDirectories(gitDirectory);
         LocalGitStorage storage = new LocalGitStorage(gitDirectory);
         return new NativeGitRepository(
-                "project", storage, new LocalGitIndex(gitDirectory, storage), "refs/heads/main");
+                "project", storage, new LocalGitIndex(gitDirectory), "refs/heads/main");
     }
 
     private static Seed seedRemote(
@@ -251,7 +251,7 @@ class SmartHttpGitRemoteGatewayTest {
         }
 
         private RacingRepository(Path directory, LocalGitStorage storage) throws IOException {
-            super("project", storage, new LocalGitIndex(directory.resolve(".git"), storage), "refs/heads/main");
+            super("project", storage, new LocalGitIndex(directory.resolve(".git")), "refs/heads/main");
         }
 
         @Override

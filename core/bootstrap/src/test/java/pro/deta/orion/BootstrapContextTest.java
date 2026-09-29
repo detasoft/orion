@@ -24,6 +24,9 @@ import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
@@ -58,6 +61,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,9 +124,11 @@ class BootstrapContextTest {
     void joinsBothBootstrapInputsAndPinsTheConfigurationCommitWhenTheRefMoves(String delayedInput)
             throws Exception {
         OrionConfiguration configuration = configuration();
+        byte[] firstConfiguration = bytes("first configuration");
+        byte[] firstMaterial = materialBytes(configuration);
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration, Map.of(
-                "orion.xml", GitFile.regular(bytes("first configuration")),
-                "material.p12", GitFile.regular(materialBytes(configuration))));
+                "orion.xml", GitFile.regular(firstConfiguration),
+                "material.p12", GitFile.regular(firstMaterial)));
         NativeGitRepository repository = backend.find("orion").valueOrFailure("seeded repository");
         String firstCommit = repository.refs().get("refs/heads/main");
         CountDownLatch bothInputsEntered = new CountDownLatch(2);
@@ -132,9 +138,20 @@ class BootstrapContextTest {
         NativeGitRepository observed = new NativeGitRepository(
                 "orion", repository.storage(), repository.index(), "refs/heads/main") {
             @Override
-            public GitRepositoryFileSnapshot loadFiles(String ref, List<String> paths)
-                    throws GitOperationException {
-                String input = paths.equals(List.of("orion.xml")) ? "configuration" : "material";
+            public Optional<LooseObject> readObject(ObjectId id) {
+                Optional<LooseObject> object = repository.readObject(id);
+                if (object.isEmpty() || object.orElseThrow().type() != GitObjectType.BLOB) {
+                    return object;
+                }
+                byte[] content = object.orElseThrow().data();
+                String input;
+                if (Arrays.equals(content, firstConfiguration)) {
+                    input = "configuration";
+                } else if (Arrays.equals(content, firstMaterial)) {
+                    input = "material";
+                } else {
+                    return object;
+                }
                 AtomicInteger reads = "configuration".equals(input) ? configurationReads : materialReads;
                 int read = reads.incrementAndGet();
                 if (read == 2) {
@@ -144,16 +161,19 @@ class BootstrapContextTest {
                         await(firstInputFinished);
                     }
                 }
-                GitRepositoryFileSnapshot snapshot = repository.loadFiles(ref, paths);
                 if (read == 2) {
                     if ("configuration".equals(input)) {
-                        repository.saveFiles(ref,
-                                Map.of("orion.xml", GitFile.regular(bytes("later configuration"))), Set.of(),
-                                "advance configuration after pinned read", GitCommitAuthor.EMPTY);
+                        try {
+                            repository.files().saveFiles("refs/heads/main",
+                                    Map.of("orion.xml", GitFile.regular(bytes("later configuration"))), Set.of(),
+                                    "advance configuration after pinned read", GitCommitAuthor.EMPTY);
+                        } catch (GitOperationException failure) {
+                            throw new IllegalStateException("Cannot advance configuration", failure);
+                        }
                     }
                     firstInputFinished.countDown();
                 }
-                return snapshot;
+                return object;
             }
         };
         NativeGitRepositoryProvider observedBackend = new NativeGitRepositoryProvider() {
@@ -295,7 +315,7 @@ class BootstrapContextTest {
         }
         GitRepositoryFileSnapshot backup = source.find("orion")
                 .valueOrFailure("open repository")
-                .loadFiles("refs/heads/main", List.of("orion.xml", "material.p12"));
+                .files().loadFiles("refs/heads/main", List.of("orion.xml", "material.p12"));
         assertThat(backup.version()).isPresent();
 
         InMemoryNativeGitRepositoryProvider incomplete = repositoryWith(
@@ -458,7 +478,7 @@ class BootstrapContextTest {
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend, true)) {
             byte[] material = backend.find("orion")
                     .valueOrFailure("open repository")
-                    .loadFiles("refs/heads/main", java.util.List.of("orion.xml", "material.p12"))
+                    .files().loadFiles("refs/heads/main", java.util.List.of("orion.xml", "material.p12"))
                     .files()
                     .get("material.p12").content();
 
@@ -956,10 +976,11 @@ class BootstrapContextTest {
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             String approvedCommit = context.initialConfiguration().orElseThrow().version().orElseThrow();
             switch (change) {
-                case "invalid-xml" -> repository.saveFiles("refs/heads/main",
+                case "invalid-xml" -> repository.files().saveFiles("refs/heads/main",
                         Map.of("orion.xml", GitFile.regular(bytes("<not-valid-xml"))), Set.of(),
                         "invalid update after bootstrap input load", GitCommitAuthor.EMPTY);
-                case "missing-primary" -> repository.saveFiles("refs/heads/main", Map.of(), Set.of("orion.xml"),
+                case "missing-primary" -> repository.files().saveFiles(
+                        "refs/heads/main", Map.of(), Set.of("orion.xml"),
                         "remove primary configuration after bootstrap input load", GitCommitAuthor.EMPTY);
                 case "deleted-ref" -> assertThat(repository.publishRefs(List.of(RefUpdate.fromWire(
                         "refs/heads/main", repository.refs().get("refs/heads/main"), "0".repeat(40))), true))
@@ -994,7 +1015,8 @@ class BootstrapContextTest {
             draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             OrionXml.write(OrionDocument.withAccessControl(draft.toAccessControl()), output);
-            repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
+            repository.files().saveFiles(
+                    "refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
                     Set.of(), "valid update after bootstrap input load", GitCommitAuthor.EMPTY);
 
             OrionComponent component = runtimeComponent(configuration, context);
@@ -1033,7 +1055,8 @@ class BootstrapContextTest {
                     .repositoryName().orElseThrow();
             NativeGitRepository source = context.repositoryProvider().openForWrite(cache)
                     .valueOrFailure("remote configuration source");
-            source.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(bytes("<not-valid-xml"))),
+            source.files().saveFiles(
+                    "refs/heads/main", Map.of("orion.xml", GitFile.regular(bytes("<not-valid-xml"))),
                     Set.of(), "invalid B after pinning A", GitCommitAuthor.EMPTY);
             String invalidB = source.refs().get("refs/heads/main");
 
@@ -1054,7 +1077,8 @@ class BootstrapContextTest {
                 OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
                         draft.toAccessControl(), Optional.empty(), List.of(), List.of(unrelated)), List.of());
                 OrionXml.write(valid, output);
-                source.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
+                source.files().saveFiles(
+                        "refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
                         Set.of(), "valid C after invalid B", GitCommitAuthor.EMPTY);
                 String validC = source.refs().get("refs/heads/main");
                 assertThat(validC).isNotEqualTo(invalidB);
@@ -1198,7 +1222,7 @@ class BootstrapContextTest {
             Map<String, GitFile> files) throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("orion").valueOrFailure("create repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 configuration.getBootstrap().getAccessControl().selectedRef(),
                 files, Set.of(),
                 "seed bootstrap inputs",

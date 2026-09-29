@@ -58,7 +58,7 @@ class NativeBootstrapGitPackReplayTest {
             NativeGitRepository repository = disk
                     ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
                             .create("proxy").valueOrFailure("repository")
-                    : new NativeGitRepository("proxy", storage, new InMemoryIndex(storage), "refs/heads/main");
+                    : new NativeGitRepository("proxy", storage, new InMemoryIndex(), "refs/heads/main");
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -119,11 +119,12 @@ class NativeBootstrapGitPackReplayTest {
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "proxy", storage, new InMemoryIndex(storage), "refs/heads/main");
-        repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
+                "proxy", storage, new InMemoryIndex(), "refs/heads/main");
+        repository.files().saveFiles(
+                "main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
                 GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");
-        var unrelated = repository.prepareFileUpdate("other",
+        var unrelated = repository.files().prepareFileUpdate("other",
                 Map.of("other.txt", GitFile.regular(new byte[]{2})), Set.of(),
                 "unrelated", GitCommitAuthor.EMPTY);
         Optional<PackId> received = ingest(repository, unrelated.pack());

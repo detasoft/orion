@@ -46,7 +46,7 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThat(store.read()).isEmpty();
         String version = store.write(bytes("encrypted-material"), null);
 
-        GitRepositoryFileSnapshot snapshot = fixture.repository().loadFiles(
+        GitRepositoryFileSnapshot snapshot = fixture.repository().files().loadFiles(
                 REF,
                 List.of("orion.xml", MATERIAL_PATH));
         assertThat(store.read().orElseThrow().version()).isEqualTo(version);
@@ -60,13 +60,14 @@ class NativeGitKeyMaterialContentStoreTest {
                 "orion.xml", GitFile.regular(bytes("initial config"))));
         NativeGitKeyMaterialContentStore store = fixture.store();
         String version = store.read().orElseThrow().version();
-        fixture.repository().saveFiles(REF, Map.of("orion.xml", GitFile.regular(bytes("new config"))), Set.of(),
+        fixture.repository().files().saveFiles(
+                REF, Map.of("orion.xml", GitFile.regular(bytes("new config"))), Set.of(),
                 "configuration update", GitCommitAuthor.EMPTY);
 
         String saved = store.write(bytes("updated material"), version);
 
         assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
-        assertThat(fixture.repository().loadFiles(REF, List.of("orion.xml", MATERIAL_PATH)).files())
+        assertThat(fixture.repository().files().loadFiles(REF, List.of("orion.xml", MATERIAL_PATH)).files())
                 .containsEntry("orion.xml", GitFile.regular(bytes("new config")))
                 .containsEntry(MATERIAL_PATH, GitFile.regular(bytes("updated material")));
     }
@@ -91,7 +92,7 @@ class NativeGitKeyMaterialContentStoreTest {
     void rejectsAnUpdateCommittedBetweenPreparationAndPublication() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 REF,
                 Map.of(MATERIAL_PATH, GitFile.regular(bytes("initial"))), Set.of(),
                 "seed repository",
@@ -115,7 +116,7 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThatThrownBy(() -> store.write(bytes("stale material"), observedVersion))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
 
-        GitRepositoryFileSnapshot snapshot = repository.loadFiles(
+        GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(
                 REF,
                 List.of(MATERIAL_PATH, "orion.xml"));
         assertThat(snapshot.files()).containsEntry(MATERIAL_PATH, GitFile.regular(bytes("initial")));
@@ -171,7 +172,7 @@ class NativeGitKeyMaterialContentStoreTest {
     private static Fixture fixture(Map<String, GitFile> initialFiles) throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
-        repository.saveFiles(REF, initialFiles, Set.of(), "seed repository", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles(REF, initialFiles, Set.of(), "seed repository", GitCommitAuthor.EMPTY);
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
         return new Fixture(repository, provider);
     }

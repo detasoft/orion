@@ -80,6 +80,6 @@ class NativeGitRepositoryShallowFetchTest {
 
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("demo", storage, new InMemoryIndex(storage), "refs/heads/main");
+        return new NativeGitRepository("demo", storage, new InMemoryIndex(), "refs/heads/main");
     }
 }

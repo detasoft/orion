@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
@@ -52,7 +53,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void persistsRefsAndBothFormsOfHeadAcrossFacadeInstances() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         assertThat(index.snapshotRefs()).isEqualTo(new RefsSnapshot(Map.of(), new Head.Symbolic(MAIN)));
         ObjectId first = publish(storage, "first");
         ObjectId second = publish(storage, "second");
@@ -61,7 +62,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         RefsSnapshot before = index.snapshotRefs();
         index.updateRefs(List.of(new RefUpdate(MAIN, Optional.of(first), Optional.of(second))), true);
         GitStorageApi reopened = new LocalGitStorage(repository);
-        GitIndexApi reopenedIndex = new LocalGitIndex(repository, reopened);
+        GitIndexApi reopenedIndex = new LocalGitIndex(repository);
         assertThat(reopenedIndex.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, second));
         assertThat(before.refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
 
@@ -69,7 +70,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         reopenedIndex.updateHead(detached);
         assertThat(index.snapshotRefs().head()).isEqualTo(detached);
         index.updateHead(new Head.Symbolic(OTHER));
-        assertThat(new LocalGitIndex(repository, storage).snapshotRefs().head()).isEqualTo(new Head.Symbolic(OTHER));
+        assertThat(new LocalGitIndex(repository).snapshotRefs().head()).isEqualTo(new Head.Symbolic(OTHER));
         index.updateRefs(List.of(new RefUpdate(MAIN, Optional.of(second), Optional.empty())), true);
         assertThat(reopenedIndex.snapshotRefs().refs()).isEmpty();
         assertThat(Files.isRegularFile(repository.resolve("refs.mv"))).isTrue();
@@ -78,7 +79,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void atomicBatchAbortsWhileNonAtomicBatchAppliesValidUpdates() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         ObjectId first = publish(storage, "first");
         ObjectId second = publish(storage, "second");
         index.updateRefs(List.of(create(MAIN, first)), true);
@@ -86,7 +87,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                 new RefUpdate(MAIN, Optional.of(second), Optional.of(first)), create(OTHER, second));
         assertThat(index.updateRefs(updates, true)).extracting(RefUpdateResult::status)
                 .containsExactly(EXPECTED_OLD_MISMATCH, ATOMIC_ABORTED);
-        assertThat(new LocalGitIndex(repository, storage).snapshotRefs().refs())
+        assertThat(new LocalGitIndex(repository).snapshotRefs().refs())
                 .containsExactlyEntriesOf(Map.of(MAIN, first));
         assertThat(index.updateRefs(updates, false)).extracting(RefUpdateResult::status)
                 .containsExactly(EXPECTED_OLD_MISMATCH, APPLIED);
@@ -99,20 +100,21 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void missingObjectsAbortAtomicBatchAndDuplicateRefsAreRejected() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         ObjectId first = publish(storage, "first");
-        assertThat(index.updateRefs(List.of(create(MAIN, first), create(OTHER, MISSING)), true))
+        assertThat(GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(MAIN, first), create(OTHER, MISSING)), true))
                 .extracting(RefUpdateResult::status).containsExactly(ATOMIC_ABORTED, OBJECT_NOT_FOUND);
         assertThat(index.snapshotRefs().refs()).isEmpty();
-        assertThatThrownBy(() -> index.updateRefs(List.of(create(MAIN, first), create(MAIN, first)), true))
+        assertThatThrownBy(() -> GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(MAIN, first), create(MAIN, first)), true))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> index.updateRefs(List.of(create(new RefId("HEAD"), first)), true))
+        assertThatThrownBy(() -> GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(new RefId("HEAD"), first)), true))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(index.snapshotRefs().refs()).isEmpty();
-        assertThatThrownBy(() -> index.updateHead(new Head.Detached(new CommitId(MISSING.toBytes()))))
-                .isInstanceOf(java.io.IOException.class);
-        assertThat(index.snapshotRefs().head()).isEqualTo(new Head.Symbolic(MAIN));
-        assertThat(index.updateRefs(List.of(create(MAIN, first), create(OTHER, MISSING)), false))
+        assertThat(GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(MAIN, first), create(OTHER, MISSING)), false))
                 .extracting(RefUpdateResult::status).containsExactly(APPLIED, OBJECT_NOT_FOUND);
         assertThat(index.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
     }
@@ -120,25 +122,26 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void objectValidationPreservesResultOrderAndDoesNotRequireObjectsForDeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         ObjectId first = publish(storage, "first");
         ObjectId second = publish(storage, "second");
         RefId stale = new RefId("refs/heads/stale");
         RefId created = new RefId("refs/heads/created");
-        index.updateRefs(List.of(create(MAIN, first), create(stale, first)), true);
+        GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(MAIN, first), create(stale, first)), true);
         List<RefUpdate> updates = List.of(
                 create(OTHER, MISSING),
                 new RefUpdate(MAIN, Optional.of(first), Optional.empty()),
                 new RefUpdate(stale, Optional.of(second), Optional.of(first)),
                 create(created, second));
 
-        List<RefUpdateResult> atomic = index.updateRefs(updates, true);
+        List<RefUpdateResult> atomic = GitRepositoryContext.publishRefs(storage, index, updates, true);
         assertThat(atomic).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
         assertThat(atomic).extracting(RefUpdateResult::status)
                 .containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED, ATOMIC_ABORTED, ATOMIC_ABORTED);
         assertThat(index.snapshotRefs().refs()).containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, first, stale, first));
 
-        List<RefUpdateResult> independent = index.updateRefs(updates, false);
+        List<RefUpdateResult> independent = GitRepositoryContext.publishRefs(storage, index, updates, false);
         assertThat(independent).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
         assertThat(independent).extracting(RefUpdateResult::status)
                 .containsExactly(OBJECT_NOT_FOUND, APPLIED, EXPECTED_OLD_MISMATCH, APPLIED);
@@ -149,9 +152,10 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void rejectsDuplicateRefsEvenWhenOneTargetObjectIsMissing() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         ObjectId first = publish(storage, "first");
-        assertThatThrownBy(() -> index.updateRefs(List.of(create(MAIN, MISSING), create(MAIN, first)), false))
+        assertThatThrownBy(() -> GitRepositoryContext.publishRefs(
+                storage, index, List.of(create(MAIN, MISSING), create(MAIN, first)), false))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(index.snapshotRefs().refs()).isEmpty();
     }
@@ -159,9 +163,9 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void concurrentVirtualThreadUpdatesCompareAgainstThePublishedValue() throws Exception {
         GitStorageApi firstStorage = new LocalGitStorage(repository);
-        GitIndexApi firstStorageIndex = new LocalGitIndex(repository, firstStorage);
+        GitIndexApi firstStorageIndex = new LocalGitIndex(repository);
         GitStorageApi secondStorage = new LocalGitStorage(repository);
-        GitIndexApi secondStorageIndex = new LocalGitIndex(repository, secondStorage);
+        GitIndexApi secondStorageIndex = new LocalGitIndex(repository);
         ObjectId first = publish(firstStorage, "first");
         ObjectId second = publish(firstStorage, "second");
         ObjectId third = publish(firstStorage, "third");
@@ -189,9 +193,9 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void snapshotsNeverObservePartOfAnAtomicBatch() throws Exception {
         GitStorageApi writer = new LocalGitStorage(repository);
-        GitIndexApi writerIndex = new LocalGitIndex(repository, writer);
+        GitIndexApi writerIndex = new LocalGitIndex(repository);
         GitStorageApi reader = new LocalGitStorage(repository);
-        GitIndexApi readerIndex = new LocalGitIndex(repository, reader);
+        GitIndexApi readerIndex = new LocalGitIndex(repository);
         ObjectId first = publish(writer, "first");
         ObjectId second = publish(writer, "second");
         assertThat(writerIndex.updateRefs(List.of(create(MAIN, first), create(OTHER, first)), true))
@@ -228,7 +232,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void unreadableStoreIsReportedInsteadOfReturningAnEmptySnapshot() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        GitIndexApi index = new LocalGitIndex(repository, storage);
+        GitIndexApi index = new LocalGitIndex(repository);
         ObjectId first = publish(storage, "first");
         Files.delete(repository.resolve("refs.mv"));
         Files.createDirectory(repository.resolve("refs.mv"));

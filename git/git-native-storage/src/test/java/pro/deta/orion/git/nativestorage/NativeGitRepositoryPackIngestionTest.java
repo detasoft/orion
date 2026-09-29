@@ -19,8 +19,9 @@ class NativeGitRepositoryPackIngestionTest {
     void independentIngestionsRemainUnpublishedUntilPersisted() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, new InMemoryIndex(storage), "refs/heads/main")) {
-            byte[] bytes = repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
+                "project.git", storage, new InMemoryIndex(), "refs/heads/main")) {
+            byte[] bytes = repository.files().prepareFileUpdate(
+                    "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {

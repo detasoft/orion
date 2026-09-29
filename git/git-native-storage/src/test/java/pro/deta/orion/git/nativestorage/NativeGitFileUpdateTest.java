@@ -33,28 +33,28 @@ class NativeGitFileUpdateTest {
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {
         try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository")) {
-            repository.saveFiles("main", Map.of(
+            repository.files().saveFiles("main", Map.of(
                     "nested/remove.txt", GitFile.regular(new byte[]{1}),
                     "keep.txt", GitFile.regular(new byte[]{2}),
                     "change.txt", GitFile.regular(new byte[]{3})), Set.of(), "initial", GitCommitAuthor.EMPTY);
             String initial = repository.refs().get("refs/heads/main");
-            NativeGitFileUpdate update = repository.prepareFileUpdate("main",
+            NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
                     Map.of("change.txt", GitFile.regular(new byte[]{4})),
                     Set.of("nested/remove.txt"), "delete and replace", GitCommitAuthor.EMPTY);
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
             assertThat(repository.publishPack(update.pack(), update.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(repository.loadFiles("main", List.of("keep.txt", "change.txt")).files())
+            assertThat(repository.files().loadFiles("main", List.of("keep.txt", "change.txt")).files())
                     .containsExactlyInAnyOrderEntriesOf(Map.of(
                             "keep.txt", GitFile.regular(new byte[]{2}),
                             "change.txt", GitFile.regular(new byte[]{4})));
-            assertThatThrownBy(() -> repository.loadFiles("main", List.of("nested/remove.txt")))
+            assertThatThrownBy(() -> repository.files().loadFiles("main", List.of("nested/remove.txt")))
                     .isInstanceOf(GitOperationException.class);
-            repository.saveFiles("main", Map.of(), Set.of("keep.txt", "change.txt"),
+            repository.files().saveFiles("main", Map.of(), Set.of("keep.txt", "change.txt"),
                     "delete remaining files", GitCommitAuthor.EMPTY);
             for (String path : List.of("keep.txt", "change.txt")) {
-                assertThatThrownBy(() -> repository.loadFiles("main", List.of(path)))
+                assertThatThrownBy(() -> repository.files().loadFiles("main", List.of(path)))
                         .isInstanceOf(GitOperationException.class);
             }
         }
@@ -64,11 +64,11 @@ class NativeGitFileUpdateTest {
     void invalidOrConflictingDeletionDoesNotPublishAnything() throws Exception {
         try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("demo").valueOrFailure("repository")) {
-            repository.saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
+            repository.files().saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
             Map<String, String> refs = repository.refs();
             Set<PackId> packs = Set.copyOf(repository.storage().packIds());
             for (String path : List.of("../config.txt", "./config.txt")) {
-                assertThatThrownBy(() -> repository.saveFiles("main", files("changed"), Set.of(path),
+                assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
                         "invalid", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalArgumentException.class);
                 assertThat(repository.refs()).isEqualTo(refs);
                 assertThat(repository.storage().packIds()).containsExactlyInAnyOrderElementsOf(packs);
@@ -81,7 +81,7 @@ class NativeGitFileUpdateTest {
         NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository");
 
-        repository.saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
 
         assertThat(repository.storage().packIds()).hasSize(1);
         PackId packId = repository.storage().packIds().iterator().next();
@@ -89,7 +89,7 @@ class NativeGitFileUpdateTest {
                 .hasValueSatisfying(header -> assertThat(header).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII)));
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
-        assertThat(reopened.loadFiles("main", List.of("config.txt")).files())
+        assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("first"));
     }
 
@@ -97,12 +97,12 @@ class NativeGitFileUpdateTest {
     void staleFileSaveRetainsValidatedPackWithoutChangingTheBranch() throws Exception {
         NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository");
-        repository.saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
         String expected = repository.refs().get("refs/heads/main");
-        repository.saveFiles("main", files("second"), Set.of(), "second", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles("main", files("second"), Set.of(), "second", GitCommitAuthor.EMPTY);
         String current = repository.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main", expected, files("stale"), Set.of(), "stale", GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
@@ -113,7 +113,7 @@ class NativeGitFileUpdateTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
-        assertThat(repository.loadFiles("main", List.of("config.txt")).files())
+        assertThat(repository.files().loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
         assertThat(repository.storage().packIds()).hasSize(3);
         assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
@@ -123,7 +123,7 @@ class NativeGitFileUpdateTest {
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("demo").valueOrFailure("repository");
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main", files("prepared"), Set.of(), "prepared", GitCommitAuthor.EMPTY);
         String commitId = update.refUpdates().getFirst().newId().orElseThrow().toHex();
         byte[] firstRead = update.pack();
@@ -150,7 +150,7 @@ class NativeGitFileUpdateTest {
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(target.loadFiles("main", List.of("config.txt")).files())
+            assertThat(target.files().loadFiles("main", List.of("config.txt")).files())
                     .containsAllEntriesOf(files("prepared"));
         }
     }
@@ -159,7 +159,7 @@ class NativeGitFileUpdateTest {
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
         NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository");
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main", files("prepared"), Set.of(), "prepared", GitCommitAuthor.EMPTY);
         byte[] corrupt = update.pack();
         corrupt[corrupt.length - 1] ^= 1;

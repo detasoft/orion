@@ -89,7 +89,7 @@ class SmartHttpGitRemoteGatewayClosureTest {
 
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("project", storage, new InMemoryIndex(storage), "refs/heads/main");
+        return new NativeGitRepository("project", storage, new InMemoryIndex(), "refs/heads/main");
     }
 
     private static Entry commit(String tree, String message) {

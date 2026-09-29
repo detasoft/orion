@@ -575,7 +575,7 @@ class RuntimeHttpGitRouteIT {
                 .containsEntry("refs/heads/" + BRANCH, commitId.name());
         assertThat(repository.readObject(new pro.deta.orion.git.parser.v2.id.ObjectId(commitId.name())))
                 .isPresent();
-        var snapshot = repository.loadFiles(BRANCH, List.of(fileName));
+        var snapshot = repository.files().loadFiles(BRANCH, List.of(fileName));
         assertThat(snapshot.version()).contains(commitId.name());
         assertThat(new String(snapshot.files().get(fileName).content(), StandardCharsets.UTF_8))
                 .isEqualTo(expectedContent);

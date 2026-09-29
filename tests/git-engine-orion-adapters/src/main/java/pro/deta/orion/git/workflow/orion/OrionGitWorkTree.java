@@ -82,7 +82,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         Path gitDirectory = workTree.resolve(".git");
         Files.createDirectories(gitDirectory);
         GitStorageApi storage = new LocalGitStorage(gitDirectory);
-        GitIndexApi index = new LocalGitIndex(gitDirectory, storage);
+        GitIndexApi index = new LocalGitIndex(gitDirectory);
         index.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
         NativeGitRepository repository = new NativeGitRepository(
                 workTree.getFileName().toString(), storage, index, MAIN_REF);
@@ -159,7 +159,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             }
             if (deleted) {
                 try {
-                    repository.loadFiles(currentBranch, List.of(path));
+                    repository.files().loadFiles(currentBranch, List.of(path));
                 } catch (GitOperationException failure) {
                     throw new IOException("Staged Git path is not tracked: " + path, failure);
                 }
@@ -172,7 +172,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
             files.put(path, new GitFile(mode, Files.readAllBytes(source)));
         }
-        repository.saveFiles(currentBranch, files, deletedPaths, message, PARITY_AUTHOR);
+        repository.files().saveFiles(currentBranch, files, deletedPaths, message, PARITY_AUTHOR);
         stagedPaths.clear();
     }
 

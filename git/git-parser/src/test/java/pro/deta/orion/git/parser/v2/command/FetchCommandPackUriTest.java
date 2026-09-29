@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FetchCommandPackUriTest {
     private final InMemoryStorage storage = new InMemoryStorage();
-    private final GitIndexApi index = new InMemoryIndex(storage);
+    private final GitIndexApi index = new InMemoryIndex();
     private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
         @Override
         public Optional<URI> packUri(PackId id) {
@@ -198,7 +198,7 @@ class FetchCommandPackUriTest {
     }
 
     private static MutableIndexedPack ingest(byte[] bytes) throws IOException {
-        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();

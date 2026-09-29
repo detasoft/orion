@@ -94,7 +94,8 @@ class PersistentProxyActivationTest {
 
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.authorization.clear();
-            retained.saveFiles("main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "save",
+            retained.files().saveFiles(
+                    "main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "save",
                     GitCommitAuthor.EMPTY);
             assertThat(fixture.authorization).containsExactly("Bearer stored-token", "Bearer stored-token");
 
@@ -245,7 +246,8 @@ class PersistentProxyActivationTest {
 
             assertThat(provider.openForRead(name)).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> retained.saveFiles("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
+            assertThatThrownBy(() -> retained.files().saveFiles(
+                    "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "save", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
             assertThat(provider.repositoryNames()).doesNotContain(name);
             assertThat(provider.isPublicRepositoryName(name)).isFalse();

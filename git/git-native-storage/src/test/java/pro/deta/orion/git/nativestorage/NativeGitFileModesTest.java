@@ -49,19 +49,19 @@ class NativeGitFileModesTest {
                 "run.sh", new GitFile(EXECUTABLE_FILE, script),
                 "next.sh", GitFile.regular(script),
                 "link", new GitFile(SYMLINK, bytes("run.sh")));
-        repository.saveFiles("main", initial, Set.of(), "create", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles("main", initial, Set.of(), "create", GitCommitAuthor.EMPTY);
         List<String> paths = List.of("run.sh", "next.sh", "link");
-        assertThat(repository.loadFiles("main", paths).files()).isEqualTo(initial);
+        assertThat(repository.files().loadFiles("main", paths).files()).isEqualTo(initial);
 
         Map<String, GitFile> updated = Map.of(
                 "run.sh", GitFile.regular(bytes("updated")),
                 "next.sh", new GitFile(EXECUTABLE_FILE, script),
                 "link", new GitFile(SYMLINK, bytes("next.sh")));
-        repository.saveFiles("main", updated, Set.of(), "update", GitCommitAuthor.EMPTY);
+        repository.files().saveFiles("main", updated, Set.of(), "update", GitCommitAuthor.EMPTY);
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
-        assertThat(reopened.loadFiles("main", paths).files()).isEqualTo(updated);
+        assertThat(reopened.files().loadFiles("main", paths).files()).isEqualTo(updated);
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
             copyPacks(reopened, observed);
             try (RevWalk walk = new RevWalk(observed)) {
@@ -105,7 +105,8 @@ class NativeGitFileModesTest {
         assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                 .isEqualTo(RefUpdateResult.Status.APPLIED);
 
-        assertThatCode(() -> repository.saveFiles("main", Map.of("config.txt", GitFile.regular(bytes("updated"))), Set.of(),
+        assertThatCode(() -> repository.files().saveFiles(
+                "main", Map.of("config.txt", GitFile.regular(bytes("updated"))), Set.of(),
                 "update", GitCommitAuthor.EMPTY)).doesNotThrowAnyException();
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
@@ -141,18 +142,19 @@ class NativeGitFileModesTest {
         expected.put("a/x", updated);
         try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository")) {
-            repository.saveFiles("main", files, Set.of(), "create", GitCommitAuthor.EMPTY);
+            repository.files().saveFiles("main", files, Set.of(), "create", GitCommitAuthor.EMPTY);
             assertGitTreeOrdering(repository);
-            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(files);
+            assertThat(repository.files().loadFiles("main", paths).files()).isEqualTo(files);
 
-            repository.saveFiles("main", Map.of("a/x", updated), Set.of(), "update", GitCommitAuthor.EMPTY);
+            repository.files().saveFiles(
+                    "main", Map.of("a/x", updated), Set.of(), "update", GitCommitAuthor.EMPTY);
             assertGitTreeOrdering(repository);
-            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(expected);
+            assertThat(repository.files().loadFiles("main", paths).files()).isEqualTo(expected);
         }
 
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository")) {
-            assertThat(reopened.loadFiles("main", paths).files()).isEqualTo(expected);
+            assertThat(reopened.files().loadFiles("main", paths).files()).isEqualTo(expected);
         }
     }
 
@@ -184,17 +186,18 @@ class NativeGitFileModesTest {
                     + "\nauthor A <a@test> 0 +0000\ncommitter A <a@test> 0 +0000\n\nimported\n"));
             assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                     .isEqualTo(RefUpdateResult.Status.APPLIED);
-            assertThat(repository.loadFiles("main", new ArrayList<>(files.keySet())).files()).isEqualTo(files);
+            assertThat(repository.files().loadFiles(
+                    "main", new ArrayList<>(files.keySet())).files()).isEqualTo(files);
 
-            repository.saveFiles("main", Map.of("config.txt", configuration), Set.of(),
+            repository.files().saveFiles("main", Map.of("config.txt", configuration), Set.of(),
                     "update", GitCommitAuthor.EMPTY);
             assertGitTreeOrdering(repository);
-            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(expected);
+            assertThat(repository.files().loadFiles("main", paths).files()).isEqualTo(expected);
         }
 
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository")) {
-            assertThat(reopened.loadFiles("main", paths).files()).isEqualTo(expected);
+            assertThat(reopened.files().loadFiles("main", paths).files()).isEqualTo(expected);
         }
     }
 

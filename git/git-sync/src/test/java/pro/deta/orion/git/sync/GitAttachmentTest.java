@@ -170,7 +170,7 @@ class GitAttachmentTest {
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "project", storage, new InMemoryIndex(storage), head("main"));
+                "project", storage, new InMemoryIndex(), head("main"));
         populate(repository);
         return repository;
     }
@@ -297,7 +297,7 @@ class GitAttachmentTest {
 
         private RacingRepository(InMemoryStorage storage, String racedRef,
                                  String expectedOldId, String concurrentId) {
-            super("project", storage, new InMemoryIndex(storage), head("main"));
+            super("project", storage, new InMemoryIndex(), head("main"));
             populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;

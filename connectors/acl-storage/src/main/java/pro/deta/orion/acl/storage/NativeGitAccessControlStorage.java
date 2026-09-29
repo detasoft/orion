@@ -52,7 +52,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             if (!repository.refs().containsKey(configurationRef)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
-            GitRepositoryFileSnapshot snapshot = repository.loadFiles(configurationRef, paths);
+            GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(configurationRef, paths);
             Map<String, byte[]> files = new LinkedHashMap<>();
             for (Map.Entry<String, GitFile> entry : snapshot.files().entrySet()) {
                 files.put(entry.getKey(), entry.getValue().content());
@@ -120,7 +120,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             return true;
         }
         try {
-            repository.loadFiles(configurationRef, List.of(paths.getFirst()));
+            repository.files().loadFiles(configurationRef, List.of(paths.getFirst()));
             return false;
         } catch (GitRepositoryFileNotFoundException missing) {
             return true;

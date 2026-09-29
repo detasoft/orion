@@ -1541,7 +1541,7 @@ class GitSshTransportEndToEndIT {
         new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
-                .saveFiles(
+                .files().saveFiles(
                         "refs/heads/" + BRANCH,
                         Map.of("orion.xml", GitFile.regular(output.toByteArray())), Set.of(),
                         "seed e2e access control",
@@ -1615,7 +1615,7 @@ class GitSshTransportEndToEndIT {
         new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
-                .saveFiles(
+                .files().saveFiles(
                         "refs/heads/" + BRANCH,
                         Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
                         "seed " + repositoryName,

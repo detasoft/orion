@@ -54,7 +54,7 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
             return Optional.empty();
         }
         try {
-            GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, List.of(path));
+            GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(refName, List.of(path));
             byte[] bytes = snapshot.files().get(path).content();
             String version = materialVersion(bytes);
             observation = new Observation(version, refRevision);

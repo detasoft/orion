@@ -2,6 +2,7 @@ package pro.deta.orion.git.fileapi;
 
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
@@ -33,13 +34,10 @@ import static pro.deta.orion.git.fileapi.NativeRepositoryFileLoader.*;
 final class NativeRepositoryFileSaver {
     private static final String NULL_ID = "0".repeat(40);
 
-    NativeGitFileUpdate prepareFiles(
-            String branch,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return prepareFiles(branch, files, deletedPaths, message, author, true);
+    private final NativeGitRepository repository;
+
+    NativeRepositoryFileSaver(NativeGitRepository repository) {
+        this.repository = Objects.requireNonNull(repository, "repository");
     }
 
     NativeGitFileUpdate prepareFiles(
@@ -116,6 +114,11 @@ final class NativeRepositoryFileSaver {
         String expectedOldId = parent.map(ObjectId::toHex).orElse(NULL_ID);
         List<RefUpdate> updates = new java.util.ArrayList<>();
         updates.add(RefUpdate.fromWire(branchRefName, expectedOldId, commitId.toHex()));
+        if (initializeDefaultHead
+                && !repository.refs().containsKey(repository.defaultHead())
+                && !repository.defaultHead().equals(branchRefName)) {
+            updates.add(RefUpdate.fromWire(repository.defaultHead(), NULL_ID, commitId.toHex()));
+        }
         return new NativeGitFileUpdate(buildPack(preparedObjects), updates);
     }
 
@@ -142,6 +145,15 @@ final class NativeRepositoryFileSaver {
         ObjectId id = new ObjectId(HexFormat.of().formatHex(hash.digest(content)));
         objects.put(id, new LooseObject(id, type, content));
         return id;
+    }
+
+    private Optional<ObjectId> resolveBranch(String branch) {
+        Map<String, String> refs = repository.refs();
+        String objectId = refs.get(branchRefName(branch));
+        if (objectId == null && !branch.startsWith("refs/")) {
+            objectId = refs.get(branch);
+        }
+        return Optional.ofNullable(objectId).map(ObjectId::new);
     }
 
     private void readTreeEntries(

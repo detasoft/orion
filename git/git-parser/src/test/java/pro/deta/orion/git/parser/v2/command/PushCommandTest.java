@@ -49,7 +49,7 @@ class PushCommandTest {
 
     @Test
     void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
             ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
             ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
             byte[] response = execute(storage, index, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
@@ -65,7 +65,7 @@ class PushCommandTest {
     @Test
     void publishesAThinPackWithItsExternalBaseAndLeavesTheInputOpen() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1, 2, 3});
         byte[] source = pack(delta(base, new byte[]{3, 4, (byte) 0x90, 3, 1, 4}));
         ObjectId result = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3, 4});
@@ -78,7 +78,7 @@ class PushCommandTest {
         }
         assertThat(output.toByteArray()).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
         GitStorageApi reopened = new LocalGitStorage(directory);
-        GitIndexApi reopenedIndex = new LocalGitIndex(directory, reopened);
+        GitIndexApi reopenedIndex = new LocalGitIndex(directory);
         assertThat(reopenedIndex.snapshotRefs().refs()).containsEntry(REF, result);
         assertThat(reopened.readObject(result, new ResolvedGitObjectRead<>(reopened,
                 (type, size, unused, input) -> input.readBytes((int) size))))
@@ -97,7 +97,7 @@ class PushCommandTest {
     @Test
     void removesStagingAfterMissingBasesMalformedDeltasAndCorruptInput() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
         byte[] corrupt = pack(blob(new byte[]{1}));
         corrupt[corrupt.length - 1] ^= 1;
@@ -121,7 +121,7 @@ class PushCommandTest {
             "report-status-v2 side-band-64k", " report-status", " report-status-v2 side-band-64k"})
     void createsUpdatesAndDeletesRefsWithNegotiatedStatus(String capabilities) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
         ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
         byte[] expected = report("unpack ok\n", "ok " + REF + "\n");
@@ -136,13 +136,13 @@ class PushCommandTest {
         byte[] deleted = execute(storage, index, request(new byte[0], second + " " + ZERO + " " + REF
                 + "\0" + capabilities));
         assertThat(status(deleted, capabilities)).isEqualTo(expected);
-        assertThat(new LocalGitIndex(directory, storage).snapshotRefs().refs()).isEmpty();
+        assertThat(new LocalGitIndex(directory).snapshotRefs().refs()).isEmpty();
     }
 
     @Test
     void consumesEmptyPackWhenCreatingARefToAnExistingObject() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{1});
         byte[] request = request(pack(), ZERO + " " + id + " " + REF + "\0report-status");
         try (BufferedByteInputV2 input = new BufferedByteInputV2(
@@ -157,7 +157,7 @@ class PushCommandTest {
     @ValueSource(booleans = {false, true})
     void preservesExpectedOldAndAtomicSemantics(boolean atomic) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId first = store(storage, GitObjectType.BLOB, new byte[]{1});
         ObjectId stale = objectId(GitObjectType.BLOB, new byte[]{2});
         ObjectId next = objectId(GitObjectType.BLOB, new byte[]{3});
@@ -180,7 +180,7 @@ class PushCommandTest {
     @Test
     void reportsMissingTargetsWithoutCreatingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId missing = objectId(GitObjectType.BLOB, new byte[]{1});
         byte[] response = execute(storage, index, request(pack(),
                 ZERO + " " + missing + " " + REF + "\0report-status"));
@@ -191,7 +191,7 @@ class PushCommandTest {
     @Test
     void reportsUnpackFailureAndDoesNotApplyEvenADeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId first = store(storage, GitObjectType.BLOB, new byte[]{1});
         index.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(first))), false);
         ObjectId next = objectId(GitObjectType.BLOB, new byte[]{2});
@@ -210,7 +210,7 @@ class PushCommandTest {
     @Test
     void sendsOnlyTheNegotiatedResponseAndAcceptsCancellation() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{1});
         assertThat(execute(storage, index, request(pack(), ZERO + " " + id + " " + REF))).isEmpty();
         assertThat(execute(storage, index, request(new byte[0], id + " " + ZERO + " " + REF + "\0side-band-64k")))
@@ -222,7 +222,7 @@ class PushCommandTest {
     @Test
     void rejectsMalformedRequestsWithoutChangingExistingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         ObjectId existing = store(storage, GitObjectType.BLOB, new byte[]{2});
         index.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(existing))), false);
         String id = objectId(GitObjectType.BLOB, new byte[]{1}).toHex();
@@ -265,7 +265,7 @@ class PushCommandTest {
     @Test
     void rejectsUnadvertisedCapabilitiesAndDeletionAndV2() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory, storage);
+        GitIndexApi index = new LocalGitIndex(directory);
         String id = objectId(GitObjectType.BLOB, new byte[]{1}).toHex();
         for (String line : List.of(ZERO + " " + id + " " + REF + "\0atomic",
                 id + " " + ZERO + " " + REF)) {

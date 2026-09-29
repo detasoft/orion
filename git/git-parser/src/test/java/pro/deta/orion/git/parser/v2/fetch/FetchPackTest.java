@@ -42,7 +42,7 @@ class FetchPackTest {
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexApi index = new LocalGitIndex(directory, storage)) {
+             GitIndexApi index = new LocalGitIndex(directory)) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             byte[] rootBytes = commit(tree);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, rootBytes);
@@ -73,7 +73,7 @@ class FetchPackTest {
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree));
             ObjectId boundary = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, root));
@@ -143,7 +143,7 @@ class FetchPackTest {
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexApi index = new LocalGitIndex(directory, storage)) {
+             GitIndexApi index = new LocalGitIndex(directory)) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             ObjectId firstId = PackTestData.store(storage, GitObjectType.BLOB, first);

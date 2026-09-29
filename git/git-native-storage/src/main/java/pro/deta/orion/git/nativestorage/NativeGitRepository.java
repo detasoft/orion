@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
+import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
@@ -40,9 +40,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * Native Git objects and ref publication. File updates save and delete explicit paths in one commit;
- * omitted paths retain their contents and modes. Deleting a missing path is a no-op. A path cannot be
- * both saved and deleted in the same update, including after path normalization.
+ * Native Git objects and ref publication. File operations are exposed separately through GitFileApi.
  */
 @Slf4j
 public class NativeGitRepository implements AutoCloseable {
@@ -70,7 +68,11 @@ public class NativeGitRepository implements AutoCloseable {
     public String name() {
         return name;
     }
-    
+
+    public GitFileApi files() {
+        return new GitFileApi(this);
+    }
+
     public String defaultHead() {
         return defaultHead;
     }

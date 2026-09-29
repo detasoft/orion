@@ -41,7 +41,7 @@ class FetchPlanTest {
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
-        index = new LocalGitIndex(directory, storage);
+        index = new LocalGitIndex(directory);
         PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
         command = new FetchCommand(storage, index, capabilities(GitCapability.values()));
     }

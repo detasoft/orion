@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -86,34 +87,40 @@ class InMemoryStorageTest {
 
     @Test
     void preservesRefResultOrderAndAtomicFailurePrecedence() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
             ObjectId old = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
             ObjectId next = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
             ObjectId absent = new ObjectId("a".repeat(40));
-            assertThat(index.updateRefs(List.of(update(FIRST, null, old)), true).getFirst().status())
+            assertThat(GitRepositoryContext.publishRefs(
+                    storage, index, List.of(update(FIRST, null, old)), true).getFirst().status())
                     .isEqualTo(APPLIED);
             RefsSnapshot before = index.snapshotRefs();
             List<RefUpdate> changes = List.of(update(SECOND, null, next), update(FIRST, next, old));
-            assertThat(index.updateRefs(changes, true)).extracting(RefUpdateResult::status)
+            assertThat(GitRepositoryContext.publishRefs(
+                    storage, index, changes, true)).extracting(RefUpdateResult::status)
                     .containsExactly(ATOMIC_ABORTED, EXPECTED_OLD_MISMATCH);
             assertThat(index.snapshotRefs()).isEqualTo(before);
-            assertThat(index.updateRefs(List.of(update(SECOND, null, absent), update(FIRST, next, old)), true))
+            assertThat(GitRepositoryContext.publishRefs(
+                    storage, index, List.of(update(SECOND, null, absent), update(FIRST, next, old)), true))
                     .extracting(RefUpdateResult::status).containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED);
-            assertThat(index.updateRefs(changes, false)).extracting(RefUpdateResult::status)
+            assertThat(GitRepositoryContext.publishRefs(
+                    storage, index, changes, false)).extracting(RefUpdateResult::status)
                     .containsExactly(APPLIED, EXPECTED_OLD_MISMATCH);
             assertThat(before.refs()).containsExactly(Map.entry(FIRST, old));
             assertThat(index.snapshotRefs().refs()).containsEntry(SECOND, next);
-            assertThat(index.updateRefs(List.of(update(SECOND, next, null)), false).getFirst().status())
+            assertThat(GitRepositoryContext.publishRefs(
+                    storage, index, List.of(update(SECOND, next, null)), false).getFirst().status())
                     .isEqualTo(APPLIED);
             assertThat(index.snapshotRefs()).isEqualTo(before);
-            assertThatThrownBy(() -> index.updateRefs(List.of(update(FIRST, old, next),
+            assertThatThrownBy(() -> GitRepositoryContext.publishRefs(
+                    storage, index, List.of(update(FIRST, old, next),
                     update(FIRST, old, next)), true)).isInstanceOf(IllegalArgumentException.class);
         }
     }
 
     @Test
     void admitsOnlyOneConcurrentExpectedOldWinner() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId old = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
             ObjectId next = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
@@ -133,7 +140,7 @@ class InMemoryStorageTest {
 
     @Test
     void snapshotsNeverExposePartOfAnAtomicBatch() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId first = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
             ObjectId second = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
@@ -164,7 +171,7 @@ class InMemoryStorageTest {
 
     @Test
     void callbacksReleaseRepositoryLockAndFailuresPreservePublishedPacks() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
             PackId published = storage.packIds().getFirst();
@@ -185,16 +192,15 @@ class InMemoryStorageTest {
     }
 
     @Test
-    void isolatesRepositoriesValidatesHeadAndConsumesPublicationAfterClose() throws Exception {
+    void isolatesRepositoriesAndConsumesPublicationAfterClose() throws Exception {
         InMemoryStorage first = new InMemoryStorage();
-        GitIndexApi firstIndex = new InMemoryIndex(first);
+        GitIndexApi firstIndex = new InMemoryIndex();
         try (first;
              firstIndex;
              GitStorageApi second = new InMemoryStorage();
-             GitIndexApi secondIndex = new InMemoryIndex(second)) {
+             GitIndexApi secondIndex = new InMemoryIndex()) {
             ObjectId object = PackTestData.store(first, GitObjectType.BLOB, new byte[]{1});
             Head detached = new Head.Detached(new CommitId(object.toBytes()));
-            assertThatThrownBy(() -> secondIndex.updateHead(detached)).isInstanceOf(IOException.class);
             firstIndex.updateHead(detached);
             assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
             assertThat(secondIndex.snapshotRefs().head()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
@@ -218,7 +224,7 @@ class InMemoryStorageTest {
 
     @Test
     void closingIndexLeavesStoredObjectsReadable() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
             ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
             assertThat(index.updateRefs(List.of(update(FIRST, null, object)), true).getFirst().status())
                     .isEqualTo(APPLIED);

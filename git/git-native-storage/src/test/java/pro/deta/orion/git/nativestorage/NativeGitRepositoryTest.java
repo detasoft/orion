@@ -32,13 +32,13 @@ class NativeGitRepositoryTest {
     void normalizesNestedUnicodePathsForReadingAndSaving() throws Exception {
         try (NativeGitRepository repository = repository()) {
             GitFile file = GitFile.regular("content".getBytes(StandardCharsets.UTF_8));
-            repository.saveFiles("topic", Map.of("./каталог//файл.txt", file), Set.of(),
+            repository.files().saveFiles("topic", Map.of("./каталог//файл.txt", file), Set.of(),
                     "create", GitCommitAuthor.EMPTY);
-            assertThat(repository.loadFiles("refs/heads/topic", List.of("каталог/./файл.txt")).files())
+            assertThat(repository.files().loadFiles("refs/heads/topic", List.of("каталог/./файл.txt")).files())
                     .containsExactlyEntriesOf(Map.of("каталог/файл.txt", file));
-            assertThatThrownBy(() -> repository.loadFiles("topic", List.of("missing")))
+            assertThatThrownBy(() -> repository.files().loadFiles("topic", List.of("missing")))
                     .isInstanceOf(GitRepositoryFileNotFoundException.class);
-            assertThatThrownBy(() -> repository.loadFiles("missing", List.of("каталог/файл.txt")))
+            assertThatThrownBy(() -> repository.files().loadFiles("missing", List.of("каталог/файл.txt")))
                     .isInstanceOf(GitRepositoryFileNotFoundException.class);
         }
     }
@@ -48,10 +48,11 @@ class NativeGitRepositoryTest {
     void rejectsInvalidPathsForReadingAndSaving(String path) throws Exception {
         try (NativeGitRepository repository = repository()) {
             GitFile file = GitFile.regular(new byte[]{1});
-            repository.saveFiles("main", Map.of("file", file), Set.of(), "create", GitCommitAuthor.EMPTY);
-            assertThatThrownBy(() -> repository.loadFiles("main", List.of(path)))
+            repository.files().saveFiles(
+                    "main", Map.of("file", file), Set.of(), "create", GitCommitAuthor.EMPTY);
+            assertThatThrownBy(() -> repository.files().loadFiles("main", List.of(path)))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> repository.saveFiles("main", Map.of(path, file), Set.of(),
+            assertThatThrownBy(() -> repository.files().saveFiles("main", Map.of(path, file), Set.of(),
                     "invalid", GitCommitAuthor.EMPTY))
                     .isInstanceOf(IllegalArgumentException.class);
         }
@@ -65,9 +66,9 @@ class NativeGitRepositoryTest {
             ObjectId commit = repository.writeObject(GitObjectType.COMMIT,
                     ("tree " + tree.toHex() + "\n\nmalformed tree\n").getBytes(StandardCharsets.UTF_8));
             repository.updateRef("refs/heads/main", NULL_ID, commit.toHex());
-            assertThatThrownBy(() -> repository.loadFiles("main", List.of("file")))
+            assertThatThrownBy(() -> repository.files().loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
-            assertThatThrownBy(() -> repository.prepareFileUpdate("main",
+            assertThatThrownBy(() -> repository.files().prepareFileUpdate("main",
                     Map.of("other", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
         }
@@ -79,9 +80,9 @@ class NativeGitRepositoryTest {
             ObjectId commit = repository.writeObject(GitObjectType.COMMIT,
                     "author A <a@b> 0 +0000\n\nmissing tree\n".getBytes(StandardCharsets.UTF_8));
             repository.updateRef("refs/heads/main", NULL_ID, commit.toHex());
-            assertThatThrownBy(() -> repository.loadFiles("main", List.of("file")))
+            assertThatThrownBy(() -> repository.files().loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
-            assertThatThrownBy(() -> repository.prepareFileUpdate("main",
+            assertThatThrownBy(() -> repository.files().prepareFileUpdate("main",
                     Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
         }
@@ -113,7 +114,7 @@ class NativeGitRepositoryTest {
                 updates.add(result);
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
-            NativeGitFileUpdate prepared = repository.prepareFileUpdate("configuration",
+            NativeGitFileUpdate prepared = repository.files().prepareFileUpdate("configuration",
                     Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
                     "configuration", GitCommitAuthor.EMPTY);
             repository.publishPack(prepared.pack(), prepared.refUpdates(), true,
@@ -157,16 +158,16 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
 
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
         GitRepositoryFileSnapshot snapshot =
-                repository.loadFiles("main", List.of("orion.xml"));
+                repository.files().loadFiles("main", List.of("orion.xml"));
         assertThat(snapshot.files())
                 .containsEntry(
                         "orion.xml",
@@ -179,9 +180,9 @@ class NativeGitRepositoryTest {
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
 
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main",
                 Map.of("orion.xml", GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "prepared acl",
@@ -191,7 +192,7 @@ class NativeGitRepositoryTest {
         assertThat(repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-        assertThat(repository.loadFiles("main", List.of("orion.xml")).files())
+        assertThat(repository.files().loadFiles("main", List.of("orion.xml")).files())
                 .containsEntry(
                         "orion.xml",
                         GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8)));
@@ -201,9 +202,9 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
 
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of(
                         "orion.xml",
@@ -213,14 +214,14 @@ class NativeGitRepositoryTest {
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("orion.xml", GitFile.regular("updated acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "updated acl",
                 GitCommitAuthor.EMPTY);
 
         GitRepositoryFileSnapshot snapshot =
-                repository.loadFiles("main", List.of("orion.xml", "nested/acl.xml"));
+                repository.files().loadFiles("main", List.of("orion.xml", "nested/acl.xml"));
         assertThat(snapshot.files())
                 .containsEntry(
                         "orion.xml",
@@ -234,14 +235,14 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
-        repository.saveFiles(
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+        repository.files().saveFiles(
                 "main",
                 Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
-        String versionOne = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
-        repository.saveFiles(
+        String versionOne = repository.files().loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        repository.files().saveFiles(
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)),
@@ -250,7 +251,7 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = repository.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main",
                 versionOne,
                 Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
@@ -265,7 +266,7 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(repository.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+        assertThat(repository.files().loadFiles("main", List.of("orion.xml", "winner.txt")).files())
                 .containsEntry("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)))
                 .containsEntry("winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8)));
     }
@@ -274,15 +275,15 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsStaleVersionAcrossProviders(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider firstProvider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
-        first.saveFiles(
+        first.files().saveFiles(
                 "main",
                 Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
         FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
-        String versionOne = second.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
-        first.saveFiles(
+        String versionOne = second.files().loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        first.files().saveFiles(
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)),
@@ -291,7 +292,7 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = first.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = second.prepareFileUpdate(
+        NativeGitFileUpdate update = second.files().prepareFileUpdate(
                 "main",
                 versionOne,
                 Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
@@ -306,7 +307,7 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(second.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(second.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+        assertThat(second.files().loadFiles("main", List.of("orion.xml", "winner.txt")).files())
                 .containsEntry("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)))
                 .containsEntry("winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8)));
     }
@@ -315,17 +316,18 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
-        repository.saveFiles(
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+        repository.files().saveFiles(
                 "main",
                 Map.of(
                         "orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8)),
                         "preserved.txt", GitFile.regular("preserved".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
-        String expectedVersion = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        String expectedVersion = repository.files().loadFiles(
+                "main", List.of("orion.xml")).version().orElseThrow();
 
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 "main",
                 expectedVersion,
                 Map.of("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8))), Set.of(),
@@ -335,7 +337,7 @@ class NativeGitRepositoryTest {
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
 
-        GitRepositoryFileSnapshot saved = repository.loadFiles(
+        GitRepositoryFileSnapshot saved = repository.files().loadFiles(
                 "main",
                 List.of("orion.xml", "preserved.txt"));
         assertThat(saved.version()).hasValue(repository.refs().get("refs/heads/main"));
@@ -349,9 +351,9 @@ class NativeGitRepositoryTest {
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
 
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "master",
                 Map.of("orion.xml", GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "initial acl",
@@ -363,6 +365,6 @@ class NativeGitRepositoryTest {
 
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
+        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(), "refs/heads/main");
     }
 }

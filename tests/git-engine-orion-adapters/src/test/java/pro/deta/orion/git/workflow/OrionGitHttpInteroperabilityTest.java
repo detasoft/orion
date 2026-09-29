@@ -109,7 +109,7 @@ class OrionGitHttpInteroperabilityTest {
             URI remote = URI.create("http://127.0.0.1:" + connector.getLocalPort() + "/r/project.git");
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
-                    repository.saveFiles("main",
+                    repository.files().saveFiles("main",
                             Map.of("README.md", GitFile.regular(("history " + number).getBytes(
                                     StandardCharsets.UTF_8))), Set.of(),
                                             "history " + number, GitCommitAuthor.EMPTY);
@@ -120,7 +120,7 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                repository.saveFiles("main",
+                repository.files().saveFiles("main",
                         Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
                         "update", GitCommitAuthor.EMPTY);
                 String commit = repository.refs().get("refs/heads/main");
@@ -188,7 +188,7 @@ class OrionGitHttpInteroperabilityTest {
                  MutableIndexedPack pack = received.ingest(input)) {
                 received.storage().persist(pack);
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
-                assertThat(new String(received.loadFiles("main",
+                assertThat(new String(received.files().loadFiles("main",
                         List.of("README.md")).files().get("README.md").content(),
                         StandardCharsets.UTF_8)).isEqualTo(content);
             }

@@ -148,7 +148,8 @@ class GitBlockingWireSessionShallowHistoryTest {
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "initial",
+        repository.files().saveFiles(
+                "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "initial",
                 GitCommitAuthor.EMPTY);
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {

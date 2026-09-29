@@ -83,8 +83,9 @@ class PackIngestionOutputTest {
     private static NativeGitFileUpdate prepared() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
-                "source", storage, new InMemoryIndex(storage), "refs/heads/main")) {
-            return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
+                "source", storage, new InMemoryIndex(), "refs/heads/main")) {
+            return repository.files().prepareFileUpdate(
+                    "main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY);
         }
     }

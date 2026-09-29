@@ -46,7 +46,7 @@ class FetchCommandTest {
         request.initialMessages().add(new NegotiationMessage.Have(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2})));
         request.initialMessages().add(NegotiationMessage.Control.DONE);
         var storage = storage(Set.of(FIRST));
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
 
         var iterator = command.prepareNegotiation(request, HTTP);
@@ -63,7 +63,7 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.capabilities().add(value(GitCapability.THIN_PACK));
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities());
         assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                 .isInstanceOf(IOException.class).hasMessageContaining("thin-pack");
@@ -75,7 +75,7 @@ class FetchCommandTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("refs/heads/main");
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities());
         assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP))
                 .isInstanceOf(IOException.class).hasMessageContaining("ref-in-want");
@@ -84,7 +84,7 @@ class FetchCommandTest {
     @Test
     void separateRequestsGetIndependentNegotiationState() throws Exception {
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities());
         var first = command.prepareNegotiation(new FetchRequest(), SSH);
         first.next(NegotiationMessage.Control.DONE);
@@ -101,7 +101,7 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.wants().add(FIRST);
         var storage = storage(Set.of(FIRST));
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities());
         var iterator = command.prepareNegotiation(request, SSH);
         assertThat(iterator.getContext().wantedObjects()).containsExactly(FIRST);
@@ -114,7 +114,7 @@ class FetchCommandTest {
         request.wants().add(FIRST);
         request.wantRefs().addAll(List.of(MAIN.value(), "HEAD"));
         var storage = storage(Set.of(FIRST));
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
         var command = new FetchCommand(storage, index, capabilities(GitCapability.REF_IN_WANT));
 
@@ -129,7 +129,7 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.wants().addAll(List.of(FIRST, SECOND));
         var storage = storage(Set.of(FIRST));
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         var command = new FetchCommand(storage, index, capabilities());
         assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                 .isInstanceOf(IOException.class).hasMessageContaining(SECOND.toHex());
@@ -142,7 +142,7 @@ class FetchCommandTest {
         request.wantRefs().add(MAIN.value());
         request.wants().add(SECOND);
         GitStorageApi storage = storage(Set.of(FIRST));
-        GitIndexApi index = new InMemoryIndex(storage);
+        GitIndexApi index = new InMemoryIndex();
         index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
         IOException denied = new IOException("Fetch access denied");
         GitRepositoryContext repository = new GitRepositoryContext(storage, index) {

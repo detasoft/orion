@@ -53,7 +53,7 @@ class NativeBootstrapGitFetcherTest {
 
         try {
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
                     .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
 
             Files.writeString(upstream.worktree().resolve("orion.xml"), "second");
@@ -62,7 +62,7 @@ class NativeBootstrapGitFetcherTest {
             upstream.git().push().setRemote(upstream.bare().toUri().toString()).call();
 
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
                     .containsEntry("orion.xml", GitFile.regular("second".getBytes()));
         } finally {
             upstream.git().close();
@@ -115,7 +115,7 @@ class NativeBootstrapGitFetcherTest {
             fetcher.fetch(location, discoveryOnly, repository);
 
             assertThat(repository.refs()).containsEntry(location.refName(), firstId);
-            assertThat(repository.loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
                     .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
         } finally {
             upstream.git().close();
@@ -154,9 +154,11 @@ class NativeBootstrapGitFetcherTest {
         BootstrapGitLocation location = location(upstream.bare());
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("proxy").valueOrFailure("create proxy");
-        repository.saveFiles("refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
+        repository.files().saveFiles(
+                "refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
                 "local", GitCommitAuthor.EMPTY);
-        repository.saveFiles("refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})), Set.of(),
+        repository.files().saveFiles(
+                "refs/heads/incoming", Map.of("orion.xml", GitFile.regular(new byte[]{2})), Set.of(),
                 "remote", GitCommitAuthor.EMPTY);
         Map<String, String> before = repository.refs();
         String concurrent = before.get("refs/heads/incoming");

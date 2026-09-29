@@ -43,13 +43,13 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("first".getBytes())), Set.of(),
                 "first",
                 GitCommitAuthor.EMPTY);
         String oldId = repository.refs().get(location.refName());
-        NativeGitFileUpdate update = repository.prepareFileUpdate(
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("second".getBytes())), Set.of(),
                 "second",
@@ -79,10 +79,11 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.saveFiles(location.refName(), Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
+        repository.files().saveFiles(
+                location.refName(), Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                 "first", GitCommitAuthor.EMPTY);
         String previous = repository.refs().get(location.refName());
-        NativeGitFileUpdate update = repository.prepareFileUpdate(location.refName(),
+        NativeGitFileUpdate update = repository.files().prepareFileUpdate(location.refName(),
                 Map.of("file", GitFile.regular(new byte[]{2})), Set.of(), "second", GitCommitAuthor.EMPTY);
         GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"), location.remoteUri(),
                 location.refName(), location.credentialKind(), Optional.empty(), Optional.empty(), Set.of());

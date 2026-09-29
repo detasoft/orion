@@ -46,7 +46,7 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        NativeGitFileUpdate prepared = repository.prepareFileUpdate("main",
+        NativeGitFileUpdate prepared = repository.files().prepareFileUpdate("main",
                 Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();
@@ -233,7 +233,7 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("payload".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "initial",
@@ -433,13 +433,13 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "base",
                 GitCommitAuthor.EMPTY);
         String have = repository.refs().get("refs/heads/main");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "next",
@@ -469,9 +469,10 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles("main", Map.of("first", GitFile.regular(new byte[]{1})), Set.of(), "first",
+        repository.files().saveFiles("main", Map.of("first", GitFile.regular(new byte[]{1})), Set.of(), "first",
                 GitCommitAuthor.EMPTY);
-        repository.saveFiles("second", Map.of("second", GitFile.regular(new byte[]{2})), Set.of(), "second",
+        repository.files().saveFiles(
+                "second", Map.of("second", GitFile.regular(new byte[]{2})), Set.of(), "second",
                 GitCommitAuthor.EMPTY);
         ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
@@ -501,13 +502,13 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "base",
                 GitCommitAuthor.EMPTY);
         String have = repository.refs().get("refs/heads/main");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "next",
@@ -643,12 +644,12 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("root".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "root",
                 GitCommitAuthor.EMPTY);
-        repository.saveFiles(
+        repository.files().saveFiles(
                 "main",
                 Map.of("README.md", GitFile.regular("tip".getBytes(StandardCharsets.US_ASCII))), Set.of(),
                 "tip",

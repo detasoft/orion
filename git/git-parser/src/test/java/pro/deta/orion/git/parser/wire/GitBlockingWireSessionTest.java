@@ -50,7 +50,7 @@ class GitBlockingWireSessionTest {
     @BeforeEach
     void openStorage() throws Exception {
         storage = new LocalGitStorage(directory);
-        index = new LocalGitIndex(directory, storage);
+        index = new LocalGitIndex(directory);
     }
 
     @Test

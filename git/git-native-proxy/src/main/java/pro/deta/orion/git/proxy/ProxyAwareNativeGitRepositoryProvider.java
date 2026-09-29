@@ -134,7 +134,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
             try {
-                GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, paths);
+                GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(refName, paths);
                 return resolved(id, repositoryName, refName, paths, snapshot.version(), allowMissing);
             } catch (GitRepositoryFileNotFoundException error) {
                 if (allowMissing && primaryPathIsMissing(repository, refName, paths)) {
@@ -589,7 +589,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         NativeGitRepository repository = backend.find(proxy.repositoryName())
                 .valueOrFailure("Cannot open native repository " + canonicalName);
         new PolicyBoundNativeGitRepository(this, canonicalName, repository)
-                .saveFiles(refName, files, deletedPaths, message, author);
+                .files().saveFiles(refName, files, deletedPaths, message, author);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {
@@ -688,7 +688,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             return true;
         }
         try {
-            repository.loadFiles(refName, List.of(paths.getFirst()));
+            repository.files().loadFiles(refName, List.of(paths.getFirst()));
             return false;
         } catch (GitRepositoryFileNotFoundException missing) {
             return true;
