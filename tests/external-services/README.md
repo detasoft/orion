@@ -16,7 +16,7 @@ From this directory:
 ```
 
 `up` builds the image when absent, creates random credentials in
-`.state/credentials.env`, starts the container, waits for Gitea, and creates its
+`.state/credentials.env`, starts the container, waits for Gitea and Chromium, and creates its
 fixture user. `check` exercises the ACME directory, Git HTTPS push/SSH fetch,
 SSH password/key login and rejection, S3 access, and browser CA trust.
 Run `./fixture down` after the round. Data and host keys remain in `.state`.
@@ -104,19 +104,108 @@ make integration-test
 ```
 
 This prints the noVNC browser URL immediately and runs Maven. The
-`pre-integration-test` phase starts or restarts the fixture for a fresh browser
-session before the integration tests. Its `.state` data and host
+`pre-integration-test` phase starts the fixture if needed and installs Playwright
+dependencies. A running fixture is reused. Its `.state` data and host
 keys persist. The fixture remains running afterward; stop it with
 `tests/external-services/fixture down`.
 
 The integration round starts an isolated Orion instance, configures test access
 and CA trust, and runs Playwright in the container's visible Chromium. Orion
-listens on host port 8000 for HTTP-01 and stops when the round ends. The browser
-retains its last page.
+listens on host port 8000 for HTTP-01 and stops when the round ends. Each test
+uses a clean browser context; its pages close after success or failure. Existing
+manual browser pages stay open.
 The Playwright dependencies are installed from its lockfile in
 `pre-integration-test`; Node.js 20 or newer, npm, and Git are required. No browser
 download is needed because Playwright connects to the fixture Chromium through
 the loopback-only DevTools port 9222.
+
+## Test an already running Orion
+
+Start the environment and server explicitly, then run the browser client against
+the URL you select. Currently services, Chromium and noVNC share one container,
+so the first command starts both the services and the browser:
+
+```sh
+tests/external-services/fixture up
+npm --prefix tests/integration-test/playwright ci
+
+# In another terminal; see the repository README for first-time initialization.
+make run-server
+
+# Fast: test plain HTTP without ACME or JVM CA configuration.
+make browser-test URL=http://localhost:8000 TEST='local repository'
+
+# Observe the same scenarios through noVNC, with a one-second action delay.
+make browser-test URL=http://localhost:8000 OBSERVE=1 TEST='local repository'
+
+# Run all ordinary scenarios, including the HTTPS Git proxy (see JVM CA trust below).
+make browser-test URL=http://localhost:8000
+```
+
+`fixture up` waits for Gitea and the browser's DevTools endpoint to become ready.
+The goals connect to the running server and browser; they do not start, restart,
+or stop either one. `URL` is required and printed before the scenarios start.
+The HTTP client uses that URL. For host loopback URLs (`localhost`, `127.0.0.1`,
+or `::1`), the container browser uses the existing `orion.test` host mapping with
+the same port and path. Both addresses are printed. Other hostnames stay unchanged
+and must be reachable from both the host and container. The Orion listener must
+be reachable from the container, normally by binding to `0.0.0.0`.
+
+If `ORION_TOKEN` is set, tests use it. Otherwise they obtain a short-lived root
+token using the existing `make issue-token-raw` SSH command and the enrolled key
+selected by your SSH configuration or agent. The SSH host defaults to the host
+in `URL`; override `ORION_SSH_HOST`, `ORION_SSH_PORT` (default `8022`), or
+`ORION_SSH_OPTIONS` when needed. The one-time key enrollment remains the ordinary
+`make enroll-admin-key` operation. Tokens and entered credentials are not printed.
+
+The local-repository scenario only needs Orion and Chromium. The Git-proxy
+scenario also needs Gitea, its fixture credentials and CA, and an Orion JVM that
+trusts that CA. Each run creates uniquely named Orion repositories and proxy
+aliases, which remain in the selected server's persistent configuration. The
+temporary upstream Gitea repository is removed after its scenario.
+
+Observed tests bring their page forward, show the scenario name, and mark clicks.
+Unattended tests use the same assertions without presentation delays. Results are
+shown in the terminal; the HTML report is in
+`tests/integration-test/target/playwright-report/`. Failed test traces are in
+`tests/integration-test/target/playwright/`. These local artifacts can contain
+test credentials and should remain private.
+
+ACME issuance is a separate, explicit invocation:
+
+```sh
+make browser-acme-test URL=http://localhost:8000 OBSERVE=1
+```
+
+The current ACME scenario tests certificate issuance through the UI after ACME
+is configured, as described above; it does not yet configure ACME through a UI
+form. It expects the fixture's `orion.test` domain and an identity without an
+issued certificate. The complete Maven integration round prepares that state
+and invokes both browser goals. `OBSERVE=1` also applies to that round.
+
+## Lifetime and reset boundaries
+
+noVNC shows the container's desktop whenever the container runs, including while
+no tests or Orion server are running. Supervisor keeps Chromium and noVNC alive.
+An open manual page can show an old response after its server has stopped.
+
+Each scenario starts with clean cookies and storage in its own browser context;
+closing that context removes its pages and browser state. This does not reset
+Orion's server-side data, Gitea, S3 or the CA. `fixture down` stops the container
+and preserves `.state`; a subsequent `fixture up` starts it again with a new
+Chromium profile. Container recreation also preserves the bind-mounted `.state`.
+Replacing `.state` is a full data reset that rotates credentials, the CA and SSH
+host keys; existing trust and host-key pins then need updating.
+
+Run one observed scenario sequence at a time on this desktop. The current fixture
+name and ports are shared across worktrees; stopping or rebuilding that container
+also affects other users of it.
+
+Chromium's CA trust is installed into its NSS database before browser startup.
+Orion's JVM trust is separate: the JVM must also trust the fixture CA for Gitea
+HTTPS and ACME. Browser trust does not configure JVM trust, and browser contexts
+keep certificate validation enabled. When the browser moves to its own container,
+pass the service fixture's root CA to that container before launching Chromium.
 
 For a local JVM started with a dedicated test truststore, one way to add the
 root is:

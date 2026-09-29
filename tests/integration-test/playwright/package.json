@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
+    "test": "playwright test git.spec.js",
     "test:acme": "playwright test acme.spec.js"
   },
   "devDependencies": {

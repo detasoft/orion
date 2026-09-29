@@ -145,11 +145,11 @@ class PlaywrightExternalServicesIT {
             SSLContext.setDefault(fixtureContext);
             HttpsURLConnection.setDefaultSSLSocketFactory(fixtureContext.getSocketFactory());
             Path output = fixtureRoot.getParent().resolve("integration-test/target/playwright.log");
-            ProcessBuilder command = new ProcessBuilder("npm", "test")
-                    .directory(fixtureRoot.getParent().resolve("integration-test/playwright").toFile())
+            ProcessBuilder command = new ProcessBuilder(
+                    "make", "-s", "browser-test", "browser-acme-test", "URL=http://127.0.0.1:8000")
+                    .directory(fixtureRoot.normalize().getParent().getParent().toFile())
                     .redirectErrorStream(true)
                     .redirectOutput(output.toFile());
-            command.environment().put("ORION_HTTP_URL", "http://127.0.0.1:8000");
             command.environment().put("ORION_TOKEN", token);
             Process process = command.start();
             try {

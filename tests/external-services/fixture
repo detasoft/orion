@@ -64,11 +64,7 @@ case "${1:-}" in
             "$engine" rm "$name" >/dev/null
         fi
         if "$engine" container inspect "$name" >/dev/null 2>&1; then
-            if [ "${FRESH_FIXTURE:-0}" = 1 ]; then
-                "$engine" restart "$name" >/dev/null
-            else
-                "$engine" start "$name" >/dev/null
-            fi
+            "$engine" start "$name" >/dev/null
         else
             "$engine" run -d --name "$name" --env-file "$state/credentials.env" \
                 --add-host orion.test:127.0.0.1 \
@@ -81,9 +77,10 @@ case "${1:-}" in
                 orion-external-services:dev >/dev/null
         fi
         attempt=0
-        until curl -fsS --cacert "$state/step/certs/root_ca.crt" \
+        until curl -fsS --max-time 2 --cacert "$state/step/certs/root_ca.crt" \
             --resolve fixture.orion.test:8443:127.0.0.1 \
-            https://fixture.orion.test:8443/api/v1/version >/dev/null 2>&1; do
+            https://fixture.orion.test:8443/api/v1/version >/dev/null 2>&1 && \
+            curl -fsS --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; do
             attempt=$((attempt + 1))
             if [ "$attempt" -ge 60 ]; then "$engine" logs --tail 100 "$name"; exit 1; fi
             sleep 2

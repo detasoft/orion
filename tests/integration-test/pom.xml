@@ -107,9 +107,6 @@
                                     <workingDirectory>${externalFixtureRoot}</workingDirectory>
                                     <executable>${externalFixtureRoot}/fixture</executable>
                                     <arguments><argument>up</argument></arguments>
-                                    <environmentVariables>
-                                        <FRESH_FIXTURE>1</FRESH_FIXTURE>
-                                    </environmentVariables>
                                 </configuration>
                             </execution>
                             <execution>

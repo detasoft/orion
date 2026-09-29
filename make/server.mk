@@ -1,6 +1,9 @@
 ORION_ROOT ?= $(CURDIR)/orion_root
 ORION_ARGS ?=
 NPM ?= npm
+URL ?=
+OBSERVE ?= 0
+TEST ?=
 AGENT_ARGS ?= --allow-unsecure
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
@@ -28,9 +31,11 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
 RUN_TEST_RESERVED_GOALS += run-frontend
+RUN_TEST_RESERVED_GOALS += browser-test browser-acme-test require-browser-test-url
 
 .PHONY: init-server run-server run-frontend run-agent enroll-admin-key require-key-material-password
 .PHONY: issue-token issue-token-raw
+.PHONY: browser-test browser-acme-test require-browser-test-url
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
 .PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
@@ -67,6 +72,22 @@ run-server: require-key-material-password ## Run the Orion server
 
 run-frontend: ## Run the frontend Vite development server with automatic UI updates
 	cd net/frontend/ui && $(NPM) run dev
+
+require-browser-test-url:
+	@test -n '$(URL)' || { echo 'Set URL to the server under test; e.g. URL=http://localhost:8000' >&2; exit 2; }
+	@case '$(OBSERVE)' in 0|1) ;; *) echo 'OBSERVE must be 0 or 1' >&2; exit 2;; esac
+
+## Test a running Orion; set URL, optionally OBSERVE=1 and TEST=<name-pattern>
+browser-test: require-browser-test-url
+	@printf '%s\n' 'Server under test: $(URL)' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
+	cd tests/integration-test/playwright && ORION_HTTP_URL='$(URL)' ORION_BROWSER_OBSERVE='$(OBSERVE)' \
+		$(NPM) test -- --grep '$(TEST)'
+
+## Test ACME issuance on a configured Orion; set URL, optionally OBSERVE=1
+browser-acme-test: require-browser-test-url
+	@printf '%s\n' 'Server under test: $(URL)' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'
+	cd tests/integration-test/playwright && ORION_HTTP_URL='$(URL)' ORION_BROWSER_OBSERVE='$(OBSERVE)' \
+		$(NPM) run test:acme -- --grep '$(TEST)'
 
 run-agent: ## Run AgentD on this machine; set AGENT_ARGS for its command-line options
 	$(MAVEN_RUN) -pl agentd -am -Pdev,run-agent \
