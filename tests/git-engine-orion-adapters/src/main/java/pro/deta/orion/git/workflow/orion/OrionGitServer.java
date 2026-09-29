@@ -74,6 +74,7 @@ final class OrionGitServer implements GitServer {
     private OrionExecutor executor;
 
     private final Map<String, NativeGitRepository> repositories = new LinkedHashMap<>();
+    private final Map<String, Git> observers = new LinkedHashMap<>();
     private Path root;
     private Path storageRoot;
     private NativeGitRepositoryProvider provider;
@@ -141,36 +142,44 @@ final class OrionGitServer implements GitServer {
         if (repository.refs().isEmpty()) {
             return RepositorySnapshot.of(MAIN_REF, Map.of(), Map.of());
         }
+        Git observation = observer(remote);
+        observation.fetch()
+                .setRemote(remote.uri())
+                .setTransportConfigCallback(GitClients.allowAllSsh())
+                .setRemoveDeletedRefs(true)
+                .setRefSpecs(
+                        new RefSpec("+refs/heads/*:refs/heads/*"),
+                        new RefSpec("+refs/tags/*:refs/tags/*"))
+                .call();
+        return RepositorySnapshot.capture(observation.getRepository());
+    }
+
+    private Git observer(GitRemoteRepository remote) throws Exception {
+        Git observation = observers.get(remote.uri());
+        if (observation != null) {
+            return observation;
+        }
         Path observer = Files.createTempDirectory(root, ".orion-jgit-observer-");
-        Throwable failure = null;
-        try (Git observation = Git.init()
-                .setBare(true)
-                .setInitialBranch("main")
-                .setDirectory(observer.toFile())
-                .call()) {
+        try {
+            observation = Git.init()
+                    .setBare(true)
+                    .setInitialBranch("main")
+                    .setDirectory(observer.toFile())
+                    .call();
             observation.getRepository().getConfig().setInt("gc", null, "auto", 0);
             observation.getRepository().getConfig().save();
-            observation.fetch()
-                    .setRemote(remote.uri())
-                    .setTransportConfigCallback(GitClients.allowAllSsh())
-                    .setRefSpecs(
-                            new RefSpec("+refs/heads/*:refs/heads/*"),
-                            new RefSpec("+refs/tags/*:refs/tags/*"))
-                    .call();
-            return RepositorySnapshot.capture(observation.getRepository());
+            observers.put(remote.uri(), observation);
+            return observation;
         } catch (Exception | Error error) {
-            failure = error;
-            throw error;
-        } finally {
+            if (observation != null) {
+                observation.close();
+            }
             try {
                 deleteRecursively(observer);
             } catch (IOException cleanupError) {
-                if (failure != null) {
-                    failure.addSuppressed(cleanupError);
-                } else {
-                    throw cleanupError;
-                }
+                error.addSuppressed(cleanupError);
             }
+            throw error;
         }
     }
 
@@ -192,18 +201,19 @@ final class OrionGitServer implements GitServer {
             return;
         }
         closed = true;
-        if (service != null) {
-            service.onStop();
-        }
+        Exception failure = null;
         try {
+            if (service != null) {
+                service.onStop();
+            }
             if (http != null) {
                 http.stop();
             }
             if (ssh != null) {
                 ssh.stop(true);
             }
-        } catch (Exception failure) {
-            throw new IllegalStateException("Cannot stop matrix server", failure);
+        } catch (Exception stopFailure) {
+            failure = stopFailure;
         } finally {
             if (executor != null) {
                 executor.shutdownNow();
@@ -212,6 +222,35 @@ final class OrionGitServer implements GitServer {
                 repository.close();
             }
             repositories.clear();
+            try {
+                closeObservers();
+            } catch (IOException cleanupFailure) {
+                if (failure == null) {
+                    failure = cleanupFailure;
+                } else {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
+        if (failure != null) {
+            throw new IllegalStateException("Cannot stop matrix server", failure);
+        }
+    }
+
+    private void closeObservers() throws IOException {
+        IOException[] failure = new IOException[1];
+        for (Git observation : observers.values()) {
+            Path directory = observation.getRepository().getDirectory().toPath();
+            observation.close();
+            try {
+                deleteRecursively(directory);
+            } catch (IOException cleanupFailure) {
+                record(cleanupFailure, failure);
+            }
+        }
+        observers.clear();
+        if (failure[0] != null) {
+            throw failure[0];
         }
     }
 
