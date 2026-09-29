@@ -1,5 +1,7 @@
 package pro.deta.orion.keymaterial;
 
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
@@ -9,16 +11,21 @@ import javax.net.ssl.SSLContext;
 import javax.security.auth.x500.X500Principal;
 import java.io.IOException;
 import java.io.CharArrayReader;
+import java.math.BigInteger;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.RSAPublicKeySpec;
+import java.security.spec.RSAPrivateCrtKeySpec;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -132,8 +139,25 @@ public final class OrionKeyMaterial implements AutoCloseable {
         };
     }
 
-    private static KeyPair readRsaPrivateKey(char[] pem) {
-        if (pem.length > 16384) throw new IllegalArgumentException("Private key PEM is too large");
+    private static KeyPair readRsaPrivateKey(char[] input) {
+        try {
+            if (input.length > 16384) throw new IllegalArgumentException();
+            int start = 0;
+            while (start < input.length && Character.isWhitespace(input[start])) start++;
+            PrivateKey key = start < input.length && input[start] == '{'
+                    ? readRsaJwk(input) : readRsaPem(input);
+            if (!(key instanceof RSAPrivateCrtKey rsa)
+                    || rsa.getModulus().bitLength() < 2048 || rsa.getModulus().bitLength() > 8192) {
+                throw new IllegalArgumentException();
+            }
+            return new KeyPair(KeyFactory.getInstance("RSA").generatePublic(
+                    new RSAPublicKeySpec(rsa.getModulus(), rsa.getPublicExponent())), rsa);
+        } catch (IOException | GeneralSecurityException | IllegalArgumentException | IllegalStateException invalid) {
+            throw new IllegalArgumentException("Invalid RSA private key");
+        }
+    }
+
+    private static PrivateKey readRsaPem(char[] pem) throws IOException {
         try (PEMParser parser = new PEMParser(new CharArrayReader(pem))) {
             Object parsed = parser.readObject();
             PrivateKeyInfo info = switch (parsed) {
@@ -142,16 +166,69 @@ public final class OrionKeyMaterial implements AutoCloseable {
                 case null, default -> throw new IllegalArgumentException("Expected an unencrypted RSA private key");
             };
             if (parser.readObject() != null) throw new IllegalArgumentException("Expected exactly one private key");
-            PrivateKey key = new JcaPEMKeyConverter().getPrivateKey(info);
-            if (!(key instanceof RSAPrivateCrtKey rsa)
-                    || rsa.getModulus().bitLength() < 2048 || rsa.getModulus().bitLength() > 8192) {
-                throw new IllegalArgumentException("Expected an RSA key of 2048–8192 bits");
-            }
-            return new KeyPair(KeyFactory.getInstance("RSA").generatePublic(
-                    new RSAPublicKeySpec(rsa.getModulus(), rsa.getPublicExponent())), rsa);
-        } catch (IOException | GeneralSecurityException invalid) {
-            throw new IllegalArgumentException("Invalid RSA private key PEM");
+            return new JcaPEMKeyConverter().getPrivateKey(info);
         }
+    }
+
+    private static PrivateKey readRsaJwk(char[] input) throws IOException, GeneralSecurityException {
+        Map<String, BigInteger> values = new HashMap<>();
+        HashSet<String> names = new HashSet<>();
+        List<String> parameters = List.of("n", "e", "d", "p", "q", "dp", "dq", "qi");
+        try (JsonReader reader = new JsonReader(new CharArrayReader(input))) {
+            reader.setLenient(false);
+            reader.beginObject();
+            while (reader.hasNext()) {
+                String name = reader.nextName();
+                if (!names.add(name) || name.equals("oth")) throw new IllegalArgumentException();
+                if (name.equals("kty")) {
+                    if (reader.peek() != JsonToken.STRING || !reader.nextString().equals("RSA")) {
+                        throw new IllegalArgumentException();
+                    }
+                } else if (parameters.contains(name)) {
+                    if (reader.peek() != JsonToken.STRING) throw new IllegalArgumentException();
+                    String encoded = reader.nextString();
+                    if (encoded.length() > 1366 || !encoded.matches("[A-Za-z0-9_-]+")) {
+                        throw new IllegalArgumentException();
+                    }
+                    byte[] bytes = Base64.getUrlDecoder().decode(encoded);
+                    try {
+                        if (bytes.length == 0 || bytes[0] == 0
+                                || !Base64.getUrlEncoder().withoutPadding().encodeToString(bytes).equals(encoded)) {
+                            throw new IllegalArgumentException();
+                        }
+                        values.put(name, new BigInteger(1, bytes));
+                    } finally {
+                        Arrays.fill(bytes, (byte) 0);
+                    }
+                } else {
+                    reader.skipValue();
+                }
+            }
+            reader.endObject();
+            if (reader.peek() != JsonToken.END_DOCUMENT || !names.contains("kty") || values.size() != 8) {
+                throw new IllegalArgumentException();
+            }
+        }
+        BigInteger n = values.get("n");
+        BigInteger e = values.get("e");
+        BigInteger d = values.get("d");
+        BigInteger p = values.get("p");
+        BigInteger q = values.get("q");
+        if (n.bitLength() < 2048 || n.bitLength() > 8192 || e.compareTo(BigInteger.ONE) <= 0
+                || e.compareTo(n) >= 0 || d.compareTo(n) >= 0 || p.equals(q)
+                || !p.multiply(q).equals(n) || !p.isProbablePrime(80) || !q.isProbablePrime(80)) {
+            throw new IllegalArgumentException();
+        }
+        BigInteger pMinusOne = p.subtract(BigInteger.ONE);
+        BigInteger qMinusOne = q.subtract(BigInteger.ONE);
+        BigInteger lambda = pMinusOne.divide(pMinusOne.gcd(qMinusOne)).multiply(qMinusOne);
+        if (!e.multiply(d).mod(lambda).equals(BigInteger.ONE)
+                || !d.mod(pMinusOne).equals(values.get("dp")) || !d.mod(qMinusOne).equals(values.get("dq"))
+                || !q.modInverse(p).equals(values.get("qi"))) {
+            throw new IllegalArgumentException();
+        }
+        return KeyFactory.getInstance("RSA").generatePrivate(new RSAPrivateCrtKeySpec(
+                n, e, d, p, q, values.get("dp"), values.get("dq"), values.get("qi")));
     }
 
     public ConfigurationMaterialCapability configurationMaterial() {

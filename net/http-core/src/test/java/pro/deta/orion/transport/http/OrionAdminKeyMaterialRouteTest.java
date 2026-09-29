@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
@@ -42,19 +44,20 @@ class OrionAdminKeyMaterialRouteTest {
         assertThat(route.doGet(null).body()).isEqualTo(Map.of("entries", List.of(entry)));
     }
 
-    @Test
-    void createsKeysWithoutReturningSecretsAndClearsTheImportedInput() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"private-secret", "{\"kty\":\"RSA\",\"d\":\"private-secret\"}"})
+    void createsKeysWithoutReturningSecretsAndClearsTheImportedInput(String privateKey) throws Exception {
         List<char[]> received = new ArrayList<>();
         OrionAdminKeyMaterialRoute route = new OrionAdminKeyMaterialRoute(null, (alias, purpose, pem) -> {
             assertThat(alias).isEqualTo("imported");
             assertThat(purpose.name()).isEqualTo("ACME_ACCOUNT");
-            assertThat(pem).containsExactly("private-secret".toCharArray());
+            assertThat(pem).containsExactly(privateKey.toCharArray());
             received.add(pem);
         }, new ObjectMapper());
         OrionHttpResponse response = route.doPost(AcmeAdministrationTest.httpRequest("POST",
-                "/api/admin/key-material", """
-                {"alias":"imported","purpose":"ACME_ACCOUNT","privateKeyPem":"private-secret"}
-                """, AcmeAdministrationTest.admin()));
+                "/api/admin/key-material", new ObjectMapper().writeValueAsString(Map.of(
+                        "alias", "imported", "purpose", "ACME_ACCOUNT", "privateKeyPem", privateKey)),
+                AcmeAdministrationTest.admin()));
         assertThat(response.status()).isEqualTo(201);
         assertThat(response.body()).isNull();
         assertThat(received).hasSize(1);

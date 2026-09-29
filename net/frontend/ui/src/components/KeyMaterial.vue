@@ -262,12 +262,14 @@ onBeforeUnmount(() => { attempt += 1 })
             </select>
           </label>
         </div>
-        <label v-if="keyForm.operation === 'import'" class="private-key-input">Private key PEM
-          <textarea v-model="keyForm.privateKeyPem" aria-label="Private key PEM" required rows="5"
+        <label v-if="keyForm.operation === 'import'" class="private-key-input">Private key PEM or Certbot JSON
+          <textarea v-model="keyForm.privateKeyPem" aria-label="Private key PEM or Certbot JSON" required rows="5"
             maxlength="16384" autocomplete="off" spellcheck="false" />
         </label>
-        <p v-if="keyForm.operation === 'import'">Import an unencrypted RSA private key in PKCS#1 or PKCS#8 PEM
-          format (2048–8192 bits). The public key is derived automatically.</p>
+        <p v-if="keyForm.operation === 'import'">Paste an unencrypted RSA private key in PKCS#1 or PKCS#8 PEM
+          format, or the contents of Certbot’s private_key.json (RSA JWK, 2048–8192 bits).
+          For a Certbot account, choose ACME account, then select the saved key and the same provider
+          in the ACME form. The public key is derived automatically.</p>
         <p v-else>Creates an RSA 3072-bit key pair in the protected store.</p>
         <p>Names use lowercase letters, digits, dots, underscores and hyphens. Existing keys cannot be overwritten.</p>
         <button type="submit" class="secondary-button">{{ creating ? 'Saving…' : 'Save key pair' }}</button>

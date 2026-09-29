@@ -55,7 +55,7 @@ public final class OrionAdminKeyMaterialRoute extends BaseAdminRoute {
             return OrionHttpResponse.empty(201).withHeader("Cache-Control", "no-store");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400,
-                    "Check the unique key name, purpose and RSA private key PEM (2048–8192 bits).");
+                    "Check the unique key name, purpose and RSA private key PEM or Certbot JSON (2048–8192 bits).");
         } catch (IOException | GeneralSecurityException failure) {
             return OrionHttpResponse.text(503, "Could not save key material.");
         } finally {

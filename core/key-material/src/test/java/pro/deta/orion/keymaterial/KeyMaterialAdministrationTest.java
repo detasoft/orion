@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.math.BigInteger;
+import java.util.Arrays;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.Base64;
@@ -66,6 +69,75 @@ class KeyMaterialAdministrationTest {
                 assertThat(keys.accountKeyPair().getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
             }
         }
+    }
+
+    @Test
+    void importsCertbotJwkAndUsesTheOriginalAccountKeyAfterReopening() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        KeyPair original = generator.generateKeyPair();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        char[] input = (" \n" + jwk((RSAPrivateCrtKey) original.getPrivate())).toCharArray();
+        try (OrionKeyMaterial material = open(store)) {
+            material.administration().create("certbot", KeyMaterialPurpose.ACME_ACCOUNT, input);
+            assertThat(input).containsOnly('\0');
+        }
+        try (OrionKeyMaterial material = open(store)) {
+            AcmeKeyMaterial keys = material.acme().acquire(new AcmeMaterialConfiguration(
+                    descriptor("certbot", KeyMaterialPurpose.ACME_ACCOUNT),
+                    descriptor("identity", KeyMaterialPurpose.TLS_IDENTITY), Optional.empty()), 2048, 2048);
+            assertThat(keys.accountKeyPair().getPrivate().getEncoded()).isEqualTo(original.getPrivate().getEncoded());
+            assertThat(keys.accountKeyPair().getPublic().getEncoded()).isEqualTo(original.getPublic().getEncoded());
+        }
+    }
+
+    @Test
+    void rejectsMalformedOrInconsistentJwkWithoutSavingAndClearsInput() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        String valid = jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate());
+        generator.initialize(1024);
+        List<String> invalidKeys = List.of("{", "{}", "{\"kty\":\"EC\"}",
+                valid + " {}", valid.replace("\"kty\":\"RSA\"", "\"kty\":\"RSA\",\"kty\":\"RSA\""),
+                valid.replace("\"d\":", "\"missing-d\":"),
+                valid.replaceFirst("\"p\":\"[^\"]+\"", "\"p\":\"AQ\""),
+                valid.replaceFirst("\"dp\":\"[^\"]+\"", "\"dp\":\"AQ\""),
+                valid.replaceFirst("\"qi\":\"[^\"]+\"", "\"qi\":\"AQ\""),
+                valid.replaceFirst("\"n\":\"[^\"]+\"", "\"n\":\"bad!\""),
+                valid.replaceFirst("\"e\":\"[^\"]+\"", "\"e\":65537"),
+                valid.replace("\"kty\":\"RSA\"", "\"kty\":\"RSA\",\"oth\":[]"),
+                jwk((RSAPrivateCrtKey) generator.generateKeyPair().getPrivate()));
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        try (OrionKeyMaterial material = open(store)) {
+            List<KeyMaterialInventoryEntry> before = material.configurationMaterial().inventory();
+            for (String invalid : invalidKeys) {
+                char[] input = invalid.toCharArray();
+                assertThatThrownBy(() -> material.administration().create("invalid",
+                        KeyMaterialPurpose.ACME_ACCOUNT, input)).isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("Invalid RSA private key").hasNoCause();
+                assertThat(input).containsOnly('\0');
+                assertThat(material.configurationMaterial().inventory()).isEqualTo(before);
+            }
+        }
+        try (OrionKeyMaterial material = open(store)) {
+            assertThat(material.configurationMaterial().inventory()).extracting(KeyMaterialInventoryEntry::alias)
+                    .containsExactly("signing");
+        }
+    }
+
+    private static String jwk(RSAPrivateCrtKey key) {
+        return """
+                {"kty":"RSA","n":"%s","e":"%s","d":"%s","p":"%s","q":"%s",
+                 "dp":"%s","dq":"%s","qi":"%s"}
+                """.formatted(unsigned(key.getModulus()), unsigned(key.getPublicExponent()),
+                unsigned(key.getPrivateExponent()), unsigned(key.getPrimeP()), unsigned(key.getPrimeQ()),
+                unsigned(key.getPrimeExponentP()), unsigned(key.getPrimeExponentQ()), unsigned(key.getCrtCoefficient()));
+    }
+
+    private static String unsigned(BigInteger value) {
+        byte[] bytes = value.toByteArray();
+        if (bytes[0] == 0) bytes = Arrays.copyOfRange(bytes, 1, bytes.length);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     @Test

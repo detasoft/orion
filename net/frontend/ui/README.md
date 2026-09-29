@@ -20,7 +20,7 @@ for the current browser session.
 ## Key material and ACME accounts
 
 Application administrators can generate RSA 3072-bit key pairs or import an
-unencrypted RSA private key in PKCS#1 or PKCS#8 PEM format (2048–8192 bits) in
+unencrypted RSA private key in PKCS#1/PKCS#8 PEM or Certbot JSON/JWK format (2048–8192 bits) in
 **Key material**. Choose **ACME account** or **HTTPS certificate** as the purpose.
 Names must be unique and use lowercase letters, digits, dots, underscores or
 hyphens, starting with a letter or digit. Creating a key never overwrites an
@@ -31,8 +31,11 @@ submission and is not saved in browser storage.
 In the ACME form, **Account key** selects a stored RSA ACME account key.
 To reuse an account from another client, import its account private key and
 select both that key and the same ACME directory. Importing a certificate's
-private key does not recover the ACME account. Certbot JSON/JWK files and
-encrypted PEM files are not accepted directly.
+private key does not recover the ACME account. For Certbot, paste the contents of
+`/etc/letsencrypt/accounts/<server>/directory/<account-id>/private_key.json`
+into the import field and choose **ACME account**. The format is detected automatically;
+`regr.json` and `meta.json` are not needed. Only two-prime RSA private JWKs are accepted;
+public-only JWKs, EC keys and encrypted PEM files are not supported.
 
 **Automatic** preserves the current key when the provider and EAB account ID
 are unchanged; otherwise it generates a key for a new account. The settings,

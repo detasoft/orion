@@ -3,7 +3,7 @@ package pro.deta.orion.keymaterial;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 
-/** Creates named ACME and TLS keys without exposing private material or replacing existing entries. */
+/** Creates named ACME and TLS keys, accepting RSA PEM or Certbot JWK without exposing or replacing stored keys. */
 public interface KeyMaterialAdministrationCapability {
     void create(String alias, KeyMaterialPurpose purpose, char[] privateKeyPem)
             throws IOException, GeneralSecurityException;
