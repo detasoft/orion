@@ -2,6 +2,8 @@ package pro.deta.orion.transport.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 
 import java.lang.reflect.InvocationHandler;
@@ -12,6 +14,31 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionGitPackfileUriBaseResolverTest {
+    @ParameterizedTest
+    @CsvSource({
+            "https, [2001:db8::1], 8443, https://[2001:db8::1]:8443/r",
+            "https, [2001:db8::1]:9443, 8443, https://[2001:db8::1]:9443/r",
+            "https, [2001:db8::1], 443, https://[2001:db8::1]/r",
+            "http, [2001:db8::1], 80, http://[2001:db8::1]/r",
+            "http, [2001:db8::1], 8080, http://[2001:db8::1]:8080/r",
+            "https, git.example, 8443, https://git.example:8443/r",
+            "https, git.example:9443, 8443, https://git.example:9443/r"
+    })
+    void preservesForwardedPortsAndExplicitHostPortPrecedence(
+            String scheme, String host, String port, String expected) {
+        GitPackfileUriConfig config = new GitPackfileUriConfig();
+        config.setBaseUri("auto");
+        config.setTrustedProxyAddresses(List.of("10.0.0.10"));
+
+        assertThat(OrionGitPackfileUriBaseResolver.resolve(
+                request(false, "http", "internal", 8080, "internal:8080", Map.of(
+                        "X-Forwarded-Proto", scheme,
+                        "X-Forwarded-Host", host,
+                        "X-Forwarded-Port", port,
+                        "Remote-Addr", "10.0.0.10")), config))
+                .contains(expected);
+    }
+
     @Test
     void resolvesExplicitBaseUri() {
         GitPackfileUriConfig config = new GitPackfileUriConfig();

@@ -186,7 +186,7 @@ final class OrionGitPackfileUriBaseResolver {
 
     private static boolean hostContainsPort(String host) {
         int colon = host.lastIndexOf(':');
-        return colon > 0 && colon < host.length() - 1;
+        return colon > 0 && colon > host.lastIndexOf(']') && colon < host.length() - 1;
     }
 
     private static String trimTrailingSlash(String value) {
