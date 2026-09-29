@@ -30,8 +30,9 @@ public final class CargoBuildMojo extends AbstractCargoMojo {
         if (isSkipped()) {
             return;
         }
-        runCargo("build");
+        validateConfiguration();
         String resolvedTarget = target == null || target.isBlank() ? detectHostTarget() : target;
+        runCargo("build", resolvedTarget);
         copyBinary(resolvedTarget);
     }
 
@@ -59,10 +60,7 @@ public final class CargoBuildMojo extends AbstractCargoMojo {
             case "release", "bench" -> "release";
             default -> selectedProfile;
         };
-        Path sourceDirectory = cargoTargetDirectory.toPath();
-        if (target != null && !target.isBlank()) {
-            sourceDirectory = sourceDirectory.resolve(target);
-        }
+        Path sourceDirectory = cargoTargetDirectory.toPath().resolve(resolvedTarget);
         Path source = sourceDirectory.resolve(profileDirectory).resolve(binary);
         Path destination = outputDirectory.toPath().resolve(resolvedTarget).resolve(binary);
         try {

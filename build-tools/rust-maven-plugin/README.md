@@ -40,6 +40,12 @@ cross-compilation targets.
 `release` and `profile` are mutually exclusive. Maven Build Cache is configured by the consuming build and is
 independent from the `incremental` parameter.
 
+The `build` goal resolves `rust.target` before compilation, using the detected Cargo host when it is unset
+or blank. It passes that target explicitly to Cargo and copies from the same target directory. This overrides
+ambient `CARGO_BUILD_TARGET` and Cargo's `build.target` configuration. An explicit host target uses Cargo's
+target mode: build scripts and proc macros compile separately and do not inherit target `RUSTFLAGS`.
+The test goals retain Cargo's normal target selection when `rust.target` is unset.
+
 ## Build and compatibility checks
 
 From the repository root:

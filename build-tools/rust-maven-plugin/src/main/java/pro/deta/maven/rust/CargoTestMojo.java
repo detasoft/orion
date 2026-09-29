@@ -17,7 +17,7 @@ public final class CargoTestMojo extends AbstractCargoMojo {
         if (isSkipped()) {
             return;
         }
-        runCargo("test");
+        runCargo("test", target);
         getPluginContext().put(TEST_EXECUTED, true);
     }
 }

@@ -23,7 +23,8 @@ final class CargoBuildMojoTest {
             "bench, false, DEFAULT, bench, release",
             "custom, false, DEFAULT, custom, custom",
             "DEFAULT, true, DEFAULT, release, release",
-            "dev, false, explicit-target, dev, debug"
+            "dev, false, explicit-target, dev, debug",
+            "dev, false, ' ', dev, debug"
     }, nullValues = "DEFAULT")
     void copiesBuiltBinaryFromSelectedProfile(String profile, boolean release, String target,
                                              String selectedProfile, String profileDirectory) throws Exception {
@@ -36,7 +37,9 @@ final class CargoBuildMojoTest {
                     exit 0
                 fi
                 selected_profile=dev
-                selected_target=
+                CARGO_BUILD_TARGET=ambient-target
+                export CARGO_BUILD_TARGET
+                selected_target="$CARGO_BUILD_TARGET"
                 while [ "$#" -gt 0 ]; do
                     case "$1" in
                         --profile) selected_profile="$2"; shift ;;
@@ -55,7 +58,8 @@ final class CargoBuildMojoTest {
                     output="$output/$selected_target"
                 fi
                 mkdir -p "$output/$profile_directory"
-                printf '%s:%s' "$selected_profile" "$selected_target" > "$output/$profile_directory/session-host"
+                printf '%s:%s' "$selected_profile" "$selected_target" \\
+                    > "$output/$profile_directory/session-host"
                 """);
         assertThat(cargo.toFile().setExecutable(true)).isTrue();
         CargoBuildMojo mojo = new CargoBuildMojo();
@@ -71,6 +75,10 @@ final class CargoBuildMojoTest {
         mojo.locked = true;
         mojo.incremental = true;
 
+        Path staleHostBinary = cargoTarget.resolve(profileDirectory).resolve("session-host");
+        Files.createDirectories(staleHostBinary.getParent());
+        Files.writeString(staleHostBinary, "stale-host-binary");
+
         if (profile != null && !profile.equals(profileDirectory)) {
             Path staleDirectory = target == null ? cargoTarget : cargoTarget.resolve(target);
             Path staleBinary = staleDirectory.resolve(profile).resolve("session-host");
@@ -80,9 +88,9 @@ final class CargoBuildMojoTest {
 
         mojo.execute();
 
-        String resolvedTarget = target == null ? "test-host" : target;
+        String resolvedTarget = target == null || target.isBlank() ? "test-host" : target;
         Path output = mojo.outputDirectory.toPath().resolve(resolvedTarget).resolve("session-host");
-        assertThat(output).hasContent(selectedProfile + ":" + (target == null ? "" : target));
+        assertThat(output).hasContent(selectedProfile + ":" + resolvedTarget);
         assertThat(output).isExecutable();
     }
 }

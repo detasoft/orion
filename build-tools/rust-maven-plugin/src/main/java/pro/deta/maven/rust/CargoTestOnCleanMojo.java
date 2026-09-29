@@ -23,7 +23,7 @@ public final class CargoTestOnCleanMojo extends AbstractCargoMojo {
         }
         boolean testAlreadyRan = Boolean.TRUE.equals(getPluginContext().get(CargoTestMojo.TEST_EXECUTED));
         if (shouldRun(session.getRequest().getGoals(), testAlreadyRan)) {
-            runCargo("test");
+            runCargo("test", target);
         }
     }
 

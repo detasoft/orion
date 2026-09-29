@@ -42,26 +42,30 @@ abstract class AbstractCargoMojo extends AbstractMojo {
     @Parameter(property = "rust.skip", defaultValue = "false")
     boolean skip;
 
-    final void runCargo(String goal) throws MojoExecutionException {
-        CargoCommand command = cargoCommand(goal);
+    final void runCargo(String goal, String resolvedTarget) throws MojoExecutionException {
+        CargoCommand command = cargoCommand(goal, resolvedTarget);
         getLog().info("Running " + String.join(" ", command.processArguments()));
         new CargoRunner().run(command);
     }
 
-    final CargoCommand cargoCommand(String goal) throws MojoExecutionException {
+    final void validateConfiguration() throws MojoExecutionException {
         if (manifest == null || !manifest.isFile()) {
             throw new MojoExecutionException("Cargo manifest does not exist: " + manifest);
         }
         if (cargoTargetDirectory == null) {
             throw new MojoExecutionException("cargoTargetDirectory is required");
         }
+    }
+
+    final CargoCommand cargoCommand(String goal, String resolvedTarget) throws MojoExecutionException {
+        validateConfiguration();
         try {
             return CargoCommand.create(
                     cargoExecutable,
                     manifest.toPath(),
                     cargoTargetDirectory.toPath(),
                     goal,
-                    target,
+                    resolvedTarget,
                     profile,
                     release,
                     features,
