@@ -1,7 +1,7 @@
 package pro.deta.orion.event.disruptor;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.event.type.RequestToAclUpdate;
+import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -14,7 +14,7 @@ class OrionDisruptorTest {
     void rejectsEventsPublishedBeforeStart() {
         OrionDisruptor disruptor = new OrionDisruptor(16);
 
-        assertThatThrownBy(() -> disruptor.publish(new RequestToAclUpdate("test")))
+        assertThatThrownBy(() -> disruptor.publish(new ApplicationShutdownRequestedEvent("test")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("before event disruptor is started");
     }
@@ -27,7 +27,7 @@ class OrionDisruptorTest {
 
         disruptor.start();
         try {
-            disruptor.publish(new RequestToAclUpdate("test"));
+            disruptor.publish(new ApplicationShutdownRequestedEvent("test"));
 
             assertThat(handled.await(1, TimeUnit.SECONDS)).isTrue();
         } finally {

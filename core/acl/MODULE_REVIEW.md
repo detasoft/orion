@@ -1,37 +1,5 @@
 # Module Review: `acl`
 
-## 3. User mutations synchronously reload and then request another reload
-
-**Problem.** `createOrUpdateUser` saves and synchronously reloads the ACL, then publishes a self-handled event
-and waits for another full load, validation and publication. An event timeout can follow an already applied
-mutation.
-
-**Sources.** [Mutation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1602),
-[redundant wait](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1607),
-[helper](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L939), and
-[synchronous activation](src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1767).
-The ACL service is the event's sole production publisher and handler. Storage has its own
-[external change subscription](../../connectors/acl-storage/src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java#L143).
-[User mutation tests](src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java) cover persistence,
-owning-file preservation and concurrent credential updates.
-
-**Documented behavior and contract.** Completed mutations must be persisted and active. The first reload
-already establishes this. Revision checks, serialized mutations and external storage notifications remain
-required; the second self-event boundary supplies no distinct guarantee. No separate requirement was found.
-
-**Minimal repair.** Delete the post-save self-event call and its helper, retaining synchronous reload and
-the storage subscription. With no remaining production publisher, remove the internal event handler/type
-and migrate its test consumers in the same replacement; preserve meaningful external-change coverage.
-
-**Alternatives and consequences.** Event-only activation changes synchronization and error propagation.
-Keeping both repeats work and adds a post-success failure boundary. Local deletion changes no wire or
-persistence format; verify activation and external reload behavior through existing supported interfaces.
-
-**Confidence.** High for repository consumers; external event publishers were not established.
-
-**Priority signals.** Importance: medium, repeated work and post-success timeouts. Repair ease: high, local
-deletion with existing behavioral coverage.
-
 ## 4. `XmlService` duplicates the canonical XML serialization boundary
 
 **Problem.** The public facade forwards document read/write directly to schema's `OrionXml` and adds ACL

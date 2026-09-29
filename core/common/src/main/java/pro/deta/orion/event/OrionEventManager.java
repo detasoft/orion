@@ -23,9 +23,8 @@ import java.util.function.Supplier;
  * Application-wide asynchronous event bus for Orion events.
  *
  * <p>An event is a concrete {@link OrionEvent} subclass that describes something that already happened or must be
- * reacted to elsewhere in the application. Current examples include git receive/upload notifications and ACL reload
- * requests. Events should carry the data their handlers need, because handlers run later and
- * outside the original request flow.</p>
+ * reacted to elsewhere in the application. Application shutdown requests use this boundary. Events should carry
+ * the data their handlers need, because handlers run later and outside the original request flow.</p>
  *
  * <p>The manager owns a single root Disruptor and starts/stops it with the application lifecycle. Event dispatch is
  * intentionally simple: handlers are registered by the concrete event class and are invoked only for that exact class.

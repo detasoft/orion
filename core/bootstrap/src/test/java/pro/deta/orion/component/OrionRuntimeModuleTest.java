@@ -169,7 +169,7 @@ class OrionRuntimeModuleTest {
     }
 
     private static OrionAccessControlServiceImpl decisionAcl(OrionDesiredState desired) {
-        return new OrionAccessControlServiceImpl(null, null, null, null,
+        return new OrionAccessControlServiceImpl(null, null, null,
                 ServerIdentityCapability.unavailable(), desired, new OrionConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
                 pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),

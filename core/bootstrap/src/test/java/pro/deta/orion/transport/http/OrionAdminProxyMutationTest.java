@@ -492,7 +492,7 @@ class OrionAdminProxyMutationTest {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, true);
             }
-            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(), null,
+            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
                     new pro.deta.orion.schema.config.OrionConfiguration(),
                     material.configurationCipher(), material.configurationMaterial(), java.util.Optional.empty());

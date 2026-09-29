@@ -11,12 +11,10 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.util.OrionProvider;
 
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -58,12 +56,10 @@ class LocalSshCredentialPersistenceTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
-        OrionEventManager events = new OrionEventManager();
-        events.onStart();
         try {
             Files.setPosixFilePermissions(secondary, PosixFilePermissions.fromString("r--r--r--"));
             assumeFalse(Files.isWritable(secondary), "requires filesystem permissions to deny writes");
-            OrionAccessControlServiceImpl service = service(configuration, events);
+            OrionAccessControlServiceImpl service = service(configuration);
             try {
                 service.onStart();
                 assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -76,7 +72,7 @@ class LocalSshCredentialPersistenceTest {
             } finally {
                 service.onStop();
             }
-            OrionAccessControlServiceImpl reopened = service(configuration, events);
+            OrionAccessControlServiceImpl reopened = service(configuration);
             try {
                 reopened.onStart();
                 assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -87,15 +83,14 @@ class LocalSshCredentialPersistenceTest {
             }
         } finally {
             Files.setPosixFilePermissions(secondary, permissions);
-            events.onStop();
         }
     }
 
     private static OrionAccessControlServiceImpl service(
-            BootstrapConfigurationSourceConfig configuration, OrionEventManager events
+            BootstrapConfigurationSourceConfig configuration
     ) {
         return new OrionAccessControlServiceImpl(new LocalAccessControlStorage(configuration),
-                new OrionPasswordHashingService(), new OrionProvider(() -> null, () -> events, () -> null),
+                new OrionPasswordHashingService(),
                 OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(), new OrionDesiredState(),
                 new pro.deta.orion.schema.config.OrionConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),

@@ -61,7 +61,7 @@ class AcmeConfigurationServiceTest {
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.current().document(), owner.configurationCipher());
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
-                    new OrionPasswordHashingService(), null, OrionRuntimeOptions.defaults(),
+                    new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
                     owner.serverIdentity(), desired, bootstrap, owner.configurationCipher(),
                     owner.configurationMaterial(), Optional.empty());
             acl.reload("test");
@@ -182,7 +182,7 @@ class AcmeConfigurationServiceTest {
             OrionConfiguration bootstrap = new OrionConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
-                    new OrionPasswordHashingService(), null,
+                    new OrionPasswordHashingService(),
                     OrionRuntimeOptions.defaults(), owner.serverIdentity(), desired,
                     bootstrap, owner.configurationCipher(), owner.configurationMaterial(), Optional.empty());
             acl.reload("test");

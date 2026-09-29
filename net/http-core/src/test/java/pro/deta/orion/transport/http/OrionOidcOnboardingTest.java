@@ -686,7 +686,7 @@ class OrionOidcOnboardingTest {
             ByteArrayOutputStream xml = new ByteArrayOutputStream();
             OrionXml.write(document, xml);
             storage.snapshot = new AccessControlSnapshot(Map.of("orion.xml", xml.toByteArray()), Optional.of("0"));
-            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(), null,
+            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
                     new pro.deta.orion.schema.config.OrionConfiguration(),
                     material.configurationCipher(), material.configurationMaterial(), java.util.Optional.empty());

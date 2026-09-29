@@ -50,7 +50,6 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
-import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -58,7 +57,6 @@ import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.util.KeyUtils;
-import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
@@ -87,7 +85,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
-    private final OrionProvider orionProvider;
     private final OrionRuntimeOptions runtimeOptions;
     private final ServerIdentityCapability serverIdentity;
     private final OrionDesiredState desiredState;
@@ -104,7 +101,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public OrionAccessControlServiceImpl(
             AccessControlStorage accessControlStorage,
             OrionPasswordHashingService orionPasswordHashingService,
-            OrionProvider orionProvider,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity,
             OrionDesiredState desiredState,
@@ -114,7 +110,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             Optional<AccessControlSnapshot> initialConfiguration) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
-        this.orionProvider = orionProvider;
         this.runtimeOptions = runtimeOptions;
         this.serverIdentity = serverIdentity;
         this.desiredState = desiredState;
@@ -127,10 +122,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void loadAccessControlOnStart() {
-        orionProvider.getEventManager().registerTypeHandler(RequestToAclUpdate.class, (event) -> {
-            log.debug("Request to update ACL received: {}", event);
-            requestToUpdate();
-        });
         changeSubscription = accessControlStorage.onChange(initiator -> requestToUpdate());
         try {
             synchronized (reloadLock) {
@@ -931,10 +922,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private void requestAclUpdateAndWait(String initiator) {
-        orionProvider.getEventManager().publishAndWait(new RequestToAclUpdate(initiator));
-    }
-
     private void resetRootPassword(AccessControlSnapshot snapshot) {
         char[] rootPassword = orionPasswordHashingService.generateRandomString(10);
         try {
@@ -1546,7 +1533,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         "createOrUpdateUser() " + userUpdate.id(),
                         author);
             }
-            requestAclUpdateAndWait(author + " createOrUpdateUser() " + userUpdate.id());
         }
 
         private AccessControlDraft.User userFrom(AccessControlUserUpdate userUpdate) {

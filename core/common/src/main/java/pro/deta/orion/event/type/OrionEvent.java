@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Getter
 public sealed abstract class OrionEvent
-        permits ApplicationShutdownRequestedEvent, RequestToAclUpdate {
+        permits ApplicationShutdownRequestedEvent {
     private final Instant createdAt = Instant.now();
     private final AtomicBoolean processed = new AtomicBoolean(false);
 

@@ -37,8 +37,6 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
@@ -58,7 +56,6 @@ import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.OrionXml;
-import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;
@@ -73,6 +70,7 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -91,6 +89,27 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
+
+    @Test
+    void userMutationsArePersistedAndActiveWhenTheyReturn() throws Exception {
+        OrionPasswordHashingService hashing = new OrionPasswordHashingService();
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            fixture.service.createOrUpdateUser(userUpdate("alice",
+                    hashing.calculateHash(pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2,
+                            "first-password".toCharArray())));
+            assertThat(fixture.service.authenticateUser("alice", "first-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            fixture.service.createOrUpdateUser(userUpdate("alice",
+                    hashing.calculateHash(pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2,
+                            "second-password".toCharArray())));
+            assertThat(fixture.service.authenticateUser("alice", "first-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(fixture.service.authenticateUser("alice", "second-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            assertThat(parse(fixture.storage.snapshot.files().get(ACL_PATH)).getUsers())
+                    .extracting(AccessControl.User::getId).containsExactly("alice");
+        }
+    }
 
     @Test
     void configurationStatusTracksStoredValidationSeparatelyFromActiveRevision() {
@@ -145,7 +164,7 @@ class OrionAccessControlServiceImplTest {
                 List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
                 List.of("acme/reader"), List.of());
         desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
-        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null, null,
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null,
                 testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
                 Optional.empty());
         TokenIssueResult issued = service.issueOrganizationToken(organization, "alice", issuer, "alice", 60);
@@ -243,7 +262,7 @@ class OrionAccessControlServiceImplTest {
                 Map<String, byte[]> files = new LinkedHashMap<>(fixture.storage.snapshot.files());
                 files.put(ACL_PATH, serialize(primary.toAccessControl()));
                 fixture.storage.snapshot = new AccessControlSnapshot(files, Optional.of("version-two"));
-                fixture.eventManager.publishAndWait(new RequestToAclUpdate("replace operators membership"));
+                fixture.storage.changeListener.accept("replace operators membership");
             });
 
             AuthenticationResult.Success overlapping = (AuthenticationResult.Success)
@@ -322,16 +341,12 @@ class OrionAccessControlServiceImplTest {
                 Map.of(ACL_PATH, serialize(initial)),
                 Optional.of("version-one")));
         OrionDesiredState desiredState = new OrionDesiredState();
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage,
                 new OrionPasswordHashingService(),
-                provider,
                 OrionRuntimeOptions.defaults(),
                 testServerIdentity(),
                 desiredState, new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
-        eventManager.onStart();
         service.onStart();
         try {
             assertThat(desiredState.current().revision()).contains("version-one");
@@ -347,12 +362,11 @@ class OrionAccessControlServiceImplTest {
             storage.snapshot = new AccessControlSnapshot(
                     Map.of(ACL_PATH, "not xml".getBytes(StandardCharsets.UTF_8)),
                     Optional.of("broken-version"));
-            eventManager.publishAndWait(new RequestToAclUpdate("malformed desired state"));
+            storage.changeListener.accept("malformed desired state");
 
             assertThat(desiredState.current()).isSameAs(lastValid);
         } finally {
             service.onStop();
-            eventManager.onStop();
         }
     }
 
@@ -363,13 +377,10 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
                 Map.of(ACL_PATH, serialize(initial)), Optional.of("valid-commit")));
         OrionDesiredState desiredState = new OrionDesiredState();
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                storage, new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
                 testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(),
                 ConfigurationMaterialCapability.unavailable(), Optional.empty());
-        eventManager.onStart();
         service.onStart();
         try {
             OrionDesiredState.Snapshot lastValid = desiredState.current();
@@ -382,13 +393,12 @@ class OrionAccessControlServiceImplTest {
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
                     Optional.of("invalid-commit"));
 
-            eventManager.publishAndWait(new RequestToAclUpdate("missing material"));
+            storage.changeListener.accept("missing material");
 
             assertThat(desiredState.current()).isSameAs(lastValid);
             assertThat(service.isRunning()).isTrue();
         } finally {
             service.onStop();
-            eventManager.onStop();
         }
     }
 
@@ -399,13 +409,10 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
                 Map.of(ACL_PATH, serialize(initial)), Optional.of("first-commit")));
         OrionDesiredState desiredState = new OrionDesiredState();
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                storage, new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
                 testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(), testMaterial(),
                 Optional.empty());
-        eventManager.onStart();
         service.onStart();
         try {
             AccessControl publishedAcl = desiredState.current().document().system().accessControl();
@@ -417,14 +424,13 @@ class OrionAccessControlServiceImplTest {
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(changed)),
                     Optional.of("second-commit"));
 
-            eventManager.publishAndWait(new RequestToAclUpdate("configuration changed"));
+            storage.changeListener.accept("configuration changed");
 
             assertThat(desiredState.current().revision()).contains("second-commit");
             assertThat(desiredState.current().document().system().https()).contains(https);
             assertThat(desiredState.current().document().system().accessControl()).isSameAs(publishedAcl);
         } finally {
             service.onStop();
-            eventManager.onStop();
         }
     }
 
@@ -434,13 +440,10 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
                 Map.of(ACL_PATH, serialize(initial)), Optional.of("valid-commit")));
         OrionDesiredState desiredState = new OrionDesiredState();
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                storage, new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
                 testServerIdentity(), desiredState, new OrionConfiguration(), testCipher(), testMaterial(),
                 Optional.empty());
-        eventManager.onStart();
         service.onStart();
         try {
             OrionDesiredState.Snapshot lastValid = desiredState.current();
@@ -450,12 +453,11 @@ class OrionAccessControlServiceImplTest {
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
                     Optional.of("invalid-commit"));
 
-            eventManager.publishAndWait(new RequestToAclUpdate("invalid secret"));
+            storage.changeListener.accept("invalid secret");
 
             assertThat(desiredState.current()).isSameAs(lastValid);
         } finally {
             service.onStop();
-            eventManager.onStop();
         }
     }
 
@@ -885,15 +887,12 @@ class OrionAccessControlServiceImplTest {
                 return true;
             }
         };
-        OrionEventManager events = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> events, () -> null);
         OrionDesiredState desired = new OrionDesiredState();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                storage, new OrionPasswordHashingService(), provider, new OrionRuntimeOptions(resetRoot),
+                storage, new OrionPasswordHashingService(), new OrionRuntimeOptions(resetRoot),
                 testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
                 Optional.empty());
         PrintStream originalOut = System.out;
-        events.onStart();
         try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
             System.setOut(output);
             service.onStart();
@@ -905,7 +904,7 @@ class OrionAccessControlServiceImplTest {
             service.onStop();
             byte[] beforeRestart = persisted.get().files().get(ACL_PATH);
             OrionAccessControlServiceImpl restarted = new OrionAccessControlServiceImpl(
-                    storage, new OrionPasswordHashingService(), provider, OrionRuntimeOptions.defaults(),
+                    storage, new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
                     testServerIdentity(), desired, new OrionConfiguration(), testCipher(), testMaterial(),
                     Optional.empty());
             try {
@@ -918,7 +917,6 @@ class OrionAccessControlServiceImplTest {
         } finally {
             System.setOut(originalOut);
             service.onStop();
-            events.onStop();
         }
     }
 
@@ -943,18 +941,14 @@ class OrionAccessControlServiceImplTest {
             AccessControlSnapshot initial,
             OrionRuntimeOptions runtimeOptions) {
         FailingReloadStorage storage = new FailingReloadStorage(initial);
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage,
                 new OrionPasswordHashingService(),
-                provider,
                 runtimeOptions,
                 testServerIdentity(),
                 new OrionDesiredState(), new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
-        eventManager.onStart();
         try {
             System.setOut(new PrintStream(processOutput, true, StandardCharsets.UTF_8));
 
@@ -964,7 +958,6 @@ class OrionAccessControlServiceImplTest {
         } finally {
             System.setOut(originalOut);
             service.onStop();
-            eventManager.onStop();
         }
 
         assertThat(storage.saved).isTrue();
@@ -1034,18 +1027,14 @@ class OrionAccessControlServiceImplTest {
         files.put(EXTRA_ACL_PATH, serialize(secondary.toAccessControl()));
         InMemoryStorage storage = new InMemoryStorage(
                 new AccessControlSnapshot(files, Optional.of("version-one")));
-        OrionEventManager eventManager = new OrionEventManager();
-        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage,
                 hashing,
-                provider,
                 OrionRuntimeOptions.defaults(),
                 serverIdentity,
                 new OrionDesiredState(), new OrionConfiguration(), testCipher(), testMaterial(), Optional.empty());
-        eventManager.onStart();
         service.onStart();
-        return new ServiceFixture(service, storage, eventManager);
+        return new ServiceFixture(service, storage);
     }
 
     private static AccessControlDraft.User user(String id) {
@@ -1253,16 +1242,22 @@ class OrionAccessControlServiceImplTest {
 
     private record ServiceFixture(
             OrionAccessControlServiceImpl service,
-            InMemoryStorage storage,
-            OrionEventManager eventManager) implements AutoCloseable {
+            InMemoryStorage storage) implements AutoCloseable {
         @Override
         public void close() {
             service.onStop();
-            eventManager.onStop();
         }
     }
 
     private static final class InMemoryStorage implements AccessControlStorage {
+        private Consumer<String> changeListener = ignored -> {};
+
+        @Override
+        public ChangeSubscription onChange(Consumer<String> listener) {
+            changeListener = listener;
+            return () -> changeListener = ignored -> {};
+        }
+
         private volatile AccessControlSnapshot snapshot;
         private int saveCount;
         private boolean concurrentOnSave;

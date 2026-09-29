@@ -14,7 +14,7 @@ class OrionEventTest {
     void recordsCreationTime() {
         Instant beforeCreation = Instant.now();
 
-        RequestToAclUpdate event = new RequestToAclUpdate("test");
+        ApplicationShutdownRequestedEvent event = new ApplicationShutdownRequestedEvent("test");
 
         assertThat(event.getCreatedAt()).isBetween(beforeCreation, Instant.now());
     }
@@ -22,11 +22,11 @@ class OrionEventTest {
     @Test
     @DisplayName("prints base event state and payload")
     void printsBaseEventStateAndPayload() {
-        RequestToAclUpdate event = new RequestToAclUpdate("acl-refresh");
+        ApplicationShutdownRequestedEvent event = new ApplicationShutdownRequestedEvent("test-request");
 
         assertThat(event.toString())
-                .startsWith("RequestToAclUpdate{")
-                .contains("createdAt=", "processed=false", "initiator='acl-refresh'");
+                .startsWith("ApplicationShutdownRequestedEvent{")
+                .contains("createdAt=", "processed=false", "source='test-request'");
 
         event.setProcessed();
 
