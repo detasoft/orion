@@ -14,7 +14,7 @@ RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
 RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
-	help skill-check skills-check docker-exec \
+	help skill-check skills-check docker-exec build-processes \
 	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
@@ -42,7 +42,7 @@ endif
 
 .PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
-	skill-check skills-check docker-exec \
+	skill-check skills-check docker-exec build-processes \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 
@@ -71,6 +71,10 @@ help: ## Show available goals and their descriptions
 
 docker-exec: ## Run CMD in orion-external-services; e.g. make docker-exec CMD='ps -ef'
 	docker exec orion-external-services $(CMD)
+
+build-processes: ## Show running Maven builds and Make test processes
+	@ps -axo pid,ppid,etime,state,command | \
+		rg '^[[:space:]]*PID|[o]rg[.]codehaus[.]plexus.*[.]Launcher|[m]ake (test|run-test)|[m]vn .*clean'
 
 dist: ## Package the bootstrap distribution
 	$(MAVEN_RUN) package -Pdist -pl core/bootstrap -am
