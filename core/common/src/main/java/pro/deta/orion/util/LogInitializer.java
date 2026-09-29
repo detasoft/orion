@@ -6,16 +6,31 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.encoder.PatternLayoutEncoder;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.ConsoleAppender;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Getter
 public class LogInitializer {
+    public record LogEntry(String level, String text) {
+    }
+
+    public record LogPage(String cursor, boolean gap, List<LogEntry> entries) {
+    }
+
+    public LogPage readLogs(String after) {
+        return recentLogs.read(after);
+    }
+
     private static final String TEST_DEBUG_PROPERTY = "orion.test.debug";
     private static final String TEST_LOG_LEVEL_PROPERTY = "orion.test.log.level";
     private static final String TEST_LOG_CATEGORIES_PROPERTY = "orion.test.log.categories";
@@ -24,6 +39,8 @@ public class LogInitializer {
 
     private final List<String> categoryLevels = new ArrayList<>();
     private final LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+    @Getter(AccessLevel.NONE)
+    private final RecentLogs recentLogs = new RecentLogs();
 
     public LogInitializer() {
         categoryLevels.add(":INFO");
@@ -43,13 +60,26 @@ public class LogInitializer {
         context.reset();
 
         // Create encoder
-        PatternLayoutEncoder encoder = new PatternLayoutEncoder();
+        PatternLayoutEncoder encoder = new PatternLayoutEncoder() {
+            @Override
+            public byte[] encode(ILoggingEvent event) {
+                byte[] output = super.encode(event);
+                recentLogs.append(event.getLevel().toString(), new String(output, StandardCharsets.UTF_8));
+                return output;
+            }
+        };
         encoder.setContext(context);
+        encoder.setCharset(StandardCharsets.UTF_8);
         encoder.setPattern("%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -%kvp- %msg%n");
         encoder.start();
 
         // Create console appender
-        ConsoleAppender<ILoggingEvent> consoleAppender = new ConsoleAppender<>();
+        ConsoleAppender<ILoggingEvent> consoleAppender = new ConsoleAppender<>() {
+            @Override
+            protected synchronized void writeOut(ILoggingEvent event) throws IOException {
+                super.writeOut(event);
+            }
+        };
         consoleAppender.setContext(context);
         consoleAppender.setName("CONSOLE");
         consoleAppender.setEncoder(encoder);
@@ -135,5 +165,58 @@ public class LogInitializer {
             return "";
         }
         return category;
+    }
+
+    private static final class RecentLogs {
+        private static final int MAX_ENTRIES = 1000;
+        private static final int MAX_CHARACTERS = 1024 * 1024;
+        private final UUID instance = UUID.randomUUID();
+        private final ArrayDeque<SequencedLog> entries = new ArrayDeque<>();
+        private long sequence;
+        private long droppedThrough;
+        private int characters;
+
+        synchronized void append(String level, String text) {
+            long id = ++sequence;
+            if (text.length() > MAX_CHARACTERS) {
+                droppedThrough = id;
+                return;
+            }
+            entries.addLast(new SequencedLog(id, new LogEntry(level, text)));
+            characters += text.length();
+            while (entries.size() > MAX_ENTRIES || characters > MAX_CHARACTERS) {
+                SequencedLog removed = entries.removeFirst();
+                characters -= removed.entry().text().length();
+                droppedThrough = Math.max(droppedThrough, removed.sequence());
+            }
+        }
+
+        synchronized LogPage read(String after) {
+            long since = 0;
+            boolean restarted = false;
+            if (after != null) {
+                try {
+                    String[] parts = after.split(":", -1);
+                    if (parts.length != 2) throw new IllegalArgumentException();
+                    UUID source = UUID.fromString(parts[0]);
+                    since = Long.parseLong(parts[1]);
+                    if (since < 0) throw new IllegalArgumentException();
+                    restarted = !instance.equals(source);
+                    if (restarted) since = 0;
+                    else if (since > sequence) throw new IllegalArgumentException();
+                } catch (IllegalArgumentException failure) {
+                    throw new IllegalArgumentException("Invalid log cursor");
+                }
+            }
+            List<LogEntry> result = new ArrayList<>();
+            for (SequencedLog entry : entries) {
+                if (entry.sequence() > since) result.add(entry.entry());
+            }
+            return new LogPage(instance + ":" + sequence, restarted || since < droppedThrough,
+                    List.copyOf(result));
+        }
+
+        private record SequencedLog(long sequence, LogEntry entry) {
+        }
     }
 }

@@ -167,6 +167,10 @@ export function createOrionClient(options = {}) {
     routes() {
       return request('/api/admin/routes')
     },
+    serverLogs(after, signal) {
+      const query = after === null ? '' : `?${new URLSearchParams({ after })}`
+      return request(`/api/admin/logs${query}`, { signal })
+    },
     transports() {
       return request('/api/admin/transports')
     },

@@ -1,8 +1,9 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppIcon from './components/AppIcon.vue'
 import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
+import { startServerLogs } from './lib/server-logs.js'
 
 const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAliases.vue'))
 const KeyMaterial = defineAsyncComponent(() => import('./components/KeyMaterial.vue'))
@@ -45,6 +46,7 @@ const newRepository = ref({ name: '' })
 const settings = ref({ sshUsername: '', token: '' })
 const settingsDraft = ref({ sshUsername: '', token: '' })
 const draftConnectionState = ref('disconnected')
+const serverLogsEnabled = ref(false)
 
 let renewalTimer
 let toastTimer
@@ -65,6 +67,17 @@ const titles = {
 
 const currentTitle = computed(() => titles[activeView.value] ?? titles.overview)
 const isConnected = computed(() => connectionState.value === 'connected')
+watch([isConnected, () => identity.value?.admin, serverLogsEnabled], ([connected, admin, enabled], _, onCleanup) => {
+  if (!connected || !admin || !enabled) return
+  onCleanup(startServerLogs({
+    client: api,
+    onError(error) {
+      serverLogsEnabled.value = false
+      if (isAuthorizationError(error)) clearExpiredCredentials()
+      showToast(error.message || 'Could not read server logs', 'error')
+    },
+  }))
+}, { flush: 'sync' })
 const shownRepositories = computed(() => repositories.value)
 const shownActivity = computed(() => connectedActivity.value)
 const filteredRepositories = computed(() => {
@@ -106,7 +119,7 @@ function showToast(message, kind = 'success') {
 }
 
 function openSettings(dialog) {
-  settingsDraft.value = { ...settings.value }
+  settingsDraft.value = { ...settings.value, serverLogs: serverLogsEnabled.value }
   draftConnectionState.value = 'disconnected'
   settingsDialog.value = dialog
   sidebarOpen.value = false
@@ -129,6 +142,7 @@ function clearConnectedState(nextState = 'disconnected') {
 }
 
 function clearExpiredCredentials() {
+  serverLogsEnabled.value = false
   connectionAttempt += 1
   draftConnectionAttempt += 1
   draftConnectionState.value = 'disconnected'
@@ -353,11 +367,12 @@ async function saveConnection() {
   showToast('Connection settings saved')
 }
 
-function saveCloneSettings() {
+function saveSettings() {
   settings.value = { ...settings.value, sshUsername: settingsDraft.value.sshUsername.trim() }
+  serverLogsEnabled.value = !!settingsDraft.value.serverLogs
   saveConnectionSettings(settings.value)
   closeSettings()
-  showToast('Git clone settings saved')
+  showToast('Settings saved')
 }
 
 async function connectSavedSettings() {
@@ -743,7 +758,7 @@ onUnmounted(() => {
         aria-modal="true"
         aria-labelledby="settings-title"
         @keydown.esc="closeSettings"
-        @submit.prevent="settingsDialog === 'connection' ? saveConnection() : saveCloneSettings()"
+        @submit.prevent="settingsDialog === 'connection' ? saveConnection() : saveSettings()"
       >
         <button
           type="button"
@@ -778,10 +793,18 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <span class="modal-icon"><AppIcon name="git-branch" :size="23" /></span>
-          <h2 id="settings-title">Git clone settings</h2>
+          <h2 id="settings-title">Settings</h2>
           <p>SSH username is used only in SSH clone URLs. Leave it empty to hide SSH clone links.</p>
           <label>
             SSH username<input v-model="settingsDraft.sshUsername" autofocus placeholder="Your Orion username" />
+          </label>
+          <label v-if="isConnected && identity?.admin" class="switch-row">
+            <div>
+              <strong>Server logs in browser console</strong>
+              <small>Show Logback output in DevTools → Console for this page.</small>
+            </div>
+            <input v-model="settingsDraft.serverLogs" type="checkbox" aria-label="Server logs in browser console" />
+            <i aria-hidden="true" />
           </label>
           <div class="modal-actions">
             <button type="button" class="secondary-button" @click="closeSettings">Cancel</button>

@@ -5,9 +5,22 @@ import dagger.Module;
 import dagger.Provides;
 import dagger.multibindings.IntoSet;
 import jakarta.inject.Singleton;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.util.LogInitializer;
 
 @Module
 public class OrionHttpModule {
+    @Provides
+    static LogInitializer logInitializer() {
+        return OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer();
+    }
+
+    @Provides
+    @IntoSet
+    static OrionHttpRoute logsRoute(OrionAdminLogsRoute route) {
+        return route;
+    }
+
     @Provides
     @IntoSet
     static OrionHttpRoute providerConfigurationRoute(OrionAdminOidcRoute route) {

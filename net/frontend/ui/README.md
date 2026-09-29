@@ -12,6 +12,28 @@ creation. It does not expose repository, member, notification, or activity
 lists. Repositories and activity created by the UI are therefore displayed only
 for the current browser session.
 
+## Server logs
+
+Connect with an application-admin token, open **Settings**, enable **Server logs
+in browser console**, and save. Open DevTools → Console to see the server's
+Logback output. Enable the console's verbose level to see DEBUG and TRACE records.
+The option applies to the current page and defaults to off after a reload.
+
+The UI polls `GET /api/admin/logs` once per second through the existing bearer-token
+client. This route uses the same application-admin authorization as the other
+administrative routes. A response contains `cursor`, `gap`, and `entries`; each
+entry contains `level` and `text`. Pass the opaque cursor as `?after=...` to retrieve
+subsequent records. Responses use `Cache-Control: no-store`.
+
+`text` is the exact UTF-8 text produced by the server's console encoder, including
+timestamps, logger names, key-value pairs, line breaks, and exception stack traces.
+The browser prints it unchanged, using the corresponding console severity.
+The server retains up to 1,000 complete records and 1,048,576 characters in memory;
+older records and individual records exceeding that character limit are omitted,
+never partially truncated. `gap: true` reports omitted records or a server restart.
+This is a recent-log view, not a durable archive. Disabling the option, changing
+connections, or leaving the page cancels the current polling operation.
+
 ## Session terminal
 
 Open **Terminal** after connecting and enter a Session ID. The view replays

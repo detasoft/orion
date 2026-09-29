@@ -10,6 +10,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.util.LogInitializer;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -49,6 +52,33 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST
 
 class OrionHttpUnifiedRouteTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Test
+    void servesUnchangedLogbackRecordsOnlyThroughExistingAdminAuthorization() throws Exception {
+        LogInitializer logging = OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer();
+        OrionHttpRoute route = new OrionAdminLogsRoute(logging);
+        String cursor = logging.readLogs(null).cursor();
+        LoggerFactory.getLogger("server.logs.route.test").warn("log endpoint test\nsecond line");
+        String path = "/api/admin/logs";
+        for (SecurityContext denied : List.of(SecurityContext.createContext(), authenticatedContext())) {
+            ResponseRecorder response = service(route, request("GET", path, denied, cursor));
+            assertThat(response.status).isEqualTo(403);
+            assertThat(response.bodyAsString()).isEmpty();
+        }
+
+        ResponseRecorder response = service(route, request("GET", path, adminContext(), cursor));
+        assertThat(response.status).isEqualTo(200);
+        assertThat(response.headers).containsEntry("Cache-Control", "no-store");
+        assertThat(OBJECT_MAPPER.readTree(response.bodyAsString()))
+                .isEqualTo(OBJECT_MAPPER.valueToTree(logging.readLogs(cursor)));
+        assertThat(response.bodyAsString()).contains("log endpoint test", "WARN");
+
+        String next = OBJECT_MAPPER.readTree(response.bodyAsString()).get("cursor").asText();
+        ResponseRecorder empty = service(route, request("GET", path, adminContext(), next));
+        assertThat(OBJECT_MAPPER.readTree(empty.bodyAsString()).get("entries").isEmpty()).isTrue();
+        assertThat(service(route, request("GET", path, adminContext(), "invalid")).status).isEqualTo(400);
+        assertThat(service(route, request("POST", path, adminContext(), null)).status).isEqualTo(405);
+    }
 
     @Test
     void servesOnlyAdminAuthorizedRawSessionEventsAfterTheCursor(@TempDir Path root)

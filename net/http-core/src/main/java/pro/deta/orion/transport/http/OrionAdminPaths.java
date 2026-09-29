@@ -10,6 +10,7 @@ final class OrionAdminPaths {
     static final String CONFIGURATION_STATUS = ADMIN + "/configuration/status";
     static final String LIFECYCLE_STATE = ADMIN + "/lifecycle/state";
     static final String ROUTES = ADMIN + "/routes";
+    static final String LOGS = ADMIN + "/logs";
     static final String TRANSPORTS = ADMIN + "/transports";
     static final String SHUTDOWN = ADMIN + "/shutdown";
     static final String ACME_CERTIFICATE = ADMIN + "/acme/certificate";

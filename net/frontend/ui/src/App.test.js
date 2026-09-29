@@ -18,6 +18,7 @@ const client = {
   repositories: vi.fn(),
   remoteAliases: vi.fn(),
   routes: vi.fn(),
+  serverLogs: vi.fn(),
   transports: vi.fn(),
 }
 
@@ -91,9 +92,104 @@ beforeEach(() => {
     nativeGit: { enabled: true, url: 'git://localhost:9419' },
   })
   client.createRepository.mockResolvedValue({ status: 'ok' })
+  client.serverLogs.mockResolvedValue({ cursor: 'process:1', gap: false, entries: [] })
 })
 
 describe('Orion connection', () => {
+  it('starts console logs only after saving the administrator setting and stops when disabled', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountApp()
+    try {
+      await connect(wrapper)
+      expect(client.serverLogs).not.toHaveBeenCalled()
+      const open = () => wrapper.findAll('.sidebar-bottom .nav-item')
+        .find((item) => item.text() === 'Settings').trigger('click')
+      await open()
+      await wrapper.get('input[aria-label="Server logs in browser console"]').setValue(true)
+      await wrapper.get('.close-button').trigger('click')
+      expect(client.serverLogs).not.toHaveBeenCalled()
+      await open()
+      expect(wrapper.get('input[aria-label="Server logs in browser console"]').element.checked).toBe(false)
+      await wrapper.get('input[aria-label="Server logs in browser console"]').setValue(true)
+      await wrapper.get('form.modal').trigger('submit')
+      await flushPromises()
+      expect(client.serverLogs).toHaveBeenCalledOnce()
+      expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+      const signal = client.serverLogs.mock.calls[0][1]
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(client.serverLogs.mock.calls[1][0]).toBe('process:1')
+      await open()
+      await wrapper.get('input[aria-label="Server logs in browser console"]').setValue(false)
+      await wrapper.get('form.modal').trigger('submit')
+      expect(signal.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(client.serverLogs).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels logs on a token change and does not print the previous connection response', async () => {
+    const pending = deferred()
+    client.serverLogs.mockReturnValueOnce(pending.promise)
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const wrapper = mountApp()
+    try {
+      await connect(wrapper)
+      await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+      await wrapper.get('input[aria-label="Server logs in browser console"]').setValue(true)
+      await wrapper.get('form.modal').trigger('submit')
+      const signal = client.serverLogs.mock.calls[0][1]
+      await wrapper.get('.server-card').trigger('click')
+      await wrapper.get('input[placeholder="Bearer token"]').setValue('replacement')
+      await wrapper.get('form.modal').trigger('submit')
+      await flushPromises()
+      expect(signal.aborted).toBe(true)
+      pending.resolve({ cursor: 'old:1', gap: false, entries: [{ level: 'INFO', text: 'old server output' }] })
+      await flushPromises()
+      expect(output).not.toHaveBeenCalled()
+      expect(client.serverLogs).toHaveBeenCalledTimes(2)
+      const currentSignal = client.serverLogs.mock.calls[1][1]
+      wrapper.unmount()
+      expect(currentSignal.aborted).toBe(true)
+    } finally {
+      wrapper.unmount()
+      output.mockRestore()
+    }
+  })
+
+  it('clears rejected credentials when a log request loses authorization', async () => {
+    client.serverLogs.mockRejectedValueOnce(Object.assign(new Error('Access denied'), { status: 403 }))
+    const wrapper = mountApp()
+    try {
+      await connect(wrapper)
+      await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+      await wrapper.get('input[aria-label="Server logs in browser console"]').setValue(true)
+      await wrapper.get('form.modal').trigger('submit')
+      await flushPromises()
+      expect(sessionStorage.getItem('orion.ui.token')).toBeNull()
+      expect(wrapper.get('.server-card').text()).toContain('Not connected')
+      expect(wrapper.get('.toast').text()).toContain('Access denied')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('does not expose server log controls to an organization user', async () => {
+    sessionStorage.setItem('orion.ui.token', 'organization-token')
+    client.me.mockResolvedValue({ userId: 'alice', organization: 'acme', admin: false })
+    const wrapper = mountApp()
+    try {
+      await flushPromises()
+      await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
+      expect(wrapper.find('input[aria-label="Server logs in browser console"]').exists()).toBe(false)
+      expect(client.serverLogs).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it.each(['', '   '])('requires a token before testing the connection with %j', async (token) => {
     const wrapper = mountApp()
     try {
@@ -149,7 +245,7 @@ describe('Orion connection', () => {
   it('saves SSH clone settings without connecting to the server', async () => {
     const wrapper = mountApp()
     await wrapper.findAll('.sidebar-bottom .nav-item').find((item) => item.text() === 'Settings').trigger('click')
-    expect(wrapper.get('[role="dialog"] h2').text()).toBe('Git clone settings')
+    expect(wrapper.get('[role="dialog"] h2').text()).toBe('Settings')
     expect(wrapper.findAll('.modal input')).toHaveLength(1)
     expect(wrapper.find('input[placeholder="Bearer token"]').exists()).toBe(false)
     await wrapper.get('input[placeholder="Your Orion username"]').setValue('  alice  ')

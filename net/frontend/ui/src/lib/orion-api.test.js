@@ -9,6 +9,19 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('loads server logs with the existing bearer token, cursor and cancellation signal', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: [], cursor: 'boot:2' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ token: 'admin-token', fetchImpl })
+    const signal = new AbortController().signal
+    await client.serverLogs('boot:1', signal)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/logs?after=boot%3A1')
+    expect(init.headers.get('Authorization')).toBe('Bearer admin-token')
+    expect(init.signal).toBe(signal)
+  })
+
   it.each([
     [401, 'text/html;charset=iso-8859-1', 'Authentication required. Enter a valid token.'],
     [403, 'text/html;charset=iso-8859-1', 'Access denied. Check your token and permissions.'],
