@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -46,18 +47,25 @@ import java.util.function.Consumer;
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final GitStorageApi storage;
+    private final GitIndexApi index;
     private final String defaultHead;
     private final CopyOnWriteArrayList<Consumer<RefUpdateResult>> refUpdateListeners = new CopyOnWriteArrayList<>();
 
-    public NativeGitRepository(String name, GitStorageApi storage, String defaultHead) {
+    public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index, String defaultHead) {
         this.name = Objects.requireNonNull(name, "name");
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
         this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
     }
 
     public GitStorageApi storage() {
         return storage;
     }
+
+    public GitIndexApi index() {
+        return index;
+    }
+
     public String name() {
         return name;
     }
@@ -130,7 +138,7 @@ public class NativeGitRepository implements AutoCloseable {
     public Map<String, String> refs() {
         try {
             Map<String, String> refs = new LinkedHashMap<>();
-            for (Map.Entry<RefId, ObjectId> ref : storage().snapshotRefs().refs().entrySet()) {
+            for (Map.Entry<RefId, ObjectId> ref : index().snapshotRefs().refs().entrySet()) {
                 refs.put(ref.getKey().value(), ref.getValue().toHex());
             }
             return Map.copyOf(refs);
@@ -203,7 +211,7 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
-        List<RefUpdateResult> results = storage().updateRefs(updates, atomic);
+        List<RefUpdateResult> results = index().updateRefs(updates, atomic);
         for (RefUpdateResult result : results) {
             if (result.status() != RefUpdateResult.Status.APPLIED
                     || result.update().expectedOld().equals(result.update().newId())) {
@@ -252,8 +260,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     @Override
     public void close() {
-        try {
-            storage.close();
+        try (storage; index) {
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

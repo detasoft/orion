@@ -1,6 +1,8 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
@@ -87,8 +89,9 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
             Path repositoryDirectory = repositoryDirectory(name);
             RepositoryMetadata metadata = readMetadata(repositoryDirectory);
             try {
-                return new NativeGitRepository(metadata.name(), new LocalGitStorage(repositoryDirectory),
-                        metadata.defaultHead());
+                GitStorageApi storage = new LocalGitStorage(repositoryDirectory);
+                return new NativeGitRepository(metadata.name(), storage,
+                        new LocalGitIndex(repositoryDirectory, storage), metadata.defaultHead());
             } catch (IOException failure) {
                 throw new UncheckedIOException("Cannot open repository " + name, failure);
             }

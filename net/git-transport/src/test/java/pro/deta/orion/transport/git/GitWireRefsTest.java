@@ -114,7 +114,7 @@ class GitWireRefsTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        repository.storage().updateHead(new Head.Detached(new CommitId(TAG_ID)));
+        repository.index().updateHead(new Head.Detached(new CommitId(TAG_ID)));
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
         LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,

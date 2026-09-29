@@ -288,7 +288,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         if (!wantedRef.equals("HEAD")) {
             assertThat(repository.updateRef(wantedRef, NULL_ID, allowed.toHex()).status()).isEqualTo(APPLIED);
         } else if (detached) {
-            repository.storage().updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
+            repository.index().updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
         }
         List<List<String>> checkedBranches = new ArrayList<>();
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -301,7 +301,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 if (wantedRef.equals("HEAD")) {
                     Head next = detached ? new Head.Detached(new CommitId(denied.toBytes()))
                             : new Head.Symbolic(new RefId("refs/heads/secret"));
-                    assertThatCode(() -> repository.storage().updateHead(next)).doesNotThrowAnyException();
+                    assertThatCode(() -> repository.index().updateHead(next)).doesNotThrowAnyException();
                 } else {
                     assertThat(repository.updateRef(wantedRef, allowed.toHex(), denied.toHex()).status())
                             .isEqualTo(APPLIED);
@@ -384,7 +384,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             if (ref.equals("tag")) {
                 repository.updateRef("refs/tags/release", NULL_ID, tip);
             } else {
-                repository.storage().updateHead(new Head.Detached(new CommitId(tip)));
+                repository.index().updateHead(new Head.Detached(new CommitId(tip)));
             }
             repository.updateRef("refs/heads/main", tip, NULL_ID);
         }

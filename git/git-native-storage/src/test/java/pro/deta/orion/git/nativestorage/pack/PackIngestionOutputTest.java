@@ -8,6 +8,7 @@ import pro.deta.orion.git.nativestorage.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -80,8 +81,9 @@ class PackIngestionOutputTest {
     }
 
     private static NativeGitFileUpdate prepared() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
-                "source", new InMemoryStorage(), "refs/heads/main")) {
+                "source", storage, new InMemoryIndex(storage), "refs/heads/main")) {
             return repository.prepareFileUpdate("main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY);
         }

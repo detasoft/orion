@@ -152,7 +152,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         return new GitReceivePackRequest(
                 List.of(command),
                 output -> {
-                    FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+                    FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
                     try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
                         pack.writeTo(writer);
                         writer.finish();

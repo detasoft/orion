@@ -15,6 +15,8 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -42,33 +44,34 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class FetchCommandPackUriTest extends GitRepositoryContext {
-    FetchCommandPackUriTest() {
-        super(new InMemoryStorage());
-    }
-
-    @Override
-    public Optional<URI> packUri(PackId id) {
-        return Optional.of(URI.create("https://git.example/project/objects/pack/" + id.toHex() + ".pack"));
-    }
+class FetchCommandPackUriTest {
+    private final InMemoryStorage storage = new InMemoryStorage();
+    private final GitIndexApi index = new InMemoryIndex(storage);
+    private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
+        @Override
+        public Optional<URI> packUri(PackId id) {
+            return Optional.of(URI.create("https://git.example/project/objects/pack/" + id.toHex() + ".pack"));
+        }
+    };
 
     @AfterEach
     void closeStorage() throws IOException {
-        storage().close();
+        try (storage; index) {
+        }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void preparationReturnsFinalUrisAndInlineCount(boolean mixed) throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackId externalPack = storage().packIds().getFirst();
+        PackId externalPack = storage.packIds().getFirst();
         Set<ObjectId> wanted = new LinkedHashSet<>(external);
         Set<ObjectId> inlineIds = mixed ? Set.of(store(new byte[]{3}, new byte[]{4}).getFirst()) : Set.of();
         wanted.addAll(inlineIds);
         FetchPlan plan = new FetchPlan(wanted, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of("https"));
-        FetchPack pack = FetchPack.prepare(this, plan);
-        Map<PackId, URI> expectedUris = Map.of(externalPack, packUri(externalPack).orElseThrow());
+        FetchPack pack = FetchPack.prepare(repository, plan);
+        Map<PackId, URI> expectedUris = Map.of(externalPack, repository.packUri(externalPack).orElseThrow());
         assertThat(pack.packUris()).isEqualTo(expectedUris);
         assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
         store(new byte[]{9});
@@ -87,26 +90,26 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
     @Test
     void sendsPublishedPackChecksumAndUriAndAnEmptyInlinePack() throws Exception {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
-        PackId packId = storage().packIds().getFirst();
+        PackId packId = storage.packIds().getFirst();
         byte[] response = fetch(ids, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
-                .contains("packfile-uris\n", packId.toHex() + " " + packUri(packId).orElseThrow() + "\n");
+                .contains("packfile-uris\n", packId.toHex() + " " + repository.packUri(packId).orElseThrow() + "\n");
         try (IndexedPack inline = inlinePack(response)) {
             assertThat(inline.objectCount()).isZero();
         }
-        assertThat(storage().packObjectIds(packId)).containsExactlyInAnyOrderElementsOf(ids);
+        assertThat(storage.packObjectIds(packId)).containsExactlyInAnyOrderElementsOf(ids);
     }
 
     @Test
     void mixesUriPackWithOnlyRequestedEntriesFromAnotherPack() throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackId externalPack = storage().packIds().getFirst();
+        PackId externalPack = storage.packIds().getFirst();
         List<ObjectId> shared = store(new byte[]{3}, new byte[]{4});
         List<ObjectId> wanted = new ArrayList<>(external);
         wanted.add(shared.getFirst());
         byte[] response = fetch(wanted, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
-                .contains(externalPack.toHex() + " " + packUri(externalPack).orElseThrow() + "\n");
+                .contains(externalPack.toHex() + " " + repository.packUri(externalPack).orElseThrow() + "\n");
         try (IndexedPack inline = inlinePack(response)) {
             assertThat(inline.entryCount()).isEqualTo(1);
             assertThat(inline.objectIds()).containsExactly(shared.getFirst());
@@ -145,8 +148,8 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
         }
         MutableIndexedPack pack = ingest(bytes.toByteArray());
         List<ObjectId> ids = new ArrayList<>(pack.objectIds());
-        new GitPackObjectResolver(pack, storage()).complete();
-        storage().persist(pack);
+        new GitPackObjectResolver(pack, storage).complete();
+        storage.persist(pack);
         return ids;
     }
 
@@ -164,7 +167,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(request.toByteArray()))) {
             GitProtocolContext protocol = new GitProtocolContext(input, new OutputStreamBufferedByteOutput(response),
                     GitProtocolVersion.V2, GitTransport.HTTP);
-            new FetchCommand(this, capabilities).action(protocol);
+            new FetchCommand(repository, capabilities).action(protocol);
         }
         return response.toByteArray();
     }
@@ -195,7 +198,7 @@ class FetchCommandPackUriTest extends GitRepositoryContext {
     }
 
     private static MutableIndexedPack ingest(byte[] bytes) throws IOException {
-        try (InMemoryStorage storage = new InMemoryStorage();
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();

@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -24,8 +25,8 @@ public final class PushCommand implements GitCommand {
     private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities;
 
-    public PushCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
-        this(new GitRepositoryContext(storage), advertisedCapabilities);
+    public PushCommand(GitStorageApi storage, GitIndexApi index, GitCapabilities advertisedCapabilities) {
+        this(new GitRepositoryContext(storage, index), advertisedCapabilities);
     }
 
     public PushCommand(GitRepositoryContext repository, GitCapabilities advertisedCapabilities) {

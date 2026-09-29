@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -22,12 +23,12 @@ import java.util.Optional;
 
 public final class RefsCommand implements GitCommand {
     private static final RefId HEAD = new RefId("HEAD");
-    private final GitStorageApi storage;
+    private final GitIndexApi index;
     private final GitObjectGraph graph;
     private final boolean unbornAllowed;
 
-    public RefsCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
-        this.storage = Objects.requireNonNull(storage, "storage");
+    public RefsCommand(GitStorageApi storage, GitIndexApi index, GitCapabilities advertisedCapabilities) {
+        this.index = Objects.requireNonNull(index, "index");
         graph = new GitObjectGraph(storage);
         Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities");
         unbornAllowed = List.of(advertisedCapabilities.value(GitCapability.LS_REFS).orElse("").split(" "))
@@ -43,7 +44,7 @@ public final class RefsCommand implements GitCommand {
         if (request.unborn() && !unbornAllowed) {
             throw new IOException("ls-refs unborn was not advertised");
         }
-        RefsSnapshot snapshot = storage.snapshotRefs();
+        RefsSnapshot snapshot = index.snapshotRefs();
         GitProtocolContext.Writer writer = protocolContext.writer();
         if (request.matches(HEAD.value())) {
             writeHead(snapshot, request, writer);

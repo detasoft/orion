@@ -127,7 +127,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
         }
         FetchPlan plan = new FetchPlan(wants, Map.of(), haves, Set.of(), OptionalInt.empty(),
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
-        FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+        FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
         try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
             pack.writeTo(writer);
             writer.finish();

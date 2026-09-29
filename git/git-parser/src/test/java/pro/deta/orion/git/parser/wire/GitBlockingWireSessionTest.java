@@ -11,6 +11,8 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -42,11 +44,13 @@ class GitBlockingWireSessionTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
+    private GitIndexApi index;
     private int opens;
 
     @BeforeEach
     void openStorage() throws Exception {
         storage = new LocalGitStorage(directory);
+        index = new LocalGitIndex(directory, storage);
     }
 
     @Test
@@ -162,7 +166,7 @@ class GitBlockingWireSessionTest {
                 ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
         ObjectId outer = PackTestData.store(storage, GitObjectType.TAG,
                 ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
-        storage.updateRefs(List.of(
+        index.updateRefs(List.of(
                 new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
                 new RefUpdate(new RefId("refs/tags/lightweight"), Optional.empty(), Optional.of(target)),
                 new RefUpdate(new RefId("refs/tags/nested"), Optional.empty(), Optional.of(outer))), true);
@@ -201,13 +205,13 @@ class GitBlockingWireSessionTest {
                 PackTestData.pack(PackTestData.blob(content)));
         ByteArrayOutputStream response = new ByteArrayOutputStream();
         session(request, response).serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.RECEIVE_PACK));
-        assertThat(storage.snapshotRefs().refs()).containsEntry(MAIN, id);
+        assertThat(index.snapshotRefs().refs()).containsEntry(MAIN, id);
         assertThat(response.toString(StandardCharsets.US_ASCII))
                 .isEqualTo("000eunpack ok\n0017ok refs/heads/main\n0000");
         response.reset();
         session(packets(id + " " + ZERO + " " + MAIN + "\0report-status", "FLUSH"), response)
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.RECEIVE_PACK));
-        assertThat(storage.snapshotRefs().refs()).isEmpty();
+        assertThat(index.snapshotRefs().refs()).isEmpty();
         assertThat(response.toString(StandardCharsets.US_ASCII))
                 .isEqualTo("000eunpack ok\n0017ok refs/heads/main\n0000");
     }
@@ -219,7 +223,7 @@ class GitBlockingWireSessionTest {
         session(packets("FLUSH"), response)
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.RECEIVE_PACK));
         assertThat(response.size()).isZero();
-        assertThat(storage.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, id));
+        assertThat(index.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, id));
     }
 
     @Test
@@ -241,7 +245,7 @@ class GitBlockingWireSessionTest {
 
     private ObjectId publish() throws Exception {
         ObjectId id = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1, 2, 3});
-        storage.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
+        index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
         return id;
     }
 
@@ -256,7 +260,7 @@ class GitBlockingWireSessionTest {
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
-            return new GitRepositoryContext(storage);
+            return new GitRepositoryContext(storage, index);
         }, configuration, wire);
     }
 

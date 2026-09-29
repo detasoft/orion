@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.junit.jupiter.api.Test;
@@ -87,7 +88,8 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository("project", new InMemoryStorage(), "refs/heads/main");
+        InMemoryStorage storage = new InMemoryStorage();
+        return new NativeGitRepository("project", storage, new InMemoryIndex(storage), "refs/heads/main");
     }
 
     private static Entry commit(String tree, String message) {

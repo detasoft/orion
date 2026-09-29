@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.util.ArrayList;
@@ -167,7 +168,9 @@ class GitAttachmentTest {
     }
 
     private static NativeGitRepository repository() {
-        NativeGitRepository repository = new NativeGitRepository("project", new InMemoryStorage(), head("main"));
+        InMemoryStorage storage = new InMemoryStorage();
+        NativeGitRepository repository = new NativeGitRepository(
+                "project", storage, new InMemoryIndex(storage), head("main"));
         populate(repository);
         return repository;
     }
@@ -289,10 +292,12 @@ class GitAttachmentTest {
                 String racedRef,
                 String expectedOldId,
                 String concurrentId) {
-            super(
-                    "project",
-                    new InMemoryStorage(),
-                    head("main"));
+            this(new InMemoryStorage(), racedRef, expectedOldId, concurrentId);
+        }
+
+        private RacingRepository(InMemoryStorage storage, String racedRef,
+                                 String expectedOldId, String concurrentId) {
+            super("project", storage, new InMemoryIndex(storage), head("main"));
             populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;

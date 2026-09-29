@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
@@ -41,10 +42,9 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
     @Override
     public Result<NativeGitRepository> create(String repositoryName) {
         String name = requireName(repositoryName);
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                name,
-                new InMemoryStorage(),
-                DEFAULT_HEAD);
+                name, storage, new InMemoryIndex(storage), DEFAULT_HEAD);
         NativeGitRepository previous = repositories.putIfAbsent(
                 name,
                 repository);

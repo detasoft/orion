@@ -1,9 +1,5 @@
 package pro.deta.orion.git.parser.v2.storage;
 
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.RefUpdate;
-import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -18,7 +14,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Repository objects and refs, independent of the backing store.
+ * Repository object storage, independent of the backing store.
  * Working packs come from newPack(); callers complete their index before persist().
  * Persist accepts completed mutable working packs from the same implementation and consumes accepted
  * packs on success or failure.
@@ -42,12 +38,6 @@ public interface GitStorageApi extends AutoCloseable {
     Set<ObjectId> packObjectIds(PackId id) throws IOException;
 
     boolean exists(ObjectId objectId) throws IOException;
-
-    RefsSnapshot snapshotRefs() throws IOException;
-
-    void updateHead(Head head) throws IOException;
-
-    List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic);
 
     Map<ObjectId, List<PackId>> findPacksByObjectIds(Collection<ObjectId> objectIds) throws IOException;
 

@@ -128,7 +128,7 @@ class BootstrapContextTest {
         AtomicInteger configurationReads = new AtomicInteger();
         AtomicInteger materialReads = new AtomicInteger();
         NativeGitRepository observed = new NativeGitRepository(
-                "orion", repository.storage(), "refs/heads/main") {
+                "orion", repository.storage(), repository.index(), "refs/heads/main") {
             @Override
             public GitRepositoryFileSnapshot loadFiles(String ref, List<String> paths)
                     throws GitOperationException {

@@ -1,12 +1,8 @@
 package pro.deta.orion.git.parser.v2.storage.local;
 
-import pro.deta.orion.git.parser.v2.data.Head;
-import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.read.ExistsGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -16,25 +12,19 @@ import pro.deta.orion.git.parser.v2.storage.PackObjectLocation;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 public final class LocalGitStorage implements GitStorageApi {
-    private final GitRefsStorage refs;
     private final GitPackStorage packs;
 
     public LocalGitStorage(Path repository) throws IOException {
         packs = new GitPackStorage(Objects.requireNonNull(repository, "repository"));
-        refs = new GitRefsStorage(repository);
     }
 
     public LocalIndexedPack newPack() throws IOException {
@@ -67,63 +57,6 @@ public final class LocalGitStorage implements GitStorageApi {
 
     public boolean exists(ObjectId objectId) throws IOException {
         return readObject(objectId, new ExistsGitObjectRead()).isPresent();
-    }
-
-    public RefsSnapshot snapshotRefs() throws IOException {
-        return refs.snapshot();
-    }
-
-    public void updateHead(Head head) throws IOException {
-        Objects.requireNonNull(head, "head");
-        if (head instanceof Head.Detached detached && !exists(new ObjectId(detached.target().toBytes()))) {
-            throw new IOException("Detached HEAD object does not exist: " + detached.target());
-        }
-        refs.updateHead(head);
-    }
-
-    public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
-        updates = List.copyOf(updates);
-        Set<RefId> names = new HashSet<>();
-        for (RefUpdate update : updates) {
-            update.ref().requireFullName();
-            if (!names.add(update.ref())) {
-                throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
-            }
-        }
-        try {
-            List<RefUpdate> ready = new ArrayList<>(updates.size());
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
-                boolean missing = update.newId().isPresent() && !exists(update.newId().orElseThrow());
-                results.add(new RefUpdateResult(update, missing ? OBJECT_NOT_FOUND : APPLIED, Optional.empty()));
-                if (!missing) {
-                    ready.add(update);
-                }
-            }
-            if (atomic && ready.size() != updates.size()) {
-                for (int index = 0; index < results.size(); index++) {
-                    RefUpdateResult result = results.get(index);
-                    if (result.status() == APPLIED) {
-                        results.set(index, new RefUpdateResult(result.update(), ATOMIC_ABORTED, Optional.empty()));
-                    }
-                }
-            } else {
-                Iterator<RefUpdateResult> applied = refs.updateAll(ready, atomic).iterator();
-                for (int index = 0; index < results.size(); index++) {
-                    if (results.get(index).status() == APPLIED) {
-                        results.set(index, applied.next());
-                    }
-                }
-            }
-            return List.copyOf(results);
-        } catch (IOException error) {
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
-                results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
-                        Optional.ofNullable(error.getMessage())));
-            }
-            return List.copyOf(results);
-        }
     }
 
     /**

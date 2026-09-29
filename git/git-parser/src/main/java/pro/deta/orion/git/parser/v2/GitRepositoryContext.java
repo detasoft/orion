@@ -4,12 +4,13 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.net.URI;
-import pro.deta.orion.git.parser.v2.id.PackId;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,13 +22,19 @@ import java.util.Optional;
  */
 public class GitRepositoryContext {
     private final GitStorageApi storage;
+    private final GitIndexApi index;
 
-    public GitRepositoryContext(GitStorageApi storage) {
+    public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
     }
 
     public final GitStorageApi storage() {
         return storage;
+    }
+
+    public final GitIndexApi index() {
+        return index;
     }
 
     public Optional<URI> packUri(PackId id) {
@@ -42,6 +49,6 @@ public class GitRepositoryContext {
         if (pack.isPresent()) {
             storage.persist(pack.orElseThrow());
         }
-        return storage.updateRefs(updates, atomic);
+        return index.updateRefs(updates, atomic);
     }
 }

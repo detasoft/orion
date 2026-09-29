@@ -19,6 +19,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -53,10 +54,11 @@ class NativeBootstrapGitPackReplayTest {
     void replaysCompletedPackWithItsBaseRegardlessOfUpstreamHistory(boolean disk) throws Exception {
         for (boolean upstreamHasBase : List.of(true, false)) {
             Path bare = directory.resolve("upstream-" + upstreamHasBase + ".git");
+            InMemoryStorage storage = new InMemoryStorage();
             NativeGitRepository repository = disk
                     ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
                             .create("proxy").valueOrFailure("repository")
-                    : new NativeGitRepository("proxy", new InMemoryStorage(), "refs/heads/main");
+                    : new NativeGitRepository("proxy", storage, new InMemoryIndex(storage), "refs/heads/main");
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -115,8 +117,9 @@ class NativeBootstrapGitPackReplayTest {
 
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                    "proxy", new InMemoryStorage(), "refs/heads/main");
+                "proxy", storage, new InMemoryIndex(storage), "refs/heads/main");
         repository.saveFiles("main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
                 GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");

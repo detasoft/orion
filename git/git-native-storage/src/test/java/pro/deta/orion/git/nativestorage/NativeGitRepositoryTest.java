@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.nio.charset.StandardCharsets;
@@ -151,10 +152,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
 
         repository.saveFiles(
                 "main",
@@ -174,10 +174,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
 
         NativeGitFileUpdate update = repository.prepareFileUpdate(
                 "main",
@@ -197,10 +196,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
 
         repository.saveFiles(
                 "main",
@@ -231,10 +229,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
         repository.saveFiles(
                 "main",
                 Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
@@ -313,10 +310,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
         repository.saveFiles(
                 "main",
                 Map.of(
@@ -348,10 +344,9 @@ class NativeGitRepositoryTest {
 
     @Test
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
+        InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new InMemoryStorage(),
-                "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
 
         repository.saveFiles(
                 "master",
@@ -364,6 +359,7 @@ class NativeGitRepositoryTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository("demo.git", new InMemoryStorage(), "refs/heads/main");
+        InMemoryStorage storage = new InMemoryStorage();
+        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(storage), "refs/heads/main");
     }
 }

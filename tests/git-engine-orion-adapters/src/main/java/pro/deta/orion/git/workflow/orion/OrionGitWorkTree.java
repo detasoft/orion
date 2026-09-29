@@ -22,6 +22,8 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -80,9 +82,10 @@ final class OrionGitWorkTree implements GitWorkTree {
         Path gitDirectory = workTree.resolve(".git");
         Files.createDirectories(gitDirectory);
         GitStorageApi storage = new LocalGitStorage(gitDirectory);
-        storage.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
+        GitIndexApi index = new LocalGitIndex(gitDirectory, storage);
+        index.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
         NativeGitRepository repository = new NativeGitRepository(
-                workTree.getFileName().toString(), storage, MAIN_REF);
+                workTree.getFileName().toString(), storage, index, MAIN_REF);
         return new OrionGitWorkTree(client, workTree, repository);
     }
 
@@ -107,7 +110,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         }
         FetchPlan plan = new FetchPlan(roots, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
-        FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+        FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), pack.objectCount())) {
             pack.writeTo(writer);
@@ -236,7 +239,7 @@ final class OrionGitWorkTree implements GitWorkTree {
                     }
                     FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                             OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
-                    FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+                    FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
                     try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
                         pack.writeTo(writer);
                         writer.finish();
@@ -322,7 +325,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             updateRef(refName, startPoint);
         }
         currentBranch = branch;
-        repository.storage().updateHead(new Head.Symbolic(new RefId(refName)));
+        repository.index().updateHead(new Head.Symbolic(new RefId(refName)));
     }
 
     @Override

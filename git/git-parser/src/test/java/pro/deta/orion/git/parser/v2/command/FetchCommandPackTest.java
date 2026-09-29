@@ -14,6 +14,9 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
@@ -60,12 +63,13 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll, boolean disk) throws Exception {
         GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+        GitIndexApi index = disk ? new LocalGitIndex(directory, storage) : new InMemoryIndex(storage);
         byte[] content = new byte[200000];
         new Random(17).nextBytes(content);
         ObjectId id = store(storage, GitObjectType.BLOB, content);
         byte[] stored = storage.readObject(id, (type, size, base, input) ->
                 input.readBytes(compressed(content).length)).orElseThrow();
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SIDEBAND_ALL),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SIDEBAND_ALL),
                 sidebandAll ? "sideband-all" : "no-progress", "want " + id.toHex(), "done", "FLUSH");
         byte[] pack = v2Pack(response, sidebandAll);
         assertChecksum(pack);
@@ -85,13 +89,14 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void excludesCommonHistoryButIncludesNewTreeAndBlob() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId oldBlob = store(storage, GitObjectType.BLOB, new byte[]{1});
         ObjectId oldTree = store(storage, GitObjectType.TREE, tree(oldBlob));
         ObjectId oldCommit = store(storage, GitObjectType.COMMIT, commit(oldTree, Optional.empty()));
         ObjectId newBlob = store(storage, GitObjectType.BLOB, new byte[]{2});
         ObjectId newTree = store(storage, GitObjectType.TREE, tree(newBlob));
         ObjectId newCommit = store(storage, GitObjectType.COMMIT, commit(newTree, Optional.of(oldCommit)));
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
                 "want " + newCommit.toHex(), "have " + oldCommit.toHex(), "done", "FLUSH");
         try (IndexedPack pack = ingest(v2Pack(response, false))) {
             assertThat(pack.objectCount()).isEqualTo(3);
@@ -107,8 +112,9 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void waitForDoneKeepsTheResponseAtAcknowledgments() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{42});
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.WAIT_FOR_DONE),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.WAIT_FOR_DONE),
                 "wait-for-done", "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
         try (BufferedByteInputV2 input = input(response)) {
             assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
@@ -123,8 +129,9 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void readyWithoutDoneSendsAnEmptyPackWhenEverythingIsCommon() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{42});
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
                 "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
         try (IndexedPack pack = ingest(v2Pack(response, false))) {
             assertThat(pack.entryCount()).isZero();
@@ -134,10 +141,11 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void commonShallowCommitDoesNotImplyThatTheClientHasItsParents() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
         ObjectId parent = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
         ObjectId shallow = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
                 "want " + parent.toHex(), "have " + shallow.toHex(), "shallow " + shallow.toHex(),
                 "done", "FLUSH");
         try (IndexedPack pack = ingest(v2Pack(response, false))) {
@@ -176,10 +184,11 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ValueSource(strings = {"", "side-band", "side-band-64k"})
     void legacySendsNakThenRawOrBoundedSidebandPack(String capability) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         byte[] content = new byte[9000];
         new Random(4).nextBytes(content);
         ObjectId id = store(storage, GitObjectType.BLOB, content);
-        byte[] response = execute(storage, GitProtocolVersion.V0,
+        byte[] response = execute(storage, index, GitProtocolVersion.V0,
                 capabilities(GitCapability.SIDE_BAND, GitCapability.SIDE_BAND_64K),
                 "want " + id.toHex() + (capability.isEmpty() ? "" : " " + capability), "FLUSH", "done");
         byte[] pack;
@@ -199,6 +208,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         boolean thin = mode.equals("thin");
         boolean includeBase = mode.equals("base-in-pack");
         GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+        GitIndexApi index = disk ? new LocalGitIndex(directory, storage) : new InMemoryIndex(storage);
         byte[] base = {1, 2, 3};
         byte[] target = {1, 2, 4};
         byte[] delta = {3, 3, 3, 1, 2, 4};
@@ -220,7 +230,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         stored.addObject(deltaOffset, targetId, GitObjectType.BLOB, 3);
         new GitPackObjectResolver(stored, storage).complete();
         storage.persist(stored);
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
                 thin ? "thin-pack" : "no-progress", "want " + targetId.toHex(),
                 (includeBase ? "want " : "have ") + baseId.toHex(), "done", "FLUSH");
         byte[] pack = v2Pack(response, false);
@@ -242,10 +252,11 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void sendsLegacyShallowBoundariesBeforeNegotiationAndPack() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
         ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
         ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
-        byte[] response = execute(storage, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
+        byte[] response = execute(storage, index, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
                 "want " + tip.toHex() + " shallow", "deepen 1", "FLUSH", "done");
         try (BufferedByteInputV2 input = input(response)) {
             assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
@@ -264,12 +275,13 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ValueSource(booleans = {false, true})
     void deepensOneGenerationFromClientBoundary(boolean sidebandAll) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
         ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
         ObjectId parent = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
         ObjectId boundary = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
         ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(boundary)));
-        byte[] response = execute(storage, GitProtocolVersion.V2,
+        byte[] response = execute(storage, index, GitProtocolVersion.V2,
                 capabilities(GitCapability.SHALLOW, GitCapability.SIDEBAND_ALL),
                 sidebandAll ? "sideband-all" : "no-progress", "want " + tip.toHex(),
                 "shallow " + boundary.toHex(), "have " + boundary.toHex(),
@@ -287,6 +299,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
         ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
         byte[] parentContent = new String(commit(tree, Optional.of(root)), StandardCharsets.US_ASCII)
@@ -295,16 +308,16 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         byte[] tipContent = new String(commit(tree, Optional.of(parent)), StandardCharsets.US_ASCII)
                 .replace(" 0 +0000", " 300 +0000").getBytes(StandardCharsets.US_ASCII);
         ObjectId tip = store(storage, GitObjectType.COMMIT, tipContent);
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
                 "want " + tip.toHex(), "deepen-since 200", "done", "FLUSH");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
         try (IndexedPack pack = ingest(v2Pack(response, false))) {
             assertThat(pack.find(tip)).isPresent();
             assertThat(pack.find(parent)).isEmpty();
         }
-        storage.updateRefs(java.util.List.of(new pro.deta.orion.git.parser.v2.data.RefUpdate(
+        index.updateRefs(java.util.List.of(new pro.deta.orion.git.parser.v2.data.RefUpdate(
                 new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
-        byte[] excluded = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+        byte[] excluded = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
                 "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
         assertThat(new String(excluded, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
         try (IndexedPack pack = ingest(v2Pack(excluded, false))) {
@@ -316,17 +329,18 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void blobFilterOmitsTreeBlobsAndRetainsExplicitlyWantedBlob() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
+        GitIndexApi index = new LocalGitIndex(directory, storage);
         ObjectId blob = store(storage, GitObjectType.BLOB, new byte[]{1});
         ObjectId tree = store(storage, GitObjectType.TREE, tree(blob));
         ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        byte[] response = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
                 "want " + tip.toHex(), "filter blob:none", "done", "FLUSH");
         try (IndexedPack pack = ingest(v2Pack(response, false))) {
             assertThat(pack.find(tip)).isPresent();
             assertThat(pack.find(tree)).isPresent();
             assertThat(pack.find(blob)).isEmpty();
         }
-        byte[] explicit = execute(storage, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+        byte[] explicit = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
                 "want " + blob.toHex(), "filter blob:none", "done", "FLUSH");
         try (IndexedPack pack = ingest(v2Pack(explicit, false))) {
             assertThat(pack.find(blob)).isPresent();
@@ -348,7 +362,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     }
 
     private IndexedPack ingest(byte[] bytes) throws IOException {
-        try (InMemoryStorage storage = new InMemoryStorage();
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage);
              BufferedByteInputV2 input = input(bytes);
              PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
             return ingestor.ingest();
@@ -359,7 +373,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @CsvSource({"HTTP,'',true", "HTTP,00,false", "SSH,'',false"})
     void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
             throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
             ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
@@ -374,7 +388,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             try (BufferedByteInputV2 input = input(request.toByteArray())) {
                 GitProtocolContext protocol = new GitProtocolContext(input,
                         new OutputStreamBufferedByteOutput(response), GitProtocolVersion.V1, transport);
-                FetchCommand command = new FetchCommand(storage, capabilities(GitCapability.SHALLOW));
+                FetchCommand command = new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW));
                 if (accepted) {
                     command.action(protocol);
                     try (BufferedByteInputV2 reply = input(response.toByteArray())) {
@@ -393,11 +407,11 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @EnumSource(GitProtocolVersion.class)
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
             ObjectId tree = store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId tip = store(storage, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             RefId main = new RefId("refs/heads/main");
-            storage.updateRefs(List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
+            index.updateRefs(List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
             for (boolean missingObject : List.of(false, true)) {
                 String wanted = missingObject ? "11".repeat(20) : tip.toHex();
                 ByteArrayOutputStream request = new ByteArrayOutputStream();
@@ -411,18 +425,18 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                 try (BufferedByteInputV2 input = input(request.toByteArray())) {
                     GitProtocolContext protocol = new GitProtocolContext(input,
                             new OutputStreamBufferedByteOutput(response), version, GitTransport.HTTP);
-                    assertThatThrownBy(() -> new FetchCommand(storage, capabilities(GitCapability.SHALLOW))
+                    assertThatThrownBy(() -> new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW))
                             .action(protocol)).isInstanceOf(IOException.class)
                             .hasMessageContaining(missingObject ? wanted : "Depth must be positive");
                 }
                 assertThat(response.toByteArray()).isEmpty();
-                assertThat(storage.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
+                assertThat(index.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
                 assertThat(storage.exists(tip)).isTrue();
             }
         }
     }
 
-    private byte[] execute(GitStorageApi storage, GitProtocolVersion version,
+    private byte[] execute(GitStorageApi storage, GitIndexApi index, GitProtocolVersion version,
                            GitCapabilities advertised, String... lines) throws IOException {
         ByteArrayOutputStream request = new ByteArrayOutputStream();
         OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
@@ -435,7 +449,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         }
         ByteArrayOutputStream response = new ByteArrayOutputStream();
         try (BufferedByteInputV2 input = input(request.toByteArray())) {
-            new FetchCommand(storage, advertised).action(new GitProtocolContext(input,
+            new FetchCommand(storage, index, advertised).action(new GitProtocolContext(input,
                     new OutputStreamBufferedByteOutput(response), version, GitTransport.HTTP));
         }
         return response.toByteArray();

@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -31,6 +32,7 @@ import java.util.Set;
 
 public final class FetchPack {
     private final GitStorageApi storage;
+    private final GitIndexApi index;
     private final Set<ObjectId> objects = new LinkedHashSet<>();
     private final Set<ObjectId> common = new HashSet<>();
     private final Set<ObjectId> shallow = new LinkedHashSet<>();
@@ -39,13 +41,14 @@ public final class FetchPack {
     private List<PackObjectLocation> entries = List.of();
     private Map<PackId, URI> packUris = Map.of();
 
-    private FetchPack(GitStorageApi storage, boolean thin) {
+    private FetchPack(GitStorageApi storage, GitIndexApi index, boolean thin) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
         this.thin = thin;
     }
 
-    public static FetchPack prepare(GitStorageApi storage, FetchPlan plan) throws IOException {
-        return prepare(new GitRepositoryContext(storage), plan);
+    public static FetchPack prepare(GitStorageApi storage, GitIndexApi index, FetchPlan plan) throws IOException {
+        return prepare(new GitRepositoryContext(storage, index), plan);
     }
 
     public static FetchPack prepare(GitRepositoryContext repository, FetchPlan plan) throws IOException {
@@ -54,7 +57,7 @@ public final class FetchPack {
         if (plan.filter().isPresent() && !plan.filter().orElseThrow().equals("blob:none")) {
             throw new IOException("Unsupported object filter: " + plan.filter().orElseThrow());
         }
-        FetchPack pack = new FetchPack(storage, plan.capabilities().has(GitCapability.THIN_PACK));
+        FetchPack pack = new FetchPack(storage, repository.index(), plan.capabilities().has(GitCapability.THIN_PACK));
         ArrayDeque<ObjectId> pending = new ArrayDeque<>(plan.commonObjects());
         while (!pending.isEmpty()) {
             ObjectId id = pending.removeFirst();
@@ -168,7 +171,7 @@ public final class FetchPack {
         if (refs.isEmpty()) {
             return result;
         }
-        RefsSnapshot snapshot = storage.snapshotRefs();
+        RefsSnapshot snapshot = index.snapshotRefs();
         Map<RefId, ObjectId> storedRefs = snapshot.refs();
         ArrayDeque<ObjectId> pending = new ArrayDeque<>();
         for (String ref : refs) {
@@ -313,7 +316,7 @@ public final class FetchPack {
 
     private void includeTags() throws IOException {
         Map<ObjectId, GitObjectLinks> tags = new LinkedHashMap<>();
-        for (Map.Entry<RefId, ObjectId> ref : storage.snapshotRefs().refs().entrySet()) {
+        for (Map.Entry<RefId, ObjectId> ref : index.snapshotRefs().refs().entrySet()) {
             if (ref.getKey().value().startsWith("refs/tags/")) {
                 ObjectId id = ref.getValue();
                 Set<ObjectId> visited = new HashSet<>();

@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.pack.PackEntry;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.PackObjectLocation;
+import pro.deta.orion.git.parser.v2.storage.shared.GitLock;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -170,7 +171,8 @@ final class GitPackStorage {
         }
 
         scan((packId, path) -> {
-            try (GitLock.Lease lease = lockPack(packId); IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
+            try (GitLock.Lease lease = lockPack(packId);
+                 IndexedPack index = LocalIndexedPack.open(packPath(packId), path)) {
                 for (ObjectId id : ids) {
                     if (index.find(id).isPresent()) {
                         List<PackId> locations = result.computeIfAbsent(id, ignored -> new ArrayList<>());

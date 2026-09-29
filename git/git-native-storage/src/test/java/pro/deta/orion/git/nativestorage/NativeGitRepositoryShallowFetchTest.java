@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.IOException;
@@ -30,7 +31,7 @@ class NativeGitRepositoryShallowFetchTest {
             for (FetchPlan plan : List.of(
                     plan(tip, OptionalInt.of(1), OptionalLong.empty(), Set.of()),
                     plan(tip, OptionalInt.empty(), OptionalLong.of(200), Set.of()))) {
-                FetchPack pack = FetchPack.prepare(repository.storage(), plan);
+                FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
                 assertThat(pack.shallowCommits()).containsExactly(tip);
                 assertThat(pack.objectCount()).isEqualTo(2);
             }
@@ -45,7 +46,7 @@ class NativeGitRepositoryShallowFetchTest {
             ObjectId tip = commit(repository, tree, base, 300);
             repository.updateRef("refs/heads/main", "0".repeat(40), base.toHex());
             for (String ref : List.of("refs/heads/main", "main", "HEAD")) {
-                FetchPack pack = FetchPack.prepare(repository.storage(),
+                FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(),
                         plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of(ref)));
                 assertThat(pack.shallowCommits()).containsExactly(tip);
                 assertThat(pack.objectCount()).isEqualTo(2);
@@ -58,7 +59,7 @@ class NativeGitRepositoryShallowFetchTest {
         try (NativeGitRepository repository = repository()) {
             ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
             ObjectId tip = commit(repository, tree, null, 100);
-            assertThatThrownBy(() -> FetchPack.prepare(repository.storage(),
+            assertThatThrownBy(() -> FetchPack.prepare(repository.storage(), repository.index(),
                     plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of("refs/heads/missing"))))
                     .isInstanceOf(IOException.class).hasMessageContaining("Unknown deepen-not ref");
         }
@@ -78,6 +79,7 @@ class NativeGitRepositoryShallowFetchTest {
     }
 
     private static NativeGitRepository repository() {
-        return new NativeGitRepository("demo", new InMemoryStorage(), "refs/heads/main");
+        InMemoryStorage storage = new InMemoryStorage();
+        return new NativeGitRepository("demo", storage, new InMemoryIndex(storage), "refs/heads/main");
     }
 }

@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.storage.local;
+package pro.deta.orion.git.parser.v2.storage.shared;
 
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -31,22 +31,22 @@ import java.util.concurrent.ExecutionException;
  * polling, sleeps, executor, or extra thread is needed. Active keys include the canonical repository path,
  * so distinct facade instances share ownership without retaining idle repositories in a registry.
  */
-final class GitLock {
+public final class GitLock {
     private static final ConcurrentHashMap<Key, CompletableFuture<Void>> OWNERS = new ConcurrentHashMap<>();
     private final Object repository;
 
-    GitLock(Object canonicalRepository) {
+    public GitLock(Object canonicalRepository) {
         repository = canonicalRepository;
     }
 
-    Lease lockRefs(Collection<RefId> refs) throws InterruptedException {
+    public Lease lockRefs(Collection<RefId> refs) throws InterruptedException {
         if (refs.isEmpty()) {
             throw new IllegalArgumentException("Ref lock requires at least one ref");
         }
         return acquire("refs");
     }
 
-    Lease lockPack(PackId packId) throws InterruptedException {
+    public Lease lockPack(PackId packId) throws InterruptedException {
         return acquire(packId);
     }
 
@@ -74,7 +74,7 @@ final class GitLock {
 
     private record Key(Object repository, Object identity) { }
 
-    interface Lease extends AutoCloseable {
+    public interface Lease extends AutoCloseable {
         @Override
         void close();
     }

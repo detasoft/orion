@@ -30,7 +30,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             ProxyAwareNativeGitRepositoryProvider provider,
             String repositoryName,
             NativeGitRepository repository) {
-        super(repositoryName, repository.storage(), repository.defaultHead());
+        super(repositoryName, repository.storage(), repository.index(), repository.defaultHead());
         this.provider = provider;
         this.repositoryName = repositoryName;
         this.repository = repository;

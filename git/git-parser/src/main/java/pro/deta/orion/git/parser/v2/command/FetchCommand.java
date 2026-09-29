@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
@@ -35,8 +36,8 @@ public class FetchCommand implements GitCommand {
     private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
 
-    public FetchCommand(GitStorageApi storage, GitCapabilities advertisedCapabilities) {
-        this(new GitRepositoryContext(storage), advertisedCapabilities);
+    public FetchCommand(GitStorageApi storage, GitIndexApi index, GitCapabilities advertisedCapabilities) {
+        this(new GitRepositoryContext(storage, index), advertisedCapabilities);
     }
 
     public FetchCommand(GitRepositoryContext repository, GitCapabilities advertisedCapabilities) {
@@ -54,7 +55,7 @@ public class FetchCommand implements GitCommand {
         if (request.mode() != FetchRequest.Mode.PROTOCOL_V2
                 && (request.depth().isPresent() || request.deepenSince().isPresent()
                 || !request.deepenNot().isEmpty())) {
-            FetchPack history = FetchPack.prepare(storage, plan(iterator.getContext()));
+            FetchPack history = FetchPack.prepare(repository, plan(iterator.getContext()));
             writer.writeShallowInfo(history.shallowCommits(), history.unshallowCommits(), SideBand.NONE);
             writer.flush();
         }
@@ -88,7 +89,7 @@ public class FetchCommand implements GitCommand {
             throws IOException {
         NegotiationContext context = new NegotiationContext(request, storage, advertisedCapabilities);
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, transport);
-        RefsSnapshot snapshot = storage.snapshotRefs();
+        RefsSnapshot snapshot = repository.index().snapshotRefs();
         if (!request.wantRefs().isEmpty()) {
             context.resolveWantedRefs(snapshot);
         }

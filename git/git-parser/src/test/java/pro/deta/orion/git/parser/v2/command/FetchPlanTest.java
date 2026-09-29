@@ -9,6 +9,8 @@ import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -33,13 +35,15 @@ class FetchPlanTest {
     private static final ObjectId UNKNOWN = new ObjectId("2".repeat(40));
     private static final RefId MAIN = new RefId("refs/heads/main");
     private GitStorageApi storage;
+    private GitIndexApi index;
     private FetchCommand command;
 
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
+        index = new LocalGitIndex(directory, storage);
         PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
-        command = new FetchCommand(storage, capabilities(GitCapability.values()));
+        command = new FetchCommand(storage, index, capabilities(GitCapability.values()));
     }
 
     @Test
@@ -116,7 +120,7 @@ class FetchPlanTest {
                 value(GitCapability.INCLUDE_TAG), value(GitCapability.NO_PROGRESS),
                 value(GitCapability.DEEPEN_RELATIVE), value(GitCapability.SIDEBAND_ALL)));
         request.packfileUriProtocols().add("https");
-        storage.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
+        index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
         var iterator = command.prepareNegotiation(request, GitTransport.HTTP);
         iterator.next(new NegotiationMessage.Have(WANT));
         iterator.next(NegotiationMessage.Control.DONE);

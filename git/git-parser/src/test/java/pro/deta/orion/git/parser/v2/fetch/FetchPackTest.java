@@ -10,6 +10,9 @@ import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -38,7 +41,8 @@ class FetchPackTest {
 
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexApi index = new LocalGitIndex(directory, storage)) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             byte[] rootBytes = commit(tree);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, rootBytes);
@@ -50,10 +54,10 @@ class FetchPackTest {
                     .resolve(hex.substring(2) + ".pack");
             FetchPlan commonOnly = plan(Set.of(), Set.of(root), Set.of(), OptionalInt.empty());
             FetchPlan wanted = plan(Set.of(tip), Set.of(root), Set.of(), OptionalInt.empty());
-            long commonReads = contentReads(storage, commonOnly, rootPath, "common.jfr");
+            long commonReads = contentReads(storage, index, commonOnly, rootPath, "common.jfr");
             assertThat(commonReads).isPositive();
-            assertThat(contentReads(storage, wanted, rootPath, "wanted.jfr")).isEqualTo(commonReads);
-            FetchPack pack = FetchPack.prepare(storage, wanted);
+            assertThat(contentReads(storage, index, wanted, rootPath, "wanted.jfr")).isEqualTo(commonReads);
+            FetchPack pack = FetchPack.prepare(storage, index, wanted);
             assertThat(pack.shallowCommits()).isEmpty();
             assertThat(pack.unshallowCommits()).isEmpty();
             assertThat(pack.objectCount()).isEqualTo(1);
@@ -69,23 +73,23 @@ class FetchPackTest {
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex(storage)) {
             ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
             ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree));
             ObjectId boundary = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, root));
             ObjectId common = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, boundary));
             ObjectId tip = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, common));
-            FetchPack ordinary = FetchPack.prepare(storage,
+            FetchPack ordinary = FetchPack.prepare(storage, index,
                     plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.empty()));
             assertThat(ordinary.objectCount()).isEqualTo(1);
             assertThat(ordinary.shallowCommits()).isEmpty();
             assertThat(ordinary.unshallowCommits()).isEmpty();
-            FetchPack deepened = FetchPack.prepare(storage,
+            FetchPack deepened = FetchPack.prepare(storage, index,
                     plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.of(4)));
             assertThat(deepened.objectCount()).isEqualTo(2);
             assertThat(deepened.shallowCommits()).isEmpty();
             assertThat(deepened.unshallowCommits()).containsExactly(boundary);
-            FetchPack shallow = FetchPack.prepare(storage,
+            FetchPack shallow = FetchPack.prepare(storage, index,
                     plan(Set.of(tip), Set.of(common), Set.of(tip), OptionalInt.empty()));
             assertThat(shallow.objectCount()).isEqualTo(1);
             assertThat(shallow.shallowCommits()).containsExactly(tip);
@@ -93,13 +97,13 @@ class FetchPackTest {
         }
     }
 
-    private long contentReads(GitStorageApi storage, FetchPlan plan, Path pack, String recordingName)
+    private long contentReads(GitStorageApi storage, GitIndexApi index, FetchPlan plan, Path pack, String recordingName)
             throws Exception {
         Path recordingPath = directory.resolve(recordingName);
         try (Recording recording = new Recording()) {
             recording.enable("jdk.FileRead").withThreshold(Duration.ZERO).withStackTrace();
             recording.start();
-            FetchPack.prepare(storage, plan);
+            FetchPack.prepare(storage, index, plan);
             recording.stop();
             recording.dump(recordingPath);
         }
@@ -138,7 +142,8 @@ class FetchPackTest {
 
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexApi index = new LocalGitIndex(directory, storage)) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             ObjectId firstId = PackTestData.store(storage, GitObjectType.BLOB, first);
@@ -146,13 +151,13 @@ class FetchPackTest {
             FetchPlan plan = new FetchPlan(new LinkedHashSet<>(List.of(secondId, firstId)), Map.of(),
                     Set.of(), Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
                     new GitCapabilities(), Set.of());
-            FetchPack pack = FetchPack.prepare(storage, plan);
+            FetchPack pack = FetchPack.prepare(storage, index, plan);
             assertThat(pack.objectCount()).isEqualTo(2);
             for (PackId id : storage.packIds()) {
                 String hex = id.toHex();
-                Path index = directory.resolve("packs").resolve(hex.substring(0, 2))
+                Path indexPath = directory.resolve("packs").resolve(hex.substring(0, 2))
                         .resolve(hex.substring(2) + ".mv");
-                Files.move(index, index.resolveSibling(index.getFileName() + ".saved"));
+                Files.move(indexPath, indexPath.resolveSibling(indexPath.getFileName() + ".saved"));
             }
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {

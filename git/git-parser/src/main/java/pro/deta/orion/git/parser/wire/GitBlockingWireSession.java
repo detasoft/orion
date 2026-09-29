@@ -144,7 +144,7 @@ public final class GitBlockingWireSession {
             if (command.equals("command=fetch") && configuration.protocolV2().fetch()) {
                 new FetchCommand(repository, capabilities).action(protocol);
             } else if (command.equals("command=ls-refs") && configuration.protocolV2().lsRefs()) {
-                new RefsCommand(repository.storage(), capabilities).action(protocol);
+                new RefsCommand(repository.storage(), repository.index(), capabilities).action(protocol);
             } else {
                 throw new IOException("Protocol v2 command was not advertised");
             }
@@ -231,7 +231,7 @@ public final class GitBlockingWireSession {
 
     private GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
             GitCapabilities capabilities, InitialRequestService service) throws IOException {
-        RefsSnapshot snapshot = repository.storage().snapshotRefs();
+        RefsSnapshot snapshot = repository.index().snapshotRefs();
         List<GitAdvertisedRef> refs = new ArrayList<>();
         ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
                 ? snapshot.refs().get(symbolic.target())
