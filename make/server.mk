@@ -30,10 +30,10 @@ ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
 	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-RUN_TEST_RESERVED_GOALS += run-frontend
+RUN_TEST_RESERVED_GOALS += run-frontend run-dev
 RUN_TEST_RESERVED_GOALS += browser-test browser-acme-test prepare-browser-test
 
-.PHONY: init-server run-server run-frontend run-agent enroll-admin-key require-key-material-password
+.PHONY: init-server run-server run-frontend run-dev run-agent enroll-admin-key require-key-material-password
 .PHONY: issue-token issue-token-raw
 .PHONY: browser-test browser-acme-test prepare-browser-test
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
@@ -72,6 +72,9 @@ run-server: require-key-material-password ## Run the Orion server
 
 run-frontend: ## Run the frontend Vite development server with automatic UI updates
 	cd net/frontend/ui && $(NPM) run dev
+
+run-dev: require-key-material-password ## Run Orion and Vite together; Ctrl-C stops both
+	+python3 "$(CURDIR)/make/run-dev.py" $(MAKE)
 
 prepare-browser-test:
 	@test -n '$(URL)' || { echo 'Set URL to the server under test; e.g. URL=http://localhost:8000' >&2; exit 2; }

@@ -44,6 +44,22 @@ Both goals accept additional application options through `ORION_ARGS`.
 to recover lost keys from an existing installation. Restore its matching
 [key-material backup](docs/key-material-backup-and-restore.md) instead.
 
+For UI development, start Orion and Vite together from the repository root:
+
+```sh
+npm --prefix net/frontend/ui ci # Once, or after frontend dependencies change.
+make run-dev
+```
+
+Keep `ORION_KEY_MATERIAL_PASSWORD` set to the existing store's password.
+`run-dev` starts the existing `run-server` and `run-frontend` goals concurrently:
+one Maven invocation runs Orion, and npm runs Vite at `http://localhost:4173`.
+It accepts the same `ORION_ARGS`, `ORION_ROOT`, `MAVEN`, and `NPM` overrides as
+those goals. Ctrl-C stops both process trees; processes that ignore shutdown
+are killed after ten seconds. If either service exits, the other is stopped too.
+Use `make init-server` first for a new installation. Python 3 is required for
+the shared development launcher on macOS and Linux.
+
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's
 `target` tree, so `mvn clean` does not remove generated keys or the local ACL.
