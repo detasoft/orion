@@ -164,11 +164,14 @@ final class ReleaseVerifier {
             throw new VerificationFailure(1, "Cannot import release public key" + commandOutput(importResult));
         }
 
+        Path statusFile = gnupgHome.resolve("verify.status");
         CommandResult verifyResult = commandRunner.run(List.of(
                 options.gpgCommand(),
                 "--batch",
                 "--homedir",
                 gnupgHome.toString(),
+                "--status-file",
+                statusFile.toString(),
                 "--verify",
                 signature.toString(),
                 artifact.toString()
@@ -179,6 +182,31 @@ final class ReleaseVerifier {
                     "Signature verification failed for " + artifact + commandOutput(verifyResult)
             );
         }
+        String expectedFingerprint = options.normalizedReleaseKeyFingerprint();
+        if (!hasExpectedSigner(Files.readString(statusFile), expectedFingerprint)) {
+            throw new VerificationFailure(
+                    1,
+                    "Signature verification did not confirm the expected release key " + expectedFingerprint
+                            + " for " + artifact + commandOutput(verifyResult)
+            );
+        }
+    }
+
+    private static boolean hasExpectedSigner(String status, String expectedFingerprint) {
+        for (String line : status.split("\\R")) {
+            if (!line.startsWith("[GNUPG:] VALIDSIG ")) {
+                continue;
+            }
+            String[] fields = line.split("\\s+");
+            if (fields.length < 11) {
+                continue;
+            }
+            String primaryFingerprint = fields.length > 11 ? fields[11] : fields[2];
+            if (expectedFingerprint.equals(AppOptions.normalizeFingerprint(primaryFingerprint))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Path artifact(AppOptions options) {

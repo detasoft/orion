@@ -1,16 +1,5 @@
 # Module review: core/bootstrap
 
-## 1. Проверка релиза не связывает подпись с ожидаемым ключом
-
-- **Проблема и триггер.** Файл содержит ожидаемый primary key первым и посторонний primary key вторым; artifact подписан вторым. Fingerprint проверяется по первому, затем импортируются оба ключа и принимается успешная подпись второго.
-- **Источники и владельцы.** [Fingerprint](src/main/java/pro/deta/orion/ReleaseVerifier.java#L112), [импорт](src/main/java/pro/deta/orion/ReleaseVerifier.java#L154), [проверка exit code](src/main/java/pro/deta/orion/ReleaseVerifier.java#L167), [первый fpr](src/main/java/pro/deta/orion/ReleaseVerifier.java#L192). Реальный вход — CLI `verify`; [тест](src/test/java/pro/deta/orion/ReleaseVerifierTest.java#L45) использует fake runner и один fingerprint.
-- **Документированное поведение.** [README](../../README.md#L166) обещает fingerprint checks и временный keyring; expected fingerprint обязателен. [GNU](https://gnupg.org/documentation/manuals/gnupg/Operational-GPG-Commands.html) отдельно определяет ограничение конкретного подписанта.
-- **Контракт.** Обязательна подпись ожидаемого primary key либо его допустимого signing subkey. Наличие ожидаемого ключа среди импортированных этого не обеспечивает.
-- **Минимальное исправление.** Связать успешную криптографическую проверку с expected primary fingerprint через машинный статус GPG либо импортировать только ожидаемый primary key вместе с subkeys. Проверить отрицательный случай двух primary keys и положительный signing subkey.
-- **Альтернативы и последствия.** [GNU --assert-signer](https://gnupg.org/documentation/manuals/gnupg/GPG-Configuration-Options.html) учитывает signing и primary key, но требует установления поддерживаемой версии GPG. [VALIDSIG](https://github.com/gpg/gnupg/blob/master/doc/DETAILS) предоставляет primary fingerprint. Сравнение только signing-subkey fingerprint с primary сломает законные подписи; отказ от нескольких primary keys закрывает этот trigger и сохраняет subkeys.
-- **Уверенность.** Высокая по коду и контракту GPG. Ключи не генерировались, exploit не запускался; fake runner не является криптографическим доказательством.
-- **Важность / простота.** Важность высокая: нарушена проверка издателя релиза. Простота средняя: локальная правка с корректной поддержкой primary/subkey и проверкой настоящего GPG.
-
 ## 2. Ошибка persistent storage незаметно включает memory backend
 
 - **Проблема и триггер.** Например, при `storage.location=env:ORION_REPOSITORY_DIR` и отсутствующей переменной ошибка разрешения storage перехватывается и выбирается память. Если остальные inputs позволяют startup, записи исчезают после restart.
