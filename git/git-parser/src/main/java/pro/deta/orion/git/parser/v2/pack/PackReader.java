@@ -173,6 +173,9 @@ public final class PackReader implements AutoCloseable {
                 throw new IOException("Inflated size exceeds declared object size");
             }
             inflatedSize += count;
+            if (entry.type() == GitObjectType.TREE && count > 0) {
+                verifyTree(inflated, count);
+            }
             if (fullEntry()) {
                 objectHash.update(inflated, 0, count);
             }
@@ -194,6 +197,12 @@ public final class PackReader implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    private void verifyTree(byte[] data, int length) throws IOException {
+        // @todo Verify tree entry ordering across inflated chunks without rewriting bytes or object IDs.
+        // This is a placeholder: tree ordering is not currently checked. Delta trees need resolved content
+        // before verification; PackReader only sees their delta instructions.
     }
 
     private byte[] readBytes(int length) throws IOException {

@@ -11,6 +11,7 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -90,6 +91,32 @@ class PackReaderTest {
             assertThat(entries.get(2).objectId()).isEmpty();
             assertThat(entries.get(2).metadata().baseId()).contains(baseId);
             assertThat(copied.toByteArray()).containsExactly(wire);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 7, 8192})
+    void preservesUnsortedTreeBytesAndObjectIds(int chunkSize) throws Exception {
+        byte[] content = "file content".getBytes(StandardCharsets.UTF_8);
+        ObjectId blobId = objectId(GitObjectType.BLOB, content);
+        byte[] tree = join("100644 \uD800\uDC00\0".getBytes(StandardCharsets.UTF_8), blobId.toBytes(),
+                "100644 \uE000\0".getBytes(StandardCharsets.UTF_8), blobId.toBytes());
+        byte[] wire = pack(blob(content), entry(GitObjectType.TREE, tree));
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ReusedSource(wire, chunkSize));
+             PackReader reader = new PackReader(input)) {
+            ByteArrayOutputStream copied = new ByteArrayOutputStream();
+            List<ObjectId> ids = new ArrayList<>();
+            PackReadStep step;
+            while (!((step = reader.next()) instanceof PackReadStep.End)) {
+                if (step instanceof PackReadStep.Bytes bytes) {
+                    copy(bytes, copied);
+                } else if (step instanceof PackReadStep.EntryEnd end) {
+                    ids.add(end.objectId().orElseThrow());
+                }
+            }
+
+            assertThat(copied.toByteArray()).containsExactly(wire);
+            assertThat(ids).containsExactly(blobId, objectId(GitObjectType.TREE, tree));
         }
     }
 

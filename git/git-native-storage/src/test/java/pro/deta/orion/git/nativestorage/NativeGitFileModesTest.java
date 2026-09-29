@@ -3,6 +3,8 @@ package pro.deta.orion.git.nativestorage;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.FileMode;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.ObjectChecker;
 import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectInserter;
@@ -21,6 +23,8 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -119,6 +123,79 @@ class NativeGitFileModesTest {
         }
     }
 
+    @Test
+    void preservesUnicodeFilesAcrossInternalSaveUpdateAndReopen() throws Exception {
+        Map<String, GitFile> files = Map.of(
+                "\uE000", new GitFile(EXECUTABLE_FILE, bytes("private-use name")),
+                "\uD800\uDC00", GitFile.regular(bytes("supplementary name")),
+                "nested/\uE000", GitFile.regular(bytes("nested private-use name")),
+                "nested/\uD800\uDC00", new GitFile(SYMLINK, bytes("../\uE000")),
+                "a.c", GitFile.regular(bytes("sibling before directory")),
+                "a/x", GitFile.regular(bytes("nested sibling")),
+                "a0", GitFile.regular(bytes("sibling after directory")));
+        List<String> paths = new ArrayList<>(files.keySet());
+        Map<String, GitFile> expected = new LinkedHashMap<>(files);
+        GitFile updated = GitFile.regular(bytes("updated nested sibling"));
+        expected.put("a/x", updated);
+        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+                .create("demo").valueOrFailure("repository")) {
+            repository.saveFiles("main", files, Set.of(), "create", GitCommitAuthor.EMPTY);
+            assertGitTreeOrdering(repository);
+            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(files);
+
+            repository.saveFiles("main", Map.of("a/x", updated), Set.of(), "update", GitCommitAuthor.EMPTY);
+            assertGitTreeOrdering(repository);
+            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(expected);
+        }
+
+        try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
+                .find("demo").valueOrFailure("repository")) {
+            assertThat(reopened.loadFiles("main", paths).files()).isEqualTo(expected);
+        }
+    }
+
+    @Test
+    void preservesImportedUnicodeFilesWhenSavingAnotherFile() throws Exception {
+        GitFile executable = new GitFile(EXECUTABLE_FILE, bytes("executable"));
+        GitFile link = new GitFile(SYMLINK, bytes("\uE000"));
+        Map<String, GitFile> files = Map.of(
+                "\uE000", executable, "\uD800\uDC00", link,
+                "nested/\uE000", executable, "nested/\uD800\uDC00", link);
+        GitFile configuration = GitFile.regular(bytes("updated configuration"));
+        Map<String, GitFile> expected = new LinkedHashMap<>(files);
+        expected.put("config.txt", configuration);
+        List<String> paths = new ArrayList<>(expected.keySet());
+        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+                .create("demo").valueOrFailure("repository")) {
+            ObjectId executableId = write(repository, GitObjectType.BLOB, executable.content());
+            ObjectId linkId = write(repository, GitObjectType.BLOB, link.content());
+            TreeFormatter nested = new TreeFormatter();
+            nested.append("\uE000", FileMode.EXECUTABLE_FILE, executableId);
+            nested.append("\uD800\uDC00", FileMode.SYMLINK, linkId);
+            ObjectId nestedId = write(repository, GitObjectType.TREE, nested.toByteArray());
+            TreeFormatter root = new TreeFormatter();
+            root.append("nested", FileMode.TREE, nestedId);
+            root.append("\uE000", FileMode.EXECUTABLE_FILE, executableId);
+            root.append("\uD800\uDC00", FileMode.SYMLINK, linkId);
+            ObjectId tree = write(repository, GitObjectType.TREE, root.toByteArray());
+            ObjectId initial = write(repository, GitObjectType.COMMIT, bytes("tree " + tree.name()
+                    + "\nauthor A <a@test> 0 +0000\ncommitter A <a@test> 0 +0000\n\nimported\n"));
+            assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
+                    .isEqualTo(RefUpdateResult.Status.APPLIED);
+            assertThat(repository.loadFiles("main", new ArrayList<>(files.keySet())).files()).isEqualTo(files);
+
+            repository.saveFiles("main", Map.of("config.txt", configuration), Set.of(),
+                    "update", GitCommitAuthor.EMPTY);
+            assertGitTreeOrdering(repository);
+            assertThat(repository.loadFiles("main", paths).files()).isEqualTo(expected);
+        }
+
+        try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
+                .find("demo").valueOrFailure("repository")) {
+            assertThat(reopened.loadFiles("main", paths).files()).isEqualTo(expected);
+        }
+    }
+
     private static void copyPacks(NativeGitRepository source, InMemoryRepository destination) throws Exception {
         try (ObjectInserter inserter = destination.newObjectInserter()) {
             for (PackId packId : source.storage().packIds()) {
@@ -127,6 +204,27 @@ class NativeGitFileModesTest {
                 inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);
             }
             inserter.flush();
+        }
+    }
+
+    private static void assertGitTreeOrdering(NativeGitRepository source) throws Exception {
+        try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
+            copyPacks(source, observed);
+            try (RevWalk revisions = new RevWalk(observed);
+                 TreeWalk trees = new TreeWalk(observed)) {
+                RevCommit commit = revisions.parseCommit(ObjectId.fromString(source.refs().get("refs/heads/main")));
+                ObjectChecker checker = new ObjectChecker();
+                assertThatCode(() -> checker.check(Constants.OBJ_TREE,
+                        observed.open(commit.getTree()).getBytes())).doesNotThrowAnyException();
+                trees.addTree(commit.getTree());
+                while (trees.next()) {
+                    if (trees.isSubtree()) {
+                        assertThatCode(() -> checker.check(Constants.OBJ_TREE,
+                                observed.open(trees.getObjectId(0)).getBytes())).doesNotThrowAnyException();
+                        trees.enterSubtree();
+                    }
+                }
+            }
         }
     }
 

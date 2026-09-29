@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -109,7 +110,8 @@ final class NativeRepositoryFileSaver {
         }
         Map<ObjectId, LooseObject> preparedObjects = new LinkedHashMap<>();
         String branchRefName = branchRefName(branch);
-        TreeMap<String, TreeEntry> treeEntries = new TreeMap<>();
+        TreeMap<String, TreeEntry> treeEntries = new TreeMap<>((left, right) -> Arrays.compareUnsigned(
+                left.getBytes(StandardCharsets.UTF_8), right.getBytes(StandardCharsets.UTF_8)));
         if (parent.isPresent()) {
             readTreeEntries(rootTreeId(parent.get(), readObject(parent.get())), "", treeEntries);
         }
