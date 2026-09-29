@@ -4,7 +4,6 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -30,6 +29,7 @@ final class MemoryIndexedPack implements IndexedPack {
     private final NavigableMap<Long, Record> entries = new TreeMap<>();
     private final Map<ObjectId, Long> objects = new HashMap<>();
     private PackId packId;
+    private MemoryPackDependencies dependencies;
     private boolean published;
 
     public void append(ByteBuffer source) throws IOException {
@@ -70,12 +70,14 @@ final class MemoryIndexedPack implements IndexedPack {
     }
 
     public PackId finish(long dataEnd) throws IOException {
-        requireOpen();
+        requireMutable();
         if (packId == null) {
             byte[] checksum = digest(bytes, dataEnd);
             write(dataEnd, ByteBuffer.wrap(checksum));
             packId = new PackId(checksum);
         }
+        dependencies().finish();
+        dependencies = null;
         return packId;
     }
 
@@ -140,6 +142,9 @@ final class MemoryIndexedPack implements IndexedPack {
             throw new IOException("Offset delta base is not a registered pack entry");
         }
         entries.put(offset, new Record(entry, null, null, -1));
+        if (dependencies != null) {
+            dependencies.entryAdded(entry);
+        }
         return true;
     }
 
@@ -167,6 +172,9 @@ final class MemoryIndexedPack implements IndexedPack {
         }
         entries.put(offset, new Record(previous.entry(), id, type, size));
         objects.putIfAbsent(id, offset);
+        if (dependencies != null) {
+            dependencies.objectAdded(previous.entry());
+        }
         return true;
     }
 
@@ -214,9 +222,24 @@ final class MemoryIndexedPack implements IndexedPack {
         requireMutable();
     }
 
-    public PackUploadIndex newUploadIndex() throws IOException {
+    public Optional<ObjectId> nextExternalBase() throws IOException {
+        return dependencies().nextExternalBase();
+    }
+
+    public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+        return dependencies().waitingFor(id, offset);
+    }
+
+    public boolean hasUnresolved() throws IOException {
+        return dependencies().hasUnresolved();
+    }
+
+    private MemoryPackDependencies dependencies() throws IOException {
         requireMutable();
-        return new MemoryPackUploadIndex(this);
+        if (dependencies == null) {
+            dependencies = new MemoryPackDependencies(this);
+        }
+        return dependencies;
     }
 
     public void requireMutable() throws IOException {
@@ -238,6 +261,10 @@ final class MemoryIndexedPack implements IndexedPack {
     }
 
     public void close() {
+        if (dependencies != null) {
+            dependencies.close();
+            dependencies = null;
+        }
         bytes.close();
         entries.clear();
         objects.clear();

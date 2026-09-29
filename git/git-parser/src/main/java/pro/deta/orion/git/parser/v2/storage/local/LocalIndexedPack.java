@@ -9,7 +9,6 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
@@ -41,6 +40,7 @@ public final class LocalIndexedPack implements IndexedPack {
     private final Path directory;
     private int pendingChanges;
     private PackId packId;
+    private LocalPackDependencies dependencies;
 
     public static LocalIndexedPack create(Path directory) throws IOException {
         Files.createDirectory(directory);
@@ -114,8 +114,24 @@ public final class LocalIndexedPack implements IndexedPack {
                 .keyType(ObjectIdDataType.INSTANCE).valueType(LongDataType.INSTANCE));
     }
 
-    public PackUploadIndex newUploadIndex() throws IOException {
-        return LocalPackUploadIndex.create(this);
+    public Optional<ObjectId> nextExternalBase() throws IOException {
+        return dependencies().nextExternalBase();
+    }
+
+    public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+        return dependencies().waitingFor(id, offset);
+    }
+
+    public boolean hasUnresolved() throws IOException {
+        return dependencies().hasUnresolved();
+    }
+
+    private LocalPackDependencies dependencies() throws IOException {
+        requireMutable();
+        if (dependencies == null) {
+            dependencies = LocalPackDependencies.create(this);
+        }
+        return dependencies;
     }
 
     public void append(ByteBuffer source) throws IOException {
@@ -164,12 +180,14 @@ public final class LocalIndexedPack implements IndexedPack {
     }
 
     public PackId finish(long dataEnd) throws IOException {
-        requireOpen();
+        requireMutable();
         if (packId == null) {
             byte[] checksum = digest(bytes, dataEnd);
             write(dataEnd, ByteBuffer.wrap(checksum));
             packId = new PackId(checksum);
         }
+        dependencies().finish();
+        dependencies = null;
         return packId;
     }
 
@@ -256,6 +274,9 @@ public final class LocalIndexedPack implements IndexedPack {
                 throw new IOException("Offset delta base is not a registered pack entry");
             }
             entries.put(entry.offset(), encode(new Record(entry, null, null, -1)));
+            if (dependencies != null) {
+                dependencies.entryAdded(entry);
+            }
             commitBatch();
             return true;
         } catch (MVStoreException error) {
@@ -294,6 +315,9 @@ public final class LocalIndexedPack implements IndexedPack {
             if (existingOffset == null) {
                 objects.put(id, entry.offset());
             }
+            if (dependencies != null) {
+                dependencies.objectAdded(entry);
+            }
             commitBatch();
             return true;
         } catch (MVStoreException error) {
@@ -331,7 +355,7 @@ public final class LocalIndexedPack implements IndexedPack {
 
     @Override
     public void close() throws IOException {
-        try (bytes) {
+        try (bytes; LocalPackDependencies temporary = dependencies) {
             store.close();
         } catch (MVStoreException error) {
             throw new IOException("Cannot close pack index", error);
@@ -416,6 +440,13 @@ public final class LocalIndexedPack implements IndexedPack {
     }
 
     void abort(Throwable error) {
+        if (dependencies != null) {
+            try {
+                dependencies.close();
+            } catch (Throwable cleanup) {
+                error.addSuppressed(cleanup);
+            }
+        }
         closeFailed(store, error);
         try {
             bytes.close();

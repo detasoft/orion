@@ -262,10 +262,8 @@ class IndexedPackTest {
     void completesTemporaryResolutionStateInMemoryWithoutClosingThePack() throws Exception {
         try (IndexedPack pack = new InMemoryStorage().newPack()) {
             ObjectId id = writeBlob(pack);
-            try (PackUploadIndex state = pack.newUploadIndex()) {
-                assertThat(state.hasUnresolved()).isFalse();
-                state.finish();
-            }
+            assertThat(pack.hasUnresolved()).isFalse();
+            pack.finish(pack.size());
             assertThat(pack.find(id)).contains(entry());
             assertThat(pack.readObject(id, new ExistsGitObjectRead())).contains(true);
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {

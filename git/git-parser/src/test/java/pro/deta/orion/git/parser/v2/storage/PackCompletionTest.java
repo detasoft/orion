@@ -114,6 +114,7 @@ class PackCompletionTest {
             assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
                     .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
             assertThatThrownBy(attempt.pack::size).isInstanceOf(ClosedChannelException.class);
+            assertThat(Files.exists(attempt.temporaryPath)).isFalse();
         }
     }
 

@@ -116,11 +116,10 @@ class PackIngestorTest {
         byte[] ofs = PackTestData.join(new byte[]{0x64, (byte) base.length},
                 PackTestData.compressed(instructions));
         byte[] wire = PackTestData.pack(base, ofs, PackTestData.delta(baseId, instructions));
-        try (IndexedPack target = PackTestData.ingest(wire, new InMemoryStorage().newPack());
-             PackUploadIndex state = target.newUploadIndex()) {
+        try (IndexedPack target = PackTestData.ingest(wire, new InMemoryStorage().newPack())) {
             assertThat(target.entryCount()).isEqualTo(3);
             assertThat(target.objectCount()).isEqualTo(1);
-            assertThat(state.hasUnresolved()).isTrue();
+            assertThat(target.hasUnresolved()).isTrue();
             assertThat(target.find(12 + base.length).orElseThrow().baseOffset()).hasValue(12);
             assertThat(target.find(12 + base.length + ofs.length).orElseThrow().baseId()).contains(baseId);
             assertThat(PackTestData.bytes(target)).containsExactly(wire);

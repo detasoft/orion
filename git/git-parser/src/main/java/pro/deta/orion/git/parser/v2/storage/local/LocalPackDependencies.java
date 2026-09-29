@@ -6,10 +6,8 @@ import org.h2.mvstore.MVStoreException;
 import org.h2.mvstore.WriteBuffer;
 import org.h2.mvstore.type.BasicDataType;
 import org.h2.mvstore.type.LongDataType;
-import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.storage.shared.PackSupport;
 
 import java.io.IOException;
@@ -20,7 +18,7 @@ import java.util.Iterator;
 import java.util.Objects;
 import java.util.Optional;
 
-final class LocalPackUploadIndex implements PackUploadIndex {
+final class LocalPackDependencies implements AutoCloseable {
     private final LocalIndexedPack data;
     private final MVStore temporary;
     private final Path temporaryPath;
@@ -29,10 +27,9 @@ final class LocalPackUploadIndex implements PackUploadIndex {
     private final MVMap<ObjectId, Long> bases;
     private long unresolved;
     private int pendingChanges;
-    private boolean finalized;
     private boolean temporaryDeleted;
 
-    static LocalPackUploadIndex create(LocalIndexedPack data) throws IOException {
+    static LocalPackDependencies create(LocalIndexedPack data) throws IOException {
         Objects.requireNonNull(data, "data").requireMutable();
         Path temporaryPath = data.directory().resolve("data.tmv");
         MVStore temporary = null;
@@ -42,7 +39,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
                     .cacheSize(4).autoCommitDisabled().autoCommitBufferSize(0);
             builder.fileName(temporaryPath.toAbsolutePath().toString());
             temporary = builder.open();
-            LocalPackUploadIndex state = new LocalPackUploadIndex(data, temporary, temporaryPath);
+            LocalPackDependencies state = new LocalPackDependencies(data, temporary, temporaryPath);
             Iterator<Long> offsets = data.offsets();
             while (offsets.hasNext()) {
                 IndexedPack.Record record = data.record(offsets.next());
@@ -73,7 +70,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
         }
     }
 
-    private LocalPackUploadIndex(LocalIndexedPack data, MVStore temporary, Path temporaryPath) {
+    private LocalPackDependencies(LocalIndexedPack data, MVStore temporary, Path temporaryPath) {
         this.data = data;
         this.temporary = temporary;
         this.temporaryPath = temporaryPath;
@@ -85,11 +82,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
                 .keyType(ObjectIdDataType.INSTANCE).valueType(LongDataType.INSTANCE));
     }
 
-    public Optional<ObjectId> nextExternalBase() throws IOException {
-        data.requireOpen();
-        if (finalized) {
-            return Optional.empty();
-        }
+    Optional<ObjectId> nextExternalBase() throws IOException {
         if (hasUnresolved()) {
             throw new IOException("Cannot classify external bases before resolving all entries");
         }
@@ -108,79 +101,57 @@ final class LocalPackUploadIndex implements PackUploadIndex {
         }
     }
 
-    public void finish() throws IOException {
-        data.requireOpen();
+    void finish() throws IOException {
         try {
-            if (!finalized) {
-                if (hasUnresolved()) {
-                    throw new IOException("Pack index contains unresolved records or dependencies");
-                }
-                if (nextExternalBase().isPresent()) {
-                    throw new IOException("Pack still requires an external base");
-                }
-                visited.clear();
-                Iterator<Long> offsets = data.offsets();
-                while (offsets.hasNext()) {
-                    PackSupport.inspectChain(data, visited, offsets.next(), this::commitBatch);
-                }
-                data.flush();
-                finalized = true;
+            if (hasUnresolved()) {
+                throw new IOException("Pack index contains unresolved records or dependencies");
             }
+            if (nextExternalBase().isPresent()) {
+                throw new IOException("Pack still requires an external base");
+            }
+            visited.clear();
+            Iterator<Long> offsets = data.offsets();
+            while (offsets.hasNext()) {
+                PackSupport.inspectChain(data, visited, offsets.next(), this::commitBatch);
+            }
+            data.flush();
             discardTemporary();
         } catch (MVStoreException error) {
             throw storageFailure(error);
         }
     }
 
-    public void addEntry(IndexedPack.EntryMetadata entry) throws IOException {
-        requireMutable();
+    void entryAdded(IndexedPack.EntryMetadata entry) throws IOException {
         try {
-            if (data.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(),
-                    entry.type(), entry.baseOffset(), entry.baseId())) {
-                unresolved++;
-                WaitingKey key = waitingKey(entry);
-                if (key != null) {
-                    waiting.put(key, entry.offset());
-                    if (entry.baseId().isPresent()) {
-                        bases.put(entry.baseId().orElseThrow(), 0L);
-                    }
+            unresolved++;
+            WaitingKey key = waitingKey(entry);
+            if (key != null) {
+                waiting.put(key, entry.offset());
+                if (entry.baseId().isPresent()) {
+                    bases.put(entry.baseId().orElseThrow(), 0L);
                 }
-                commitBatch();
             }
-        } catch (IOException | MVStoreException error) {
-            if (error instanceof MVStoreException || !data.isOpen()) {
-                throw storageFailure(error);
-            }
-            throw (IOException) error;
+            commitBatch();
+        } catch (MVStoreException error) {
+            throw storageFailure(error);
         }
     }
 
-    public void addObject(IndexedPack.EntryMetadata entry, ObjectId id, GitObjectType type, long size)
-            throws IOException {
-        requireMutable();
+    void objectAdded(IndexedPack.EntryMetadata entry) throws IOException {
         try {
-            if (data.addObject(entry.offset(), id, type, size)) {
-                unresolved--;
-                WaitingKey key = waitingKey(entry);
-                if (key != null) {
-                    waiting.remove(key);
-                }
-                commitBatch();
+            unresolved--;
+            WaitingKey key = waitingKey(entry);
+            if (key != null) {
+                waiting.remove(key);
             }
-        } catch (IOException | MVStoreException error) {
-            if (error instanceof MVStoreException || !data.isOpen()) {
-                throw storageFailure(error);
-            }
-            throw (IOException) error;
+            commitBatch();
+        } catch (MVStoreException error) {
+            throw storageFailure(error);
         }
     }
 
-    public Optional<IndexedPack.EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
-        data.requireOpen();
+    Optional<IndexedPack.EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
         Objects.requireNonNull(id, "id");
-        if (finalized) {
-            return Optional.empty();
-        }
         try {
             Optional<IndexedPack.EntryMetadata> byId = waiting(new WaitingKey(id, 0, 0));
             return byId.isPresent() ? byId : waiting(new WaitingKey(null, offset, 0));
@@ -189,8 +160,7 @@ final class LocalPackUploadIndex implements PackUploadIndex {
         }
     }
 
-    public boolean hasUnresolved() throws IOException {
-        data.requireOpen();
+    boolean hasUnresolved() {
         return unresolved != 0;
     }
 
@@ -230,16 +200,9 @@ final class LocalPackUploadIndex implements PackUploadIndex {
         }
     }
 
-    private void requireMutable() throws IOException {
-        data.requireOpen();
-        if (finalized) {
-            throw new IllegalStateException("Pack index is finalized");
-        }
-    }
-
     private IOException storageFailure(Throwable error) {
         IOException failure = new IOException("Pack index storage failure", error);
-        LocalIndexedPack.closeFailed(temporary, failure);
+        data.abort(failure);
         return failure;
     }
 

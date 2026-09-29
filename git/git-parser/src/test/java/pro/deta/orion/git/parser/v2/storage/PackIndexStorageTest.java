@@ -7,11 +7,11 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.pack.PackUploadIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -30,26 +30,29 @@ class PackIndexStorageTest {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
-        var base = new ObjectId("1".repeat(40));
-        var object = new ObjectId("2".repeat(40));
-        var entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
+        ObjectId base = new ObjectId("1".repeat(40));
+        ObjectId object = new ObjectId("2".repeat(40));
+        IndexedPack.EntryMetadata entry = new IndexedPack.EntryMetadata(12, 33, 4, GitObjectType.REF_DELTA,
                 OptionalLong.empty(), Optional.of(base));
-        try (IndexedPack pack = LocalIndexedPack.create(staging); PackUploadIndex index = pack.newUploadIndex()) {
+        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
-            index.addEntry(entry);
+            pack.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+                    entry.baseOffset(), entry.baseId());
+            assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.size(indexPath)).isPositive();
             assertThat(Files.size(temporaryPath)).isPositive();
-            assertThat(index.waitingFor(base, 0)).contains(entry);
-            assertThatThrownBy(index::finish).isInstanceOf(IOException.class);
+            assertThat(pack.waitingFor(base, 0)).contains(entry);
+            assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             assertThat(Files.exists(temporaryPath)).isTrue();
-            index.addObject(entry, object, GitObjectType.BLOB, 3);
-            assertThat(index.nextExternalBase()).contains(base);
-            assertThatThrownBy(index::finish).isInstanceOf(IOException.class);
-            var appended = new IndexedPack.EntryMetadata(64, 65, 3, GitObjectType.BLOB,
+            pack.addObject(entry.offset(), object, GitObjectType.BLOB, 3);
+            assertThat(pack.nextExternalBase()).contains(base);
+            assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
+            IndexedPack.EntryMetadata appended = new IndexedPack.EntryMetadata(64, 65, 3, GitObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty());
-            index.addEntry(appended);
-            index.addObject(appended, base, GitObjectType.BLOB, 3);
-            index.finish();
+            pack.addEntry(appended.offset(), appended.dataOffset(), appended.inflatedSize(), appended.type(),
+                    appended.baseOffset(), appended.baseId());
+            pack.addObject(appended.offset(), base, GitObjectType.BLOB, 3);
+            pack.finish(12);
             assertThat(Files.exists(temporaryPath)).isFalse();
             assertThat(pack.find(object)).contains(entry);
             assertThat(pack.find(base)).isPresent();
@@ -61,7 +64,7 @@ class PackIndexStorageTest {
             assertThat(pack.find(12)).contains(entry);
             assertThat(pack.find(base)).isPresent();
         }
-        try (var store = new MVStore.Builder().fileName(published.toString()).readOnly().open()) {
+        try (MVStore store = new MVStore.Builder().fileName(published.toString()).readOnly().open()) {
             assertThat(store.getMapNames()).containsExactlyInAnyOrder("entries", "objects");
         }
         assertThat(Files.exists(temporaryPath)).isFalse();
@@ -74,7 +77,7 @@ class PackIndexStorageTest {
         Path temporaryPath = staging.resolve("data.tmv");
         try (IndexedPack pack = LocalIndexedPack.create(staging)) {
             Files.writeString(temporaryPath, "another attempt");
-            assertThatThrownBy(() -> pack.newUploadIndex()).isInstanceOf(IOException.class);
+            assertThatThrownBy(pack::hasUnresolved).isInstanceOf(IOException.class);
             assertThat(Files.exists(indexPath)).isTrue();
             assertThat(Files.readString(temporaryPath)).isEqualTo("another attempt");
             assertThat(pack.entryCount()).isZero();
@@ -82,19 +85,33 @@ class PackIndexStorageTest {
     }
 
     @Test
-    void closingAnUnfinishedAttemptReleasesAndDeletesOnlyItsTemporaryStore() throws Exception {
+    void closingUnfinishedPackReleasesTemporaryStoreAndPreservesPermanentFiles() throws Exception {
         Path staging = directory.resolve("pack");
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
         try (IndexedPack pack = LocalIndexedPack.create(staging)) {
-            PackUploadIndex index = pack.newUploadIndex();
-            index.addEntry(new IndexedPack.EntryMetadata(12, 13, 3, GitObjectType.BLOB,
-                    OptionalLong.empty(), Optional.empty()));
-            index.close();
-            index.close();
+            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            assertThat(pack.hasUnresolved()).isTrue();
+            assertThat(Files.exists(temporaryPath)).isTrue();
+            pack.close();
+            pack.close();
             assertThat(Files.exists(temporaryPath)).isFalse();
             assertThat(Files.exists(indexPath)).isTrue();
-            assertThat(pack.find(12)).isPresent();
+            assertThatThrownBy(pack::hasUnresolved).isInstanceOf(ClosedChannelException.class);
         }
     }
+
+    @Test
+    void discardsPackWithActiveDependenciesAndRemovesItsDirectory() throws Exception {
+        Path staging = directory.resolve("pack");
+        try (IndexedPack pack = LocalIndexedPack.create(staging)) {
+            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            assertThat(pack.hasUnresolved()).isTrue();
+            assertThat(Files.exists(staging.resolve("data.tmv"))).isTrue();
+            pack.discard();
+            assertThat(Files.exists(staging)).isFalse();
+            assertThatThrownBy(pack::size).isInstanceOf(ClosedChannelException.class);
+        }
+    }
+
 }

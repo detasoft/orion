@@ -16,10 +16,11 @@ import java.util.Set;
 /**
  * Pack bytes and their physical-entry and resolved-object index.
  * Writes and truncation invalidate the pack identity; ingestion assigns a verified trailer identity,
- * and completion writes a new trailer when bytes have changed. Index completion is a separate step.
- * Returned inputs borrow the pack and must be closed before it. Temporary upload indexes are caller-owned;
- * closing them releases only resolution state, while close() releases pack resources and discard()
- * also removes a mutable working pack. Storage publication takes ownership of accepted packs.
+ * and finish validates dependencies and writes a new trailer when bytes have changed.
+ * Returned inputs borrow the pack and must be closed before it. The pack owns temporary dependency state;
+ * finish releases it after validation, close() releases all pack resources, and discard()
+ * also removes a mutable working pack. Mutations after finish are tracked by subsequent dependency queries.
+ * Storage publication takes ownership of accepted packs. Dependency queries and finish require a mutable pack.
  * Offsets iterate in ascending physical order. Missing records and object offsets are null; unresolved
  * records have no object ID or logical type and a size of -1. Entry metadata describes compressed bytes,
  * while a resolved record carries the logical object type and size after delta application.
@@ -86,7 +87,11 @@ public interface IndexedPack extends AutoCloseable {
 
     void requireMutable() throws IOException;
 
-    PackUploadIndex newUploadIndex() throws IOException;
+    Optional<ObjectId> nextExternalBase() throws IOException;
+
+    Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException;
+
+    boolean hasUnresolved() throws IOException;
 
     record EntryMetadata(long offset, long dataOffset, long inflatedSize, GitObjectType type,
                          OptionalLong baseOffset, Optional<ObjectId> baseId) {

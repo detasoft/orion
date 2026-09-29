@@ -47,7 +47,6 @@ class IndexedPackContractTest {
                 assertThat(completedId).isNotEqualTo(receivedId);
                 assertThat(pack.checksumMatches(completedId)).isTrue();
                 assertThat(pack.objectIds()).containsExactlyInAnyOrder(baseId, resultId);
-                assertThat(pack.uploadClosed).isTrue();
                 assertThat(pack.closed).isFalse();
                 IndexedPack replay = PackTestData.ingest(PackTestData.bytes(pack), storage.newPack());
                 assertThat(new GitPackObjectResolver(replay, storage).complete()).isEqualTo(completedId);
@@ -105,7 +104,6 @@ class IndexedPackContractTest {
             PackTestData.ingest(PackTestData.pack(PackTestData.delta(missing, new byte[]{1, 1, 1, 2})), pack);
             assertThatThrownBy(() -> new GitPackObjectResolver(pack, storage).complete())
                     .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
-            assertThat(pack.uploadClosed).isTrue();
             assertThat(pack.closed).isTrue();
             assertThatThrownBy(pack::size).isInstanceOf(ClosedChannelException.class);
             assertThat(storage.packIds()).isEmpty();
@@ -116,7 +114,6 @@ class IndexedPackContractTest {
         private final IndexedPack delegate;
         private boolean closed;
         private boolean discarded;
-        private boolean uploadClosed;
 
         private ContractPack(IndexedPack delegate) {
             this.delegate = delegate;
@@ -273,46 +270,18 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public PackUploadIndex newUploadIndex() throws IOException {
-            PackUploadIndex index = delegate.newUploadIndex();
-            return new PackUploadIndex() {
-                @Override
-                public Optional<ObjectId> nextExternalBase() throws IOException {
-                    return index.nextExternalBase();
-                }
+        public Optional<ObjectId> nextExternalBase() throws IOException {
+            return delegate.nextExternalBase();
+        }
 
-                @Override
-                public void finish() throws IOException {
-                    index.finish();
-                }
+        @Override
+        public Optional<EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
+            return delegate.waitingFor(id, offset);
+        }
 
-                @Override
-                public void addEntry(IndexedPack.EntryMetadata entry) throws IOException {
-                    index.addEntry(entry);
-                }
-
-                @Override
-                public void addObject(IndexedPack.EntryMetadata entry, ObjectId id, GitObjectType type, long size)
-                        throws IOException {
-                    index.addObject(entry, id, type, size);
-                }
-
-                @Override
-                public Optional<IndexedPack.EntryMetadata> waitingFor(ObjectId id, long offset) throws IOException {
-                    return index.waitingFor(id, offset);
-                }
-
-                @Override
-                public boolean hasUnresolved() throws IOException {
-                    return index.hasUnresolved();
-                }
-
-                @Override
-                public void close() throws IOException {
-                    uploadClosed = true;
-                    index.close();
-                }
-            };
+        @Override
+        public boolean hasUnresolved() throws IOException {
+            return delegate.hasUnresolved();
         }
     }
 }

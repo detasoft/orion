@@ -48,38 +48,38 @@ public final class GitPackObjectResolver {
 
     public PackId complete() throws IOException {
         pack.requireMutable();
-        try (PackUploadIndex index = pack.newUploadIndex()) {
-            resolve(index);
-            return complete(pack, index, storage);
+        try {
+            resolve();
+            return complete(pack, storage);
         } catch (IOException | RuntimeException | Error failure) {
             closeFailed(pack, failure);
             throw failure;
         }
     }
 
-    private void resolve(PackUploadIndex index) throws IOException {
+    private void resolve() throws IOException {
         Iterator<Long> offsets = pack.offsets();
         while (offsets.hasNext()) {
             IndexedPack.Record record = pack.record(offsets.next());
             if (record.objectId() == null) {
-                record = resolve(record.entry(), index);
+                record = resolve(record.entry());
             }
             if (record != null) {
-                resolveWaiting(record, index);
+                resolveWaiting(record);
             }
         }
     }
 
-    private void resolveWaiting(IndexedPack.Record available, PackUploadIndex index) throws IOException {
+    private void resolveWaiting(IndexedPack.Record available) throws IOException {
         Deque<IndexedPack.Record> pending = new ArrayDeque<>();
         pending.push(available);
         while (!pending.isEmpty()) {
             IndexedPack.Record base = pending.peek();
-            Optional<IndexedPack.EntryMetadata> waiting = index.waitingFor(base.objectId(), base.entry().offset());
+            Optional<IndexedPack.EntryMetadata> waiting = pack.waitingFor(base.objectId(), base.entry().offset());
             if (waiting.isEmpty()) {
                 pending.pop();
             } else {
-                IndexedPack.Record resolved = resolve(waiting.orElseThrow(), index);
+                IndexedPack.Record resolved = resolve(waiting.orElseThrow());
                 if (resolved == null) {
                     throw new IOException("Indexed delta base is unavailable");
                 }
@@ -88,7 +88,7 @@ public final class GitPackObjectResolver {
         }
     }
 
-    private IndexedPack.Record resolve(IndexedPack.EntryMetadata entry, PackUploadIndex index) throws IOException {
+    private IndexedPack.Record resolve(IndexedPack.EntryMetadata entry) throws IOException {
         IndexedPack.Record base = baseRecord(entry);
         IndexedPack.Record resolved;
         if (base != null && base.objectId() != null) {
@@ -101,7 +101,7 @@ public final class GitPackObjectResolver {
             return null;
         }
         if (resolved != null) {
-            index.addObject(entry, resolved.objectId(), resolved.type(), resolved.size());
+            pack.addObject(entry.offset(), resolved.objectId(), resolved.type(), resolved.size());
         }
         return resolved;
     }
@@ -180,9 +180,8 @@ public final class GitPackObjectResolver {
         return input.readBytes((int) size);
     }
 
-    private static PackId complete(IndexedPack bytes, PackUploadIndex index,
-                                   GitStorageApi storage) throws IOException {
-        if (index.hasUnresolved()) {
+    private static PackId complete(IndexedPack bytes, GitStorageApi storage) throws IOException {
+        if (bytes.hasUnresolved()) {
             throw new IOException("Pack contains unresolved objects");
         }
         long size = bytes.size();
@@ -196,7 +195,7 @@ public final class GitPackObjectResolver {
         if (objectCount != bytes.objectCount()) {
             throw new IOException("Pack contains duplicate objects");
         }
-        Optional<ObjectId> missing = index.nextExternalBase();
+        Optional<ObjectId> missing = bytes.nextExternalBase();
         long dataEnd = size - 20;
         if (missing.isPresent()) {
             bytes.truncate(size - 20);
@@ -208,18 +207,17 @@ public final class GitPackObjectResolver {
                 IndexedPack.EntryMetadata entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
                         (type, length, unused, content) -> appendBase(bytes, base, type, length, content)))
                         .orElseThrow(() -> new IOException("Missing external base: " + base));
-                index.addEntry(entry);
-                index.addObject(entry, base, entry.type(), entry.inflatedSize());
+                bytes.addEntry(entry.offset(), entry.dataOffset(), entry.inflatedSize(), entry.type(),
+                        entry.baseOffset(), entry.baseId());
+                bytes.addObject(entry.offset(), base, entry.type(), entry.inflatedSize());
                 objectCount++;
-                missing = index.nextExternalBase();
+                missing = bytes.nextExternalBase();
             }
             ByteBuffer count = ByteBuffer.allocate(4).putInt((int) objectCount).flip();
             bytes.write(8, count);
             dataEnd = bytes.size();
         }
-        PackId id = bytes.finish(dataEnd);
-        index.finish();
-        return id;
+        return bytes.finish(dataEnd);
     }
 
     private static IndexedPack.EntryMetadata appendBase(IndexedPack bytes, ObjectId expected,
