@@ -2,7 +2,6 @@ package pro.deta.orion.util.stream;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.assertj.core.api.SoftAssertions;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -22,10 +21,9 @@ import static pro.deta.orion.util.stream.StreamUtils.readStreamInto;
 @Slf4j
 public class AssertiveIOClient implements IoConsumer<ClientIO> {
     private final List<DirectionalByteArrayOutputStream> state;
-    private final SoftAssertions softAssertions;
 
-    public AssertiveIOClient(String ioState, SoftAssertions softAssertions) {
-        this(new RecordingStandardStreams(ioState).getStates(), softAssertions);
+    public AssertiveIOClient(String ioState) {
+        this(new RecordingStandardStreams(ioState).getStates());
     }
 
     @Override
@@ -41,10 +39,7 @@ public class AssertiveIOClient implements IoConsumer<ClientIO> {
 
                     ByteBuffer bu = ByteBuffer.allocate(expected.length + 128);
                     int n = readStreamInto(bu, client.getReceive());
-                    if (n == -1)
-                        continue;
-                    int available = 0;
-                    while ((available = client.getReceive().available()) > 0 || n < expected.length) {
+                    while (n >= 0 && (client.getReceive().available() > 0 || n < expected.length)) {
                         int count = readStreamInto(bu, client.getReceive());
                         if (count < 0) {
                             break;
@@ -54,9 +49,10 @@ public class AssertiveIOClient implements IoConsumer<ClientIO> {
 
                     byte[] arr = getByteArray(bu);
 
-                    if (softAssertions != null) {
-                        softAssertions.assertThat(arr).describedAs("Client expect to receive (%s) but actually got (%s)", new String(expected), new String(arr)).isEqualTo(expected);
-                    }
+                    assertThat(arr)
+                            .describedAs("Client expect to receive (%s) but actually got (%s)",
+                                    new String(expected), new String(arr))
+                            .isEqualTo(expected);
                 }
             }
         }

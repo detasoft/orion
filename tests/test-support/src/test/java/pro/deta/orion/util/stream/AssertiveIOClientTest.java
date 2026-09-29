@@ -1,19 +1,33 @@
 package pro.deta.orion.util.stream;
 
-import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static pro.deta.orion.util.stream.IOTestStreamUtils.testPipeScenario;
 
 class AssertiveIOClientTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Jello\n", "", "Hel"})
+    void scenarioRejectsDifferentOrIncompleteServerResponse(String response) {
+        AssertiveIOClient replay = new AssertiveIOClient("S:Hello\\0A\n");
+
+        AssertionError mismatch = assertThrows(AssertionError.class, () -> testPipeScenario(replay, server -> {
+            server.getSend().write(response.getBytes(StandardCharsets.UTF_8));
+            server.getSend().close();
+        }));
+
+        assertTrue(mismatch.getMessage().contains("Hello"));
+    }
 
     @Test
     void truncatedResponseStopsAtEofAndComparesReceivedBytes() throws IOException {
@@ -34,15 +48,12 @@ class AssertiveIOClientTest {
              PipedOutputStream send = new PipedOutputStream(sent)) {
             source.write("Hel".getBytes(StandardCharsets.UTF_8));
             source.close();
-            SoftAssertions assertions = new SoftAssertions();
-            AssertiveIOClient replay = new AssertiveIOClient("S:Hello\\0A\n", assertions);
+            AssertiveIOClient replay = new AssertiveIOClient("S:Hello\\0A\n");
 
-            assertDoesNotThrow(() -> replay.accept(new ClientIO(send, receive)));
-
-            AssertionError mismatch = assertThrows(AssertionError.class, assertions::assertAll);
+            AssertionError mismatch = assertThrows(AssertionError.class,
+                    () -> replay.accept(new ClientIO(send, receive)));
             assertTrue(mismatch.getMessage().contains("Hello"));
             assertTrue(mismatch.getMessage().contains("Hel"));
-            assertEquals(-1, sent.read());
         }
     }
 
@@ -54,12 +65,10 @@ class AssertiveIOClientTest {
              PipedOutputStream send = new PipedOutputStream(sent)) {
             source.write("Hello\n".getBytes(StandardCharsets.UTF_8));
             source.close();
-            SoftAssertions assertions = new SoftAssertions();
-            AssertiveIOClient replay = new AssertiveIOClient("S:Hello\\0A\n", assertions);
+            AssertiveIOClient replay = new AssertiveIOClient("S:Hello\\0A\n");
 
             replay.accept(new ClientIO(send, receive));
 
-            assertions.assertAll();
             assertEquals(-1, sent.read());
         }
     }

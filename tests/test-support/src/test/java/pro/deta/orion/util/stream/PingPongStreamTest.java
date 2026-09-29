@@ -48,7 +48,7 @@ public class PingPongStreamTest {
         IoConsumer<ClientIO> testStateClient = new AssertiveIOClient("""
                 C:test1\\0A
                 S:Hello test1\\0A
-                """, null);
+                """);
         testPipeScenario(testStateClient, helloBackServer);
     }
 }
