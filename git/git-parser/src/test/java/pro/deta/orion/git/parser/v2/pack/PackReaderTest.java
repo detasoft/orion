@@ -111,6 +111,59 @@ class PackReaderTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void emptyPackEmitsOnlyBytesThenEnd(int version) throws Exception {
+        byte[] wire = pack(version);
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ReusedSource(join(wire, new byte[]{42}), 1));
+             PackReader reader = new PackReader(input)) {
+            ByteArrayOutputStream copied = new ByteArrayOutputStream();
+            PackReadStep step;
+            while (!((step = reader.next()) instanceof PackReadStep.End)) {
+                assertThat(step).isInstanceOf(PackReadStep.Bytes.class);
+                copy((PackReadStep.Bytes) step, copied);
+            }
+            assertThat(copied.toByteArray()).containsExactly(wire);
+            PackReadStep.End end = (PackReadStep.End) step;
+            assertThat(end.id()).isEqualTo(new PackId(Arrays.copyOfRange(wire, PackHeader.SIZE, wire.length)));
+            assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
+            assertThat(input.readUnsignedByte()).isEqualTo(42);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {7, 12})
+    void checksumIncludesPackAndEntryHeaders(int changedOffset) throws Exception {
+        byte[] wire = pack(blob(new byte[]{1}));
+        wire[changedOffset] ^= changedOffset == 7 ? 1 : 0x10;
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ReusedSource(wire, 7));
+             PackReader reader = new PackReader(input)) {
+            assertThatThrownBy(() -> {
+                while (!(reader.next() instanceof PackReadStep.End)) {
+                    // Reach the checksum check after reading the otherwise valid entry.
+                }
+            }).isInstanceOf(IOException.class).hasMessage("Pack checksum mismatch");
+            assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    void truncatedInputTerminatesReaderAtEveryBoundary() throws Exception {
+        byte[] wire = pack(blob(new byte[]{1}), delta(new ObjectId(new byte[20]), new byte[]{1, 1, 1, 2}));
+        for (int length = 0; length < wire.length; length++) {
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(
+                    new ReusedSource(Arrays.copyOf(wire, length), 3));
+                 PackReader reader = new PackReader(input)) {
+                assertThatThrownBy(() -> {
+                    while (!(reader.next() instanceof PackReadStep.End)) {
+                        // Every strict prefix must fail before End.
+                    }
+                }).isInstanceOf(IOException.class);
+                assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
+            }
+        }
+    }
+
     @Test
     void closingEarlyLeavesInputWithCaller() throws Exception {
         ReusedSource source = new ReusedSource(pack(), 3);

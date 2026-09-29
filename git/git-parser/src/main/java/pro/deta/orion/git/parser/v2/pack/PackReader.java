@@ -25,7 +25,7 @@ import java.util.zip.Inflater;
  * positioned immediately after the trailer. End, failure or close terminates the reader.
  */
 public final class PackReader implements AutoCloseable {
-    private enum State { HEADER, ENTRY_HEADER, CONTENT, ENTRY_END, TRAILER, END, CLOSED }
+    private enum State { HEADER, ENTRY_HEADER, CONTENT, TRAILER, END, CLOSED }
 
     private final BufferedByteInputV2 input;
     private final Inflater inflater = new Inflater();
@@ -55,16 +55,25 @@ public final class PackReader implements AutoCloseable {
                     header.clear();
                     remainingEntries = PackHeader.read(readBytes(PackHeader.SIZE));
                     state = remainingEntries == 0 ? State.TRAILER : State.ENTRY_HEADER;
-                    yield headerBytes();
+                    yield hashBytes(header.flip());
                 }
                 case ENTRY_HEADER -> {
                     header.clear();
                     readEntry();
                     state = State.CONTENT;
-                    yield headerBytes();
+                    yield hashBytes(header.flip());
                 }
-                case CONTENT -> readContent();
-                case ENTRY_END -> endEntry();
+                case CONTENT -> {
+                    ByteBuffer bytes = readContent();
+                    if (bytes != null) {
+                        yield hashBytes(bytes);
+                    }
+                    Optional<ObjectId> objectId = fullEntry() ? Optional.of(new ObjectId(objectHash.digest()))
+                            : Optional.empty();
+                    remainingEntries--;
+                    state = remainingEntries == 0 ? State.TRAILER : State.ENTRY_HEADER;
+                    yield new PackReadStep.EntryEnd(entry, objectId);
+                }
                 case TRAILER -> {
                     header.clear();
                     byte[] expected = checksum.digest();
@@ -74,7 +83,7 @@ public final class PackReader implements AutoCloseable {
                     }
                     id = new PackId(received);
                     state = State.END;
-                    yield headerBytes();
+                    yield new PackReadStep.Bytes(header.flip().asReadOnlyBuffer());
                 }
                 case END -> {
                     close();
@@ -88,8 +97,9 @@ public final class PackReader implements AutoCloseable {
         }
     }
 
-    private PackReadStep.Bytes headerBytes() {
-        return new PackReadStep.Bytes(header.flip().asReadOnlyBuffer());
+    private PackReadStep.Bytes hashBytes(ByteBuffer bytes) {
+        checksum.update(bytes.duplicate());
+        return new PackReadStep.Bytes(bytes.asReadOnlyBuffer());
     }
 
     private void readEntry() throws IOException {
@@ -142,14 +152,7 @@ public final class PackReader implements AutoCloseable {
         return entry.type() != GitObjectType.OFS_DELTA && entry.type() != GitObjectType.REF_DELTA;
     }
 
-    private PackReadStep.EntryEnd endEntry() {
-        Optional<ObjectId> objectId = fullEntry() ? Optional.of(new ObjectId(objectHash.digest()))
-                : Optional.empty();
-        state = --remainingEntries == 0 ? State.TRAILER : State.ENTRY_HEADER;
-        return new PackReadStep.EntryEnd(entry, objectId);
-    }
-
-    private PackReadStep readContent() throws IOException {
+    private ByteBuffer readContent() throws IOException {
         while (!inflater.finished()) {
             if (inflater.needsInput()) {
                 compressed = input.buffer();
@@ -179,23 +182,18 @@ public final class PackReader implements AutoCloseable {
             if (count == 0 && consumed == 0 && !inflater.finished() && !inflater.needsInput()) {
                 throw new IOException("Pack zlib stream made no progress");
             }
-            if (inflater.finished()) {
-                if (inflatedSize != entry.inflatedSize()) {
-                    throw new IOException("Inflated size differs from declared object size");
-                }
-                state = State.ENTRY_END;
+            if (inflater.finished() && inflatedSize != entry.inflatedSize()) {
+                throw new IOException("Inflated size differs from declared object size");
             }
             if (consumed > 0) {
                 if (consumed > Long.MAX_VALUE - position) {
                     throw new IOException("Pack offset overflows a signed long");
                 }
-                ByteBuffer bytes = compressed.slice(start, consumed).asReadOnlyBuffer();
-                checksum.update(bytes.duplicate());
                 position += consumed;
-                return new PackReadStep.Bytes(bytes);
+                return compressed.slice(start, consumed);
             }
         }
-        return endEntry();
+        return null;
     }
 
     private byte[] readBytes(int length) throws IOException {
@@ -213,9 +211,6 @@ public final class PackReader implements AutoCloseable {
         int value = input.readUnsignedByte();
         header.put((byte) value);
         position++;
-        if (state != State.TRAILER) {
-            checksum.update((byte) value);
-        }
         return value;
     }
 
