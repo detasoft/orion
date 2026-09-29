@@ -181,11 +181,6 @@
                 <artifactId>transport</artifactId>
                 <version>${project.version}</version>
             </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.git</groupId>
-                <artifactId>git</artifactId>
-                <version>${project.version}</version>
-            </dependency>
         </dependencies>
     </dependencyManagement>
 

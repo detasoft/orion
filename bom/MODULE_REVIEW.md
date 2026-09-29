@@ -33,27 +33,3 @@ contract. A separate test BOM or generated catalog adds unnecessary mechanisms.
 
 **Priority signals.** Importance: medium, central ownership is incomplete. Repair ease: high, a few POM edits
 through an existing mechanism, without production or persisted changes.
-
-## 2. The Git aggregator is catalogued as a nonexistent JAR
-
-**Problem.** The BOM entry for `pro.deta.orion.git:git` uses the default JAR type; its producer packages a POM.
-The catalog therefore manages a coordinate the reactor does not produce.
-
-**Sources.** [Managed entry](pom.xml#L184) and [producer](../git/pom.xml).
-The five child Git modules use it as a parent, which dependency management does not govern. No dependency
-consumer of the JAR key was found; no current build or runtime failure is claimed.
-
-**Documented behavior and contract.** The accepted catalog requirement says every produced artifact belongs
-in the BOM but does not resolve whether aggregator POMs are intended dependency entries. Parent inheritance
-does not require this JAR entry.
-
-**Minimal repair.** Remove the unused JAR key. If the catalog must also contain this POM as a dependency,
-replace the entry with its actual POM type. Resolve that intention before implementation.
-
-**Alternatives and consequences.** Both options preserve current dependency consumers. Adding all parent
-POMs without a verified dependency contract broadens the result unnecessarily.
-
-**Confidence.** High in the type mismatch; the intended POM catalog policy remains uncertain.
-
-**Priority signals.** Importance: low, stale unused configuration. Repair ease: very high after the catalog
-decision, with real Maven verification.
