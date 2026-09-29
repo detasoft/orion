@@ -27,6 +27,9 @@ public class StreamUtils {
         int n;
         do {
             n = recv.read(buffer);
+            if (n < 0) {
+                return n;
+            }
             bu.put(buffer, 0, n);
         } while (n == 0);
 

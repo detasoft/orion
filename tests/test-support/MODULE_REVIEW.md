@@ -1,23 +1,23 @@
 # Module review: tests/test-support
 
-## 1. Ошибки участников pipe scenario теряются
+## 1. Pipe scenario participant failures are lost
 
-- **Проблема и триггер.** Client assertion/unchecked failure завершает background thread; client IOException и server Exception только логируются. TERMINATED считается успехом. Неверный ответ той же длины в существующем PingPongStreamTest вызывает AssertionError, который не достигает JUnit; transcript round-trip не проверяет правильность ответа.
-- **Источники и владельцы.** [Client catch](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L45), [server catch/join](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L53), [outcome](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L64), реальный [assertion](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L37), [caller/round-trip](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L41), [transcript owner](../../core/common/src/main/java/pro/deta/orion/util/stream/RecordingStandardStreams.java#L117).
-- **Документированное поведение.** Class comment helper описывает client/server scenario; тест задаёт обязательный Hello response. Разрешения игнорировать callback failures нет.
-- **Контракт.** Failure любого участника должен fail вызывающий тест. TERMINATED не означает success. Сохранить один worker и transcript recording.
-- **Минимальное исправление.** Передать worker IOException/RuntimeException/AssertionError вызывающему потоку после join, propagate server failures. При failure закрывать pipe endpoints, позволяя другой стороне завершиться. Использовать существующий thread boundary; проверить server IOException и client AssertionError с cause/cleanup.
-- **Альтернативы и последствия.** Log/thread-state check не защищают; общий SoftAssertions не ловит IO/unchecked errors. FutureTask на существующем worker либо небольшой result holder локальны; новый executor/service или thread per I/O не нужны.
-- **Уверенность.** Высокая по коду и реальному assertion caller; repro не запускался. Не вся server error обязательно проходит: живой зависший client может fail текущий thread-state check.
-- **Важность / простота.** Важность высокая: false-green oracle. Простота средняя: проверить propagation и cleanup.
+- **Problem and trigger.** A client assertion or unchecked failure terminates the background thread; client IOException and server Exception are only logged. TERMINATED is treated as success. A wrong response of the same length in the existing PingPongStreamTest raises AssertionError without reaching JUnit; the transcript round trip does not establish response correctness.
+- **Sources and owners.** [Client catch](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L45), [server catch/join](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L53), [outcome](src/main/java/pro/deta/orion/util/stream/IOTestStreamUtils.java#L64), the real [assertion](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L37), [caller/round trip](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L41), and [transcript owner](../../core/common/src/main/java/pro/deta/orion/util/stream/RecordingStandardStreams.java#L117).
+- **Documented behavior.** The helper's class comment describes a client/server scenario; the test requires a Hello response. No permission to ignore callback failures was found.
+- **Contract.** Any participant failure must fail the calling test. TERMINATED does not mean success. Preserve one worker and transcript recording.
+- **Minimal repair.** Propagate worker IOException, RuntimeException, and AssertionError to the caller after join, and propagate server failures. Close the pipe endpoints on failure so the other participant can finish. Keep the existing thread boundary; test server IOException and client AssertionError, including their causes and cleanup.
+- **Alternatives and consequences.** Logging and thread-state checks do not preserve failures; shared SoftAssertions do not catch IO or unchecked failures. FutureTask on the existing worker or a small local result holder is sufficient; no new executor, service, or thread per I/O call is needed.
+- **Confidence.** High from code and the real assertion caller; runtime reproduction was not run. Some server failures may already fail the thread-state check if the client remains blocked.
+- **Importance / ease.** High importance: tests can pass incorrectly. Medium ease: propagation and cleanup need verification.
 
-## 2. Transcript replay отключает сравнение в единственном caller
+## 2. Transcript replay can skip response comparison
 
-- **Проблема и триггер.** testPingPongStream2 передаёт null SoftAssertions. AssertiveIOClient сравнивает ответ только при non-null; неверные bytes той же длины проходят.
-- **Источники и владельцы.** [Сравнение](src/main/java/pro/deta/orion/util/stream/AssertiveIOClient.java#L53), [чтение](src/main/java/pro/deta/orion/util/stream/AssertiveIOClient.java#L40), [sole caller/null](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L48). Полный поиск иных constructors/callers не нашёл.
-- **Документированное поведение.** Class comment обещает сравнение server chunks с recorded bytes и executable assertion.
-- **Контракт.** Assertiveness replay обязательна; nullable отключение не нужно callers. Сохранить корректный transcript и send/receive порядок.
-- **Минимальное исправление.** Убрать nullable mode, всегда сравнивать обычным assertion и обновить caller; сначала обеспечить propagation из №1. Проверить mismatch и premature/truncated response.
-- **Альтернативы и последствия.** Non-null SoftAssertions с обязательным assertAll исправляет caller, но оставляет отключаемый oracle. Hard assertion без №1 потеряется в worker. EOF policy требует корректного обращения с underlying read result.
-- **Уверенность.** Высокая, проверка статическая. n==-1/continue сейчас не является loop/skip trigger: [StreamUtils](../../core/common/src/main/java/pro/deta/orion/util/stream/StreamUtils.java#L30) бросает на negative length раньше возврата; это отдельный common finding.
-- **Важность / простота.** Важность средняя: текущий replay не проверяет ответ. Простота высокая после №1.
+- **Problem and trigger.** testPingPongStream2 passes null SoftAssertions. AssertiveIOClient compares a response only with non-null assertions, so wrong bytes of the same length pass. Initial EOF also skips the expected server chunk before comparison, even when assertions are provided.
+- **Sources and owners.** [Comparison](src/main/java/pro/deta/orion/util/stream/AssertiveIOClient.java#L57), [read and initial EOF](src/main/java/pro/deta/orion/util/stream/AssertiveIOClient.java#L40), and the [replay scenario passing null](src/test/java/pro/deta/orion/util/stream/PingPongStreamTest.java#L48). The direct [EOF regression](src/test/java/pro/deta/orion/util/stream/AssertiveIOClientTest.java#L20) supplies assertions and covers a truncated response after bytes have arrived; it does not fix the scenario's nullable comparison or initial EOF policy.
+- **Documented behavior.** The class comment promises comparison of server chunks with recorded bytes and executable assertions.
+- **Contract.** Replay must assert the expected response, including when no bytes arrive. Preserve valid transcripts and send/receive order.
+- **Minimal repair.** Remove nullable comparison, always assert the received bytes, and update the scenario caller; first ensure failure propagation from finding #1. Compare an empty response on initial EOF instead of skipping it. Test mismatches and both empty and truncated responses through the scenario boundary.
+- **Alternatives and consequences.** Non-null SoftAssertions with mandatory assertAll repairs the caller but retains an optional oracle. A hard assertion without finding #1 would be lost in the worker. Changing comparison policy is separate from correctly terminating reads at EOF.
+- **Confidence.** High from the current caller and conditional comparison. The direct regression verifies partial EOF termination and comparison with non-null assertions; runtime reproduction of the remaining scenario failure was not run.
+- **Importance / ease.** Medium importance: the current replay scenario does not verify its response. High ease after finding #1.

@@ -45,7 +45,11 @@ public class AssertiveIOClient implements IoConsumer<ClientIO> {
                         continue;
                     int available = 0;
                     while ((available = client.getReceive().available()) > 0 || n < expected.length) {
-                        n += readStreamInto(bu, client.getReceive());
+                        int count = readStreamInto(bu, client.getReceive());
+                        if (count < 0) {
+                            break;
+                        }
+                        n += count;
                     }
 
                     byte[] arr = getByteArray(bu);
