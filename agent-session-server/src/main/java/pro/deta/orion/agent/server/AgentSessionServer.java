@@ -78,17 +78,27 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         if (authenticator != null) {
             return;
         }
+        start(new FileSystemSessionJournalStorage(
+                root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults())));
+    }
+
+    @TestOnly
+    synchronized void startWithJournalStorage(FileSystemSessionJournalStorage journals) throws Exception {
+        if (authenticator != null) {
+            throw new IllegalStateException("Agent session server is already running");
+        }
+        start(Objects.requireNonNull(journals, "journals"));
+    }
+
+    private void start(FileSystemSessionJournalStorage openedJournals) throws Exception {
         FileSystemAgentRegistry openedAgents = null;
         FileSystemSessionRegistry openedSessions = null;
-        FileSystemSessionJournalStorage openedJournals = null;
         SessionReplicationService openedReplication = null;
         SessionCommandService openedCommands = null;
         AuthenticatedAgentConnections openedConnections = null;
         try {
             openedAgents = new FileSystemAgentRegistry(root.resolve("agents"));
             openedSessions = new FileSystemSessionRegistry(root.resolve("sessions"));
-            openedJournals = new FileSystemSessionJournalStorage(
-                    root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults()));
             openedReplication = new SessionReplicationService(openedJournals, openedSessions);
             AtomicReference<SessionCommandService> commands = new AtomicReference<>();
             SessionReconciliationPublisher reconciliation =

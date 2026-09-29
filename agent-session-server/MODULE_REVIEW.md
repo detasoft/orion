@@ -33,32 +33,3 @@ risks sequence/delivery ordering and does not solve materialization.
 
 **Priority signals.** Importance: high for growing session history and interactive responsiveness. Repair ease:
 medium, by reusing reader machinery with behavior coverage.
-
-## 5. Facade concurrency test pins a private monitor and JVM blocking state
-
-**Problem.** The facade regression test reflects `ROOT_OWNER_MONITOR`, locks it, and requires
-`Thread.State.BLOCKED`. Renaming the field or substituting an equivalent lock breaks the test while supported
-behavior remains unchanged.
-
-**Sources.** [Reflective test](src/test/java/pro/deta/orion/agent/server/AgentSessionServerTest.java#L59),
-[private monitor](src/main/java/pro/deta/orion/agent/server/journal/FileSystemSessionJournalStorage.java#L40),
-[storage interface](src/main/java/pro/deta/orion/agent/server/journal/SessionJournalStorage.java#L10), and
-[behavioral concurrency tests](src/test/java/pro/deta/orion/agent/server/journal/JournalConcurrencyTest.java#L110).
-
-**Documented behavior.** The [test-quality rule](../.agents/skills/orion-minimal-implementation/SKILL.md#verify-and-review)
-prohibits incidental structure assertions.
-
-**Contract.** Preserve regression coverage that blocked reads allow unrelated facade operations, shutdown waits
-for admitted reads, and storage ownership becomes reusable. The monitor field and thread state are incidental.
-
-**Minimal repair.** Arrange a blocked read through an existing controlled storage/fault-injection boundary,
-or a narrow marked `@TestOnly` hook if existing mechanisms are insufficient. Assert observable operations and
-completion instead of reflecting the monitor or requiring a particular JVM state.
-
-**Alternatives and consequences.** Deleting the test loses meaningful historical regression coverage.
-A broad injection framework adds unnecessary complexity. Any test seam must stay narrow and marked.
-
-**Confidence.** High from explicit field lookup and blocking-state assertion.
-
-**Priority signals.** Importance: medium as a test-quality violation. Repair ease: medium, because concurrency
-coverage must survive replacement of the blocking arrangement.
