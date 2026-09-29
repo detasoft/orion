@@ -14,20 +14,8 @@
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.net</groupId>
-            <artifactId>git-transport</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>http-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-native-storage</artifactId>
         </dependency>
     </dependencies>
 </project>

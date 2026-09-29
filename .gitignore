@@ -10,6 +10,7 @@ build
 .test-durations/
 .worktrees/
 /.mvn/build.lock
+/build-tools/__pycache__/
 /net/http-core/account.keypair
 /net/http-core/domain.keypair
 /net/http-core/domain.crt

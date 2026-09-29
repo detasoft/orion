@@ -19,54 +19,16 @@
             <version>11.38.2</version>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.net</groupId>
-            <artifactId>net-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>schema</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>key-material</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>acl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>authorization</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-native-proxy</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-native-storage</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-parser</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>git-transport</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-annotations</artifactId>
-            <version>${jackson.version}</version>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jetty.ee10</groupId>
@@ -74,37 +36,14 @@
             <version>${jetty.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.eclipse.jetty.http2</groupId>
-            <artifactId>jetty-http2-server</artifactId>
-            <version>${jetty.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-alpn-java-server</artifactId>
             <version>${jetty.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion</groupId>
-            <artifactId>agent-protocol</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion</groupId>
-            <artifactId>agent-session-server</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.shredzone.acme4j</groupId>
             <artifactId>acme4j-client</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.bouncycastle</groupId>
-                    <artifactId>bcprov-jdk18on</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.bouncycastle</groupId>
-                    <artifactId>bcpkix-jdk18on</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>

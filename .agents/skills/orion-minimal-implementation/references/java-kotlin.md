@@ -20,6 +20,20 @@ Inspect the actual module graph and runtime composition before judging package b
 
 Package names alone are weak evidence of an architectural boundary. Tests, dependency declarations, runtime wiring, and serialization often reveal the real boundary.
 
+## Maven Dependency Placement
+
+Use the narrowest scope that meets the module's actual needs: `test` for tests,
+`runtime` for runtime-only use, and `provided` only for a verified external provider contract.
+Do not declare a dependency already supplied transitively at the required version
+and scope, even when source code uses its classes directly. Keep an explicit
+declaration only when it preserves a verified contract, such as version mediation,
+scope, exclusions, optionality, or service/compiler loading.
+
+When an intermediate module does not use a dependency, place it at the nearest
+actual consumers and reuse their transitive export for farther consumers. Retain
+`test` scope when only the intermediate's tests need it. Verify resolved versions
+and scopes with Maven, preserving runtime/provided behavior and effective constraints.
+
 ## High-Value Smells
 
 ### Interfaces and indirection

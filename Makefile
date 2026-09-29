@@ -12,7 +12,8 @@ TEST_JFR_MAVEN_ARGS ?=
 RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>' [LOG=<log-file>]
 RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>' [LOG=<log-file>]
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
-RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-report xml-schema \
+RUN_TEST_RESERVED_GOALS = dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
+	dependency-minimize \
 	help skill-check skills-check docker-exec \
 	init-server run-server run-agent issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
@@ -39,7 +40,9 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema skill-check skills-check docker-exec \
+.PHONY: help dist test integration-test run-test test-jfr test-jfr-report xml-schema dependency-audit \
+	dependency-minimize \
+	skill-check skills-check docker-exec \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test \
 	run-agentd-session
 
@@ -74,6 +77,19 @@ dist: ## Package the bootstrap distribution
 
 test: ## Run the Maven/JVM test suite with the dev profile
 	$(MAVEN_RUN) package -Pdev -T 4 -q
+
+dependency-audit: ## Report explicit Maven dependencies that also have transitive paths
+	$(MAVEN_RUN) org.apache.maven.plugins:maven-dependency-plugin:3.10.0:tree -Pdev -T 4 -q \
+		-DoutputType=json -DoutputFile=target/dependency-audit.json -Dverbose=true
+	python3 build-tools/orion-dependency-cleanup-audit.py
+
+## Propose moving Maven dependencies to their actual consumers; set APPLY=1 to write the patch
+dependency-minimize: dependency-audit
+	$(MAVEN_RUN) org.apache.maven.plugins:maven-help-plugin:3.5.1:effective-pom \
+		-Pdev -q -Doutput=target/dependency-effective-pom.xml
+	$(MAVEN_RUN) package org.apache.maven.plugins:maven-dependency-plugin:3.10.0:build-classpath \
+		-Pdev -T 4 -q -DskipTests -Dmdep.outputFile=target/dependency-classpath.txt
+	python3 -B build-tools/orion-dependency-minimize.py $(if $(filter 1,$(APPLY)),--apply)
 
 integration-test: ## Start external services and run integration tests; show the browser URL first
 	@printf '%s\n' 'Browser (noVNC): http://localhost:6080/vnc.html?autoconnect=1'

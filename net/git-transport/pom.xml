@@ -22,24 +22,8 @@
             <artifactId>agent-session-server</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-parser</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>authorization</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>command</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>key-material</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.sshd</groupId>
-            <artifactId>sshd-core</artifactId>
         </dependency>
         <dependency>
             <groupId>ch.qos.logback</groupId>

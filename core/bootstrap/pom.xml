@@ -20,10 +20,6 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion</groupId>
-            <artifactId>agent-session-server</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion</groupId>
             <artifactId>session-host</artifactId>
         </dependency>
         <dependency>
@@ -41,10 +37,6 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>acl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
             <artifactId>key-material</artifactId>
         </dependency>
         <dependency>
@@ -54,10 +46,6 @@
         <dependency>
             <groupId>pro.deta.orion.connectors</groupId>
             <artifactId>configuration-location</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-native-proxy</artifactId>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jgit</groupId>

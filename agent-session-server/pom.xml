@@ -38,10 +38,6 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion</groupId>
-            <artifactId>agent-protocol</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>common-runtime</artifactId>
         </dependency>
@@ -69,19 +65,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.eclipse.jetty.http2</groupId>
-            <artifactId>jetty-http2-client</artifactId>
-            <version>${jetty.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

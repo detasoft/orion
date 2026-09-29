@@ -45,6 +45,7 @@
     <acme4j.version>3.5.0</acme4j.version>
     <sshd.version>2.13.2</sshd.version>
     <eddsa.version>0.3.0</eddsa.version>
+    <bouncycastle.version>1.79</bouncycastle.version>
     <maven-shade-plugin.version>3.5.0</maven-shade-plugin.version>
     <maven-antrun-plugin.version>3.1.0</maven-antrun-plugin.version>
     <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
@@ -219,6 +220,21 @@
         <artifactId>acme4j-utils</artifactId>
         <version>${acme4j.version}</version>
       </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcprov-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcutil-jdk18on</artifactId>
+        <version>${bouncycastle.version}</version>
+      </dependency>
     </dependencies>
 
   </dependencyManagement>
@@ -234,11 +250,6 @@
       <artifactId>dagger</artifactId>
     </dependency>
 
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter-api</artifactId>
-      <scope>test</scope>
-    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>

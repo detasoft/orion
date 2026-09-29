@@ -19,33 +19,8 @@
             <version>${revision}</version>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>schema</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>git-engine-test-support</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-native-storage</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-parser</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.net</groupId>
-            <artifactId>git-transport</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit</artifactId>
-            <version>${jgit.version}</version>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.tests</groupId>
