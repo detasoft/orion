@@ -105,10 +105,26 @@ const draftServerLabel = computed(() => {
 })
 
 function selectView(view) {
+  if (window.location.hash !== `#/${view}`) {
+    window.history.pushState(null, '', `#/${view}`)
+  }
+  readRoute()
+}
+
+function readRoute() {
+  const requested = window.location.hash.slice(2)
+  const available = identity.value ? navItems.value : allNavItems
+  const view = window.location.hash.startsWith('#/') && available.some((item) => item.id === requested)
+    ? requested : identity.value?.organization ? 'repositories' : 'overview'
+  if (window.location.hash !== `#/${view}`) {
+    window.history.replaceState(null, '', `#/${view}`)
+  }
   activeView.value = view
   search.value = ''
   sidebarOpen.value = false
 }
+
+watch(identity, readRoute)
 
 function showToast(message, kind = 'success') {
   clearTimeout(toastTimer)
@@ -391,7 +407,6 @@ async function connectSavedSettings() {
       ])
     if (attempt === connectionAttempt) {
       identity.value = currentIdentity
-      if (currentIdentity.organization) activeView.value = 'repositories'
       serverSnapshot.value = { lifecycle, routes: routes.routes ?? [], transports }
       repositories.value = (repositoryResponse.repositories ?? []).map((repository) => ({
         name: repository.name,
@@ -441,6 +456,8 @@ onMounted(() => {
       organization: fragment.get('organization') ?? 'default' }
     window.history.replaceState(null, '', window.location.pathname + window.location.search)
   }
+  readRoute()
+  window.addEventListener('hashchange', readRoute)
   darkMode.value = localStorage.getItem('orion.ui.theme') === 'dark'
   settings.value = loadConnectionSettings()
   api.dispose()
@@ -453,6 +470,7 @@ onUnmounted(() => {
   clearInterval(renewalTimer)
   clearTimeout(toastTimer)
   window.removeEventListener('focus', renewSession)
+  window.removeEventListener('hashchange', readRoute)
   document.removeEventListener('visibilitychange', renewSession)
   api.dispose()
 })

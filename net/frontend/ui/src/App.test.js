@@ -1,5 +1,7 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
 
 const client = {
   me: vi.fn(),
@@ -68,6 +70,7 @@ async function replaceToken(wrapper, token) {
 }
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/')
   localStorage.clear()
   sessionStorage.clear()
   vi.clearAllMocks()
@@ -96,6 +99,107 @@ beforeEach(() => {
   })
   client.createRepository.mockResolvedValue({ status: 'ok' })
   client.serverLogs.mockResolvedValue({ cursor: 'process:1', gap: false, entries: [] })
+})
+
+describe('Orion navigation', () => {
+  it.each([
+    ['overview', 'Overview'], ['repositories', 'Repositories'], ['remote-aliases', 'Remote aliases'],
+    ['pending-decisions', 'Pending decisions'], ['people', 'People'], ['activity', 'Activity'],
+    ['terminal', 'Terminal'],
+  ])('restores %s from its URL on reload', async (route, title) => {
+    const wrapper = mountApp()
+    await wrapper.findAll('.primary-nav .nav-item').find((item) => item.text() === title).trigger('click')
+    expect(window.location.hash).toBe(`#/${route}`)
+    wrapper.unmount()
+
+    const reloaded = mountApp()
+    await flushPromises()
+    expect(reloaded.get('.page-heading h1').text()).toBe(title)
+    expect(reloaded.get('.primary-nav .active').text()).toBe(title)
+  })
+
+  it('follows browser back and forward without adding duplicate entries', async () => {
+    const wrapper = mountApp()
+    const select = (title) => wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === title).trigger('click')
+    await select('Repositories')
+    await wrapper.get('.search-box input').setValue('filter')
+    await select('Terminal')
+    await select('Terminal')
+
+    for (const [direction, title, route] of [
+      ['back', 'Repositories', 'repositories'], ['back', 'Overview', 'overview'],
+      ['forward', 'Repositories', 'repositories'], ['forward', 'Terminal', 'terminal'],
+    ]) {
+      const changed = new Promise((resolve) => window.addEventListener('hashchange', resolve, { once: true }))
+      window.history[direction]()
+      await changed
+      await flushPromises()
+      expect(window.location.hash).toBe(`#/${route}`)
+      expect(wrapper.get('.page-heading h1').text()).toBe(title)
+      if (route === 'repositories') expect(wrapper.get('.search-box input').element.value).toBe('')
+    }
+  })
+
+  it('normalizes unknown routes while preserving the UI alias and query', () => {
+    window.history.replaceState(null, '', '/ui?theme=dark#/missing')
+    const wrapper = mountApp()
+    expect(wrapper.get('.page-heading h1').text()).toBe('Overview')
+    expect(window.location.pathname + window.location.search + window.location.hash)
+      .toBe('/ui?theme=dark#/overview')
+  })
+
+  it('stops handling URL changes after unmount', () => {
+    const wrapper = mountApp()
+    wrapper.unmount()
+    window.history.replaceState(null, '', '/#/missing')
+    window.dispatchEvent(new Event('hashchange'))
+    expect(window.location.hash).toBe('#/missing')
+  })
+
+  it('keeps the administrator route while restoring authentication', async () => {
+    window.history.replaceState(null, '', '/#/key-material')
+    sessionStorage.setItem('orion.ui.token', 'token')
+    const identity = deferred()
+    client.me.mockReturnValueOnce(identity.promise)
+    const wrapper = mountApp()
+    expect(window.location.hash).toBe('#/key-material')
+    expect(client.keyMaterial).not.toHaveBeenCalled()
+    identity.resolve({ userId: 'admin', organization: '', admin: true })
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Issue ACME certificate'))
+    expect(wrapper.get('.primary-nav .active').text()).toBe('Key material')
+    expect(window.location.hash).toBe('#/key-material')
+  })
+
+  it.each([
+    [{ userId: 'alice', organization: 'acme', admin: false }, 'repositories', 'Repositories'],
+    [{ userId: 'alice', organization: '', admin: false }, 'overview', 'Overview'],
+  ])('redirects unavailable routes after authentication: %j', async (identity, route, title) => {
+    window.history.replaceState(null, '', '/#/key-material')
+    sessionStorage.setItem('orion.ui.token', 'token')
+    client.me.mockResolvedValue(identity)
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(window.location.hash).toBe(`#/${route}`)
+    expect(wrapper.get('.page-heading h1').text()).toBe(title)
+    expect(client.keyMaterial).not.toHaveBeenCalled()
+
+    window.location.hash = '#/key-material'
+    await vi.waitFor(() => expect(window.location.hash).toBe(`#/${route}`))
+    expect(client.keyMaterial).not.toHaveBeenCalled()
+  })
+
+  it.each(['invite', 'onboarding'])('consumes %s links before initializing the route', async (parameter) => {
+    window.history.replaceState(null, '', `/ui#${parameter}=secret&organization=acme`)
+    const wrapper = mount(App, { global: { stubs: { OrganizationSignIn: {
+      props: ['invitation', 'ticket', 'organization'], template: '<div class="sign-in" />',
+    } } } })
+    await flushPromises()
+    const signIn = wrapper.getComponent('.sign-in')
+    expect(signIn.props(parameter === 'invite' ? 'invitation' : 'ticket')).toBe('secret')
+    expect(signIn.props('organization')).toBe('acme')
+    expect(window.location.hash).toBe('#/overview')
+  })
 })
 
 describe('Orion connection', () => {

@@ -7,6 +7,11 @@ to configure the optional SSH username used in clone URLs; saving it preserves
 the active connection. Tokens are kept in session storage; usernames are kept in
 local storage.
 
+Navigation uses hash routes such as `/#/repositories` and `/ui#/terminal`.
+Reloading or opening a copied URL restores that section; browser Back and Forward
+follow section changes. Unknown routes open Overview, and authenticated users
+are redirected to an available section when a route is outside their access.
+
 The current Admin API exposes lifecycle and route information plus repository
 creation. It does not expose repository, member, notification, or activity
 lists. Repositories and activity created by the UI are therefore displayed only
