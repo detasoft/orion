@@ -2,7 +2,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { createOrionClient } from '../lib/orion-api.js'
 
-const props = defineProps({ token: { type: String, required: true } })
+const props = defineProps({
+  token: { type: String, required: true },
+  taskId: { type: String, default: '' },
+})
 const emit = defineEmits(['authorization-error'])
 const scope = ref('tasks')
 const files = ref([])
@@ -62,7 +65,15 @@ async function loadFiles() {
   const current = begin()
   try {
     const result = await createOrionClient({ token: props.token }).scopedLogFiles(scope.value, current.signal)
-    if (active === current) files.value = result
+    if (active !== current) return
+    files.value = result
+    if (scope.value === 'tasks' && props.taskId) {
+      const index = result.findIndex(file => file.id === props.taskId && file.file === 'current.log')
+      if (index >= 0) {
+        selected.value = String(index)
+        await read(true)
+      }
+    }
   } catch (failure) {
     if (active === current) failed(failure)
   } finally {
@@ -118,7 +129,7 @@ function findNext() {
   output.value.scrollTop = line * parseFloat(getComputedStyle(output.value).lineHeight)
 }
 
-watch([() => props.token, scope], loadFiles, { immediate: true })
+watch([() => props.token, scope, () => props.taskId], loadFiles, { immediate: true })
 watch(query, () => { searchOffset = 0 })
 onBeforeUnmount(cancel)
 </script>
@@ -142,6 +153,9 @@ onBeforeUnmount(cancel)
       <button type="button" class="button-secondary" @click="loadFiles">Refresh list</button>
     </div>
     <p v-if="!busy && !files.length && !error">No saved logs in this group yet.</p>
+    <p v-else-if="!busy && !error && scope === 'tasks' && taskId && !files.some(file => file.id === taskId)">
+      No saved logs for task {{ taskId }} yet.
+    </p>
     <p v-if="error" role="alert">{{ error }}</p>
     <template v-if="selected !== '' && files.length">
       <div class="log-controls">

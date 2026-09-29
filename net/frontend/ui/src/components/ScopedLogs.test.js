@@ -12,6 +12,29 @@ beforeEach(() => {
     nextOffset: 123, more: false, version: 'one' })
 })
 
+it('opens the requested task current file even when another task or archive is listed first', async () => {
+  client.scopedLogFiles.mockResolvedValueOnce([
+    { id: 'another-task', file: 'current.log', size: 20 },
+    { id: 'acme-certificate', file: 'archive.1.log', size: 50 },
+    { id: 'acme-certificate', file: 'current.log', size: 123 },
+  ])
+  const wrapper = mount(ScopedLogs, { props: { token: 'admin', taskId: 'acme-certificate' } })
+  await flushPromises()
+  expect(client.scopedLog).toHaveBeenCalledWith('tasks', 'acme-certificate', 'current.log',
+    0, null, expect.any(AbortSignal))
+  expect(wrapper.get('pre').text()).toContain('Starting issuance')
+  wrapper.unmount()
+})
+
+it('does not open an unrelated journal when the requested task has no logs', async () => {
+  client.scopedLogFiles.mockResolvedValueOnce([{ id: 'another-task', file: 'current.log', size: 20 }])
+  const wrapper = mount(ScopedLogs, { props: { token: 'admin', taskId: 'acme-certificate' } })
+  await flushPromises()
+  expect(client.scopedLog).not.toHaveBeenCalled()
+  expect(wrapper.text()).toContain('No saved logs for task acme-certificate yet.')
+  wrapper.unmount()
+})
+
 it('opens a task file and appends pages without parsing multiline events', async () => {
   client.scopedLog.mockResolvedValueOnce({ text: 'First\n  at ', nextOffset: 12, more: true, version: 'one' })
   const wrapper = mount(ScopedLogs, { props: { token: 'admin' } })

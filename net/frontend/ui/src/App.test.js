@@ -23,6 +23,8 @@ const client = {
   remoteAliases: vi.fn(),
   routes: vi.fn(),
   serverLogs: vi.fn(),
+  scopedLogFiles: vi.fn(),
+  scopedLog: vi.fn(),
   sessions: vi.fn(),
   transports: vi.fn(),
 }
@@ -100,9 +102,45 @@ beforeEach(() => {
   })
   client.createRepository.mockResolvedValue({ status: 'ok' })
   client.serverLogs.mockResolvedValue({ cursor: 'process:1', gap: false, entries: [] })
+  client.scopedLogFiles.mockResolvedValue([{ id: 'acme-certificate', file: 'current.log', size: 20 }])
+  client.scopedLog.mockResolvedValue({ text: 'Renewal started', nextOffset: 20, more: false, version: 'one' })
 })
 
 describe('Orion navigation', () => {
+  it('opens a recurring task and restores its journal from the link after authentication', async () => {
+    window.history.replaceState(null, '', '/#/tasks')
+    sessionStorage.setItem('orion.ui.token', 'token')
+    client.acmeConfiguration.mockResolvedValue({ renewal: { state: 'disabled' } })
+    const wrapper = mountApp()
+    await flushPromises()
+    expect(wrapper.get('.page-heading h1').text()).toBe('Tasks')
+    await vi.waitFor(() => expect(wrapper.find('a[href="#/logs?task=acme-certificate"]').exists()).toBe(true))
+    const link = wrapper.get('a[href="#/logs?task=acme-certificate"]')
+    window.history.pushState(null, '', link.attributes('href'))
+    window.dispatchEvent(new Event('hashchange'))
+    await flushPromises()
+    expect(window.location.hash).toBe('#/logs?task=acme-certificate')
+    await vi.waitFor(() => expect(wrapper.get('[aria-label="Log text"]').text()).toBe('Renewal started'))
+    wrapper.unmount()
+    const restored = mountApp()
+    await flushPromises()
+    expect(window.location.hash).toBe('#/logs?task=acme-certificate')
+    expect(restored.get('[aria-label="Log text"]').text()).toBe('Renewal started')
+  })
+
+  it.each(['tasks', 'logs?task=acme-certificate'])(
+    'does not load protected %s data for a non-administrator', async route => {
+      window.history.replaceState(null, '', `/#/${route}`)
+      sessionStorage.setItem('orion.ui.token', 'token')
+      client.me.mockResolvedValue({ userId: 'reader', organization: '', admin: false })
+      const wrapper = mountApp()
+      await flushPromises()
+      expect(wrapper.find('a[href="#/tasks"]').exists()).toBe(false)
+      expect(client.acmeConfiguration).not.toHaveBeenCalled()
+      expect(client.scopedLogFiles).not.toHaveBeenCalled()
+      expect(window.location.hash).toBe('#/overview')
+    })
+
   it('restores a selected terminal session only after administrator authentication', async () => {
     window.history.replaceState(null, '', '/#/terminal?session=session-1')
     sessionStorage.setItem('orion.ui.token', 'token')

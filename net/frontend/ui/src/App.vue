@@ -8,6 +8,7 @@ import { startServerLogs } from './lib/server-logs.js'
 const RemoteAliases = defineAsyncComponent(() => import('./components/RemoteAliases.vue'))
 const KeyMaterial = defineAsyncComponent(() => import('./components/KeyMaterial.vue'))
 const ScopedLogs = defineAsyncComponent(() => import('./components/ScopedLogs.vue'))
+const RecurringTasks = defineAsyncComponent(() => import('./components/RecurringTasks.vue'))
 const PendingDecisions = defineAsyncComponent(() => import('./components/PendingDecisions.vue'))
 const SessionTerminal = defineAsyncComponent(() => import('./components/SessionTerminal.vue'))
 
@@ -16,6 +17,7 @@ const allNavItems = [
   { id: 'repositories', label: 'Repositories', icon: 'repository' },
   { id: 'remote-aliases', label: 'Remote aliases', icon: 'git-branch' },
   { id: 'key-material', label: 'Key material', icon: 'lock' },
+  { id: 'tasks', label: 'Tasks', icon: 'activity' },
   { id: 'logs', label: 'Logs', icon: 'activity' },
   { id: 'pending-decisions', label: 'Pending decisions', icon: 'bell' },
   { id: 'people', label: 'People', icon: 'users' },
@@ -28,7 +30,7 @@ const navItems = computed(() => identity.value?.organization
   ? allNavItems.filter((item) => item.id === 'repositories')
   : allNavItems.filter((item) => item.id === 'terminal'
     ? !identity.value || identity.value.admin
-    : !['key-material', 'logs'].includes(item.id) || identity.value?.admin))
+    : !['key-material', 'tasks', 'logs'].includes(item.id) || identity.value?.admin))
 const signIn = ref(null)
 const providerRevision = ref(0)
 const OrganizationOidc = defineAsyncComponent(() => import('./components/OrganizationOidc.vue'))
@@ -36,6 +38,7 @@ const OrganizationInvitations = defineAsyncComponent(() => import('./components/
 const OrganizationSignIn = defineAsyncComponent(() => import('./components/OrganizationSignIn.vue'))
 const activeView = ref('overview')
 const selectedSession = ref('')
+const selectedLogTask = ref('')
 const search = ref('')
 const darkMode = ref(false)
 const sidebarOpen = ref(false)
@@ -63,6 +66,7 @@ const titles = {
   overview: ['Overview', 'A quiet view of everything happening in Orion.'],
   'key-material': ['Key material', 'Inspect certificates and public information in the protected store.'],
   logs: ['Logs', 'Saved task and user logs, including complete exception traces.'],
+  tasks: ['Tasks', 'Recurring operations, their schedule and execution logs.'],
   repositories: ['Repositories', 'Browse and manage source repositories.'],
   'remote-aliases': ['Remote aliases', 'Inspect upstream-backed Git access paths.'],
   'pending-decisions': ['Pending decisions', 'Review requests awaiting your response.'],
@@ -125,12 +129,15 @@ function readRoute() {
   const view = window.location.hash.startsWith('#/') && available.some((item) => item.id === requested)
     ? requested : identity.value?.organization ? 'repositories' : 'overview'
   const session = view === 'terminal' ? new URLSearchParams(query).get('session') ?? '' : ''
-  const hash = `#/${view}${session ? `?${new URLSearchParams({ session })}` : ''}`
+  const task = view === 'logs' ? new URLSearchParams(query).get('task') ?? '' : ''
+  const parameters = session ? new URLSearchParams({ session }) : task ? new URLSearchParams({ task }) : ''
+  const hash = `#/${view}${parameters ? `?${parameters}` : ''}`
   if (window.location.hash !== hash) {
     window.history.replaceState(null, '', hash)
   }
   activeView.value = view
   selectedSession.value = session
+  selectedLogTask.value = task
   search.value = ''
   sidebarOpen.value = false
 }
@@ -700,8 +707,18 @@ onUnmounted(() => {
           </div>
         </template>
 
+        <template v-else-if="activeView === 'tasks'">
+          <RecurringTasks v-if="isConnected && identity?.admin" :token="settings.token"
+            @authorization-error="clearExpiredCredentials" />
+          <div v-else class="empty-state panel">
+            <h3>Connect as an administrator</h3>
+            <p>Click the server card to connect and inspect recurring tasks.</p>
+          </div>
+        </template>
+
         <template v-else-if="activeView === 'logs'">
-          <ScopedLogs v-if="isConnected && identity?.admin" :token="settings.token"
+          <ScopedLogs v-if="isConnected && identity?.admin" :token="settings.token" :task-id="selectedLogTask"
+            :key="selectedLogTask"
             @authorization-error="clearExpiredCredentials" />
         </template>
 
