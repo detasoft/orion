@@ -19,7 +19,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -127,22 +126,20 @@ final class MemoryIndexedPack implements MutableIndexedPack {
         return Optional.of(base.objectId());
     }
 
-    public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
-                            OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
+    public boolean addEntry(PackEntry entry) throws IOException {
         requireMutable();
-        PackEntry entry = new PackEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
         validateEntry(entry);
-        Record previous = entries.get(offset);
+        Record previous = entries.get(entry.offset());
         if (previous != null) {
             if (!previous.entry().equals(entry)) {
                 throw new IOException("Conflicting physical pack entry");
             }
             return false;
         }
-        if (baseOffset.isPresent() && !entries.containsKey(baseOffset.getAsLong())) {
+        if (entry.baseOffset().isPresent() && !entries.containsKey(entry.baseOffset().getAsLong())) {
             throw new IOException("Offset delta base is not a registered pack entry");
         }
-        entries.put(offset, new Record(entry, null, null, -1));
+        entries.put(entry.offset(), new Record(entry, null, null, -1));
         if (dependencies != null) {
             dependencies.entryAdded(entry);
         }

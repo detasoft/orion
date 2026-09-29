@@ -213,10 +213,10 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         MutableIndexedPack stored = storage.newPack();
         stored.append(bytes.flip());
         stored.append(ByteBuffer.wrap(MessageDigest.getInstance("SHA-1").digest(bytes.array())));
-        stored.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+        stored.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
         stored.addObject(12, baseId, GitObjectType.BLOB, 3);
-        stored.addEntry(deltaOffset, deltaOffset + 2, delta.length, GitObjectType.OFS_DELTA,
-                OptionalLong.of(12), Optional.empty());
+        stored.addEntry(new PackEntry(deltaOffset, deltaOffset + 2, delta.length, GitObjectType.OFS_DELTA,
+                OptionalLong.of(12), Optional.empty()));
         stored.addObject(deltaOffset, targetId, GitObjectType.BLOB, 3);
         new GitPackObjectResolver(stored, storage).complete();
         storage.persist(stored);

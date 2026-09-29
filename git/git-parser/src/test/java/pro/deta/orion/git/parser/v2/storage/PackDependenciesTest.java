@@ -36,15 +36,15 @@ class PackDependenciesTest {
             assertThat(pack.hasUnresolved()).isFalse();
             assertThat(pack.find(12)).isEmpty();
             assertThat(pack.find(id(1))).isEmpty();
-            addEntry(pack, first);
+            pack.addEntry(first);
             assertThat(pack.find(12)).contains(first);
             assertThat(pack.find(id(1))).isEmpty();
             assertThat(pack.hasUnresolved()).isTrue();
             pack.addObject(first.offset(), id(1), GitObjectType.BLOB, 3);
-            addEntry(pack, duplicate);
+            pack.addEntry(duplicate);
             pack.addObject(duplicate.offset(), id(1), GitObjectType.BLOB, 3);
             pack.addObject(first.offset(), id(1), GitObjectType.BLOB, 3);
-            addEntry(pack, first);
+            pack.addEntry(first);
             assertThat(pack.hasUnresolved()).isFalse();
             assertThat(pack.find(id(1))).contains(first);
             assertThat(pack.find(12)).contains(first);
@@ -69,7 +69,7 @@ class PackDependenciesTest {
             PackEntry byOffset = ofs(128, 12);
             PackEntry child = ref(192, id(2));
             for (PackEntry entry : List.of(base, byId, byOffset, child)) {
-                addEntry(pack, entry);
+                pack.addEntry(entry);
             }
             pack.addObject(base.offset(), id(1), GitObjectType.BLOB, 3);
             assertThat(pack.waitingFor(id(1), 12)).contains(byId);
@@ -95,15 +95,15 @@ class PackDependenciesTest {
         PackEntry appendedBase = full(320);
         try (MutableIndexedPack pack = create(memory, path)) {
             for (PackEntry entry : List.of(ref(12, id(10)), ref(64, id(20)), ref(128, id(20)))) {
-                addEntry(pack, entry);
+                pack.addEntry(entry);
                 pack.addObject(entry.offset(), id((int) entry.offset()), GitObjectType.BLOB, 99);
             }
-            addEntry(pack, lateInternal);
+            pack.addEntry(lateInternal);
             pack.addObject(lateInternal.offset(), id(10), GitObjectType.BLOB, 3);
             assertThat(pack.nextExternalBase()).contains(id(20));
             assertThat(pack.nextExternalBase()).contains(id(20));
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class).hasMessageContaining("external");
-            addEntry(pack, appendedBase);
+            pack.addEntry(appendedBase);
             pack.addObject(appendedBase.offset(), id(20), GitObjectType.BLOB, 3);
             assertThat(pack.nextExternalBase()).isEmpty();
             pack.finish(12);
@@ -122,7 +122,7 @@ class PackDependenciesTest {
     void refusesToFinalizeCyclesWithoutEvidenceOfWhichExternalBaseBreaksThem(boolean memory) throws Exception {
         try (MutableIndexedPack pack = create(memory, directory.resolve("self.index"))) {
             PackEntry self = ref(12, id(1));
-            addEntry(pack, self);
+            pack.addEntry(self);
             pack.addObject(self.offset(), id(1), GitObjectType.BLOB, 3);
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class).hasMessageContaining("cycle");
             assertThat(pack.hasUnresolved()).isFalse();
@@ -131,9 +131,9 @@ class PackDependenciesTest {
         try (MutableIndexedPack pack = create(memory, directory.resolve("mixed.index"))) {
             PackEntry first = ref(12, id(2));
             PackEntry second = ofs(64, 12);
-            addEntry(pack, first);
+            pack.addEntry(first);
             pack.addObject(first.offset(), id(1), GitObjectType.BLOB, 3);
-            addEntry(pack, second);
+            pack.addEntry(second);
             pack.addObject(second.offset(), id(2), GitObjectType.BLOB, 3);
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class).hasMessageContaining("cycle");
         }
@@ -146,7 +146,7 @@ class PackDependenciesTest {
         try (MutableIndexedPack pack = create(memory, path)) {
             for (int i = 1; i <= 2000; i++) {
                 PackEntry entry = i == 2000 ? full(12L + 64L * i) : ref(12L + 64L * i, id(i + 1));
-                addEntry(pack, entry);
+                pack.addEntry(entry);
                 pack.addObject(entry.offset(), id(i), GitObjectType.BLOB, 3);
             }
             pack.finish(12);
@@ -164,9 +164,9 @@ class PackDependenciesTest {
         try (MutableIndexedPack pack = create(memory, directory.resolve("incoming.index"))) {
             PackEntry base = full(12);
             PackEntry delta = ref(64, id(1));
-            addEntry(pack, base);
+            pack.addEntry(base);
             pack.addObject(base.offset(), id(1), GitObjectType.BLOB, 3);
-            addEntry(pack, delta);
+            pack.addEntry(delta);
             assertThatThrownBy(() -> pack.addObject(delta.offset(), id(1), GitObjectType.BLOB, 4))
                     .isInstanceOf(IOException.class);
             assertThat(pack.waitingFor(id(1), 12)).contains(delta);
@@ -196,12 +196,12 @@ class PackDependenciesTest {
                             OptionalLong.empty(), Optional.of(id(1))),
                     new PackEntry(12, 13, 3, GitObjectType.REF_DELTA,
                             OptionalLong.empty(), Optional.empty()), ofs(12, 12))) {
-                assertThatThrownBy(() -> addEntry(pack, invalid)).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> pack.addEntry(invalid)).isInstanceOf(IOException.class);
             }
             assertThat(pack.hasUnresolved()).isFalse();
             PackEntry entry = full(12);
-            addEntry(pack, entry);
-            assertThatThrownBy(() -> addEntry(pack, ref(12, id(1)))).isInstanceOf(IOException.class);
+            pack.addEntry(entry);
+            assertThatThrownBy(() -> pack.addEntry(ref(12, id(1)))).isInstanceOf(IOException.class);
             assertThatThrownBy(() -> pack.addObject(entry.offset(), id(1), GitObjectType.TREE, 3))
                     .isInstanceOf(IOException.class);
             assertThatThrownBy(() -> pack.addObject(entry.offset(), id(1), GitObjectType.BLOB, 4))
@@ -220,12 +220,12 @@ class PackDependenciesTest {
         Path path = directory.resolve("incoming.index");
         PackEntry entry = full(12);
         try (MutableIndexedPack pack = create(memory, path)) {
-            addEntry(pack, entry);
+            pack.addEntry(entry);
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             pack.addObject(entry.offset(), id(1), GitObjectType.BLOB, 3);
             pack.finish(12);
             pack.finish(12);
-            addEntry(pack, full(64));
+            pack.addEntry(full(64));
             assertThat(pack.hasUnresolved()).isTrue();
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             pack.addObject(64, id(2), GitObjectType.BLOB, 3);
@@ -245,11 +245,11 @@ class PackDependenciesTest {
         try (MutableIndexedPack pack = create(memory, directory.resolve("incoming"))) {
             PackEntry base = full(12);
             PackEntry delta = ref(64, id(1));
-            addEntry(pack, base);
+            pack.addEntry(base);
             pack.addObject(base.offset(), id(1), GitObjectType.BLOB, 3);
             assertThat(pack.hasUnresolved()).isFalse();
-            addEntry(pack, delta);
-            addEntry(pack, delta);
+            pack.addEntry(delta);
+            pack.addEntry(delta);
             assertThat(pack.waitingFor(id(1), 12)).contains(delta);
             assertThat(pack.hasUnresolved()).isTrue();
             pack.addObject(delta.offset(), id(2), GitObjectType.BLOB, 4);
@@ -259,11 +259,6 @@ class PackDependenciesTest {
             assertThat(pack.nextExternalBase()).isEmpty();
             assertThat(pack.checksumMatches(pack.finish(12))).isTrue();
         }
-    }
-
-    private static void addEntry(MutableIndexedPack pack, PackEntry entry) throws IOException {
-        pack.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
-                entry.baseOffset(), entry.baseId());
     }
 
     private static MutableIndexedPack create(boolean memory, Path path) throws IOException {

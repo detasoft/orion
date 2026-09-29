@@ -7,7 +7,6 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /**
  * Working pack receiving bytes, index records and resolved objects before publication.
@@ -24,8 +23,7 @@ public interface MutableIndexedPack extends IndexedPack {
 
     void truncate(long size) throws IOException;
 
-    boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
-                     OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException;
+    boolean addEntry(PackEntry entry) throws IOException;
 
     boolean addObject(long offset, ObjectId id, GitObjectType type, long size)
             throws IOException;

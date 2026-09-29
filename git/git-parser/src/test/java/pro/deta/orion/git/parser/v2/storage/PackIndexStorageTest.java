@@ -38,8 +38,7 @@ class PackIndexStorageTest {
                 OptionalLong.empty(), Optional.of(base));
         try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.wrap(PackTestData.pack()));
-            pack.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
-                    entry.baseOffset(), entry.baseId());
+            pack.addEntry(entry);
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.size(indexPath)).isPositive();
             assertThat(Files.size(temporaryPath)).isPositive();
@@ -51,8 +50,7 @@ class PackIndexStorageTest {
             assertThatThrownBy(() -> pack.finish(12)).isInstanceOf(IOException.class);
             PackEntry appended = new PackEntry(64, 65, 3, GitObjectType.BLOB,
                     OptionalLong.empty(), Optional.empty());
-            pack.addEntry(appended.offset(), appended.packOffset(), appended.inflatedSize(), appended.type(),
-                    appended.baseOffset(), appended.baseId());
+            pack.addEntry(appended);
             pack.addObject(appended.offset(), base, GitObjectType.BLOB, 3);
             pack.finish(12);
             assertThat(Files.exists(temporaryPath)).isFalse();
@@ -92,7 +90,7 @@ class PackIndexStorageTest {
         Path indexPath = staging.resolve("data.mv");
         Path temporaryPath = staging.resolve("data.tmv");
         try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
-            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.exists(temporaryPath)).isTrue();
             pack.close();
@@ -107,7 +105,7 @@ class PackIndexStorageTest {
     void discardsPackWithActiveDependenciesAndRemovesItsDirectory() throws Exception {
         Path staging = directory.resolve("pack");
         try (MutableIndexedPack pack = LocalIndexedPack.create(staging)) {
-            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
             assertThat(pack.hasUnresolved()).isTrue();
             assertThat(Files.exists(staging.resolve("data.tmv"))).isTrue();
             pack.discard();

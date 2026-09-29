@@ -257,10 +257,8 @@ public final class LocalIndexedPack implements MutableIndexedPack {
         return readBounded(bytes, entry, end, baseId, reader);
     }
 
-    public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
-                            OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
+    public boolean addEntry(PackEntry entry) throws IOException {
         requireOpen();
-        PackEntry entry = new PackEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
         try {
             requireMutable();
             validateEntry(entry);

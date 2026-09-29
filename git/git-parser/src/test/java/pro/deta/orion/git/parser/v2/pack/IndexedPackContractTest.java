@@ -21,7 +21,6 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -205,9 +204,8 @@ class IndexedPackContractTest {
         }
 
         @Override
-        public boolean addEntry(long offset, long packOffset, long inflatedSize, GitObjectType type,
-                                OptionalLong baseOffset, Optional<ObjectId> baseId) throws IOException {
-            return delegate.addEntry(offset, packOffset, inflatedSize, type, baseOffset, baseId);
+        public boolean addEntry(PackEntry entry) throws IOException {
+            return delegate.addEntry(entry);
         }
 
         @Override

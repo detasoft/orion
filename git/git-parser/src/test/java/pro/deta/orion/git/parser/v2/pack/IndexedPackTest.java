@@ -45,7 +45,7 @@ class IndexedPackTest {
         try (MutableIndexedPack pack = memory ? new InMemoryStorage().newPack() : LocalIndexedPack.create(staging)) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
-            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
             long end = pack.size();
             assertThat(pack.readObject(12, new ContentGitObjectRead<byte[]>(
                     (type, size, base, input) -> input.readBytes((int) size)))).containsExactly(content);
@@ -76,8 +76,8 @@ class IndexedPackTest {
                     .hasValueSatisfying(bytes -> assertThat(bytes).containsExactly(1, 2, 3));
             assertThatThrownBy(() -> pack.append(ByteBuffer.wrap(new byte[]{42})))
                     .isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pack.addEntry(12, 13, 3, GitObjectType.BLOB,
-                    OptionalLong.empty(), Optional.empty())).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB,
+                    OptionalLong.empty(), Optional.empty()))).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> pack.truncate(0)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(pack::discard).isInstanceOf(IllegalStateException.class);
         }
@@ -106,7 +106,7 @@ class IndexedPackTest {
                 : LocalIndexedPack.create(directory.resolve("staging"));
         try (pack) {
             pack.append(ByteBuffer.allocate(13));
-            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
             assertThatThrownBy(() -> pack.readObject(12, new ExistsGitObjectRead()))
                     .isInstanceOf(EOFException.class);
             pack.truncate(12);
@@ -129,7 +129,7 @@ class IndexedPackTest {
                 : LocalIndexedPack.create(directory.resolve("staging"))) {
             pack.append(ByteBuffer.allocate(13));
             pack.append(ByteBuffer.wrap(compressed));
-            pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+            pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
             boolean[] closed = {false};
             assertThatThrownBy(() -> pack.readObject(12,
                     (type, size, base, input) -> (AutoCloseable) () -> {
@@ -281,7 +281,7 @@ class IndexedPackTest {
         MessageDigest hash = MessageDigest.getInstance("SHA-1");
         hash.update("blob 3\0".getBytes(StandardCharsets.US_ASCII));
         ObjectId id = new ObjectId(hash.digest(content));
-        pack.addEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty());
+        pack.addEntry(new PackEntry(12, 13, 3, GitObjectType.BLOB, OptionalLong.empty(), Optional.empty()));
         pack.addObject(12, id, GitObjectType.BLOB, content.length);
         return id;
     }

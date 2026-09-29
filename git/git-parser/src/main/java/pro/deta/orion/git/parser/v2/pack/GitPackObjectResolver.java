@@ -207,8 +207,7 @@ public final class GitPackObjectResolver {
                 PackEntry entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
                         (type, length, unused, content) -> appendBase(bytes, base, type, length, content)))
                         .orElseThrow(() -> new IOException("Missing external base: " + base));
-                bytes.addEntry(entry.offset(), entry.packOffset(), entry.inflatedSize(), entry.type(),
-                        entry.baseOffset(), entry.baseId());
+                bytes.addEntry(entry);
                 bytes.addObject(entry.offset(), base, entry.type(), entry.inflatedSize());
                 objectCount++;
                 missing = bytes.nextExternalBase();
