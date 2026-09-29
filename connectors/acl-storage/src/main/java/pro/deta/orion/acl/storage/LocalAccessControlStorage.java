@@ -28,7 +28,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Arrays;
-import java.util.Iterator;
+import java.util.UUID;
+import java.util.HashSet;
+import java.util.Comparator;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Optional;
@@ -38,8 +41,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
 
+/** Publishes complete local ACL generations through one atomic pointer replacement under the configuration lock. */
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class LocalAccessControlStorage extends OrionEnableServiceSupport implements AccessControlStorage {
+    private static final String CURRENT = ".orion-acl-current";
+    private static final String GENERATION_PREFIX = ".orion-acl-generation-";
     private final BootstrapConfigurationSourceConfig config;
 
     @Override
@@ -72,10 +78,19 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     private Result<AccessControlSnapshot> loadFiles() {
         Map<String, byte[]> files = new java.util.LinkedHashMap<>();
         try {
+            Path current = currentDirectory(aclDirectory());
+            Map<String, Path> documents = new LinkedHashMap<>();
             for (String configuredPath : config.selectedPaths()) {
-                Path file = aclPath(configuredPath);
+                documents.put(configuredPath, resolvePath(current, configuredPath));
+            }
+            for (Map.Entry<String, Path> document : documents.entrySet()) {
+                String configuredPath = document.getKey();
+                Path file = document.getValue();
                 if (!Files.exists(file)) {
-                    return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                    if (!current.equals(aclDirectory())) {
+                        throw new IOException("Published ACL document is missing: " + configuredPath);
+                    }
+                    return new Result.Failure<>(Result.FailureCode.NOT_FOUND, configuredPath, null);
                 }
                 files.put(configuredPath, readDocument(file));
             }
@@ -103,39 +118,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                             throw new AccessControlConcurrentUpdateException("Local configuration changed before save", null);
                         }
                     }
-                    Map<Path, byte[]> changed = new LinkedHashMap<>();
-                    for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                        changed.put(aclPath(entry.getKey()), entry.getValue());
-                    }
-                    Iterator<Map.Entry<Path, byte[]>> pending = changed.entrySet().iterator();
-                    while (pending.hasNext()) {
-                        Map.Entry<Path, byte[]> entry = pending.next();
-                        try {
-                            if (Arrays.equals(readDocument(entry.getKey()), entry.getValue())) {
-                                pending.remove();
-                            }
-                        } catch (NoSuchFileException missing) {
-                            // A new document still needs to be written.
-                        }
-                    }
-                    Map<Path, Path> prepared = new LinkedHashMap<>();
-                    try {
-                        for (Map.Entry<Path, byte[]> entry : changed.entrySet()) {
-                            prepared.put(entry.getKey(), prepareDocument(entry.getKey(), entry.getValue()));
-                        }
-                        Iterator<Map.Entry<Path, Path>> replacements = prepared.entrySet().iterator();
-                        while (replacements.hasNext()) {
-                            Map.Entry<Path, Path> entry = replacements.next();
-                            Files.move(entry.getValue(), entry.getKey(),
-                                    StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                            replacements.remove();
-                        }
-                    } catch (IOException | RuntimeException failure) {
-                        for (Path temporary : prepared.values()) {
-                            deleteTemporary(temporary, failure);
-                        }
-                        throw failure;
-                    }
+                    publishSnapshot(directory, snapshot.files());
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Cannot save local ACL snapshot", e);
@@ -143,15 +126,165 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
         }
     }
 
-    private static Path prepareDocument(Path target, byte[] content) throws IOException {
-        boolean existing = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
-        Path parent = target.getParent();
-        Files.createDirectories(parent);
-        if (existing && !Files.isWritable(target)) {
-            throw new AccessDeniedException(target.toString());
+    private void publishSnapshot(Path directory, Map<String, byte[]> files) throws IOException {
+        List<String> paths = config.selectedPaths();
+        if (new HashSet<>(paths).size() != paths.size() || !files.keySet().equals(new HashSet<>(paths))) {
+            throw new IllegalArgumentException("ACL snapshot must contain exactly the configured paths");
         }
+        Path current = currentDirectory(directory);
+        Map<String, Path> sources = new LinkedHashMap<>();
+        boolean changed = false;
+        for (String path : paths) {
+            Path relative = Path.of(path);
+            if (relative.isAbsolute() || !relative.normalize().equals(relative) || relative.toString().isEmpty()
+                    || relative.startsWith("..") || relative.getName(0).toString().startsWith(".orion-")) {
+                throw new IllegalArgumentException("Invalid ACL document path: " + path);
+            }
+            Path source = resolvePath(current, path);
+            sources.put(path, source);
+            try {
+                if (!Arrays.equals(readDocument(source), files.get(path))) {
+                    if (!Files.isWritable(source) || !Files.isWritable(source.getParent())) {
+                        throw new AccessDeniedException(source.toString());
+                    }
+                    changed = true;
+                }
+            } catch (NoSuchFileException missing) {
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return;
+        }
+        cleanGenerations(directory, current);
+        try (var pointers = Files.newDirectoryStream(directory, ".orion-acl-pointer-*.tmp")) {
+            for (Path abandoned : pointers) {
+                Files.delete(abandoned);
+            }
+        }
+        Path generation = directory.resolve(GENERATION_PREFIX + UUID.randomUUID());
+        Files.createDirectory(generation,
+                Files.getFileStore(directory).supportsFileAttributeView("posix")
+                        ? new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(
+                                PosixFilePermissions.fromString("rwx------"))}
+                        : new FileAttribute<?>[0]);
+        Path pointer = null;
+        boolean publicationAttempted = false;
+        try {
+            for (String path : paths) {
+                Path target = resolvePath(generation, path);
+                Path source = sources.get(path);
+                Files.createDirectories(target.getParent());
+                boolean existing = Files.exists(source, LinkOption.NOFOLLOW_LINKS);
+                writeDocument(source, target, files.get(path), existing);
+            }
+            try (var tree = Files.walk(generation)) {
+                for (Path path : tree.sorted(Comparator.reverseOrder()).toList()) {
+                    if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                        Path sourceDirectory = current.resolve(generation.relativize(path));
+                        if (Files.isDirectory(sourceDirectory, LinkOption.NOFOLLOW_LINKS)) {
+                            copyAccessAttributes(sourceDirectory, path);
+                        }
+                        forceDirectory(path);
+                    }
+                }
+            }
+            forceDirectory(directory);
+            pointer = Files.createTempFile(directory, ".orion-acl-pointer-", ".tmp",
+                    Files.getFileStore(directory).supportsFileAttributeView("posix")
+                            ? new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(
+                                    PosixFilePermissions.fromString("rw-rw-rw-"))}
+                            : new FileAttribute<?>[0]);
+            try (FileChannel output = FileChannel.open(pointer, StandardOpenOption.WRITE)) {
+                ByteBuffer bytes = StandardCharsets.UTF_8.encode(generation.getFileName().toString());
+                while (bytes.hasRemaining()) {
+                    output.write(bytes);
+                }
+                output.force(true);
+            }
+            publicationAttempted = true;
+            publishPointer(pointer, resolvePath(directory, CURRENT));
+            forceDirectory(directory);
+            cleanGenerations(directory, generation);
+        } catch (IOException | RuntimeException failure) {
+            if (pointer != null) {
+                deleteTemporary(pointer, failure);
+            }
+            if (!publicationAttempted) {
+                try {
+                    deleteGeneration(generation);
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
+    }
+
+    @TestOnly
+    void publishPointer(Path prepared, Path current) throws IOException {
+        Files.move(prepared, current, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static Path currentDirectory(Path directory) throws IOException {
+        String name;
+        try {
+            name = new String(readDocument(resolvePath(directory, CURRENT)), StandardCharsets.UTF_8);
+        } catch (NoSuchFileException initialFiles) {
+            return directory;
+        }
+        if (!name.matches(java.util.regex.Pattern.quote(GENERATION_PREFIX)
+                + "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+            throw new IOException("Invalid ACL generation pointer");
+        }
+        Path generation = resolvePath(directory, name);
+        if (!Files.isDirectory(generation, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Published ACL generation is missing");
+        }
+        return generation;
+    }
+
+    private static void cleanGenerations(Path directory, Path current) throws IOException {
+        try (var children = Files.newDirectoryStream(directory, GENERATION_PREFIX + "*")) {
+            for (Path child : children) {
+                if (!child.equals(current)) {
+                    deleteGeneration(child);
+                }
+            }
+        }
+    }
+
+    private static void deleteGeneration(Path generation) throws IOException {
+        List<Path> paths;
+        try (java.util.stream.Stream<Path> tree = Files.walk(generation)) {
+            paths = tree.sorted(Comparator.reverseOrder()).toList();
+        }
+        for (Path path : paths) {
+            if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                    && Files.getFileStore(path).supportsFileAttributeView("posix")) {
+                java.util.Set<java.nio.file.attribute.PosixFilePermission> permissions =
+                        Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
+                permissions.add(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+                Files.setPosixFilePermissions(path, permissions);
+            }
+        }
+        for (Path path : paths) {
+            Files.deleteIfExists(path);
+        }
+    }
+
+    private static void forceDirectory(Path directory) throws IOException {
+        if (Files.getFileStore(directory).supportsFileAttributeView("posix")) {
+            try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+                channel.force(true);
+            }
+        }
+    }
+
+    private static void writeDocument(Path source, Path target, byte[] content, boolean existing)
+            throws IOException {
         FileAttribute<?>[] attributes = new FileAttribute<?>[0];
-        AclFileAttributeView acl = existing ? Files.getFileAttributeView(target, AclFileAttributeView.class) : null;
+        AclFileAttributeView acl = existing ? Files.getFileAttributeView(source, AclFileAttributeView.class) : null;
         if (acl != null) {
             List<AclEntry> entries = acl.getAcl();
             attributes = new FileAttribute<?>[]{new FileAttribute<List<AclEntry>>() {
@@ -165,20 +298,23 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
                     return entries;
                 }
             }};
-        } else if (!existing && Files.getFileAttributeView(parent, PosixFileAttributeView.class) != null) {
+        } else if (Files.getFileAttributeView(target.getParent(), PosixFileAttributeView.class) != null) {
             attributes = new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(
                     PosixFilePermissions.fromString("rw-rw-rw-"))};
         }
-        Path temporary = Files.createTempFile(parent, ".orion-acl-", ".tmp", attributes);
-        try {
-            if (existing) {
-                copyAccessAttributes(target, temporary);
+        try (FileChannel output = FileChannel.open(target,
+                java.util.Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE), attributes)) {
+            ByteBuffer bytes = ByteBuffer.wrap(content);
+            while (bytes.hasRemaining()) {
+                output.write(bytes);
             }
-            Files.write(temporary, content);
-            return temporary;
-        } catch (IOException | RuntimeException failure) {
-            deleteTemporary(temporary, failure);
-            throw failure;
+            if (existing) {
+                copyAccessAttributes(source, target);
+                if (Arrays.equals(readDocument(source), content)) {
+                    Files.setLastModifiedTime(target, Files.getLastModifiedTime(source, LinkOption.NOFOLLOW_LINKS));
+                }
+            }
+            output.force(true);
         }
     }
 
@@ -241,11 +377,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
         return config.isCreateDefaultIfMissing();
     }
 
-    private Path aclPath(String configuredPath) {
-        return resolvePath(aclDirectory(), configuredPath);
-    }
-
-    public static Path resolvePath(Path root, String configuredPath) {
+    private static Path resolvePath(Path root, String configuredPath) {
         Path aclDirectory = root.toAbsolutePath().normalize();
         Path file = aclDirectory.resolve(configuredPath).normalize();
         if (!file.startsWith(aclDirectory)) {
@@ -262,6 +394,10 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     }
 
     private static byte[] readDocument(Path file) throws IOException {
+        if (!Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS).isRegularFile()) {
+            throw new IOException("ACL document must be a regular file: " + file);
+        }
         try (java.io.InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
             return input.readAllBytes();
         }

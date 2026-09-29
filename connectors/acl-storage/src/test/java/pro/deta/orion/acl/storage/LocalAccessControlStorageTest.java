@@ -39,9 +39,158 @@ class LocalAccessControlStorageTest {
     private Path root;
 
     @Test
+    void publishedSnapshotIsIndependentOfTheInitialFiles() throws Exception {
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("roles"));
+        Files.write(document(root, ACL_PATH), bytes("initial ACL"));
+        Files.write(document(root, ROLES_PATH), bytes("initial roles"));
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        AccessControlSnapshot before = storage.load().valueOrFailure("initial snapshot");
+        Map<String, byte[]> replacement = Map.of(ACL_PATH, bytes("new ACL"), ROLES_PATH, bytes("new roles"));
+        storage.save(new AccessControlSnapshot(replacement, before.version()),
+                new AccessControlSaveRequest("publish snapshot", UserEmail.EMPTY));
+
+        Files.write(root.resolve(ACL_PATH), bytes("obsolete source"));
+        LocalAccessControlStorage reopened = new LocalAccessControlStorage(configuration);
+        assertThat(reopened.load().valueOrFailure("published snapshot").files()).containsExactlyInAnyOrderEntriesOf(
+                replacement);
+    }
+
+    @Test
+    void failedPublicationLeavesEveryOldDocumentVisibleAndAllowsRetry() throws Exception {
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("old ACL"), ROLES_PATH, bytes("old roles")),
+                Optional.empty()), request);
+        AccessControlSnapshot before = storage.load().valueOrFailure("old snapshot");
+        Map<String, byte[]> updated = Map.of(ACL_PATH, bytes("new ACL"), ROLES_PATH, bytes("new roles"));
+        LocalAccessControlStorage failing = new LocalAccessControlStorage(configuration) {
+            @Override
+            void publishPointer(Path prepared, Path current) throws java.io.IOException {
+                Path generation = root.resolve(Files.readString(prepared));
+                assertThat(Files.readAllBytes(generation.resolve(ACL_PATH))).isEqualTo(bytes("new ACL"));
+                assertThat(Files.readAllBytes(generation.resolve(ROLES_PATH))).isEqualTo(bytes("new roles"));
+                throw new java.io.IOException("publication failed after preparing both files");
+            }
+        };
+        AccessControlSnapshot replacement = new AccessControlSnapshot(updated, before.version());
+        assertThatThrownBy(() -> failing.save(replacement, request))
+                .isInstanceOf(RuntimeException.class).hasCauseInstanceOf(java.io.IOException.class);
+        LocalAccessControlStorage reopened = new LocalAccessControlStorage(configuration);
+        assertThat(reopened.load().valueOrFailure("after failed publication").files())
+                .containsExactlyInAnyOrderEntriesOf(before.files());
+        reopened.save(replacement, request);
+        assertThat(storage.load().valueOrFailure("after retry").files())
+                .containsExactlyInAnyOrderEntriesOf(updated);
+    }
+
+    @Test
+    void uncertainPublicationDoesNotDeleteThePublishedGeneration() throws Exception {
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("old ACL"), ROLES_PATH, bytes("old roles")),
+                Optional.empty()), request);
+        Map<String, byte[]> updated = Map.of(ACL_PATH, bytes("new ACL"), ROLES_PATH, bytes("new roles"));
+        LocalAccessControlStorage failing = new LocalAccessControlStorage(configuration) {
+            @Override
+            void publishPointer(Path prepared, Path current) throws java.io.IOException {
+                super.publishPointer(prepared, current);
+                throw new java.io.IOException("publication response lost");
+            }
+        };
+        assertThatThrownBy(() -> failing.save(new AccessControlSnapshot(updated, Optional.empty()), request))
+                .isInstanceOf(RuntimeException.class);
+        assertThat(new LocalAccessControlStorage(configuration).load().valueOrFailure("committed snapshot").files())
+                .containsExactlyInAnyOrderEntriesOf(updated);
+    }
+
+    @Test
+    void processDeathBeforePublicationKeepsTheOldSnapshotAndRetryRemovesOrphans() throws Exception {
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        Map<String, byte[]> old = Map.of(ACL_PATH, bytes("old ACL"), ROLES_PATH, bytes("old roles"));
+        storage.save(new AccessControlSnapshot(old, Optional.empty()), request);
+        Process writer = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("java.class.path"), CrashingWriter.class.getName(), root.toString())
+                .inheritIO().start();
+        try {
+            assertThat(writer.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(writer.exitValue()).isEqualTo(23);
+        } finally {
+            writer.destroyForcibly();
+        }
+        AccessControlSnapshot recovered = new LocalAccessControlStorage(configuration).load()
+                .valueOrFailure("after process death");
+        assertThat(recovered.files()).containsExactlyInAnyOrderEntriesOf(old);
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("retry ACL"), ROLES_PATH, bytes("retry roles")),
+                recovered.version()), request);
+        assertThat(storage.load().valueOrFailure("retry").files().get(ACL_PATH)).isEqualTo(bytes("retry ACL"));
+        try (var children = Files.newDirectoryStream(root, ".orion-acl-generation-*")) {
+            assertThat(children).hasSize(1);
+        }
+    }
+
+    public static class CrashingWriter {
+        public static void main(String[] args) {
+            BootstrapConfigurationSourceConfig configuration = config(Path.of(args[0]));
+            configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+            LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration) {
+                @Override
+                void publishPointer(Path prepared, Path current) {
+                    Runtime.getRuntime().halt(23);
+                }
+            };
+            storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("new ACL"), ROLES_PATH, bytes("new roles")),
+                    Optional.empty()), new AccessControlSaveRequest("crash", UserEmail.EMPTY));
+        }
+    }
+
+    @Test
+    void invalidPublishedPointerNeverFallsBackToInitialFiles() throws Exception {
+        Files.createDirectories(root.resolve("config"));
+        Files.write(root.resolve(ACL_PATH), bytes("obsolete ACL"));
+        Files.writeString(root.resolve(".orion-acl-current"), "../outside");
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        assertThat(storage.load()).isInstanceOfSatisfying(Result.Failure.class,
+                failure -> assertThat(failure.code()).isEqualTo(Result.FailureCode.GENERAL));
+        assertThatThrownBy(() -> storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("new ACL")),
+                new AccessControlSaveRequest("save", UserEmail.EMPTY))).isInstanceOf(RuntimeException.class);
+        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("obsolete ACL"));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void refusesMissingAndExtraSnapshotDocuments(boolean extra) throws Exception {
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
+        AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
+        Map<String, byte[]> initial = Map.of(ACL_PATH, bytes("old ACL"), ROLES_PATH, bytes("old roles"));
+        storage.save(new AccessControlSnapshot(initial, Optional.empty()), request);
+        Map<String, byte[]> invalid = new LinkedHashMap<>(initial);
+        if (extra) {
+            invalid.put("extra.xml", bytes("extra"));
+        } else {
+            invalid.remove(ROLES_PATH);
+        }
+        assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(invalid, Optional.empty()), request))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(storage.load().valueOrFailure("unchanged snapshot").files())
+                .containsExactlyInAnyOrderEntriesOf(initial);
+    }
+
+    @Test
     void loadsExistingConfiguredFile() throws Exception {
         Files.createDirectories(root.resolve("config"));
-        Files.write(root.resolve(ACL_PATH), bytes("existing ACL"));
+        Files.write(document(root, ACL_PATH), bytes("existing ACL"));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
 
         AccessControlSnapshot snapshot = storage.load().valueOrFailure("existing ACL");
@@ -94,7 +243,7 @@ class LocalAccessControlStorageTest {
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void reportsLockCreationFailureInsteadOfReadingWithoutALock() throws Exception {
         Files.createDirectories(root.resolve("config"));
-        Files.write(root.resolve(ACL_PATH), bytes("ACL"));
+        Files.write(document(root, ACL_PATH), bytes("ACL"));
         Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(root);
         try {
             Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("r-xr-xr-x"));
@@ -111,8 +260,8 @@ class LocalAccessControlStorageTest {
     void readerInAnotherProcessWaitsForTheWholeSave() throws Exception {
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("roles"));
-        Files.write(root.resolve(ACL_PATH), bytes("old ACL"));
-        Files.write(root.resolve(ROLES_PATH), bytes("old roles"));
+        Files.write(document(root, ACL_PATH), bytes("old ACL"));
+        Files.write(document(root, ROLES_PATH), bytes("old roles"));
         Path lockPath = root.resolve(".orion-configuration.lock");
         try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(lockPath,
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)) {
@@ -120,7 +269,7 @@ class LocalAccessControlStorageTest {
             Process reader = null;
             java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor();
             try {
-                Files.write(root.resolve(ACL_PATH), bytes("new ACL"));
+                Files.write(document(root, ACL_PATH), bytes("new ACL"));
                 reader = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                         "-cp", System.getProperty("java.class.path"), LockedReader.class.getName(), root.toString())
                         .redirectError(ProcessBuilder.Redirect.INHERIT).start();
@@ -130,7 +279,7 @@ class LocalAccessControlStorageTest {
                 java.util.concurrent.Future<String> loaded = executor.submit(output::readLine);
                 assertThatThrownBy(() -> loaded.get(500, java.util.concurrent.TimeUnit.MILLISECONDS))
                         .isInstanceOf(java.util.concurrent.TimeoutException.class);
-                Files.write(root.resolve(ROLES_PATH), bytes("new roles"));
+                Files.write(document(root, ROLES_PATH), bytes("new roles"));
                 lock.release();
                 assertThat(loaded.get(10, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo("new ACL|new roles");
                 assertThat(reader.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
@@ -170,10 +319,10 @@ class LocalAccessControlStorageTest {
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("initial ACL")),
                 new AccessControlSaveRequest("initial ACL", UserEmail.EMPTY));
 
-        assertThat(Files.readAllBytes(directory.resolve(ACL_PATH))).isEqualTo(bytes("initial ACL"));
+        assertThat(Files.readAllBytes(document(directory, ACL_PATH))).isEqualTo(bytes("initial ACL"));
         if (Files.getFileStore(directory).supportsFileAttributeView("posix")) {
             Path ordinary = Files.createFile(root.resolve("ordinary.xml"));
-            assertThat(Files.getPosixFilePermissions(directory.resolve(ACL_PATH)))
+            assertThat(Files.getPosixFilePermissions(document(directory, ACL_PATH)))
                     .isEqualTo(Files.getPosixFilePermissions(ordinary));
         }
         assertThat(storage.load().valueOrFailure("initial ACL").files())
@@ -184,14 +333,14 @@ class LocalAccessControlStorageTest {
     @Test
     void overwritesExistingFileWithShorterContent() throws Exception {
         Files.createDirectories(root.resolve("config"));
-        Files.write(root.resolve(ACL_PATH), bytes("previous longer ACL content"));
+        Files.write(document(root, ACL_PATH), bytes("previous longer ACL content"));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("updated ACL")),
                 new AccessControlSaveRequest("update ACL", UserEmail.EMPTY));
 
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("updated ACL"));
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("updated ACL"));
         LocalAccessControlStorage reopened = new LocalAccessControlStorage(config(root));
         assertThat(reopened.load().valueOrFailure("updated ACL").files())
                 .containsOnlyKeys(ACL_PATH)
@@ -204,20 +353,20 @@ class LocalAccessControlStorageTest {
         LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
         AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
         storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("previous complete document")), request);
-        Path file = root.resolve(ACL_PATH);
+        Path file = document(root, ACL_PATH);
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r-----"));
         PosixFileAttributes before = Files.readAttributes(file, PosixFileAttributes.class);
         try (InputStream previous = Files.newInputStream(file)) {
             storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("replacement")), request);
             assertThat(previous.readAllBytes()).isEqualTo(bytes("previous complete document"));
-            assertThat(Files.readAllBytes(file)).isEqualTo(bytes("replacement"));
+            assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("replacement"));
         }
-        PosixFileAttributes after = Files.readAttributes(file, PosixFileAttributes.class);
+        PosixFileAttributes after = Files.readAttributes(document(root, ACL_PATH), PosixFileAttributes.class);
         assertThat(after.permissions()).isEqualTo(before.permissions());
         assertThat(after.owner()).isEqualTo(before.owner());
         assertThat(after.group()).isEqualTo(before.group());
-        try (java.util.stream.Stream<Path> children = Files.list(file.getParent())) {
-            assertThat(children.toList()).containsExactly(file);
+        try (java.util.stream.Stream<Path> children = Files.list(document(root, ACL_PATH).getParent())) {
+            assertThat(children.toList()).containsExactly(document(root, ACL_PATH));
         }
     }
 
@@ -227,7 +376,7 @@ class LocalAccessControlStorageTest {
         LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
         AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
         storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("previous")), request);
-        Path file = root.resolve(ACL_PATH);
+        Path file = document(root, ACL_PATH);
         Path parent = file.getParent();
         Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(parent);
         try {
@@ -248,7 +397,7 @@ class LocalAccessControlStorageTest {
         LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
         AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
         storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("previous")), request);
-        Path file = root.resolve(ACL_PATH);
+        Path file = document(root, ACL_PATH);
         Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
         try {
             Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
@@ -271,8 +420,8 @@ class LocalAccessControlStorageTest {
     void preparesEveryDocumentBeforePublishingAny(boolean firstExists) throws Exception {
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("roles"));
-        Path first = root.resolve(ACL_PATH);
-        Path second = root.resolve(ROLES_PATH);
+        Path first = document(root, ACL_PATH);
+        Path second = document(root, ROLES_PATH);
         if (firstExists) {
             Files.write(first, bytes("old ACL"));
         }
@@ -281,7 +430,9 @@ class LocalAccessControlStorageTest {
         Map<String, byte[]> changed = new LinkedHashMap<>();
         changed.put(ACL_PATH, bytes("new ACL"));
         changed.put(ROLES_PATH, bytes("new roles"));
-        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
         try {
             Files.setPosixFilePermissions(second.getParent(), PosixFilePermissions.fromString("r-xr-xr-x"));
             assumeFalse(Files.isWritable(second.getParent()), "requires permissions to deny directory writes");
@@ -305,9 +456,9 @@ class LocalAccessControlStorageTest {
         }
         storage.save(new AccessControlSnapshot(changed, Optional.empty()),
                 new AccessControlSaveRequest("retry both", UserEmail.EMPTY));
-        assertThat(Files.readAllBytes(first)).isEqualTo(bytes("new ACL"));
-        assertThat(Files.readAllBytes(second)).isEqualTo(bytes("new roles"));
-        for (Path file : List.of(first, second)) {
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("new ACL"));
+        assertThat(Files.readAllBytes(document(root, ROLES_PATH))).isEqualTo(bytes("new roles"));
+        for (Path file : List.of(document(root, ACL_PATH), document(root, ROLES_PATH))) {
             try (java.util.stream.Stream<Path> children = Files.list(file.getParent())) {
                 assertThat(children.toList()).containsExactly(file);
             }
@@ -362,15 +513,15 @@ class LocalAccessControlStorageTest {
         storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("ACL")),
                 new AccessControlSaveRequest("save", UserEmail.EMPTY));
         assertThat(storage.load().valueOrFailure("trusted root").files().get(ACL_PATH)).isEqualTo(bytes("ACL"));
-        assertThat(Files.readAllBytes(actual.resolve(ACL_PATH))).isEqualTo(bytes("ACL"));
+        assertThat(Files.readAllBytes(document(actual, ACL_PATH))).isEqualTo(bytes("ACL"));
     }
 
     @Test
     void loadsAndSavesMultipleConfiguredFilesWithConfiguredPrimaryPath() throws Exception {
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("roles"));
-        Files.write(root.resolve(ACL_PATH), bytes("existing ACL"));
-        Files.write(root.resolve(ROLES_PATH), bytes("existing roles"));
+        Files.write(document(root, ACL_PATH), bytes("existing ACL"));
+        Files.write(document(root, ROLES_PATH), bytes("existing roles"));
         BootstrapConfigurationSourceConfig configuration = config(root);
         configuration.setPaths(List.of(ROLES_PATH, ACL_PATH));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
@@ -388,8 +539,8 @@ class LocalAccessControlStorageTest {
                         ACL_PATH, bytes("updated ACL")), Optional.empty()),
                 new AccessControlSaveRequest("update configured files", UserEmail.EMPTY));
 
-        assertThat(Files.readAllBytes(root.resolve(ROLES_PATH))).isEqualTo(bytes("updated roles"));
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("updated ACL"));
+        assertThat(Files.readAllBytes(document(root, ROLES_PATH))).isEqualTo(bytes("updated roles"));
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("updated ACL"));
         assertThat(storage.load().valueOrFailure("updated files").files())
                 .containsOnlyKeys(ROLES_PATH, ACL_PATH)
                 .containsEntry(ROLES_PATH, bytes("updated roles"))
@@ -405,16 +556,16 @@ class LocalAccessControlStorageTest {
         storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("before"), ROLES_PATH, bytes("roles")),
                 Optional.empty()), request);
         FileTime originalTime = FileTime.fromMillis(1_000_000);
-        Files.setLastModifiedTime(root.resolve(ROLES_PATH), originalTime);
+        Files.setLastModifiedTime(document(root, ROLES_PATH), originalTime);
         AccessControlSnapshot loaded = storage.load().valueOrFailure("loaded");
         storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("after"), ROLES_PATH, bytes("roles")),
                 loaded.version()), request);
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("after"));
-        assertThat(Files.getLastModifiedTime(root.resolve(ROLES_PATH))).isEqualTo(originalTime);
-        Files.setLastModifiedTime(root.resolve(ACL_PATH), originalTime);
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("after"));
+        assertThat(Files.getLastModifiedTime(document(root, ROLES_PATH))).isEqualTo(originalTime);
+        Files.setLastModifiedTime(document(root, ACL_PATH), originalTime);
         storage.save(storage.load().valueOrFailure("updated"), request);
-        assertThat(Files.getLastModifiedTime(root.resolve(ACL_PATH))).isEqualTo(originalTime);
-        assertThat(Files.getLastModifiedTime(root.resolve(ROLES_PATH))).isEqualTo(originalTime);
+        assertThat(Files.getLastModifiedTime(document(root, ACL_PATH))).isEqualTo(originalTime);
+        assertThat(Files.getLastModifiedTime(document(root, ROLES_PATH))).isEqualTo(originalTime);
     }
 
     @Test
@@ -427,21 +578,23 @@ class LocalAccessControlStorageTest {
         files.put("../escape.xml", bytes("invalid"));
         assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(files, Optional.empty()), request))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("before"));
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("before"));
     }
 
     @Test
     void failsContentComparisonBeforeWritingAnyDocument() throws Exception {
-        LocalAccessControlStorage storage = new LocalAccessControlStorage(config(root));
+        BootstrapConfigurationSourceConfig configuration = config(root);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(configuration);
         AccessControlSaveRequest request = new AccessControlSaveRequest("save", UserEmail.EMPTY);
         storage.save(AccessControlSnapshot.singleFile(ACL_PATH, bytes("before")), request);
-        Files.createDirectories(root.resolve(ROLES_PATH));
+        Files.createDirectories(document(root, ROLES_PATH));
+        configuration.setPaths(List.of(ACL_PATH, ROLES_PATH));
         Map<String, byte[]> files = new LinkedHashMap<>();
         files.put(ACL_PATH, bytes("after"));
         files.put(ROLES_PATH, bytes("roles"));
         assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(files, Optional.empty()), request))
                 .isInstanceOf(RuntimeException.class).hasCauseInstanceOf(java.io.IOException.class);
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("before"));
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("before"));
     }
 
     @ParameterizedTest
@@ -450,8 +603,8 @@ class LocalAccessControlStorageTest {
             throws Exception {
         Files.createDirectories(root.resolve("config"));
         Files.createDirectories(root.resolve("roles"));
-        Files.write(root.resolve(ACL_PATH), bytes("resolved ACL"));
-        Files.write(root.resolve(ROLES_PATH), bytes("resolved roles"));
+        Files.write(document(root, ACL_PATH), bytes("resolved ACL"));
+        Files.write(document(root, ROLES_PATH), bytes("resolved roles"));
         String location = fileUri ? root.toUri().toString() : root.toString();
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 BootstrapRepositorySources.CONFIGURATION,
@@ -483,14 +636,14 @@ class LocalAccessControlStorageTest {
         storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("original"), ROLES_PATH, bytes("roles")),
                 Optional.empty()), new AccessControlSaveRequest("seed", UserEmail.EMPTY));
         AccessControlSnapshot before = storage.load().valueOrFailure("snapshot");
-        Files.write(root.resolve(ROLES_PATH), bytes("new roles"));
+        Files.write(document(root, ROLES_PATH), bytes("new roles"));
 
         assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
                 Map.of(ACL_PATH, bytes("stale"), ROLES_PATH, bytes("roles")), before.version()),
                 new AccessControlSaveRequest("stale", UserEmail.EMPTY)))
                 .isInstanceOf(AccessControlConcurrentUpdateException.class);
-        assertThat(Files.readAllBytes(root.resolve(ACL_PATH))).isEqualTo(bytes("original"));
-        assertThat(Files.readAllBytes(root.resolve(ROLES_PATH))).isEqualTo(bytes("new roles"));
+        assertThat(Files.readAllBytes(document(root, ACL_PATH))).isEqualTo(bytes("original"));
+        assertThat(Files.readAllBytes(document(root, ROLES_PATH))).isEqualTo(bytes("new roles"));
     }
 
     @Test
@@ -519,6 +672,12 @@ class LocalAccessControlStorageTest {
         }
         var reopened = new LocalAccessControlStorage(config(root));
         assertThat(reopened.load().valueOrFailure("saved").version()).isNotEqualTo(revision);
+    }
+
+    private static Path document(Path directory, String path) throws Exception {
+        Path pointer = directory.resolve(".orion-acl-current");
+        Path selected = Files.exists(pointer) ? directory.resolve(Files.readString(pointer)) : directory;
+        return selected.resolve(path);
     }
 
     private static BootstrapConfigurationSourceConfig config(Path directory) {

@@ -340,31 +340,16 @@ public final class BootstrapContext implements AutoCloseable {
         }
         Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
         Path root = directFileRoot(configured.getLocation(), baseDirectory, "Configuration location");
-        List<Path> paths = new ArrayList<>();
-        for (String configuredPath : resolved.paths()) {
-            paths.add(LocalAccessControlStorage.resolvePath(root, configuredPath));
-        }
-        for (int index = 0; index < paths.size(); index++) {
-            Path path = paths.get(index);
-            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-                if (index == 0 && configured.isCreateDefaultIfMissing()) {
-                    return resolvedDirectSource(resolved, root);
-                }
-                throw new IllegalStateException(FAILURE_MESSAGE);
+        BootstrapConfigurationSourceConfig local = new BootstrapConfigurationSourceConfig();
+        local.setLocation(root.toUri().toString());
+        local.setPaths(resolved.paths());
+        Result<AccessControlSnapshot> loaded = new LocalAccessControlStorage(local).load();
+        if (loaded instanceof Result.Failure<AccessControlSnapshot> failure) {
+            if (failure.code() == Result.FailureCode.NOT_FOUND && configured.isCreateDefaultIfMissing()
+                    && (failure.message() == null || failure.message().equals(local.primaryPath()))) {
+                return resolvedDirectSource(resolved, root);
             }
-            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
-                throw new IllegalStateException(FAILURE_MESSAGE);
-            }
-            byte[] bytes = null;
-            try (java.io.InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
-                bytes = input.readAllBytes();
-            } catch (IOException failure) {
-                throw new IllegalStateException(FAILURE_MESSAGE);
-            } finally {
-                if (bytes != null) {
-                    Arrays.fill(bytes, (byte) 0);
-                }
-            }
+            throw new IllegalStateException(FAILURE_MESSAGE);
         }
         return resolvedDirectSource(resolved, root);
     }

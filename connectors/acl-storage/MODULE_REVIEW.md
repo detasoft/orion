@@ -1,23 +1,32 @@
 # Module review: connectors/acl-storage
 
-## 2. Local save частично публикует несколько документов
+## 3. Local path checks leave a directory-swap TOCTOU gap
 
-- **Проблема и триггер.** При изменении двух и более ACL files первый rename проходит, следующий Files.move бросает IOException. Snapshot уже смешанный; save throws, последующая activation/reload не выполняется.
-- **Источники и владельцы.** [Sequential moves/cleanup](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L121), реальный multidocument [resetRootPassword](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L951), [save-before-reload](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1767), [prepare-all test](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L271), [multifile success](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L369).
-- **Документированное поведение.** [Snapshot plan](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md#L14) оставляет atomic generation либо narrower contract решением.
-- **Контракт.** Сохранить snapshot CAS, общий reader/writer lock, per-file atomic replacement, permissions и untouched identical files. Несколько moves не обеспечивают общую transaction/crash durability.
-- **Минимальное исправление.** Согласовать all-or-nothing либо explicit partial publication/reconciliation; затем regression failure после первого rename. Prepare всех temp files не решает поздний отказ.
-- **Альтернативы и последствия.** Immutable generations меняют operator layout; rollback может сам отказать и не атомарен; запрет Local/multifile writers убирает поддерживаемую возможность.
-- **Уверенность.** Высокая по текущему пути; fault/crash repro не выполнялся. Не вся credential operation меняет несколько документов; typed PERSISTENCE_FAILED не приписывается безусловно startup recovery.
-- **Важность / простота.** Важность высокая: root recovery может оставить partial durable state. Простота низкая: требуется contract/layout решение.
+**Problem.** An actor able to rename descendant directories can replace a checked directory with a symlink
+before a read, create, publication, or cleanup operation. Final-component `NOFOLLOW_LINKS` does not protect
+intermediate components, so operations can escape the ACL root. Atomic generation publication does not anchor
+filesystem operations against external directory replacement.
 
-## 3. Проверки Local paths оставляют directory-swap TOCTOU
+**Sources.** [LocalAccessControlStorage](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java):
+`resolvePath`, `readDocument`, `publishSnapshot`, and `deleteGeneration` operate on checked paths rather than
+retained directory handles. [BootstrapContext](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java)
+uses the same storage reader. [Existing tests](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java)
+reject static descendant symlinks but do not exercise concurrent directory replacement.
 
-- **Проблема и триггер.** Actor с правом rename descendant directory меняет проверенный каталог на symlink до read/open/temp/move. Final NOFOLLOW не защищает intermediate components; операция может выйти за ACL root.
-- **Источники и владельцы.** [resolvePath](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L248), [read](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L264), [prepare](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L146), [publication](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L129), реальный [bootstrap consumer](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java#L328), [static symlink tests](src/test/java/pro/deta/orion/acl/storage/LocalAccessControlStorageTest.java#L321).
-- **Документированное поведение.** [Containment plan](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md#L14) требует through-use anchoring, safe creation и outside-root nonaccess.
-- **Контракт.** Root trusted и может быть symlink; descendant links отвергаются даже внутри root. Cooperative lock не исключает external directory rename.
-- **Минимальное исправление.** Выбрать поддерживаемый directory-handle mechanism для traversal/read/lock/temp/publication, сохранив nested creation и per-file atomic replacement; согласовать платформы и проверить adversarial race.
-- **Альтернативы и последствия.** Rechecks сужают окно, но не закрывают гонку. Immutable ancestors меняют deployment contract. SecureDirectoryStream зависит от provider.
-- **Уверенность.** Высокая в gap; adversarial race/providers при аудите не запускались. Наличие конкретного macOS/Corretto provider не утверждается.
-- **Важность / простота.** Важность высокая при доступных actor mutable descendants. Простота низкая: platform и creation semantics.
+**Documented behavior.** The [containment plan](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md)
+requires anchoring through use, safe creation, and no outside-root access.
+
+**Contract.** The root is trusted and may itself be a symlink. Descendant symlinks are rejected even when their
+target remains inside the root. The cooperative configuration lock does not exclude external directory renames.
+Preserve complete-generation publication and nested configured paths.
+
+**Minimal repair.** Choose a supported directory-handle mechanism for traversal, reads, creation, pointer
+publication, and cleanup. Establish supported providers and test adversarial replacement during these operations.
+
+**Alternatives and consequences.** Rechecking paths narrows the race but does not close it. Requiring immutable
+ancestors changes the deployment contract. `SecureDirectoryStream` availability depends on the filesystem provider.
+
+**Confidence.** High in the path-based gap; adversarial races and provider capabilities have not been tested.
+
+**Priority signals.** Importance: high when another actor can rename descendant directories. Repair ease: low
+because provider support and safe directory creation must be resolved together.

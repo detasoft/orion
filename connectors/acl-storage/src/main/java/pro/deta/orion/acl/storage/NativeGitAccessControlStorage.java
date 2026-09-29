@@ -1,10 +1,10 @@
 package pro.deta.orion.acl.storage;
 
-import pro.deta.orion.git.nativestorage.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitFile;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
+import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;

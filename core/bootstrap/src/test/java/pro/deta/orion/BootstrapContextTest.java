@@ -1084,14 +1084,32 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                assertThat(OrionXml.read(new ByteArrayInputStream(Files.readAllBytes(
-                        directory.resolve("orion.xml")))).system().proxies()).hasSize(remoteMaterial ? 1 : 0);
+                LocalAccessControlStorage local = new LocalAccessControlStorage(
+                        configuration.getBootstrap().getAccessControl());
+                assertThat(OrionXml.read(new ByteArrayInputStream(
+                        local.load().valueOrFailure("published configuration").files().get("orion.xml")))
+                        .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
             } finally {
                 lifecycle.shutdownApplication();
             }
+        }
+    }
+
+    @Test
+    void opensPublishedLocalConfigurationWithoutTheInitialFiles() throws Exception {
+        OrionConfiguration configuration = configuration();
+        Path directory = tempDir.resolve("published-configuration");
+        configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(
+                configuration.getBootstrap().getAccessControl());
+        storage.save(AccessControlSnapshot.singleFile("orion.xml", xml()),
+                new AccessControlSaveRequest("publish", UserEmail.EMPTY));
+        assertThat(directory.resolve("orion.xml")).doesNotExist();
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, true)) {
+            assertThat(context).isNotNull();
         }
     }
 
