@@ -75,8 +75,8 @@ docker-exec: ## Run CMD in orion-external-services; e.g. make docker-exec CMD='p
 dist: ## Package the bootstrap distribution
 	$(MAVEN_RUN) package -Pdist -pl core/bootstrap -am
 
-test: ## Run the Maven/JVM test suite with the dev profile
-	$(MAVEN_RUN) package -Pdev -T 4 -q
+test: ## Run the Maven/JVM test suite; use RAM-backed temporary files on macOS
+	python3 make/test-ramdisk.py $(MAVEN_RUN) package -Pdev -T 4 -q
 
 dependency-audit: ## Report explicit Maven dependencies that also have transitive paths
 	$(MAVEN_RUN) org.apache.maven.plugins:maven-dependency-plugin:3.10.0:tree -Pdev -T 4 -q \
