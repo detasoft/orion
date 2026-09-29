@@ -2,7 +2,9 @@
 
 - Owner: codex, session 01a0e9f3-3074-7992-89d5-cfa3075fd72d,
   branch `codex/maven-dependency-cleanup-3074`,
-  worktree `.worktrees/maven-dependency-cleanup-3074`, started 2026-09-29 09:32 Europe/Amsterdam.
+  worktree `.worktrees/maven-dependency-cleanup-3074`, paused 2026-09-29 10:30 Europe/Amsterdam;
+  next: authorize integration of reviewed commit `4876dc4f1bbbcd89958b17f3a74711f56306c977`,
+  verify main, then remove the task worktree and branch.
 
 ## Requirements
 
