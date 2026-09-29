@@ -24,8 +24,9 @@
   `--apply`. Prefer the nearest real consumer and reuse its transitive export
   for more distant consumers.
 - Ignore `build-tools/__pycache__/` in `.gitignore`.
-- Document in `AGENTS.md` the repository rule of minimum necessary dependency
-  scope and minimum duplication: do not add a direct dependency when a
+- Document in `orion-minimal-implementation`'s JVM reference the repository
+  rule of minimum necessary dependency scope and minimum duplication:
+  do not add a direct dependency when a
   transitive path already supplies the required version and scope, even when
   code uses it directly. Keep explicit declarations only for a demonstrated
   build/runtime contract; preserve version mediation, scope, and exclusions.
