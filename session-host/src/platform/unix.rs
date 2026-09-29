@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::ffi::{CString, OsStr};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -209,7 +210,6 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         pty_closed: false,
         accepted_sequence_high_watermark: None,
         active_server_connection_floor: None,
-        operation_order: Arc::new(Mutex::new(())),
         operations: Arc::new(OperationCoordinator::new()),
         acknowledgement: initialized.acknowledgement,
         descendants: Arc::new(Mutex::new(initialized.descendants)),
@@ -863,7 +863,6 @@ struct SharedState {
     pty_closed: bool,
     accepted_sequence_high_watermark: Option<u64>,
     active_server_connection_floor: Option<u64>,
-    operation_order: Arc<Mutex<()>>,
     operations: Arc<OperationCoordinator>,
     acknowledgement: JournalAcknowledgement,
     descendants: Arc<Mutex<DescendantTracker>>,
@@ -879,7 +878,8 @@ struct OperationCoordinator {
 
 struct OperationState {
     admission_open: bool,
-    active_operations: usize,
+    pending: VecDeque<u64>,
+    next_ticket: u64,
     termination_active: bool,
 }
 
@@ -888,7 +888,8 @@ impl OperationCoordinator {
         Self {
             state: Mutex::new(OperationState {
                 admission_open: true,
-                active_operations: 0,
+                pending: VecDeque::new(),
+                next_ticket: 0,
                 termination_active: false,
             }),
             changed: std::sync::Condvar::new(),
@@ -906,19 +907,25 @@ impl OperationCoordinator {
         if !state.admission_open {
             return Err((ERROR_INVALID_STATE, "session finalization has started".to_owned()));
         }
-        let ordinary_operations = state.active_operations - usize::from(state.termination_active);
         if (termination && state.termination_active)
-            || (!termination && ordinary_operations >= MAX_PENDING_COMMANDS)
+            || (!termination && state.pending.len() >= MAX_PENDING_COMMANDS)
         {
             return Err((ERROR_INVALID_STATE, "command queue is full".to_owned()));
         }
-        state.active_operations += 1;
-        if termination {
+        let ticket = if termination {
             state.termination_active = true;
-        }
+            None
+        } else {
+            let ticket = state.next_ticket;
+            state.next_ticket = ticket.checked_add(1).ok_or_else(|| {
+                (ERROR_INVALID_STATE, "command admission ordinal space is exhausted".to_owned())
+            })?;
+            state.pending.push_back(ticket);
+            Some(ticket)
+        };
         Ok(ActiveOperation {
             operations: Arc::clone(self),
-            termination,
+            ticket,
         })
     }
 
@@ -929,10 +936,11 @@ impl OperationCoordinator {
         Ok(())
     }
 
-    fn operation_done(&self, termination: bool) -> Result<(), HostError> {
+    fn operation_done(&self, ticket: Option<u64>) -> Result<(), HostError> {
         let mut state = self.lock_state()?;
-        state.active_operations = state.active_operations.saturating_sub(1);
-        if termination {
+        if let Some(ticket) = ticket {
+            state.pending.retain(|pending| *pending != ticket);
+        } else {
             state.termination_active = false;
         }
         self.changed.notify_all();
@@ -941,7 +949,7 @@ impl OperationCoordinator {
 
     fn wait_for_operations(&self) -> Result<(), HostError> {
         let mut state = self.lock_state()?;
-        while state.active_operations != 0 {
+        while !state.pending.is_empty() || state.termination_active {
             state = self.changed.wait(state).map_err(|_| {
                 HostError::Thread("operation coordinator mutex is poisoned".to_owned())
             })?;
@@ -952,12 +960,27 @@ impl OperationCoordinator {
 
 struct ActiveOperation {
     operations: Arc<OperationCoordinator>,
-    termination: bool,
+    ticket: Option<u64>,
+}
+
+impl ActiveOperation {
+    fn wait_for_turn(&self) -> Result<(), HostError> {
+        let Some(ticket) = self.ticket else {
+            return Ok(());
+        };
+        let mut state = self.operations.lock_state()?;
+        while state.pending.front() != Some(&ticket) {
+            state = self.operations.changed.wait(state).map_err(|_| {
+                HostError::Thread("operation coordinator mutex is poisoned".to_owned())
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ActiveOperation {
     fn drop(&mut self) {
-        let _ = self.operations.operation_done(self.termination);
+        let _ = self.operations.operation_done(self.ticket);
     }
 }
 
@@ -1291,7 +1314,7 @@ fn handle_operation(
                         if operation.source == protocol::OperationSource::Server {
                             state.accepted_sequence_high_watermark = Some(operation_sequence);
                         }
-                        Ok((Arc::clone(&state.operation_order), active_operation))
+                        Ok(active_operation)
                     }
                     Err(rejection) => Err(rejection),
                 }
@@ -1299,7 +1322,7 @@ fn handle_operation(
         }
         Err(error) => Err((ERROR_IO, error.to_string())),
     };
-    let (operation_order, _active_operation) = match admission {
+    let active_operation = match admission {
         Ok(admission) => admission,
         Err((code, detail)) => {
             send_received(stream, frame, Some((code, &detail)))?;
@@ -1307,20 +1330,7 @@ fn handle_operation(
         }
     };
     send_received(stream, frame, None)?;
-    let _operation_guard = if frame.message_type == control_message::TERMINATE {
-        None
-    } else {
-        match operation_order.lock() {
-            Ok(guard) => Some(guard),
-            Err(_) => {
-                eprintln!(
-                    "session-host: operation {} was received but operation order mutex is poisoned",
-                    operation_sequence
-                );
-                return Ok(());
-            }
-        }
-    };
+    active_operation.wait_for_turn()?;
 
     let effect_result = execute_operation_effect(frame.message_type, &operation.effect, shared);
     let (outcome, detail) = match effect_result {
@@ -2244,7 +2254,6 @@ mod tests {
             pty_closed: false,
             accepted_sequence_high_watermark: None,
             active_server_connection_floor: None,
-            operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),
             acknowledgement,
             descendants: Arc::new(Mutex::new(descendants)),
@@ -2318,7 +2327,6 @@ mod tests {
             pty_closed: false,
             accepted_sequence_high_watermark: None,
             active_server_connection_floor: None,
-            operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),
             acknowledgement,
             descendants: Arc::new(Mutex::new(descendants)),
@@ -2409,6 +2417,45 @@ mod tests {
         assert_eq!(coordinator.register_operation(false).err(), full);
         drop(ordinary);
         drop(termination);
+        coordinator.wait_for_operations().unwrap();
+    }
+
+    #[test]
+    fn later_effect_waits_for_an_admitted_operation_that_has_not_started() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let first = coordinator.register_operation(false).unwrap();
+        let second = coordinator.register_operation(false).unwrap();
+        let (started, waiting) = std::sync::mpsc::channel();
+        let (finished, result) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            started.send(()).unwrap();
+            second.wait_for_turn().unwrap();
+            finished.send(()).unwrap();
+        });
+        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(result.recv_timeout(Duration::from_millis(50)).is_err());
+        let termination = coordinator.register_operation(true).unwrap();
+        termination.wait_for_turn().unwrap();
+        drop(termination);
+        coordinator.close_admission().unwrap();
+        first.wait_for_turn().unwrap();
+        drop(first);
+        result.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
+        coordinator.wait_for_operations().unwrap();
+    }
+
+    #[test]
+    fn abandoned_waiter_does_not_block_the_following_operation() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let first = coordinator.register_operation(false).unwrap();
+        let second = coordinator.register_operation(false).unwrap();
+        let third = coordinator.register_operation(false).unwrap();
+        drop(second);
+        first.wait_for_turn().unwrap();
+        drop(first);
+        third.wait_for_turn().unwrap();
+        drop(third);
         coordinator.wait_for_operations().unwrap();
     }
 

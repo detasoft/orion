@@ -1,10 +1,16 @@
 package pro.deta.orion.agentd.session;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
+import pro.deta.orion.agent.protocol.AgentProtocolCodec;
+import pro.deta.orion.agent.protocol.CommandId;
+import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SessionCommandOutcome;
@@ -28,6 +34,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
@@ -269,6 +276,111 @@ class NativeControlLivePeerTest {
             if (!Files.exists(release)) {
                 Files.createFile(release);
             }
+            client.send(endpoint, new ControlCommand.Terminate(9, SessionCommandSource.MANUAL,
+                    Optional.empty(), AgentMessage.TerminationMode.FORCE));
+            if (!host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                host.destroyForcibly();
+                host.waitFor();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void serverDeliveryOrdersEffectsAcrossConnectionsAndCanTerminateBlockedInput(boolean terminateBlocked)
+            throws Exception {
+        Path executable = extractSessionHost();
+        Path directory = Files.createDirectory(temporaryDirectory.resolve("server-order"));
+        Path log = temporaryDirectory.resolve("server-order.log");
+        Path ready = temporaryDirectory.resolve("ready");
+        Path release = temporaryDirectory.resolve("release");
+        Process host = new ProcessBuilder(executable.toString(),
+                "--session-id", "server-order", "--start-command-id", "command.start",
+                "--session-dir", directory.toString(), "--cwd", temporaryDirectory.toString(),
+                "--cols", "80", "--rows", "24", "--term", "xterm", "--", "/bin/sh", "-c",
+                "stty raw -echo; touch ready; while [ ! -f release ]; do sleep 0.01; done; cat > /dev/null")
+                .redirectError(log.toFile()).redirectOutput(log.toFile()).start();
+        ControlEndpoint endpoint = new ControlEndpoint(ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                "control.sock", directory.resolve("control.sock"));
+        SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
+        try {
+            awaitStatus(client, endpoint, host, log);
+            Instant deadline = Instant.now().plus(TIMEOUT);
+            while (!Files.exists(ready) && Instant.now().isBefore(deadline)) {
+                Thread.sleep(10);
+            }
+            assertThat(ready).exists();
+            SessionManifest manifest = new JsonSessionManifestReader().read(directory);
+            SessionRegistry registry = new SessionRegistry();
+            registry.replace(new DiscoverySnapshot(Map.of(manifest.sessionId(), new LocalSession(
+                    directory, manifest, HostObservation.live(ChildState.LIVE),
+                    JournalObservation.READABLE, LocalSessionState.LIVE)), Map.of()));
+            EstablishedSessionCommandDelivery delivery = new EstablishedSessionCommandDelivery(registry, client);
+            AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+            SessionId session = new SessionId(manifest.sessionId());
+            byte[] large = new byte[1024 * 1024];
+            Arrays.fill(large, (byte) 'a');
+            List<AgentMessage> commands = List.of(
+                    new AgentMessage.Input(new CommandId("first"), session, UUID.randomUUID(),
+                            ProtocolBytes.copyOf(large), 1),
+                    new AgentMessage.Resize(new CommandId("resize"), session, 120, 40, 2),
+                    new AgentMessage.Input(new CommandId("second"), session, UUID.randomUUID(),
+                            ProtocolBytes.copyOf(new byte[]{'b', 'c'}), 3),
+                    new AgentMessage.Resize(new CommandId("last"), session, 100, 30, 4));
+            for (int index = 0; index < commands.size(); index++) {
+                AgentMessage command = commands.get(index);
+                assertReceived(delivery.deliver(new AgentMessageRecord(command,
+                        ProtocolBytes.copyOf(codec.encode(command)))), index + 1);
+            }
+            if (!terminateBlocked) {
+                Files.createFile(release);
+                JournalReadPage page = awaitCommandResults(directory, List.of(1L, 2L, 3L, 4L));
+                assertThat(commandResultSequences(page.records())).containsExactly(1L, 2L, 3L, 4L);
+                List<SessionEventPayload> effects = new ArrayList<>();
+                for (SessionEventRecord record : page.records()) {
+                    SessionEventPayload payload = EVENT_CODEC.decodeKnownPayload(record).orElseThrow();
+                    if (payload instanceof SessionEventPayload.PtyInput
+                            || payload instanceof SessionEventPayload.PtyResize) {
+                        effects.add(payload);
+                    }
+                }
+                AgentMessage.Input first = (AgentMessage.Input) commands.get(0);
+                AgentMessage.Input second = (AgentMessage.Input) commands.get(2);
+                assertThat(effects).containsExactly(new SessionEventPayload.PtyResize(80, 24),
+                        new SessionEventPayload.PtyInput(first.inputId().toString(), first.bytes()),
+                        new SessionEventPayload.PtyResize(120, 40),
+                        new SessionEventPayload.PtyInput(second.inputId().toString(), second.bytes()),
+                        new SessionEventPayload.PtyResize(100, 30));
+            }
+            AgentMessage terminate = new AgentMessage.Terminate(new CommandId("stop"), session,
+                    AgentMessage.TerminationMode.FORCE, 5);
+            assertReceived(delivery.deliver(new AgentMessageRecord(terminate,
+                    ProtocolBytes.copyOf(codec.encode(terminate)))), 5);
+            assertThat(host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
+            assertThat(host.exitValue()).as(Files.readString(log)).isZero();
+            JournalReadPage page = new FileSystemSessionJournalReader().readPage(
+                    directory, Optional.empty(), Optional.empty(), READ_LIMITS);
+            List<Long> ordinaryResults = new ArrayList<>();
+            int terminationResults = 0;
+            for (SessionEventRecord record : page.records()) {
+                if (record.eventType() != 0x0002) {
+                    continue;
+                }
+                SessionEventPayload.CommandResult result = (SessionEventPayload.CommandResult)
+                        EVENT_CODEC.decodeKnownPayload(record).orElseThrow();
+                if (result.operationSequence() == 5) {
+                    terminationResults++;
+                    assertThat(result.outcome()).isEqualTo(SessionCommandOutcome.SUCCEEDED);
+                } else {
+                    ordinaryResults.add(result.operationSequence());
+                    if (terminateBlocked && result.operationSequence() == 1) {
+                        assertThat(result.outcome()).isEqualTo(SessionCommandOutcome.FAILED);
+                    }
+                }
+            }
+            assertThat(terminationResults).isEqualTo(1);
+            assertThat(ordinaryResults).containsExactly(1L, 2L, 3L, 4L);
+        } finally {
             client.send(endpoint, new ControlCommand.Terminate(9, SessionCommandSource.MANUAL,
                     Optional.empty(), AgentMessage.TerminationMode.FORCE));
             if (!host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {

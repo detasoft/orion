@@ -253,7 +253,7 @@ error payload. Journal append failures go only to stderr.
 
 Admission has a fixed capacity of 64 ordinary commands, shared by `SERVER` and
 `MANUAL`, plus one reserved `TERMINATE` slot. A slot covers receipt delivery,
-waiting for the effect lock, execution, and recording the result. It is released
+waiting for earlier ordinary commands, execution, and recording the result. It is released
 when processing finishes, including on failure; disconnecting after admission
 does not cancel the command or release its slot early. When the relevant capacity
 is full, the host returns `RECEIVED` with `ERROR_INVALID_STATE` (4) and UTF-8 detail
@@ -267,9 +267,12 @@ slot is occupied. These limits do not bound idle control connections.
 
 For `SERVER`, `operationSequence` identifies an operation and protects it from
 replay. For `MANUAL`, it is only a live response-correlation value and may
-repeat. It is not a FIFO position across control connections. `operation_order` serializes
-ordinary effects, but `TERMINATE` bypasses it so it can signal descendants while
-a blocked ordinary effect is still running. `RECEIVED` may therefore be
+repeat. Ordinary effects execute in admission order across all control connections
+and sources. The host assigns their queue positions before sending `RECEIVED`,
+so a delayed receipt or worker cannot allow a later admitted effect to overtake.
+These positions are internal and independent of `operationSequence`. `TERMINATE`
+bypasses the ordinary queue so it can signal descendants while a blocked ordinary
+effect is still running. `RECEIVED` may therefore be
 observed before an earlier effect or result is complete, and journal readers
 must match `COMMAND_RESULT` records by `operationSequence` rather than by record
 order. Match source as well as sequence because manual sequences can repeat.

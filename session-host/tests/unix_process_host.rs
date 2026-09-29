@@ -1712,7 +1712,11 @@ fn full_command_queue_rejects_without_consuming_the_sequence_and_recovers() {
     send_operation(&mut stream, control_message::TERMINATE, 1001, b"terminate", &[1, 0, 0, 0]);
     assert!(host.wait_with_timeout(TIMEOUT).success());
     let events = journal_reader::read(host.directory(), 0).unwrap().events;
-    assert_eq!(events.iter().filter(|event| event.event_type == event_type::COMMAND_RESULT).count(), 66);
+    let completed: Vec<_> = events.iter()
+        .filter(|event| event.event_type == event_type::COMMAND_RESULT)
+        .map(|event| u64_at(&event.payload[2..10])).collect();
+    let expected: Vec<_> = (1..=64).chain([1000, 1001]).collect();
+    assert_eq!(completed, expected);
 }
 
 #[test]
