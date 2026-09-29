@@ -54,6 +54,11 @@ make run-dev
 Keep `ORION_KEY_MATERIAL_PASSWORD` set to the existing store's password.
 `run-dev` starts the existing `run-server` and `run-frontend` goals concurrently:
 one Maven invocation runs Orion, and npm runs Vite at `http://localhost:4173`.
+Vite opens the browser automatically when it starts (also with `make run-frontend`);
+if that port is occupied, it opens the next available port. Set `BROWSER=none`
+to suppress opening the browser. Orion may still be compiling when the UI opens.
+`run-server` disables Maven build-cache restoration because the `process-classes`
+launch needs reactor dependency outputs that cached builds may not make available.
 It accepts the same `ORION_ARGS`, `ORION_ROOT`, `MAVEN`, and `NPM` overrides as
 those goals. Ctrl-C stops both process trees; processes that ignore shutdown
 are killed after ten seconds. If either service exits, the other is stopped too.

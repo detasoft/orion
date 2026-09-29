@@ -67,11 +67,11 @@ init-server: ## Initialize key material and run the Orion server for the first t
 	$(MAKE) run-server ORION_ARGS="--create-if-missing $(ORION_ARGS)"
 
 run-server: require-key-material-password ## Run the Orion server
-	$(MAVEN_RUN) -pl core/bootstrap -am -Prun-server \
+	$(MAVEN_RUN) -Dmaven.build.cache.enabled=false -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
-run-frontend: ## Run the frontend Vite development server with automatic UI updates
-	cd net/frontend/ui && $(NPM) run dev
+run-frontend: ## Run Vite with automatic UI updates and open the browser
+	cd net/frontend/ui && $(NPM) run dev -- --open
 
 run-dev: require-key-material-password ## Run Orion and Vite together; Ctrl-C stops both
 	+python3 "$(CURDIR)/make/run-dev.py" $(MAKE)

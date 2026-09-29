@@ -81,9 +81,10 @@ class RunDevTest(unittest.TestCase):
                 server = json.loads((state / "server-invocation.json").read_text())
                 frontend = json.loads((state / "frontend-invocation.json").read_text())
                 self.assertIn("-Dorion.run.arguments=--example", server["arguments"])
+                self.assertIn("-Dmaven.build.cache.enabled=false", server["arguments"])
                 self.assertEqual(server["orion_root"], str(state / "server state"))
                 self.assertEqual(Path(frontend["cwd"]).resolve(), (checkout / "net/frontend/ui").resolve())
-                self.assertEqual(frontend["arguments"], ["run", "dev"])
+                self.assertEqual(frontend["arguments"], ["run", "dev", "--", "--open"])
                 if fail:
                     (state / "release").touch()
                 else:

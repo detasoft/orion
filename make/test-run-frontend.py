@@ -34,7 +34,7 @@ class RunFrontendTest(unittest.TestCase):
             self.assertEqual(result.returncode == 0, npm_exit == 0, result.stdout + result.stderr)
             self.assertTrue(trace.is_file(), "npm was not invoked")
             invocation = json.loads(trace.read_text(encoding="utf-8"))
-            self.assertEqual(invocation["arguments"], ["run", "dev"])
+            self.assertEqual(invocation["arguments"], ["run", "dev", "--", "--open"])
             self.assertEqual(Path(invocation["cwd"]).resolve(), frontend.resolve())
             if npm_exit:
                 self.assertIn("Error " + str(npm_exit), result.stderr)
