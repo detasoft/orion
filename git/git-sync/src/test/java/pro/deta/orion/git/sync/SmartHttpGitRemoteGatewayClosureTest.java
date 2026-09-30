@@ -12,7 +12,6 @@ import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -99,13 +98,9 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static void persist(NativeGitRepository repository, byte[] bytes) throws IOException {
-        repository.index().withAccess(access1 -> {
-            try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), access1)) {
-                output.write(bytes);
-                repository.publishPack(output.complete()).packChecksum();
-            }
-            return null;
-        });
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+            repository.publishPack(repository.ingest(input));
+        }
     }
 
     private static byte[] pack(Entry... entries) throws IOException {

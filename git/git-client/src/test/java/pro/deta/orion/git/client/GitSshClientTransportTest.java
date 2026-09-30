@@ -18,7 +18,6 @@ import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
@@ -252,19 +251,19 @@ class GitSshClientTransportTest {
             client.start();
             GitSshClientTransport transport = new GitSshClientTransport(
                     client, new GitCredentials(GitCredentialKind.PASSWORD, "", "password".toCharArray()));
-            ByteArrayOutputStream pack = new ByteArrayOutputStream();
 
-            GitClientResult<GitUploadPackResult> fetch =
+            GitClientResult<GitUploadPackResult<Long>> fetch =
                     new GitUploadPackClient(transport).fetch(
                             server.repositoryUri(),
                             GitClientOptions.defaults(),
                             GitUploadPackRequest.of(
                                     repository.commitId(),
-                                    new OutputStreamBufferedByteOutput(pack)));
+                                    input -> {
+                                        assertThat(input.readInt()).isEqualTo(0x5041434b);
+                                        return input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                                    }));
 
             assertThat(fetch).isInstanceOf(GitClientResult.Success.class);
-            assertThat(pack.toByteArray()).startsWith(
-                    "PACK".getBytes(StandardCharsets.US_ASCII));
 
             GitReceivePackRequest delete = new GitReceivePackRequest(
                     List.of(new GitReceivePackRequest.Command(

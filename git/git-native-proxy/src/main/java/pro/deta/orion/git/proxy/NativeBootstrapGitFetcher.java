@@ -7,7 +7,8 @@ import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -87,15 +88,18 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             String newId) {
         try {
             repository.index().withAccess(access -> {
-                try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), access)) {
-                    GitUploadPackRequest request = new GitUploadPackRequest(
-                            List.of(newId),
-                            NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
-                            output,
-                            ignored -> { });
-                    success(client.fetch(location.remoteUri(), OPTIONS, request), "pack transfer");
-                    repository.publishPack(output.complete());
-                }
+                GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                        List.of(newId),
+                        NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
+                        input -> {
+                            try (PackIngestor ingestor = new PackIngestor(input, repository.storage(), access)) {
+                                return ingestor.ingest();
+                            }
+                        },
+                        ignored -> { });
+                PackMetadata pack = success(client.fetch(location.remoteUri(), OPTIONS, request),
+                        "pack transfer").pack();
+                repository.publishPack(pack);
                 return null;
             });
         } catch (IOException failure) {

@@ -23,13 +23,12 @@ import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.git.client.GitSmartHttpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
+import pro.deta.orion.git.client.GitUploadPackResult;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.net.io.BufferedByteInputV2;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
@@ -40,8 +39,6 @@ import pro.deta.orion.transport.http.OrionHttpResponseWriter;
 import pro.deta.orion.transport.http.OrionHttpRouteRegistry;
 import pro.deta.orion.transport.http.OrionHttpRouteServlet;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -177,15 +174,15 @@ class OrionGitHttpInteroperabilityTest {
             GitUploadPackClient client = new GitUploadPackClient(
                     new GitSmartHttpClientTransport(http, GitCredentials.none(), true));
             assertThat(client.discover(remote, GitClientOptions.defaults())).isInstanceOf(GitClientResult.Success.class);
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            assertThat(client.fetch(remote, GitClientOptions.defaults(),
-                    GitUploadPackRequest.of(commit, new OutputStreamBufferedByteOutput(bytes))))
-                    .isInstanceOf(GitClientResult.Success.class);
             FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(
                     Files.createTempDirectory(directory, "received-"));
-            try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy");
-                 BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
-                PackMetadata pack = received.ingest(input);
+            try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy")) {
+                GitClientResult<GitUploadPackResult<PackMetadata>> result = client.fetch(
+                        remote, GitClientOptions.defaults(),
+                        GitUploadPackRequest.of(commit, received::ingest));
+                assertThat(result).isInstanceOf(GitClientResult.Success.class);
+                PackMetadata pack = ((GitClientResult.Success<GitUploadPackResult<PackMetadata>>)
+                        result).value().pack();
                 received.publishPack(pack).packChecksum();
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
                 assertThat(new String(received.files().loadFiles("main",

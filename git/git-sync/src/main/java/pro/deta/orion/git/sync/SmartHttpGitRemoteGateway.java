@@ -6,7 +6,8 @@ import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -51,28 +52,29 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try {
             return checked.index().<GitHeads, GitRemoteException>withAccess(access -> {
-                try (PackIngestionOutput target = new PackIngestionOutput(
-                        checked.storage(), access)) {
-                    GitUploadPackRequest request = new GitUploadPackRequest(
-                            List.copyOf(wants),
-                            List.copyOf(haves),
-                            target,
-                            ignored -> { });
-                    requireSuccess(
-                            connection.uploadPack().fetch(
-                                    connection.uri(),
-                                    connection.options(),
-                                    request),
-                            "fetch");
-                    checked.publishPack(target.complete());
-                    for (String root : wants) {
-                        if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
-                            throw GitRemoteException.local("complete object validation", false, null);
-                        }
+                GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                        List.copyOf(wants),
+                        List.copyOf(haves),
+                        input -> {
+                            try (PackIngestor ingestor = new PackIngestor(input, checked.storage(), access)) {
+                                return ingestor.ingest();
+                            }
+                        },
+                        ignored -> { });
+                PackMetadata pack = requireSuccess(
+                        connection.uploadPack().fetch(
+                                connection.uri(),
+                                connection.options(),
+                                request),
+                        "fetch").pack();
+                checked.publishPack(pack);
+                for (String root : wants) {
+                    if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
+                        throw GitRemoteException.local("complete object validation", false, null);
                     }
-                    publishTrackingRefs(checked, heads);
-                    return heads;
                 }
+                publishTrackingRefs(checked, heads);
+                return heads;
             });
         } catch (IOException | RuntimeException error) {
             throw GitRemoteException.local("fetch publication", true, error);

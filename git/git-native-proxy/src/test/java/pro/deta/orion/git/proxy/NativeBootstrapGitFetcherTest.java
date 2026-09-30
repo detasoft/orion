@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -149,6 +150,37 @@ class NativeBootstrapGitFetcherTest {
     }
 
     @Test
+    void rejectsDamagedDownloadedPacksWithoutPublishingObjectsOrRefs() throws Exception {
+        FileUpdateFixture.Prepared prepared;
+        try (NativeGitRepository source = new InMemoryNativeGitRepositoryProvider()
+                .create("source").valueOrFailure("source")) {
+            prepared = FileUpdateFixture.prepare(source.files(), "main",
+                    Map.of("orion.xml", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
+                    "initial", GitCommitAuthor.EMPTY);
+        }
+        byte[] valid = prepared.pack();
+        byte[] corrupt = valid.clone();
+        corrupt[corrupt.length - 1] ^= 1;
+        ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
+        for (byte[] invalid : new byte[][]{
+                Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
+            try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                    .create("proxy").valueOrFailure("proxy")) {
+                GitClientTransport transport = packTransport(commit, invalid);
+                assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(
+                        location(tempDir.resolve("upstream.git")), transport, repository))
+                        .isInstanceOf(BootstrapGitProxyException.class);
+                assertThat(repository.refs()).isEmpty();
+                repository.index().withAccess(access -> {
+                    assertThat(access.packs()).isEmpty();
+                    assertThat(access.locations(commit)).isEmpty();
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
         Upstream upstream = upstream("remote");
         BootstrapGitLocation location = location(upstream.bare());
@@ -193,7 +225,12 @@ class NativeBootstrapGitFetcherTest {
         output.write(pack);
         byte[] bytes = response.toByteArray();
         return (service, uri, options) -> new GitClientTransportSession() {
-            private final BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
+            private final BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes) {
+                @Override
+                public synchronized int read(byte[] target, int offset, int length) {
+                    return super.read(target, offset, Math.min(length, 3));
+                }
+            });
             private final BufferedByteOutput sink = new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream());
 
             @Override

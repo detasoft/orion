@@ -10,7 +10,6 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
@@ -65,19 +64,19 @@ class GitSmartHttpClientTransportTest {
         try (GitHttpBackendTestServer server = GitHttpBackendTestServer.start(
                 temporaryDirectory, repository.path())) {
             GitSmartHttpClientTransport transport = transport(true);
-            ByteArrayOutputStream pack = new ByteArrayOutputStream();
 
-            GitClientResult<GitUploadPackResult> fetch =
+            GitClientResult<GitUploadPackResult<Long>> fetch =
                     new GitUploadPackClient(transport).fetch(
                             server.repositoryUri(),
                             GitClientOptions.defaults(),
                             GitUploadPackRequest.of(
                                     repository.commitId(),
-                                    new OutputStreamBufferedByteOutput(pack)));
+                                    input -> {
+                                        assertThat(input.readInt()).isEqualTo(0x5041434b);
+                                        return input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                                    }));
 
             assertThat(fetch).isInstanceOf(GitClientResult.Success.class);
-            assertThat(pack.toByteArray()).startsWith(
-                    "PACK".getBytes(StandardCharsets.US_ASCII));
 
             GitReceivePackRequest delete = new GitReceivePackRequest(
                     List.of(new GitReceivePackRequest.Command(
@@ -137,13 +136,13 @@ class GitSmartHttpClientTransportTest {
             GitClientTransport transport = new GitRemoteClientTransport(null,
                     new GitCredentials(GitCredentialKind.TOKEN, "", "secret".toCharArray()), Set.of(), true);
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
-            GitClientResult<GitUploadPackResult> fetch =
+            GitClientResult<GitUploadPackResult<Long>> fetch =
                     new GitUploadPackClient(transport).fetch(
                             server.repositoryUri(),
                             GitClientOptions.defaults(),
                             GitUploadPackRequest.of(
                                     OLD_ID,
-                                    new OutputStreamBufferedByteOutput(pack)));
+                                    input -> input.newInputStream().transferTo(pack)));
 
             assertThat(fetch).isInstanceOf(GitClientResult.Success.class);
             assertThat(pack.toString(StandardCharsets.US_ASCII))
@@ -407,10 +406,10 @@ class GitSmartHttpClientTransportTest {
                     Duration.ofSeconds(2), Duration.ofSeconds(10), 1);
             long started = System.nanoTime();
             try {
-                GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport).fetch(
+                GitClientResult<GitUploadPackResult<Long>> result = new GitUploadPackClient(transport).fetch(
                         server.repositoryUri(), options,
                         GitUploadPackRequest.of(OLD_ID,
-                                new OutputStreamBufferedByteOutput(new ByteArrayOutputStream())));
+                                input -> input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream())));
 
                 assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.TIMEOUT);
                 assertThat(posts).hasValue(1);

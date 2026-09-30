@@ -22,10 +22,10 @@ public final class GitUploadPackClient {
                 GitUploadPackClient::discover);
     }
 
-    public GitClientResult<GitUploadPackResult> fetch(
+    public <T> GitClientResult<GitUploadPackResult<T>> fetch(
             URI remoteUri,
             GitClientOptions options,
-            GitUploadPackRequest request) {
+            GitUploadPackRequest<T> request) {
         Objects.requireNonNull(request, "request");
         return GitBlockingClientExecutor.execute(
                 transport,
@@ -35,10 +35,10 @@ public final class GitUploadPackClient {
                 session -> fetch(session, options, request));
     }
 
-    private static GitUploadPackResult fetch(
+    private static <T> GitUploadPackResult<T> fetch(
             GitClientTransportSession session,
             GitClientOptions options,
-            GitUploadPackRequest request)
+            GitUploadPackRequest<T> request)
             throws GitClientProtocolException {
         GitBlockingClientWire wire = new GitBlockingClientWire(session);
         GitRemoteAdvertisement advertisement;
@@ -58,9 +58,8 @@ public final class GitUploadPackClient {
                     "Failed to write upload-pack request",
                     error);
         }
-        long packBytes;
         try {
-            packBytes = wire.readUploadPack(
+            return wire.readUploadPack(
                     request, advertisement, options.maximumPackBytes());
         } catch (IOException error) {
             throw transportFailure(
@@ -68,7 +67,6 @@ public final class GitUploadPackClient {
                     "Upload-pack transfer failed",
                     error);
         }
-        return new GitUploadPackResult(advertisement, packBytes);
     }
 
     private static GitRemoteAdvertisement discover(

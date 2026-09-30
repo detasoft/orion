@@ -11,7 +11,8 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
+import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -377,24 +378,25 @@ final class OrionGitWorkTree implements GitWorkTree {
             haves.add(new ObjectId(objectId));
         }
         repository.index().withAccess(access -> {
-            try (PackIngestionOutput target = new PackIngestionOutput(
-                    repository.storage(), access)) {
-                GitUploadPackRequest request = new GitUploadPackRequest(
-                        List.of(wantedId),
-                        haves.stream().map(ObjectId::toHex).toList(),
-                        target,
-                        ignored -> { });
-                OrionGitClient.requireSuccess(
-                        client.uploadPack().fetch(client.uri(remote), client.options(), request),
-                        "upload-pack");
-                repository.publishPack(target.complete());
-                String localTrackingRef = trackingRef(remoteName, branch);
-                String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
-                List<RefUpdateResult> results = repository.publishRefs(
-                        List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
-                if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
-                    throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
-                }
+            GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                    List.of(wantedId),
+                    haves.stream().map(ObjectId::toHex).toList(),
+                    input -> {
+                        try (PackIngestor ingestor = new PackIngestor(input, repository.storage(), access)) {
+                            return ingestor.ingest();
+                        }
+                    },
+                    ignored -> { });
+            PackMetadata pack = OrionGitClient.requireSuccess(
+                    client.uploadPack().fetch(client.uri(remote), client.options(), request),
+                    "upload-pack").pack();
+            repository.publishPack(pack);
+            String localTrackingRef = trackingRef(remoteName, branch);
+            String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
+            List<RefUpdateResult> results = repository.publishRefs(
+                    List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
+            if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
+                throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
             }
             return null;
         });

@@ -1,7 +1,6 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
@@ -29,9 +28,11 @@ final class GitBlockingClientWire {
     private static final int MAXIMUM_REPORT_STATUS_BYTES = 1024 * 1024;
 
     private final GitBlockingWireTransport wire;
+    private final BufferedByteInputV2 input;
 
     GitBlockingClientWire(GitClientTransportSession session) {
-        wire = new GitBlockingWireTransport(session.input(), session.output());
+        input = session.input();
+        wire = new GitBlockingWireTransport(input, session.output());
     }
 
     GitRemoteAdvertisement readAdvertisement()
@@ -55,7 +56,7 @@ final class GitBlockingClientWire {
     }
 
     void writeUploadRequest(
-            GitUploadPackRequest request,
+            GitUploadPackRequest<?> request,
             GitRemoteAdvertisement advertisement)
             throws IOException, GitClientProtocolException {
         Set<String> capabilities = advertisement.capabilities();
@@ -82,8 +83,8 @@ final class GitBlockingClientWire {
         wire.flush();
     }
 
-    long readUploadPack(
-            GitUploadPackRequest request,
+    <T> GitUploadPackResult<T> readUploadPack(
+            GitUploadPackRequest<T> request,
             GitRemoteAdvertisement advertisement,
             long maximumPackBytes)
             throws IOException, GitClientProtocolException {
@@ -99,7 +100,7 @@ final class GitBlockingClientWire {
                         "Expected upload-pack negotiation response");
             }
             if (sideBand && isSideBand(data.content())) {
-                return readSideBandPack(packet, request, maximumPackBytes);
+                return readPack(packet, request, advertisement, maximumPackBytes);
             }
             String line = stripLf(text(
                     data.content(), GitClientFailure.Phase.NEGOTIATION, StandardCharsets.US_ASCII));
@@ -115,36 +116,33 @@ final class GitBlockingClientWire {
                 continue;
             }
             if (!sideBand) {
-                return readRawPack(request, maximumPackBytes);
+                return readPack(null, request, advertisement, maximumPackBytes);
             }
         }
     }
 
-    private long readRawPack(
-            GitUploadPackRequest request,
+    private <T> GitUploadPackResult<T> readPack(
+            GitPktLine first,
+            GitUploadPackRequest<T> request,
+            GitRemoteAdvertisement advertisement,
             long maximumPackBytes)
             throws IOException, GitClientProtocolException {
-        long total = 0;
-        while (true) {
-            ByteBuf buffer = Unpooled.buffer(GitBlockingWireTransport.BUFFER_CAPACITY);
-            try {
-                int read = wire.readRawInto(
-                        buffer, GitBlockingWireTransport.BUFFER_CAPACITY);
-                if (read == 0) {
-                    request.packTarget().flush();
-                    return total;
-                }
-                total += read;
-                if (total > maximumPackBytes) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
-                            GitClientFailure.Phase.PACK_TRANSFER,
-                            "Remote pack exceeds configured size limit");
-                }
-                request.packTarget().write(buffer);
-            } finally {
-                buffer.release();
+        PackInput source = new PackInput(first, request, maximumPackBytes);
+        try (BufferedByteInputV2 pack = new BufferedByteInputV2(source)) {
+            T value = request.packReader().read(pack);
+            if (source.failure != null) {
+                throw source.failure;
             }
+            if (pack.buffer() != null) {
+                throw protocolFailure(GitClientFailure.Kind.MALFORMED_RESPONSE,
+                        GitClientFailure.Phase.PACK_TRANSFER, "Unexpected unread bytes after pack reader");
+            }
+            return new GitUploadPackResult<>(advertisement, source.total, value);
+        } catch (IOException error) {
+            if (source.failure != null) {
+                throw source.failure;
+            }
+            throw error;
         }
     }
 
@@ -274,53 +272,6 @@ final class GitBlockingClientWire {
         }
         if (received.size() != expected.size()) {
             throw malformedStatus();
-        }
-    }
-
-    private long readSideBandPack(
-            GitPktLine first,
-            GitUploadPackRequest request,
-            long maximumPackBytes)
-            throws IOException, GitClientProtocolException {
-        long total = 0;
-        GitPktLine packet = first;
-        while (true) {
-            if (packet == GitPktLine.Control.FLUSH) {
-                request.packTarget().flush();
-                return total;
-            }
-            byte[] payload = requireData(packet, GitClientFailure.Phase.PACK_TRANSFER).content();
-            if (payload.length == 0) {
-                throw protocolFailure(
-                        GitClientFailure.Kind.MALFORMED_RESPONSE,
-                        GitClientFailure.Phase.PACK_TRANSFER,
-                        "Side-band packet is empty");
-            }
-            int channel = payload[0] & 0xff;
-            int dataLength = payload.length - 1;
-            if (channel == 1) {
-                total += dataLength;
-                if (total > maximumPackBytes) {
-                    throw protocolFailure(
-                            GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
-                            GitClientFailure.Phase.PACK_TRANSFER,
-                            "Remote pack exceeds configured size limit");
-                }
-                request.packTarget().write(payload, 1, dataLength);
-            } else if (channel == 2) {
-                request.progress().accept(new String(payload, 1, dataLength, StandardCharsets.UTF_8));
-            } else if (channel == 3) {
-                throw protocolFailure(
-                        GitClientFailure.Kind.SIDE_BAND_ERROR,
-                        GitClientFailure.Phase.PACK_TRANSFER,
-                        sanitized(new String(payload, 1, dataLength, StandardCharsets.UTF_8)));
-            } else {
-                throw protocolFailure(
-                        GitClientFailure.Kind.MALFORMED_RESPONSE,
-                        GitClientFailure.Phase.PACK_TRANSFER,
-                        "Unknown Git side-band channel");
-            }
-            packet = readPacket(GitClientFailure.Phase.PACK_TRANSFER);
         }
     }
 
@@ -636,6 +587,79 @@ final class GitBlockingClientWire {
             this.objectId = objectId;
             this.name = name;
         }
+    }
+
+    /** Borrows the session input and exposes only pack payload, preserving protocol failure details. */
+    private final class PackInput implements BufferedByteInputV2.Source {
+        private final GitUploadPackRequest<?> request;
+        private final long maximumBytes;
+        private final boolean sideBand;
+        private GitPktLine first;
+        private long total;
+        private GitClientProtocolException failure;
+
+        private PackInput(GitPktLine first, GitUploadPackRequest<?> request, long maximumBytes) {
+            this.first = first;
+            this.request = request;
+            this.maximumBytes = maximumBytes;
+            sideBand = first != null;
+        }
+
+        @Override
+        public ByteBuffer read() throws IOException {
+            try {
+                ByteBuffer bytes = sideBand ? readPayload() : input.buffer();
+                if (bytes != null) {
+                    if (bytes.remaining() > maximumBytes - total) {
+                        throw protocolFailure(GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
+                                GitClientFailure.Phase.PACK_TRANSFER, "Remote pack exceeds configured size limit");
+                    }
+                    total += bytes.remaining();
+                }
+                return bytes;
+            } catch (GitClientProtocolException error) {
+                failure = error;
+                throw new IOException(error);
+            }
+        }
+
+        private ByteBuffer readPayload() throws IOException, GitClientProtocolException {
+            while (true) {
+                GitPktLine packet = first;
+                first = null;
+                if (packet == null) {
+                    packet = readPacket(GitClientFailure.Phase.PACK_TRANSFER);
+                }
+                if (packet == GitPktLine.Control.FLUSH) {
+                    return null;
+                }
+                byte[] payload = requireData(packet, GitClientFailure.Phase.PACK_TRANSFER).content();
+                if (payload.length == 0) {
+                    throw protocolFailure(GitClientFailure.Kind.MALFORMED_RESPONSE,
+                            GitClientFailure.Phase.PACK_TRANSFER, "Side-band packet is empty");
+                }
+                int channel = payload[0] & 0xff;
+                if (channel == 1) {
+                    return ByteBuffer.wrap(payload, 1, payload.length - 1);
+                }
+                if (channel == 2) {
+                    request.progress().accept(new String(payload, 1, payload.length - 1, StandardCharsets.UTF_8));
+                } else if (channel == 3) {
+                    throw protocolFailure(GitClientFailure.Kind.SIDE_BAND_ERROR,
+                            GitClientFailure.Phase.PACK_TRANSFER,
+                            sanitized(new String(payload, 1, payload.length - 1, StandardCharsets.UTF_8)));
+                } else {
+                    throw protocolFailure(GitClientFailure.Kind.MALFORMED_RESPONSE,
+                            GitClientFailure.Phase.PACK_TRANSFER, "Unknown Git side-band channel");
+                }
+            }
+        }
+
+        @Override
+        public void release() { }
+
+        @Override
+        public void close() { }
     }
 
     private static final class LimitedPackOutput implements BufferedByteOutput {

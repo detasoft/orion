@@ -101,18 +101,13 @@ class RawPackInteroperabilityTest {
 
     private static void fetch(GitUploadPackClient client, GitRemoteRepository remote, String want,
             List<String> haves, NativeGitRepository copy) throws Exception {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitUploadPackResult result = OrionGitClient.requireSuccess(client.fetch(URI.create(remote.uri()),
-                GitClientOptions.defaults(), new GitUploadPackRequest(List.of(want), haves,
-                        new OutputStreamBufferedByteOutput(bytes), ignored -> { })), "raw fetch");
+        GitUploadPackResult<PackMetadata> result = OrionGitClient.requireSuccess(client.fetch(URI.create(remote.uri()),
+                GitClientOptions.defaults(), new GitUploadPackRequest<>(List.of(want), haves,
+                        copy::ingest, ignored -> { })), "raw fetch");
         assertThat(result.advertisement().capabilities()).contains("multi_ack_detailed")
                 .doesNotContain("side-band", "side-band-64k");
-        assertThat(result.packBytes()).isEqualTo(bytes.size());
-        assertThat(bytes.toByteArray()).startsWith("PACK".getBytes(StandardCharsets.US_ASCII));
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
-                PackMetadata pack = copy.ingest(input);
-            copy.publishPack(pack).packChecksum();
-        }
+        assertThat(result.packBytes()).isPositive();
+        copy.publishPack(result.pack());
     }
 
     private static GitClientTransport withoutSideBand(GitClientTransport transport) {

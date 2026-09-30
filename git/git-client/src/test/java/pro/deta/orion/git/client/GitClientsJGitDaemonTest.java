@@ -11,7 +11,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -37,21 +36,21 @@ class GitClientsJGitDaemonTest {
             assertThat(repositoryUri.getPort()).isPositive();
             GitClientOptions options = GitClientOptions.defaults();
 
-            ByteArrayOutputStream pack = new ByteArrayOutputStream();
             GitClientTransport transport = new GitRemoteClientTransport(null, GitCredentials.none(), Set.of(), false);
-            GitClientResult<GitUploadPackResult> fetch =
+            GitClientResult<GitUploadPackResult<Long>> fetch =
                     new GitUploadPackClient(transport).fetch(
                             repositoryUri,
                             options,
                             GitUploadPackRequest.of(
                                     testRepository.commitId(),
-                                    new OutputStreamBufferedByteOutput(pack)));
+                                    input -> {
+                                        assertThat(input.readInt()).isEqualTo(0x5041434b);
+                                        return input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                                    }));
 
             assertThat(fetch).isInstanceOf(GitClientResult.Success.class);
-            GitUploadPackResult fetchResult = success(fetch);
+            GitUploadPackResult<Long> fetchResult = success(fetch);
             assertThat(fetchResult.packBytes()).isPositive();
-            assertThat(pack.toByteArray()).startsWith(
-                    "PACK".getBytes(StandardCharsets.US_ASCII));
 
             ObjectId createdCommit = commit(testRepository.sourcePath(),
                     "Create branch through receive-pack\n");

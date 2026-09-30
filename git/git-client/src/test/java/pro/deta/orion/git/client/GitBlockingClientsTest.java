@@ -4,9 +4,9 @@ import io.netty.buffer.ByteBuf;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -31,6 +31,77 @@ class GitBlockingClientsTest {
     private static final URI REMOTE = URI.create("ssh://example.test/repository.git");
 
     @Test
+    void returnsReaderValueAfterConsumingTrailingProgressAndClosesBorrowedInput() {
+        List<String> progress = new ArrayList<>();
+        BufferedByteInputV2[] borrowed = new BufferedByteInputV2[1];
+        RecordingTransport transport = new RecordingTransport(concat(advertisement("side-band"),
+                packet("NAK\n"), sideBandPacket(1, new byte[]{1, 2, 3}),
+                sideBandPacket(2, "finished\n".getBytes(StandardCharsets.UTF_8)), flush()));
+        GitUploadPackRequest<String> request = new GitUploadPackRequest<>(List.of(OLD_ID), List.of(), input -> {
+            borrowed[0] = input;
+            assertThat(transport.session.closed).isFalse();
+            assertThat(progress).isEmpty();
+            assertThat(input.readBytes(3)).containsExactly(1, 2, 3);
+            assertThat(progress).isEmpty();
+            return "parsed";
+        }, progress::add);
+
+        GitUploadPackResult<String> result = success(new GitUploadPackClient(transport)
+                .fetch(REMOTE, GitClientOptions.defaults(), request));
+
+        assertThat(result.pack()).isEqualTo("parsed");
+        assertThat(result.packBytes()).isEqualTo(3);
+        assertThat(progress).containsExactly("finished\n");
+        assertThat(transport.session.closed).isTrue();
+        assertThatThrownBy(() -> borrowed[0].buffer()).isInstanceOf(IOException.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"fatal,SIDE_BAND_ERROR", "missing,UNEXPECTED_END_OF_STREAM", "trailing,MALFORMED_RESPONSE"})
+    void rejectsResponseErrorsAfterTheReaderReturns(String ending, GitClientFailure.Kind kind) {
+        byte[] tail = switch (ending) {
+            case "fatal" -> sideBandPacket(3, "failed\n".getBytes(StandardCharsets.UTF_8));
+            case "missing" -> new byte[0];
+            default -> concat(sideBandPacket(1, new byte[]{4}), flush());
+        };
+        RecordingTransport transport = new RecordingTransport(concat(advertisement("side-band"),
+                packet("NAK\n"), sideBandPacket(1, new byte[]{1, 2, 3}), tail));
+        GitClientResult<GitUploadPackResult<byte[]>> result = new GitUploadPackClient(transport).fetch(
+                REMOTE, GitClientOptions.defaults(), GitUploadPackRequest.of(OLD_ID, input -> input.readBytes(3)));
+
+        assertThat(failure(result).kind()).isEqualTo(kind);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.PACK_TRANSFER);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void enforcesFetchPackLimitWhileTheReaderPulls(boolean sideBand) {
+        byte[] data = new byte[]{1, 2, 3, 4};
+        RecordingTransport transport = new RecordingTransport(concat(advertisement(sideBand ? "side-band" : ""),
+                packet("NAK\n"), sideBand ? concat(sideBandPacket(1, data), flush()) : data));
+        GitClientOptions defaults = GitClientOptions.defaults();
+        GitClientOptions options = new GitClientOptions(defaults.connectTimeout(), defaults.readTimeout(),
+                defaults.writeTimeout(), defaults.operationTimeout(), 3);
+        GitClientResult<GitUploadPackResult<byte[]>> result = new GitUploadPackClient(transport).fetch(
+                REMOTE, options, GitUploadPackRequest.of(OLD_ID, input -> input.newInputStream().readAllBytes()));
+
+        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.PACK_TRANSFER);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
+    void closesTransportWhenThePackReaderFails() {
+        IOException error = new IOException("reader failure");
+        RecordingTransport transport = new RecordingTransport(concat(advertisement(""), packet("NAK\n")));
+        GitClientResult<GitUploadPackResult<Object>> result = new GitUploadPackClient(transport).fetch(
+                REMOTE, GitClientOptions.defaults(), GitUploadPackRequest.of(OLD_ID, input -> { throw error; }));
+        assertThat(failure(result).cause()).isSameAs(error);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
     void fetchesLargeSideBandPackOnVirtualThreadFromFragmentedInput()
             throws Exception {
         byte[] firstPackPart = new byte[65_000];
@@ -49,17 +120,17 @@ class GitBlockingClientsTest {
         RecordingTransport transport = new RecordingTransport(response);
         ByteArrayOutputStream pack = new ByteArrayOutputStream();
         List<String> progress = new ArrayList<>();
-        GitUploadPackRequest request = new GitUploadPackRequest(
+        GitUploadPackRequest<Long> request = new GitUploadPackRequest<>(
                 List.of(OLD_ID),
                 List.of(NEW_ID),
-                new OutputStreamBufferedByteOutput(pack),
+                input -> input.newInputStream().transferTo(pack),
                 progress::add);
 
-        GitClientResult<GitUploadPackResult> result =
+        GitClientResult<GitUploadPackResult<Long>> result =
                 new GitUploadPackClient(transport).fetch(
                         REMOTE, GitClientOptions.defaults(), request);
 
-        GitUploadPackResult value = success(result);
+        GitUploadPackResult<Long> value = success(result);
         assertThat(value.packBytes()).isEqualTo(70_000);
         assertThat(pack.toByteArray()).isEqualTo(concat(
                 firstPackPart, secondPackPart));
@@ -85,13 +156,13 @@ class GitBlockingClientsTest {
                 packet("NAK\n"),
                 packBytes));
         ByteArrayOutputStream pack = new ByteArrayOutputStream();
-        GitUploadPackRequest request = new GitUploadPackRequest(
+        GitUploadPackRequest<Long> request = new GitUploadPackRequest<>(
                 List.of(OLD_ID),
                 List.of(),
-                new OutputStreamBufferedByteOutput(pack),
+                input -> input.newInputStream().transferTo(pack),
                 ignored -> { });
 
-        GitClientResult<GitUploadPackResult> result =
+        GitClientResult<GitUploadPackResult<Long>> result =
                 new GitUploadPackClient(transport).fetch(
                         REMOTE, GitClientOptions.defaults(), request);
 
@@ -112,9 +183,9 @@ class GitBlockingClientsTest {
                 packet("ACK " + NEW_ID + " ready\n"),
                 packet("ACK " + NEW_ID + "\n"), packBytes));
         ByteArrayOutputStream pack = new ByteArrayOutputStream();
-        GitUploadPackRequest request = new GitUploadPackRequest(List.of(OLD_ID), List.of(NEW_ID),
-                new OutputStreamBufferedByteOutput(pack), ignored -> { });
-        GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+        GitUploadPackRequest<Long> request = new GitUploadPackRequest<>(List.of(OLD_ID), List.of(NEW_ID),
+                input -> input.newInputStream().transferTo(pack), ignored -> { });
+        GitClientResult<GitUploadPackResult<Long>> result = new GitUploadPackClient(transport)
                 .fetch(REMOTE, GitClientOptions.defaults(), request);
         assertThat(success(result).packBytes()).isEqualTo(packBytes.length);
         assertThat(pack.toByteArray()).isEqualTo(packBytes);
@@ -129,10 +200,10 @@ class GitBlockingClientsTest {
                     packet("ACK " + OLD_ID + suffix + " common\n"), packet("NAK\n"),
                     "PACKpayload".getBytes(StandardCharsets.US_ASCII)));
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
-            GitUploadPackRequest request = GitUploadPackRequest.of(
-                    OLD_ID, new OutputStreamBufferedByteOutput(pack));
+            GitUploadPackRequest<Long> request = GitUploadPackRequest.of(
+                    OLD_ID, input -> input.newInputStream().transferTo(pack));
 
-            GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+            GitClientResult<GitUploadPackResult<Long>> result = new GitUploadPackClient(transport)
                     .fetch(REMOTE, GitClientOptions.defaults(), request);
 
             assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
@@ -147,9 +218,9 @@ class GitBlockingClientsTest {
         RecordingTransport transport = new RecordingTransport(concat(advertisement("multi_ack_detailed"),
                 packet("ACK " + NEW_ID + " common\n")));
         ByteArrayOutputStream pack = new ByteArrayOutputStream();
-        GitUploadPackRequest request = new GitUploadPackRequest(List.of(OLD_ID), List.of(NEW_ID),
-                new OutputStreamBufferedByteOutput(pack), ignored -> { });
-        GitClientResult<GitUploadPackResult> result = new GitUploadPackClient(transport)
+        GitUploadPackRequest<Long> request = new GitUploadPackRequest<>(List.of(OLD_ID), List.of(NEW_ID),
+                input -> input.newInputStream().transferTo(pack), ignored -> { });
+        GitClientResult<GitUploadPackResult<Long>> result = new GitUploadPackClient(transport)
                 .fetch(REMOTE, GitClientOptions.defaults(), request);
         assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.UNEXPECTED_END_OF_STREAM);
         assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.NEGOTIATION);
@@ -178,11 +249,11 @@ class GitBlockingClientsTest {
         RecordingTransport transport = new RecordingTransport(concat(
                 advertisement("side-band-64k"),
                 packet("NAK\n")));
-        GitUploadPackRequest request = GitUploadPackRequest.of(
+        GitUploadPackRequest<Long> request = GitUploadPackRequest.of(
                 OLD_ID,
-                new RecordingOutput());
+                input -> input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream()));
 
-        GitClientResult<GitUploadPackResult> result =
+        GitClientResult<GitUploadPackResult<Long>> result =
                 new GitUploadPackClient(transport).fetch(
                         REMOTE, GitClientOptions.defaults(), request);
 
@@ -580,10 +651,10 @@ class GitBlockingClientsTest {
                 packet("NAK\n"),
                 sideBandPacket(2, "progress\n".getBytes(StandardCharsets.UTF_8)),
                 flush()));
-        GitUploadPackRequest request = new GitUploadPackRequest(
+        GitUploadPackRequest<Long> request = new GitUploadPackRequest<>(
                 List.of(OLD_ID),
                 List.of(),
-                new RecordingOutput(),
+                input -> input.newInputStream().transferTo(java.io.OutputStream.nullOutputStream()),
                 ignored -> {
                     throw new IllegalStateException("progress callback failed");
                 });
