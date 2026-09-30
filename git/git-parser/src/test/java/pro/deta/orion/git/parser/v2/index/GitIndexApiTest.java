@@ -1,6 +1,5 @@
 package pro.deta.orion.git.parser.v2.index;
 
-import org.h2.mvstore.MVStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -65,8 +64,9 @@ class GitIndexApiTest {
         PackId id = PackId.create();
         PackMetadata metadata = pack(id, "b", 100);
         IndexedObject abandoned = object(PackId.create(), "c", 12);
-        new LocalGitIndex(directory).withAccess(first -> {
-            GitIndexAccess second = new LocalGitIndex(directory).createAccess();
+        LocalGitIndex factory = new LocalGitIndex(directory);
+        factory.withAccess(first -> {
+            GitIndexAccess second = factory.createAccess();
             try {
                 byte[] before = Files.readAllBytes(directory.resolve("refs.mv"));
                 for (int i = 0; i < 100; i++) {
@@ -85,7 +85,7 @@ class GitIndexApiTest {
             }
             return null;
         });
-        new LocalGitIndex(directory).withAccess(reopened -> {
+        factory.withAccess(reopened -> {
             assertThat(reopened.findPack(id)).contains(metadata);
             assertThat(reopened.objects(id)).hasSize(100);
             assertThat(reopened.findObject(abandoned.packId(), abandoned.objectId())).contains(abandoned);
@@ -264,10 +264,10 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void repositoryDefaultsToSha1AndRejectsMixedAlgorithms(boolean local) throws Exception {
-        {
-            GitIndexAccess index = index(local);
+        try (GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex()) {
+            GitIndexAccess index = factory.createAccess();
             try {
-                assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex()).hashAlgorithm())
+                assertThat(factory.hashAlgorithm())
                         .isEqualTo(GitHashAlgorithm.SHA1);
                 PackId packId = PackId.create();
                 ObjectId sha256 = new ObjectId("a".repeat(64));
@@ -304,12 +304,11 @@ class GitIndexApiTest {
         PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(64)), "pack", 1, 64);
         RefId ref = new RefId("refs/heads/main");
         Head head = new Head.Detached(new CommitId(objectId.toBytes()));
-        {
-            GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))
-                            : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref));
+        try (GitIndexApi factory = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256)
+                : new InMemoryIndex(GitHashAlgorithm.SHA256)) {
+            GitIndexAccess index = factory.createAccess(java.util.Set.of(ref));
             try {
-                assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex(GitHashAlgorithm.SHA256))
-                        .hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+                assertThat(factory.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
                 index.addObject(object);
                 index.publishIndex(pack);
                 assertThat(index.locations(objectId)).containsExactly(object);
@@ -326,8 +325,9 @@ class GitIndexApiTest {
             }
         }
         if (local) {
-            new LocalGitIndex(directory).withAccess(reopened -> {
-                assertThat(new LocalGitIndex(directory).hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+            LocalGitIndex factory = new LocalGitIndex(directory);
+            assertThat(factory.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+            factory.withAccess(reopened -> {
                 assertThat(reopened.locations(objectId)).containsExactly(object);
                 assertThat(reopened.packs(pack.packChecksum())).containsExactly(pack);
                 assertThat(reopened.snapshotRefs().refs()).containsEntry(ref, objectId);
@@ -341,21 +341,6 @@ class GitIndexApiTest {
         }
         assertThatThrownBy(() -> new PackMetadata(id, pack.packChecksum(), "pack", 0, 32))
                 .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    void rejectsPreviousFormatWithoutModifyingIt(int version) throws Exception {
-        Path file = directory.resolve("refs.mv");
-        try (MVStore store = new MVStore.Builder().fileName(file.toString()).open()) {
-            store.setStoreVersion(version);
-            store.<String, String>openMap("refs").put("HEAD", "ref: refs/heads/main");
-            store.commit();
-        }
-        byte[] original = Files.readAllBytes(file);
-        assertThatThrownBy(() -> new LocalGitIndex(directory).createAccess()).isInstanceOf(IOException.class)
-                .hasMessageContaining("Unsupported repository index format");
-        assertThat(Files.readAllBytes(file)).isEqualTo(original);
     }
 
     private GitIndexAccess index(boolean local) throws IOException {

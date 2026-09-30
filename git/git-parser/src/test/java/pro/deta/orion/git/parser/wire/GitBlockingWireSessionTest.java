@@ -44,6 +44,7 @@ class GitBlockingWireSessionTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
+    private LocalGitIndex factory;
     private GitIndexAccess index;
     private int opens;
     private GitIndexAccess servedAccess;
@@ -51,7 +52,8 @@ class GitBlockingWireSessionTest {
     @BeforeEach
     void openStorage() throws Exception {
         storage = new LocalGitStorage(directory);
-        index = new LocalGitIndex(directory).createAccess();
+        factory = new LocalGitIndex(directory);
+        index = factory.createAccess();
     }
 
     @AfterEach
@@ -63,6 +65,7 @@ class GitBlockingWireSessionTest {
 
                 } finally {
                     ownedIndex.discard();
+                    factory.close();
                 }
             }
         }
@@ -188,7 +191,7 @@ class GitBlockingWireSessionTest {
                 ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
         ObjectId outer = PackTestData.store(storage, index, GitObjectType.TAG,
                 ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
-        publishRefs(storage, new LocalGitIndex(directory), List.of(
+        publishRefs(storage, factory, List.of(
                 new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
                 new RefUpdate(new RefId("refs/tags/lightweight"), Optional.empty(), Optional.of(target)),
                 new RefUpdate(new RefId("refs/tags/nested"), Optional.empty(), Optional.of(outer))), true);
@@ -268,7 +271,7 @@ class GitBlockingWireSessionTest {
     private ObjectId publish() throws Exception {
         ObjectId id = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
         publishRefs(
-                storage, new LocalGitIndex(directory),
+                storage, factory,
                 List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
         return id;
     }
@@ -284,7 +287,7 @@ class GitBlockingWireSessionTest {
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
-            GitRepositoryContext repository = new GitRepositoryContext(storage, new LocalGitIndex(directory));
+            GitRepositoryContext repository = new GitRepositoryContext(storage, factory);
             servedAccess = repository.index();
             return repository;
         }, configuration, wire);

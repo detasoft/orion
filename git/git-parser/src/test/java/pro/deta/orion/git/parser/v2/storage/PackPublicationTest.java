@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -74,7 +75,8 @@ class PackPublicationTest {
     void concurrentIdenticalLoadsPublishIndependentPacks(boolean memory) throws Exception {
         {
             try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
+                GitIndexApi factory = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexAccess index = factory.createAccess();
                 try {
                     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
                         byte[] input = pack(blob(new byte[]{1}));
@@ -90,7 +92,7 @@ class PackPublicationTest {
                             }
                             {
                                 try (GitStorageApi otherStorage = new LocalGitStorage(directory)) {
-                                    GitIndexAccess otherIndex = new LocalGitIndex(directory).createAccess();
+                                    GitIndexAccess otherIndex = factory.createAccess();
                                     try {
                                         return publish(input, otherStorage, otherIndex);
                                     } finally {

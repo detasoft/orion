@@ -37,22 +37,26 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 /**
- * Persistent repository index. Connections share one open store per canonical repository path.
- * Store ownership is synchronized separately from refs and pack operations. Entries stay hidden until publication.
+ * One persistent index owns a repository. Its accesses share one store, opened while accesses are active.
+ * Independent ingestions write distinct packs concurrently. Entries stay hidden until publication.
  * Pack publication, apply and the last connection close commit and sync the store. Ref updates stay
  * private until apply atomically compares and updates the shared refs. Secondary maps contain lookup keys.
+ * Refs are persisted as one snapshot replaced through MVMap CAS; unrelated ref changes are merged on retry.
  */
 public final class LocalGitIndex implements GitIndexApi {
     private static final RefId HEAD = new RefId("HEAD");
     private static final String SYMBOLIC = "ref: ";
     private static final Set<String> MAPS = Set.of("refs", "settings", "objects", "locations", "packs", "checksums");
-    private static final Map<Path, SharedStore> STORES = new LinkedHashMap<>();
+    private static final String REFS_SNAPSHOT = "snapshot";
     private final Path path;
-    private boolean closed;
+    private MVStore store;
+    private int accesses;
+    private volatile boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
 
     public LocalGitIndex(Path repository) throws IOException {
@@ -64,52 +68,72 @@ public final class LocalGitIndex implements GitIndexApi {
     }
 
     private LocalGitIndex(Path repository, Optional<GitHashAlgorithm> requestedAlgorithm) throws IOException {
-        Path root = repository.toRealPath();
-        path = root.resolve("refs.mv");
+        path = repository.toRealPath().resolve("refs.mv");
+        MVStore store = acquireStore(true, requestedAlgorithm);
         try {
-            synchronized (STORES) {
-                checkInterrupted();
-                SharedStore existing = STORES.get(path);
-                if (existing != null) {
-                    validateFormat(existing.store);
-                    hashAlgorithm = readHashAlgorithm(existing.store);
-                    requireAlgorithm(requestedAlgorithm, hashAlgorithm);
+            hashAlgorithm = readHashAlgorithm(store);
+            readHead(readRefs(store));
+        } finally {
+            releaseStore();
+        }
+    }
 
+    private synchronized MVStore acquireStore(boolean create, Optional<GitHashAlgorithm> requested)
+            throws IOException {
+        checkInterrupted();
+        if (closed) throw new IOException("Repository index is closed");
+        if (store != null) {
+            if (store.isClosed()) throw new IOException("Repository index is closed");
+            accesses++;
+            return store;
+        }
+        boolean missing = Files.notExists(path);
+        if ((!create || !missing) && !Files.isRegularFile(path)) {
+            throw new IOException("Repository index file is missing: " + path);
+        }
+        try {
+            MVStore opened = open();
+            try {
+                if (missing) {
+                    for (String name : MAPS) map(opened, name);
+                    map(opened, "settings").put("objectFormat",
+                            requested.orElse(GitHashAlgorithm.SHA1).wireName());
+                    map(opened, "refs").put(REFS_SNAPSHOT,
+                            encodeRefs(Map.of(HEAD.value(), SYMBOLIC + "refs/heads/main")));
                 } else {
-                    boolean create = Files.notExists(path);
-                    if (!create) {
-                        try (MVStore previous = open(true)) {
-                            validateFormat(previous);
-                            requireAlgorithm(requestedAlgorithm, readHashAlgorithm(previous));
-                        }
-                    }
-                    MVStore store = open(false);
-                    try {
-                        if (create) {
-                            store.setStoreVersion(3);
-                            for (String name : MAPS) {
-                                map(store, name);
-                            }
-                            map(store, "settings").put("objectFormat",
-                                    requestedAlgorithm.orElse(GitHashAlgorithm.SHA1).wireName());
-                            map(store, "refs").put(HEAD.value(), SYMBOLIC + "refs/heads/main");
-                            store.commit();
-                            store.sync();
-                            try (FileChannel directory = FileChannel.open(root, StandardOpenOption.READ)) {
-                                directory.force(true);
-                            }
-                        }
-                        hashAlgorithm = readHashAlgorithm(store);
-                        readHead(map(store, "refs"));
-                        store.closeImmediately();
-                    } catch (IOException | RuntimeException | Error failure) {
-                        store.closeImmediately();
-                        throw failure;
+                    validateFormat(opened);
+                    requireAlgorithm(requested, readHashAlgorithm(opened));
+                }
+                opened.commit();
+                opened.sync();
+                if (missing) {
+                    try (FileChannel directory = FileChannel.open(path.getParent(), StandardOpenOption.READ)) {
+                        directory.force(true);
                     }
                 }
+                store = opened;
+                accesses = 1;
+                return opened;
+            } catch (IOException | RuntimeException | Error failure) {
+                opened.closeImmediately();
+                throw failure;
             }
-        } catch (MVStoreException | IllegalArgumentException error) {
-            throw storageFailure(error);
+        } catch (MVStoreException | IllegalArgumentException failure) {
+            throw storageFailure(failure);
+        }
+    }
+
+    private synchronized void releaseStore() {
+        if (--accesses != 0) return;
+        MVStore released = store;
+        store = null;
+        try {
+            if (!released.isClosed()) {
+                released.commit();
+                released.sync();
+            }
+        } finally {
+            released.closeImmediately();
         }
     }
 
@@ -143,90 +167,50 @@ public final class LocalGitIndex implements GitIndexApi {
     }
 
     private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates) throws IOException {
+        Access access = new Access(acquireStore(false, Optional.of(hashAlgorithm)));
         try {
-            synchronized (STORES) {
-                checkInterrupted();
-                if (closed) throw new IOException("Repository index is closed");
-                SharedStore shared = STORES.get(path);
-                if (shared == null) {
-                    if (!Files.isRegularFile(path)) {
-                        throw new IOException("Repository index file is missing: " + path);
-                    }
-                    MVStore store = open(false);
-                    try {
-                        validateFormat(store);
-                        if (readHashAlgorithm(store) != hashAlgorithm) {
-                            throw new IOException("Repository hash algorithm changed");
-                        }
-                        shared = new SharedStore(store);
-                        STORES.put(path, shared);
-                    } catch (IOException | RuntimeException | Error failure) {
-                        store.closeImmediately();
-                        throw failure;
-                    }
-                } else {
-                    if (shared.store.isClosed()) {
-                        throw new IOException("Repository index is closed");
-                    }
-                    shared.owners++;
-                }
-                Access access = new Access(shared);
-                try {
-                    synchronized (shared.store) {
-                        MVMap<String, String> refs = map(shared.store, "refs");
-                        for (RefId ref : names) {
-                            access.originalRefs.put(ref,
-                                    Optional.ofNullable(refs.get(ref.value())).map(ObjectId::new));
-                        }
-                    }
-                    for (RefUpdate update : updates) {
-                        Optional<ObjectId> actual = access.originalRefs.get(update.ref());
-                        if (!actual.equals(update.expectedOld())) {
-                            throw new GitRefConflictException(update, actual);
-                        }
-                    }
-                    for (RefUpdate update : updates) {
-                        access.changedRefs.put(update.ref(), update.newId());
-                    }
-                    return access;
-                } catch (IOException | RuntimeException | Error failure) {
-                    try {
-                        access.release();
-                    } catch (RuntimeException | Error cleanup) {
-                        failure.addSuppressed(cleanup);
-                    }
-                    throw failure;
-                }
+            Map<String, String> refs = readRefs(access.store);
+            for (RefId ref : names) {
+                access.originalRefs.put(ref, Optional.ofNullable(refs.get(ref.value())).map(ObjectId::new));
             }
-        } catch (MVStoreException | IllegalArgumentException error) {
-            throw storageFailure(error);
+            for (RefUpdate update : updates) {
+                Optional<ObjectId> actual = access.originalRefs.get(update.ref());
+                if (!actual.equals(update.expectedOld())) throw new GitRefConflictException(update, actual);
+                access.changedRefs.put(update.ref(), update.newId());
+            }
+            return access;
+        } catch (IOException | RuntimeException | Error failure) {
+            try {
+                access.discard();
+            } catch (IOException | RuntimeException | Error cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
         }
     }
 
     @Override
     public void close() {
-        synchronized (STORES) {
-            closed = true;
-        }
+        closed = true;
     }
 
     private final class Access implements GitIndexAccess {
-        private final SharedStore shared;
+        private final MVStore store;
         private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
         private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
         private String originalHead;
         private String changedHead;
         private boolean closed;
 
-        private Access(SharedStore shared) {
-            this.shared = shared;
+        private Access(MVStore store) {
+            this.store = store;
         }
 
         @Override
         public void addObject(IndexedObject object) throws IOException {
             hashAlgorithm.requireLength(object.objectId().byteLength());
             object.delta().ifPresent(delta -> hashAlgorithm.requireLength(delta.baseId().byteLength()));
-            withStore(shared.packs, false, store -> {
+            withStore(false, store -> {
                 MVMap<String, String> objects = map(store, "objects");
                 String key = objectKey(object);
                 String value = encode(object);
@@ -270,7 +254,7 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public List<IndexedObject> locations(ObjectId objectId) throws IOException {
             Objects.requireNonNull(objectId, "objectId");
-            return withStore(shared.packs, false, store -> {
+            return withStore(false, store -> {
                 String prefix = objectId.toHex() + ":";
                 MVMap<String, String> objects = map(store, "objects");
                 MVMap<String, String> packs = map(store, "packs");
@@ -289,7 +273,7 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public Optional<PackMetadata> findPack(PackId packId) throws IOException {
             Objects.requireNonNull(packId, "packId");
-            return withStore(shared.packs, false, store -> {
+            return withStore(false, store -> {
                 String value = map(store, "packs").get(packId.toString());
                 return value == null ? Optional.empty() : Optional.of(decodePack(packId, value));
             });
@@ -298,13 +282,14 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public List<PackMetadata> packs(PackChecksum checksum) throws IOException {
             Objects.requireNonNull(checksum, "checksum");
-            return withStore(shared.packs, false, store -> {
+            return withStore(false, store -> {
                 String prefix = checksum.toHex() + ":";
                 MVMap<String, String> packs = map(store, "packs");
                 List<PackMetadata> result = new ArrayList<>();
                 for (String key : keys(map(store, "checksums"), prefix)) {
                     PackId id = new PackId(key.substring(prefix.length()));
-                    result.add(decodePack(id, packs.get(id.toString())));
+                    String value = packs.get(id.toString());
+                    if (value != null) result.add(decodePack(id, value));
                 }
                 return List.copyOf(result);
             });
@@ -312,7 +297,7 @@ public final class LocalGitIndex implements GitIndexApi {
 
         @Override
         public List<PackMetadata> packs() throws IOException {
-            return withStore(shared.packs, false, store -> {
+            return withStore(false, store -> {
                 List<PackMetadata> result = new ArrayList<>();
                 for (Map.Entry<String, String> entry : map(store, "packs").entrySet()) {
                     result.add(decodePack(new PackId(entry.getKey()), entry.getValue()));
@@ -324,7 +309,8 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public PackMetadata publishIndex(PackMetadata pack) throws IOException {
             hashAlgorithm.requireLength(pack.packChecksum().byteLength());
-            return withStore(shared.packs, true, store -> {
+            return withStore(true, store -> {
+                pack.validateObjects(LocalGitIndex.objects(store, pack.packId()));
                 MVMap<String, String> packs = map(store, "packs");
                 String key = pack.packId().toString();
                 String previous = packs.get(key);
@@ -334,17 +320,16 @@ public final class LocalGitIndex implements GitIndexApi {
                     }
                     return pack;
                 }
-                pack.validateObjects(LocalGitIndex.objects(store, pack.packId()));
-                packs.put(key, encode(pack));
                 map(store, "checksums").put(pack.packChecksum().toHex() + ":" + key, "");
+                packs.put(key, encode(pack));
                 return pack;
             });
         }
 
         @Override
         public RefsSnapshot snapshotRefs() throws IOException {
-            return withStore(shared.store, false, store -> {
-                MVMap<String, String> values = map(store, "refs");
+            return withStore(false, store -> {
+                Map<String, String> values = readRefs(store);
                 Head head = changedHead == null ? readHead(values)
                         : readHead(Map.of(HEAD.value(), changedHead));
                 Map<RefId, ObjectId> refs = new LinkedHashMap<>();
@@ -376,8 +361,8 @@ public final class LocalGitIndex implements GitIndexApi {
                     yield detached.target().toHex();
                 }
             };
-            withStore(shared.store, false, store -> {
-                MVMap<String, String> refs = map(store, "refs");
+            withStore(false, store -> {
+                Map<String, String> refs = readRefs(store);
                 readHead(refs);
                 if (changedHead == null) {
                     originalHead = refs.get(HEAD.value());
@@ -406,8 +391,8 @@ public final class LocalGitIndex implements GitIndexApi {
                 return List.of();
             }
             try {
-                return withStore(shared.store, false, store -> {
-                    MVMap<String, String> refs = map(store, "refs");
+                return withStore(false, store -> {
+                    Map<String, String> refs = readRefs(store);
                     readHead(refs);
                     List<RefUpdateResult> results = new ArrayList<>(requested.size());
                     boolean failed = false;
@@ -449,29 +434,35 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public void apply() throws IOException {
             try {
-                withStore(shared.store, true, store -> {
-                    MVMap<String, String> refs = map(store, "refs");
-                    for (Map.Entry<RefId, Optional<ObjectId>> entry : changedRefs.entrySet()) {
-                        Optional<ObjectId> actual = Optional.ofNullable(refs.get(entry.getKey().value()))
-                                .map(ObjectId::new);
-                        Optional<ObjectId> expected = originalRefs.get(entry.getKey());
-                        if (!actual.equals(expected)) {
-                            throw new GitRefConflictException(
-                                    new RefUpdate(entry.getKey(), expected, entry.getValue()), actual);
+                withStore(true, store -> {
+                    MVMap<String, String> snapshots = map(store, "refs");
+                    for (;;) {
+                        checkInterrupted();
+                        String previous = snapshots.get(REFS_SNAPSHOT);
+                        Map<String, String> refs = decodeRefs(previous);
+                        for (Map.Entry<RefId, Optional<ObjectId>> entry : changedRefs.entrySet()) {
+                            Optional<ObjectId> actual = Optional.ofNullable(refs.get(entry.getKey().value()))
+                                    .map(ObjectId::new);
+                            Optional<ObjectId> expected = originalRefs.get(entry.getKey());
+                            if (!actual.equals(expected)) {
+                                throw new GitRefConflictException(
+                                        new RefUpdate(entry.getKey(), expected, entry.getValue()), actual);
+                            }
                         }
-                    }
-                    if (changedHead != null && !Objects.equals(refs.get(HEAD.value()), originalHead)) {
-                        throw new IOException("Concurrent repository HEAD modification");
-                    }
-                    for (Map.Entry<RefId, Optional<ObjectId>> entry : changedRefs.entrySet()) {
-                        if (entry.getValue().isPresent()) {
-                            refs.put(entry.getKey().value(), entry.getValue().orElseThrow().toHex());
-                        } else {
-                            refs.remove(entry.getKey().value());
+                        if (changedHead != null && !Objects.equals(refs.get(HEAD.value()), originalHead)) {
+                            throw new IOException("Concurrent repository HEAD modification");
                         }
-                    }
-                    if (changedHead != null) {
-                        refs.put(HEAD.value(), changedHead);
+                        for (Map.Entry<RefId, Optional<ObjectId>> entry : changedRefs.entrySet()) {
+                            if (entry.getValue().isPresent()) {
+                                refs.put(entry.getKey().value(), entry.getValue().orElseThrow().toHex());
+                            } else {
+                                refs.remove(entry.getKey().value());
+                            }
+                        }
+                        if (changedHead != null) {
+                            refs.put(HEAD.value(), changedHead);
+                        }
+                        if (snapshots.replace(REFS_SNAPSHOT, previous, encodeRefs(refs))) break;
                     }
                     return null;
                 });
@@ -500,10 +491,8 @@ public final class LocalGitIndex implements GitIndexApi {
         public void discard() throws IOException {
             boolean interrupted = false;
             try {
-                synchronized (STORES) {
-                    interrupted = Thread.interrupted();
-                    release();
-                }
+                interrupted = Thread.interrupted();
+                release();
             } catch (MVStoreException | IllegalArgumentException error) {
                 throw storageFailure(error);
             } finally {
@@ -518,47 +507,22 @@ public final class LocalGitIndex implements GitIndexApi {
             closed = true;
             changedRefs.clear();
             changedHead = null;
-            if (--shared.owners == 0) {
-                STORES.remove(path, shared);
-                try {
-                    if (!shared.store.isClosed()) {
-                        shared.store.commit();
-                        shared.store.sync();
-                    }
-                } finally {
-                    shared.store.closeImmediately();
-                }
-            }
-        }
-
-        private <T> T withStore(Object monitor, boolean durable, Operation<T> operation)
-                throws IOException {
-            synchronized (monitor) {
-                if (durable) {
-                    synchronized (shared.store) {
-                        return withStore(true, operation);
-                    }
-                }
-                return withStore(false, operation);
-            }
+            releaseStore();
         }
 
         private <T> T withStore(boolean durable, Operation<T> operation) throws IOException {
             try {
                 checkInterrupted();
-                if (closed || shared.store.isClosed()) {
+                if (closed || store.isClosed()) {
                     throw new IOException("Repository index is closed");
                 }
-                if (!Files.isRegularFile(path)) {
-                    throw new IOException("Repository index file is missing: " + path);
-                }
-                T result = operation.apply(shared.store);
+                T result = operation.apply(store);
                 if (durable) {
                     try {
-                        shared.store.commit();
-                        shared.store.sync();
+                        store.commit();
+                        store.sync();
                     } catch (MVStoreException failure) {
-                        shared.store.closeImmediately();
+                        store.closeImmediately();
                         throw failure;
                     }
                 }
@@ -577,24 +541,9 @@ public final class LocalGitIndex implements GitIndexApi {
         }
     }
 
-    private static final class SharedStore {
-        private final MVStore store;
-        private final MVMap<String, String> packs;
-        private int owners = 1;
-
-        private SharedStore(MVStore store) {
-            this.store = store;
-            packs = map(store, "packs");
-        }
-    }
-
-    private MVStore open(boolean readOnly) {
-        MVStore.Builder builder = new MVStore.Builder().fileName(path.toString()).cacheSize(1)
-                .autoCommitDisabled().autoCommitBufferSize(0);
-        if (readOnly) {
-            builder.readOnly();
-        }
-        return builder.open();
+    private MVStore open() {
+        return new MVStore.Builder().fileName(path.toString()).cacheSize(1)
+                .autoCommitDisabled().autoCommitBufferSize(0).open();
     }
 
     private static MVMap<String, String> map(MVStore store, String name) {
@@ -603,7 +552,7 @@ public final class LocalGitIndex implements GitIndexApi {
     }
 
     private static void validateFormat(MVStore store) throws IOException {
-        if (store.getStoreVersion() != 3 || !store.getMapNames().equals(MAPS)) {
+        if (!store.getMapNames().equals(MAPS)) {
             throw new IOException("Unsupported repository index format");
         }
     }
@@ -616,6 +565,31 @@ public final class LocalGitIndex implements GitIndexApi {
             }
         }
         throw new IOException("Invalid repository hash algorithm");
+    }
+
+    private static Map<String, String> readRefs(MVStore store) throws IOException {
+        return decodeRefs(map(store, "refs").get(REFS_SNAPSHOT));
+    }
+
+    private static String encodeRefs(Map<String, String> refs) {
+        StringBuilder result = new StringBuilder();
+        for (Map.Entry<String, String> entry : new TreeMap<>(refs).entrySet()) {
+            result.append(entry.getKey()).append('\t').append(entry.getValue()).append('\n');
+        }
+        return result.toString();
+    }
+
+    private static Map<String, String> decodeRefs(String snapshot) throws IOException {
+        if (snapshot == null) throw new IOException("Missing refs snapshot");
+        Map<String, String> refs = new LinkedHashMap<>();
+        for (String row : snapshot.split("\n")) {
+            int separator = row.indexOf('\t');
+            if (separator <= 0 || refs.putIfAbsent(row.substring(0, separator),
+                    row.substring(separator + 1)) != null) {
+                throw new IOException("Invalid refs snapshot");
+            }
+        }
+        return refs;
     }
 
     private Head readHead(Map<String, String> refs) throws IOException {

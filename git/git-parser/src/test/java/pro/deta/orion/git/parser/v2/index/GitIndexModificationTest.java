@@ -109,13 +109,14 @@ class GitIndexModificationTest {
     }
 
     @Test
-    void concurrentFacadesShareTheStoreUntilBothAccessesFinish() throws Exception {
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    void concurrentAccessesShareTheStoreUntilBothFinish() throws Exception {
+        try (GitIndexApi index = new LocalGitIndex(directory);
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             CyclicBarrier start = new CyclicBarrier(2);
             CyclicBarrier opened = new CyclicBarrier(2);
             for (int attempt = 0; attempt < 20; attempt++) {
-                Future<Void> first = executor.submit(() -> openTogether(start, opened));
-                Future<Void> second = executor.submit(() -> openTogether(start, opened));
+                Future<Void> first = executor.submit(() -> openTogether(index, start, opened));
+                Future<Void> second = executor.submit(() -> openTogether(index, start, opened));
                 first.get(10, TimeUnit.SECONDS);
                 second.get(10, TimeUnit.SECONDS);
                 assertFileUnlocked();
@@ -123,15 +124,13 @@ class GitIndexModificationTest {
         }
     }
 
-    private Void openTogether(CyclicBarrier start, CyclicBarrier opened) throws Exception {
+    private Void openTogether(GitIndexApi index, CyclicBarrier start, CyclicBarrier opened) throws Exception {
         start.await(5, TimeUnit.SECONDS);
-        try (GitIndexApi index = new LocalGitIndex(directory)) {
-            return index.withAccess(access -> {
-                opened.await(5, TimeUnit.SECONDS);
-                assertThat(access.snapshotRefs().refs()).isEmpty();
-                return null;
-            });
-        }
+        return index.withAccess(access -> {
+            opened.await(5, TimeUnit.SECONDS);
+            assertThat(access.snapshotRefs().refs()).isEmpty();
+            return null;
+        });
     }
 
     private RefUpdate update() {

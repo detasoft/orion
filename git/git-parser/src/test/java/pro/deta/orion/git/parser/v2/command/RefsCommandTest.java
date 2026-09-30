@@ -1,6 +1,8 @@
 package pro.deta.orion.git.parser.v2.command;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
@@ -48,11 +50,22 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @TempDir
     Path repository;
     private ByteBuffer source;
+    private LocalGitIndex factory;
+
+    @BeforeEach
+    void openIndex() throws Exception {
+        factory = new LocalGitIndex(repository);
+    }
+
+    @AfterEach
+    void closeIndex() {
+        factory.close();
+    }
 
     @Test
     void listsRefsWithSymbolicHeadAndFiltersByAnyRequestedPrefix() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             addRef("refs/heads/main", commit);
             addRef("refs/heads/ветка", commit);
@@ -71,7 +84,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             List<RefUpdate> updates = new ArrayList<>();
             List<String> expected = new ArrayList<>();
@@ -81,7 +94,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 expected.add(commit + " " + ref.value());
             }
             assertThat(publishRefs(
-                    storage, new LocalGitIndex(repository), updates, true)).hasSize(updates.size())
+                    storage, factory, updates, true)).hasSize(updates.size())
                     .allSatisfy(result -> assertThat(result.status()).isEqualTo(RefUpdateResult.Status.APPLIED));
 
             ByteArrayOutputStream response = new ByteArrayOutputStream();
@@ -108,7 +121,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void handlesUnbornAndDetachedHead() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             assertThat(execute(storage, index)).isEmpty();
             assertThat(execute(storage, index, "symrefs")).isEmpty();
             assertThat(execute(storage, index, "unborn")).isEmpty();
@@ -125,7 +138,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void peelsNestedTagsIncludingRefsOutsideTheTagsNamespace() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             ObjectId blob = publish(storage, index, GitObjectType.BLOB, "content");
             ObjectId inner = publish(storage, index, GitObjectType.TAG, tag(blob, "blob", "inner"));
             ObjectId outer = publish(storage, index, GitObjectType.TAG, tag(inner, "tag", "outer"));
@@ -146,7 +159,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void consumesOnlyThisRequestAndWritesNothingBeforeItsFlush() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             OutputStreamBufferedByteOutput request = new OutputStreamBufferedByteOutput(bytes);
             GitPktLine.Control.FLUSH.writeTo(request);
@@ -174,7 +187,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void rejectsInvalidArgumentsControlsAndUnadvertisedUnborn() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             for (String argument : List.of("peel extra", "ref-prefix", "unknown", "symrefs\t")) {
                 assertThatThrownBy(() -> execute(storage, index, argument)).isInstanceOf(IOException.class);
             }
@@ -210,7 +223,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void omitsPeeledAttributeForMissingTagTarget() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             ObjectId missing = new ObjectId("f".repeat(40));
             ObjectId tag = publish(storage, index, GitObjectType.TAG, tag(missing, "blob", "broken"));
             addRef("refs/tags/broken", tag);
@@ -223,7 +236,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void rejectsExcessivePrefixesAndMalformedUtf8BeforeResponding() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        new LocalGitIndex(repository).withAccess(index -> {
+        factory.withAccess(index -> {
             String[] prefixes = new String[257];
             Arrays.fill(prefixes, "ref-prefix refs/heads/");
             assertThatThrownBy(() -> execute(storage, index, prefixes)).isInstanceOf(IOException.class)
@@ -278,7 +291,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     private void addRef(String name, ObjectId id) throws IOException {
         List<RefUpdate> updates = List.of(new RefUpdate(new RefId(name), Optional.empty(), Optional.of(id)));
-        new LocalGitIndex(repository).withAccess(updates, access -> {
+        factory.withAccess(updates, access -> {
             access.apply();
             return null;
         });

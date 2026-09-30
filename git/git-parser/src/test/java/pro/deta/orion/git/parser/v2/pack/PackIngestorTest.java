@@ -5,7 +5,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -24,7 +27,14 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 
@@ -34,6 +44,65 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PackIngestorTest {
     @TempDir
     Path directory;
+
+    @Test
+    void concurrentIdenticalUploadsKeepBothPacksWhenOneRefApplyConflicts() throws Exception {
+        byte[][] entries = new byte[256][];
+        for (int i = 0; i < entries.length; i++) {
+            entries[i] = PackTestData.blob(ByteBuffer.allocate(4).putInt(i).array());
+        }
+        byte[] wire = PackTestData.pack(entries);
+        ObjectId target = PackTestData.objectId(GitObjectType.BLOB, new byte[4]);
+        RefId ref = new RefId("refs/heads/main");
+        List<RefUpdate> updates = List.of(new RefUpdate(ref, Optional.empty(), Optional.of(target)));
+        AtomicInteger applied = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        CyclicBarrier ready = new CyclicBarrier(2);
+        List<PackMetadata> uploaded = new ArrayList<>();
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             LocalGitIndex index = new LocalGitIndex(directory);
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<PackMetadata>> uploads = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                uploads.add(executor.submit(() -> index.withAccess(updates, access -> {
+                    ready.await(5, TimeUnit.SECONDS);
+                    PackMetadata pack = PackTestData.ingest(wire, storage, access);
+                    assertThat(access.findPack(pack.packId())).isEmpty();
+                    assertThat(access.objects(pack.packId())).hasSize(entries.length);
+                    access.publishIndex(pack);
+                    ready.await(5, TimeUnit.SECONDS);
+                    try {
+                        access.apply();
+                        applied.incrementAndGet();
+                    } catch (GitRefConflictException expected) {
+                        conflicts.incrementAndGet();
+                    }
+                    return pack;
+                })));
+            }
+            for (Future<PackMetadata> upload : uploads) {
+                uploaded.add(upload.get(15, TimeUnit.SECONDS));
+            }
+            assertThat(applied.get()).isEqualTo(1);
+            assertThat(conflicts.get()).isEqualTo(1);
+            assertThat(uploaded.get(0).packId()).isNotEqualTo(uploaded.get(1).packId());
+            assertThat(uploaded.get(0).packChecksum()).isEqualTo(uploaded.get(1).packChecksum());
+        }
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             LocalGitIndex index = new LocalGitIndex(directory)) {
+            index.withAccess(access -> {
+                assertThat(access.snapshotRefs().refs()).containsEntry(ref, target);
+                assertThat(access.packs(uploaded.getFirst().packChecksum()))
+                        .containsExactlyInAnyOrderElementsOf(uploaded);
+                assertThat(access.locations(target)).hasSize(2);
+                for (PackMetadata pack : uploaded) {
+                    assertThat(storage.exists(pack.packId())).isTrue();
+                    assertThat(PackTestData.bytes(pack, storage, access)).containsExactly(wire);
+                }
+                return null;
+            });
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

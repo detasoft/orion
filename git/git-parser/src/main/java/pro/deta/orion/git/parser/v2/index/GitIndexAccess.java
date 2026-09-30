@@ -15,10 +15,13 @@ import java.util.Optional;
 
 /**
  * Access with refs declared at creation. Ref updates remain private until apply checks their original
- * values and publishes them under the index lock. Undeclared refs cannot be updated; declared refs need
+ * values and publishes the changed refs atomically. Undeclared refs cannot be updated; declared refs need
  * not be changed. Apply finishes the access; discard abandons pending ref and HEAD changes.
  * Update results describe preparation, not publication. A single caller uses each access at a time.
  * Object ingestion and pack publication retain their independent lifetime.
+ * Each ingestion owns a distinct PackId, even for identical content. Finish its object writes before
+ * publishing its index; callers must not write and publish the same PackId concurrently.
+ * A ref conflict does not remove ingested objects or published packs.
  */
 public interface GitIndexAccess extends Modification {
     void addObject(IndexedObject object) throws IOException;

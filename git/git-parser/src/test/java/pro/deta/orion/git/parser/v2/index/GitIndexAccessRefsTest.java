@@ -147,9 +147,8 @@ class GitIndexAccessRefsTest {
     }
 
     @Test
-    void concurrentApplyAcrossFacadesPublishesOnlyOneCompleteBatch() throws Exception {
+    void concurrentAccessesPublishOnlyOneCompleteBatch() throws Exception {
         try (GitIndexApi firstIndex = new LocalGitIndex(directory);
-             GitIndexApi secondIndex = new LocalGitIndex(directory);
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             firstIndex.withAccess(reader -> {
                 for (int attempt = 0; attempt < 20; attempt++) {
@@ -158,7 +157,7 @@ class GitIndexAccessRefsTest {
                     ObjectId secondTarget = new ObjectId(String.format("%040x", attempt * 2 + 2));
                     firstIndex.withAccess(List.of(update(MAIN, previous, firstTarget),
                             update(OTHER, previous, firstTarget)), first -> {
-                        secondIndex.withAccess(List.of(update(MAIN, previous, secondTarget),
+                        firstIndex.withAccess(List.of(update(MAIN, previous, secondTarget),
                                 update(OTHER, previous, secondTarget)), second -> {
                             CyclicBarrier start = new CyclicBarrier(2);
                             Future<Boolean> left = executor.submit(() -> applyAtBarrier(first, start));
@@ -185,6 +184,25 @@ class GitIndexAccessRefsTest {
             return true;
         } catch (GitRefConflictException expected) {
             return false;
+        }
+    }
+
+    @Test
+    void concurrentUnrelatedRefChangesBothApplyWithoutLosingEither() throws Exception {
+        try (GitIndexApi index = new LocalGitIndex(directory);
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            index.withAccess(List.of(update(MAIN, null, FIRST)), first -> {
+                index.withAccess(List.of(update(OTHER, null, SECOND)), second -> {
+                    CyclicBarrier start = new CyclicBarrier(2);
+                    Future<Boolean> left = executor.submit(() -> applyAtBarrier(first, start));
+                    Future<Boolean> right = executor.submit(() -> applyAtBarrier(second, start));
+                    assertThat(left.get(10, TimeUnit.SECONDS)).isTrue();
+                    assertThat(right.get(10, TimeUnit.SECONDS)).isTrue();
+                    return null;
+                });
+                return null;
+            });
+            assertRefs(index, Map.of(MAIN, FIRST, OTHER, SECOND));
         }
     }
 

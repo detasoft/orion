@@ -37,13 +37,15 @@ class FetchPlanTest {
     private static final ObjectId UNKNOWN = new ObjectId("2".repeat(40));
     private static final RefId MAIN = new RefId("refs/heads/main");
     private GitStorageApi storage;
+    private LocalGitIndex factory;
     private GitIndexAccess index;
     private FetchCommand command;
 
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
-        index = new LocalGitIndex(directory).createAccess();
+        factory = new LocalGitIndex(directory);
+        index = factory.createAccess();
         PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
         command = new FetchCommand(storage, index, capabilities(GitCapability.values()));
     }
@@ -51,6 +53,7 @@ class FetchPlanTest {
     @AfterEach
     void closeIndex() throws Exception {
         index.discard();
+        factory.close();
     }
 
     @Test
@@ -128,7 +131,7 @@ class FetchPlanTest {
                 value(GitCapability.DEEPEN_RELATIVE), value(GitCapability.SIDEBAND_ALL)));
         request.packfileUriProtocols().add("https");
         publishRefs(
-                storage, new LocalGitIndex(directory),
+                storage, factory,
                 List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
         var iterator = command.prepareNegotiation(request, GitTransport.HTTP);
         iterator.next(new NegotiationMessage.Have(WANT));

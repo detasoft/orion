@@ -353,7 +353,8 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        new LocalGitIndex(directory).withAccess(index -> {
+        LocalGitIndex factory = new LocalGitIndex(directory);
+        factory.withAccess(index -> {
             ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             byte[] parentContent = new String(commit(tree, Optional.of(root)), StandardCharsets.US_ASCII)
@@ -374,7 +375,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                     pack.discard();
                 }
             }
-            publishRefs(storage, new LocalGitIndex(directory), List.of(new RefUpdate(
+            publishRefs(storage, factory, List.of(new RefUpdate(
                     new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
             byte[] excluded = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
                     "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
