@@ -16,6 +16,7 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -98,6 +99,7 @@ class NativeGitRepositoryPackIngestionTest {
                     checked = true;
                     return !missing && access.exists(packId);
                 }
+                public Set<PackId> packIds() throws IOException { return access.packIds(); }
                 public void close() throws IOException { access.close(); }
             };
         }

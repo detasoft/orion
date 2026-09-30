@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -311,6 +312,11 @@ class GitPackObjectResolverTest {
         @Override
         public boolean exists(PackId id) throws IOException {
             return backend.exists(id);
+        }
+
+        @Override
+        public Set<PackId> packIds() throws IOException {
+            return backend.packIds();
         }
 
         @Override

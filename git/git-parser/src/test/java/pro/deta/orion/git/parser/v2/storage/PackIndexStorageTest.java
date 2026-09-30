@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +55,7 @@ class PackIndexStorageTest {
                                 return backend.readPack(id, offset, length, reader);
                         }
                             public boolean exists(PackId id) throws IOException { return backend.exists(id); }
+                            public Set<PackId> packIds() throws IOException { return backend.packIds(); }
                             public void close() {}
                     };
                         BufferedByteInputV2.Source source = new BufferedByteInputV2.Source() {

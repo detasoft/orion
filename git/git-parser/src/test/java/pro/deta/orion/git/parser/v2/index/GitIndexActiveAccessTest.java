@@ -122,6 +122,7 @@ class GitIndexActiveAccessTest {
                         throw new AssertionError("No pack should be read");
                     }
                     public boolean exists(PackId id) { return false; }
+                    public Set<PackId> packIds() { return Set.of(); }
                     public void close() { }
                 };
                 assertThatThrownBy(() -> PackTestData.ingest(PackTestData.pack(), storage, access))

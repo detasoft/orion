@@ -25,6 +25,20 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 @Timeout(30)
 class S3GitStorageTest {
+    @Test
+    void inventoriesOnlyStoredPackObjects() throws Exception {
+        try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire(); S3Transport transport = new S3Transport();
+             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport));
+             GitStorageAccess storage = owner.createAccess()) {
+            PackId stored = PackId.create();
+            PackId pending = PackId.create();
+            wire.contents.put("/bucket/repo/packs/" + stored + ".data", new byte[]{1});
+            wire.contents.put("/bucket/repo/packs/not-a-pack.data", new byte[]{1});
+            storage.newPack(pending);
+            assertThat(storage.packIds()).containsExactly(stored);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void failedMultipartUploadAbortsAndCloseReleasesTheHandle(boolean rejectAbort) throws Exception {

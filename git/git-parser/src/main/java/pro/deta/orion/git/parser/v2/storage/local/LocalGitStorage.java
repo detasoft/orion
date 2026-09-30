@@ -10,14 +10,18 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.FileChannel;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.Objects;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.nio.channels.ClosedChannelException;
+import java.util.Objects;
+import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.closeUnreturned;
 
@@ -80,6 +84,26 @@ public final class LocalGitStorage implements GitStorageApi {
         public boolean exists(PackId packId) throws IOException {
             requireOpen();
             return Files.isRegularFile(path(packId));
+        }
+
+        @Override
+        public Set<PackId> packIds() throws IOException {
+            requireOpen();
+            Set<PackId> ids = new HashSet<>();
+            try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory, "pack-*.data")) {
+                for (Path entry : entries) {
+                    if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) continue;
+                    String filename = entry.getFileName().toString();
+                    String raw = filename.substring("pack-".length(), filename.length() - ".data".length());
+                    try {
+                        PackId id = new PackId(raw);
+                        if (id.toString().equals(raw)) ids.add(id);
+                    } catch (IllegalArgumentException ignored) {
+                        // Files unrelated to stored packs are not inventory entries.
+                    }
+                }
+            }
+            return Set.copyOf(ids);
         }
 
         private void requireOpen() throws ClosedChannelException {

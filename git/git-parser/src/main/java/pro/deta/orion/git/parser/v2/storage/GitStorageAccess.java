@@ -5,6 +5,7 @@ import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.IOException;
+import java.util.Set;
 
 /**
  * Operation-scoped access to pack bytes, independent of object lookup and publication. Callers flush
@@ -18,6 +19,9 @@ public interface GitStorageAccess extends AutoCloseable {
     <R> R readPack(PackId packId, long offset, long length, GitPackRead<R> reader) throws IOException;
 
     boolean exists(PackId packId) throws IOException;
+
+    /** Snapshot of stored pack IDs; callers must also inspect published and active index accesses. */
+    Set<PackId> packIds() throws IOException;
 
     @Override
     void close() throws IOException;

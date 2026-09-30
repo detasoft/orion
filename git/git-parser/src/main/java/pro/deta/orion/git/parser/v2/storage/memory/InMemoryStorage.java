@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.closeUnreturned;
 
@@ -92,6 +93,14 @@ public final class InMemoryStorage implements GitStorageApi {
             synchronized (InMemoryStorage.this) {
                 requireOpen();
                 return packs.containsKey(Objects.requireNonNull(packId, "packId"));
+            }
+        }
+
+        @Override
+        public Set<PackId> packIds() throws IOException {
+            synchronized (InMemoryStorage.this) {
+                requireOpen();
+                return Set.copyOf(packs.keySet());
             }
         }
 

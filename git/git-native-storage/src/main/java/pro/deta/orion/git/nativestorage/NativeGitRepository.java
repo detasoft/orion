@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -40,12 +41,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -89,6 +92,22 @@ public class NativeGitRepository implements AutoCloseable {
 
     public GitIndexApi index() {
         return index;
+    }
+
+    /** Read-only cleanup candidates; a later deletion must recheck concurrent access. */
+    public Set<PackId> packCleanupCandidates() throws IOException {
+        return index.withAccess(access -> {
+            try (GitStorageAccess bytes = storage.createAccess()) {
+                Set<PackId> candidates = new HashSet<>(bytes.packIds());
+                for (GitIndexAccess active : index.activeAccesses()) {
+                    active.packId().ifPresent(candidates::remove);
+                }
+                for (PackMetadata pack : access.packs()) {
+                    candidates.remove(pack.packId());
+                }
+                return Set.copyOf(candidates);
+            }
+        });
     }
 
     public GitHashAlgorithm hashAlgorithm() {

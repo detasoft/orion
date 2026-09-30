@@ -24,8 +24,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.closeUnreturned;
 
@@ -131,6 +133,23 @@ final class S3GitStorage implements GitStorageAccess {
             if (owner.writers.containsKey(id)) return true;
         }
         return objects.list(key(id)).contains(key(id));
+    }
+
+    @Override
+    public Set<PackId> packIds() throws IOException {
+        requireOpen();
+        Set<PackId> ids = new HashSet<>();
+        for (String entry : objects.list("packs/")) {
+            if (!entry.startsWith("packs/") || !entry.endsWith(".data")) continue;
+            String raw = entry.substring("packs/".length(), entry.length() - ".data".length());
+            try {
+                PackId id = new PackId(raw);
+                if (id.toString().equals(raw)) ids.add(id);
+            } catch (IllegalArgumentException ignored) {
+                // Other objects under this prefix are not packs.
+            }
+        }
+        return Set.copyOf(ids);
     }
 
     private void requireOpen() throws ClosedChannelException {
