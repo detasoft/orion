@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.Session;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
@@ -82,7 +81,7 @@ public final class AcmeConfigurationService {
                 certificates.prepareMaterial(candidate.system().https().orElseThrow());
                 return candidate;
             },
-                    new AccessControlSaveRequest("Configure ACME certificate issuance", new UserEmail(userId, "")));
+                    "Configure ACME certificate issuance", new UserEmail(userId, ""));
             return view();
         } finally {
             if (settings.eabHmacKey() != null) Arrays.fill(settings.eabHmacKey(), '\0');

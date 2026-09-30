@@ -6,7 +6,6 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
@@ -85,8 +84,8 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
             acl.updatePrimaryConfiguration(revision,
                     document -> save(document, id, provider, suppliedSecret),
-                    new AccessControlSaveRequest("Configure organization OIDC provider",
-                            new UserEmail(context.getUserIdentity().getUserId(), "")));
+                    "Configure organization OIDC provider",
+                    new UserEmail(context.getUserIdentity().getUserId(), ""));
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
         } catch (AccessControlConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload providers and try again.");

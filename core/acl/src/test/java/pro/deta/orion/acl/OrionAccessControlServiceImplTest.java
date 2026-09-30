@@ -1,6 +1,7 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
@@ -18,7 +19,6 @@ import pro.deta.orion.schema.orion.OrganizationId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -304,7 +304,7 @@ class OrionAccessControlServiceImplTest {
                             document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
                             "credential", testEnvelope())), document.system().proxies(),
                                     document.system().connections()), document.organizations()),
-                    new AccessControlSaveRequest("update proxy", null));
+                    "update proxy", null);
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
             assertThat(fixture.storage.snapshot.files().get(EXTRA_ACL_PATH)).isEqualTo(secondary);
@@ -319,7 +319,7 @@ class OrionAccessControlServiceImplTest {
             int saves = fixture.storage.saveCount;
             assertThatThrownBy(() -> fixture.service.updatePrimaryConfiguration("stale", document -> {
                 throw new AssertionError("A stale mutation must not consume credentials");
-            }, new AccessControlSaveRequest("update proxy", null)))
+            }, "update proxy", null))
                     .isInstanceOf(AccessControlConcurrentUpdateException.class);
             assertThat(fixture.storage.saveCount).isEqualTo(saves);
         }
@@ -332,7 +332,7 @@ class OrionAccessControlServiceImplTest {
                     Map.of(ACL_PATH, "<invalid".getBytes(StandardCharsets.UTF_8)), Optional.of("version-two"));
             assertThatThrownBy(() -> fixture.service.updatePrimaryConfiguration("version-one", document -> {
                 throw new AssertionError("A stale mutation must not parse or change the new head");
-            }, new AccessControlSaveRequest("update ACL", null)))
+            }, "update ACL", null))
                     .isInstanceOf(AccessControlConcurrentUpdateException.class);
             assertThat(fixture.storage.saveCount).isZero();
         }
@@ -892,7 +892,7 @@ class OrionAccessControlServiceImplTest {
             }
 
             @Override
-            public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+            public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
                 persisted.set(snapshot);
             }
 
@@ -1299,8 +1299,8 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
-            if (blockCredentialRemoval && request.message().startsWith("remove SSH credential")) {
+        public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
+            if (blockCredentialRemoval && message.startsWith("remove SSH credential")) {
                 credentialRemovalSaveEntered.countDown();
                 try {
                     continueCredentialRemoval.await();
@@ -1348,7 +1348,7 @@ class OrionAccessControlServiceImplTest {
         }
 
         @Override
-        public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+        public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
             saved = true;
         }
 

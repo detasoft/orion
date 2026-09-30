@@ -1,6 +1,7 @@
 package pro.deta.orion.acl.storage;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
@@ -73,11 +74,12 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     }
 
     @Override
-    public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+    public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
         Objects.requireNonNull(snapshot, "snapshot");
-        Objects.requireNonNull(request, "request");
+        message = Objects.requireNonNullElse(message, "");
+        author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
         try {
-            GitCommitAuthor author = author(request);
+            GitCommitAuthor commitAuthor = new GitCommitAuthor(author.getUsername(), author.getEmail());
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
             CheckedFunction<GitFileAccess, Void> update = access -> {
@@ -105,19 +107,15 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             };
             if (snapshot.version().isPresent()) {
                 repository.files().withAccess(configurationRef, snapshot.version().orElseThrow(),
-                        request.message(), author, update);
+                        message, commitAuthor, update);
             } else {
-                repository.files().withAccess(configurationRef, request.message(), author, update);
+                repository.files().withAccess(configurationRef, message, commitAuthor, update);
             }
         } catch (GitRefConflictException error) {
             throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", error);
         } catch (Exception error) {
             throw new IllegalStateException("Cannot save ACL to native repository " + repositoryName, error);
         }
-    }
-
-    private static GitCommitAuthor author(AccessControlSaveRequest request) {
-        return new GitCommitAuthor(request.author().getUsername(), request.author().getEmail());
     }
 
     private boolean primaryPathIsMissing(NativeGitRepository repository) {

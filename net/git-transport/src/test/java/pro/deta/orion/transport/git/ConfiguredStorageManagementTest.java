@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.storage.*;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.config.*;
@@ -407,7 +408,7 @@ class ConfiguredStorageManagementTest {
         @Override
         public String primaryPath() { return "config.xml"; }
         @Override
-        public void save(AccessControlSnapshot updated, AccessControlSaveRequest request) {
+        public void save(AccessControlSnapshot updated, String message, UserEmail author) {
             if (!snapshot.version().equals(updated.version())) {
                 throw new AccessControlConcurrentUpdateException("Changed", null);
             }

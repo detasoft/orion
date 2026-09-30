@@ -2,11 +2,14 @@ package pro.deta.orion.acl.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
@@ -99,7 +102,7 @@ class NativeGitAccessControlStorageTest {
         assertThat(storage.createIfMissing()).isFalse();
         storage.save(
                 new AccessControlSnapshot(Map.of(ACL_PATH, bytes("versioned update")), loaded.version()),
-                new AccessControlSaveRequest("versioned update", UserEmail.EMPTY));
+                "versioned update", UserEmail.EMPTY);
 
         assertThat(selected.files().readBytes(ref, ACL_PATH)).isEqualTo(bytes("versioned update"));
         assertThat(backend.repositoryNames()).containsExactly("team/repo");
@@ -114,8 +117,9 @@ class NativeGitAccessControlStorageTest {
         assertThat(provider.repositoryNames()).isEmpty();
     }
 
-    @Test
-    void createsConfiguredRepositoryAndCommitsInitialAcl(@TempDir Path rootDirectory) {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void createsConfiguredRepositoryAndCommitsInitialAcl(boolean useDefaults, @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         AccessControlStorage storage = preparedStorage(provider);
 
@@ -124,7 +128,8 @@ class NativeGitAccessControlStorageTest {
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("initial acl")),
-                new AccessControlSaveRequest("bootstrap ACL", new UserEmail("root", "root@example.test")));
+                useDefaults ? null : "bootstrap ACL",
+                useDefaults ? null : new UserEmail("root", "root@example.test"));
 
         AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load");
         assertThat(snapshot.files()).containsOnlyKeys(ACL_PATH);
@@ -132,6 +137,13 @@ class NativeGitAccessControlStorageTest {
         assertThat(snapshot.version()).isPresent();
         assertThat(storage.createIfMissing()).isTrue();
         assertThat(provider.repositoryNames()).containsExactly("internal/configuration");
+        NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
+        byte[] commit = repository.readObject(new ObjectId(snapshot.version().orElseThrow()))
+                .orElseThrow().data();
+        String identity = useDefaults ? "orion <orion@localhost>" : "root <root@example.test>";
+        assertThat(new String(commit, StandardCharsets.UTF_8))
+                .contains("\nauthor " + identity + " ", "\ncommitter " + identity + " ")
+                .endsWith("\n\n" + (useDefaults ? "update files" : "bootstrap ACL") + "\n");
     }
 
     @Test
@@ -140,7 +152,7 @@ class NativeGitAccessControlStorageTest {
                 new FileNativeGitRepositoryProvider(rootDirectory));
         first.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("persisted acl")),
-                new AccessControlSaveRequest("bootstrap ACL", UserEmail.EMPTY));
+                "bootstrap ACL", UserEmail.EMPTY);
 
         AccessControlStorage restarted = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
@@ -197,7 +209,7 @@ class NativeGitAccessControlStorageTest {
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("first")),
-                new AccessControlSaveRequest("first", UserEmail.EMPTY));
+                "first", UserEmail.EMPTY);
         provider.find("internal/configuration").valueOrFailure("repository").files()
                 .withAccess("refs/heads/other", "other branch", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write(ACL_PATH, bytes("other"));
@@ -206,11 +218,11 @@ class NativeGitAccessControlStorageTest {
         });
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("second")),
-                new AccessControlSaveRequest("second", UserEmail.EMPTY));
+                "second", UserEmail.EMPTY);
         subscription.close();
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("third")),
-                new AccessControlSaveRequest("third", UserEmail.EMPTY));
+                "third", UserEmail.EMPTY);
 
         assertThat(changes).hasValue(2);
     }
@@ -221,7 +233,7 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage storage = preparedStorage(provider);
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("version one")),
-                new AccessControlSaveRequest("version one", UserEmail.EMPTY));
+                "version one", UserEmail.EMPTY);
         AccessControlSnapshot stale = storage.load().valueOrFailure("version one");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
         repository.files().withAccess("refs/heads/configuration", "version two", GitCommitAuthor.EMPTY,
@@ -235,7 +247,7 @@ class NativeGitAccessControlStorageTest {
 
         assertThatThrownBy(() -> storage.save(
                 stale,
-                new AccessControlSaveRequest("stale", UserEmail.EMPTY)))
+                "stale", UserEmail.EMPTY))
                 .isInstanceOf(AccessControlConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/configuration")).isEqualTo(winningVersion);
@@ -259,7 +271,7 @@ class NativeGitAccessControlStorageTest {
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
-                new AccessControlSaveRequest("created", UserEmail.EMPTY));
+                "created", UserEmail.EMPTY);
 
         assertThat(repository.files().readBytes("refs/heads/configuration", ACL_PATH))
                 .isEqualTo(bytes("created"));
@@ -293,7 +305,7 @@ class NativeGitAccessControlStorageTest {
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("provider acl")),
-                new AccessControlSaveRequest("provider ACL", UserEmail.EMPTY));
+                "provider ACL", UserEmail.EMPTY);
 
         assertThat(provider.saves).hasValue(1);
         assertThat(provider.find("internal/configuration").valueOrFailure("repository").refs())

@@ -207,7 +207,7 @@ class OrionAdminProxyMutationTest {
             f.createSsh(Set.of());
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
             f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> document,
-                    new AccessControlSaveRequest("concurrent update", null));
+                    "concurrent update", null);
             int saves = f.storage.saves;
             f.work.remove().run();
             assertThat(f.storage.saves).isEqualTo(saves);
@@ -364,7 +364,7 @@ class OrionAdminProxyMutationTest {
                         document.system().https(), document.system().secrets(), List.of(first, second),
                                 document.system().connections()),
                         document.organizations());
-            }, new AccessControlSaveRequest("share fixture credential", null));
+            }, "share fixture credential", null);
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
@@ -487,7 +487,7 @@ class OrionAdminProxyMutationTest {
                 var system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                         system.secrets(), List.of(first, second), system.connections()), document.organizations());
-            }, new AccessControlSaveRequest("share SSH connection", UserEmail.EMPTY));
+            }, "share SSH connection", UserEmail.EMPTY);
             OrionDocument original = f.desired.current().document();
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
             Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
@@ -688,7 +688,7 @@ class OrionAdminProxyMutationTest {
         }
         @Override public Result<AccessControlSnapshot> load() { return new Result.Success<>(snapshot); }
         @Override public String primaryPath() { return "orion.xml"; }
-        @Override public void save(AccessControlSnapshot next, AccessControlSaveRequest request) {
+        @Override public void save(AccessControlSnapshot next, String message, UserEmail author) {
             if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.version().equals(next.version())) {
                 throw new AccessControlConcurrentUpdateException("configuration conflict", null);

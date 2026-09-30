@@ -13,7 +13,6 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -871,8 +870,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             throw new AccessControlValidationException("Invalid ACL configuration file");
         }
         updatePrimaryConfiguration(expectedRevision, ignored -> document,
-                new AccessControlSaveRequest("saveAccessControlConfigurationFile() " + primaryPath,
-                        new UserEmail(Objects.requireNonNull(authorId, "configuration author"), "")));
+                "saveAccessControlConfigurationFile() " + primaryPath,
+                new UserEmail(Objects.requireNonNull(authorId, "configuration author"), ""));
     }
 
     private AccessControl parseAccessControlConfiguration(byte[] content, String sourceName) {
@@ -1047,7 +1046,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             root.draft().toAccessControl()));
             accessControlStorage.save(
                     new AccessControlSnapshot(updatedFiles, loadedSnapshot.version()),
-                    new AccessControlSaveRequest("add internal server keys to root", UserEmail.EMPTY));
+                    "add internal server keys to root", UserEmail.EMPTY);
             preparedSnapshot = switch (loadValidatedAccessControlSnapshot()) {
                 case Result.Success<AccessControlSnapshot>(var snapshot) -> snapshot;
                 case Result.Failure<AccessControlSnapshot> failure -> throw new IllegalStateException(
@@ -1703,17 +1702,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControlSnapshot snapshot,
             String message,
             UserEmail author) {
-        accessControlStorage.save(snapshot, new AccessControlSaveRequest(message, author));
+        accessControlStorage.save(snapshot, message, author);
         reload(author + " " + message);
     }
 
     public OrionDesiredState.Snapshot updatePrimaryConfiguration(String expectedRevision,
-            java.util.function.UnaryOperator<OrionDocument> update, AccessControlSaveRequest request) {
+            java.util.function.UnaryOperator<OrionDocument> update, String message, UserEmail author) {
         if (expectedRevision == null || expectedRevision.isBlank()) {
             throw new IllegalArgumentException("Configuration revision is required");
         }
         Objects.requireNonNull(update, "configuration update");
-        Objects.requireNonNull(request, "save request");
+        message = Objects.requireNonNullElse(message, "");
+        author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
         AccessControlSnapshot loaded = accessControlStorage.load()
                 .valueOrFailure("Cannot load configuration for update");
         if (!loaded.version().equals(Optional.of(expectedRevision))) {
@@ -1727,7 +1727,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 Objects.requireNonNull(update.apply(primary), "updated configuration")));
         AccessControlSnapshot candidate = new AccessControlSnapshot(files, loaded.version());
         documentFrom(candidate).valueOrFailure("Invalid updated configuration");
-        saveAccessControlSnapshotAndReload(candidate, request.message(), request.author());
+        saveAccessControlSnapshotAndReload(candidate, message, author);
         return desiredState.current();
     }
 

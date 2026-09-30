@@ -2,7 +2,6 @@ package pro.deta.orion.acl;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -178,7 +177,7 @@ public final class OrganizationAccounts {
                 throw new IllegalArgumentException("Organization is unavailable");
             }
             return new OrionDocument(document.system(), organizations);
-        }, new AccessControlSaveRequest(message, author));
+        }, message, author);
     }
 
     private static OrionDocument.Organization replaceAccounts(OrionDocument.Organization organization,

@@ -18,7 +18,6 @@ import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.TeamId;
 import pro.deta.orion.schema.orion.RepositoryId;
 import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
@@ -297,7 +296,7 @@ class OrionRuntimeModuleTest {
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_FILE, "native acl".getBytes(StandardCharsets.UTF_8)),
-                new AccessControlSaveRequest("native acl", new UserEmail("tester", "tester@example.test")));
+                "native acl", new UserEmail("tester", "tester@example.test"));
 
         AccessControlSnapshot snapshot =
                 storage.load().valueOrFailure("ACL should load from local storage");
@@ -312,7 +311,7 @@ class OrionRuntimeModuleTest {
         AccessControlStorage storage = resolvedStorage(configuration, provider);
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_FILE, "versioned acl".getBytes(StandardCharsets.UTF_8)),
-                new AccessControlSaveRequest("versioned acl", UserEmail.EMPTY));
+                "versioned acl", UserEmail.EMPTY);
 
         assertInstanceOf(NativeGitAccessControlStorage.class, storage);
         assertEquals(List.of("internal/settings"), provider.repositoryNames());

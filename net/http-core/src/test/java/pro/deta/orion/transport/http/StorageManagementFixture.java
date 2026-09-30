@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.storage.*;
 import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.config.OrionDesiredState;
@@ -38,7 +39,7 @@ final class StorageManagementFixture {
             private int revision = 1;
             @Override public Result<AccessControlSnapshot> load() { return Result.of(snapshot); }
             @Override public String primaryPath() { return "config.xml"; }
-            @Override public void save(AccessControlSnapshot updated, AccessControlSaveRequest request) {
+            @Override public void save(AccessControlSnapshot updated, String message, UserEmail author) {
                 if (!snapshot.version().equals(updated.version())) {
                     throw new AccessControlConcurrentUpdateException("Changed", null);
                 }

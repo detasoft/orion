@@ -18,7 +18,6 @@ import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -138,8 +137,8 @@ public class OrionRuntimeModule {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), bindings, connections), document.organizations());
-            }, new AccessControlSaveRequest("Reconcile bootstrap connection " + change.previous().alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY));
+            }, "Reconcile bootstrap connection " + change.previous().alias().value()
+                    + " approved by " + actor, UserEmail.EMPTY);
             return Result.of(null);
         } catch (RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
@@ -196,8 +195,8 @@ public class OrionRuntimeModule {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), system.proxies(), connections), document.organizations());
-            }, new AccessControlSaveRequest("Trust SSH host key for " + binding.alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY));
+            }, "Trust SSH host key for " + binding.alias().value()
+                    + " approved by " + actor, UserEmail.EMPTY);
             recordTrustAudit(audit, binding, actor, "saved");
             return Result.of(null);
         } catch (AccessControlConcurrentUpdateException failure) {

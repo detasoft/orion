@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -133,7 +132,7 @@ class PlaywrightExternalServicesIT {
                                 document.system().accessControl(), Optional.of(https),
                                 document.system().secrets(), document.system().proxies(), document.system().connections()),
                         document.organizations()),
-                new AccessControlSaveRequest("configure test ACME", UserEmail.EMPTY));
+                "configure test ACME", UserEmail.EMPTY);
     }
 
     private void runPlaywright(Path fixtureRoot, Path caRoot, String token) throws Exception {

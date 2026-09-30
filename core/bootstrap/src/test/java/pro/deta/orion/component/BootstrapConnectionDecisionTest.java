@@ -4,7 +4,6 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -98,7 +97,7 @@ class BootstrapConnectionDecisionTest {
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), document.system().secrets(),
                             List.of(fixture.previous, unrelated), document.system().connections()), document.organizations()),
-                    new AccessControlSaveRequest("unrelated edit", UserEmail.EMPTY));
+                    "unrelated edit", UserEmail.EMPTY);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).contains(unrelated);
             assertThat(fixture.desired.current().document().system().proxies()).filteredOn(
@@ -117,7 +116,7 @@ class BootstrapConnectionDecisionTest {
                 new GitProxyBinding.Direct(fixture.previous.upstream(fixture.desired.current().document()
                         .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
             fixture.acl.updatePrimaryConfiguration(fixture.desired.current().revision().orElseThrow(),
-                    document -> withBinding(concurrent), new AccessControlSaveRequest("concurrent edit", UserEmail.EMPTY));
+                    document -> withBinding(concurrent), "concurrent edit", UserEmail.EMPTY);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).containsExactly(concurrent);
             assertThat(fixture.storage.load().isFailure()).isFalse();

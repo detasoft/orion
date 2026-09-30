@@ -52,7 +52,7 @@ class NativeSshCredentialPersistenceTest {
         byte[] unchanged = roles.toByteArray();
         storage.save(new AccessControlSnapshot(Map.of("users.xml", users.toByteArray(),
                         "roles.xml", unchanged), Optional.empty()),
-                new AccessControlSaveRequest("seed", UserEmail.EMPTY));
+                "seed", UserEmail.EMPTY);
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();

@@ -1,7 +1,6 @@
 package pro.deta.orion;
 
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
@@ -294,7 +293,7 @@ public final class BootstrapContext implements AutoCloseable {
             }
             try {
                 storage.save(new AccessControlSnapshot(updatedFiles, preparedSnapshot.version()),
-                        new AccessControlSaveRequest("Adopt bootstrap Git proxies", UserEmail.EMPTY));
+                        "Adopt bootstrap Git proxies", UserEmail.EMPTY);
                 return Optional.of(candidate);
             } catch (RuntimeException failure) {
                 lastSaveFailure = failure;

@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
@@ -104,8 +103,8 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
                 acl.updatePrimaryConfiguration(request.revision(), document -> update(document, selected, mutation),
-                        new AccessControlSaveRequest("proxy " + action + " " + alias,
-                                new UserEmail(context.getUserIdentity().getUserId(), "")));
+                        "proxy " + action + " " + alias,
+                        new UserEmail(context.getUserIdentity().getUserId(), ""));
             }
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             GitProxyBinding binding = find(snapshot.document(), selected);

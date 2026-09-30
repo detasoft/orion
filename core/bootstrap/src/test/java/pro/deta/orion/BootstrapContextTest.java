@@ -15,7 +15,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.internal.UserEmail;
@@ -694,16 +693,16 @@ class BootstrapContextTest {
                 AccessControlStorage storage = new AccessControlStorageResolver(
                         context.repositorySources(), context.repositoryProvider()).resolve();
                 storage.save(AccessControlSnapshot.singleFile("orion.xml", xml()),
-                        new AccessControlSaveRequest("initial ACL", UserEmail.EMPTY));
+                        "initial ACL", UserEmail.EMPTY);
                 AccessControlSnapshot first = storage.load().valueOrFailure("initial ACL");
                 firstRevision = first.version().orElseThrow();
                 storage.save(new AccessControlSnapshot(Map.of("orion.xml", xml(),
                                 "roles.xml", xml()), first.version()),
-                        new AccessControlSaveRequest("add roles", UserEmail.EMPTY));
+                        "add roles", UserEmail.EMPTY);
                 assertThat(storage.load().valueOrFailure("updated ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
                 assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
                                 Map.of("orion.xml", bytes("stale replacement")), first.version()),
-                        new AccessControlSaveRequest("stale update", UserEmail.EMPTY)))
+                        "stale update", UserEmail.EMPTY))
                         .isInstanceOf(AccessControlConcurrentUpdateException.class);
             }
             try (Git git = Git.open(directory.toFile())) {
@@ -1111,7 +1110,7 @@ class BootstrapContextTest {
         }
 
         @Override
-        public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+        public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
             assertThat(snapshot.version()).contains(Integer.toString(version));
             saves++;
             if (mode == Mode.FAIL_SAVE) {

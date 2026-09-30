@@ -5,7 +5,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -157,8 +156,7 @@ class BootstrapProxyTransportIT {
                         rotatedFiles.put(storage.primaryPath(), rotatedXml.toByteArray());
                         storage.save(new AccessControlSnapshot(
                                         rotatedFiles, beforeRotation.version()),
-                                new AccessControlSaveRequest(
-                                        "rotate proxy credential", UserEmail.EMPTY));
+                                "rotate proxy credential", UserEmail.EMPTY);
                         component.orionAccessControlService().reload("credential rotation");
                         current.set(rotated);
                         provider.openForRead(cache).valueOrFailure("rotated credential");

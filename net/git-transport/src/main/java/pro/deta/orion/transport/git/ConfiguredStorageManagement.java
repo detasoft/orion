@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.StorageManagement;
@@ -72,7 +71,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     // Organization-local grants never authorize the server's default credential chain.
                     if (s3.secretKey().isEmpty()) require(admin(actor, document));
                     return bind(document, address, binding);
-                }, saveRequest(actor, "Create S3 repository"));
+                }, "Create S3 repository", new UserEmail(actor.getUserIdentity().getUserId(), ""));
             } else if (binding(snapshot.document(), name).isPresent()) {
                 throw new Conflict();
             }
@@ -156,7 +155,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     updatedConnections.removeIf(connection -> connection.name().equals(input.name()));
                     updatedConnections.add(replacement);
                     return withConnections(updated, owner, updatedConnections);
-                }, saveRequest(actor, create ? "Create S3 connection" : "Update S3 connection"));
+                }, create ? "Create S3 connection" : "Update S3 connection",
+                        new UserEmail(actor.getUserIdentity().getUserId(), ""));
                 return new Success<>(view(actor, owner, saved));
             });
         } finally {
@@ -301,10 +301,6 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             organizations.add(organization.id().equals(replacement.id()) ? replacement : organization);
         }
         return new OrionDocument(document.system(), organizations);
-    }
-
-    private static AccessControlSaveRequest saveRequest(SecurityContext actor, String message) {
-        return new AccessControlSaveRequest(message, new UserEmail(actor.getUserIdentity().getUserId(), ""));
     }
 
     private static void require(boolean allowed) {

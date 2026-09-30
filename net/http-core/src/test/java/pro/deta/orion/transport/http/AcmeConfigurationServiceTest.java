@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import java.time.Instant;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,7 +18,6 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.command.DefaultCommandDispatcher;
@@ -382,7 +382,7 @@ class AcmeConfigurationServiceTest {
 
         @Override
         public void save(AccessControlSnapshot next,
-                AccessControlSaveRequest request) {
+                String message, UserEmail author) {
             snapshot = new AccessControlSnapshot(next.files(), Optional.of("r2"));
         }
     }
