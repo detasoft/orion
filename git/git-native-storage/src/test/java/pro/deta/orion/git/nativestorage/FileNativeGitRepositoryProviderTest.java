@@ -37,6 +37,21 @@ class FileNativeGitRepositoryProviderTest {
     private static final String NULL_ID = "0".repeat(40);
 
     @Test
+    void closesCachedRepositoriesAndRejectsNewLookups(@TempDir Path root) throws Exception {
+        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(root);
+        NativeGitRepository first = provider.create("first").valueOrFailure("create first");
+        NativeGitRepository second = provider.create("second").valueOrFailure("create second");
+        provider.close();
+        provider.close();
+        assertThatThrownBy(() -> first.index().createAccess()).hasMessageContaining("closed");
+        assertThatThrownBy(() -> second.index().createAccess()).hasMessageContaining("closed");
+        assertThatThrownBy(() -> provider.find("first")).hasMessageContaining("closed");
+        try (FileNativeGitRepositoryProvider reopened = new FileNativeGitRepositoryProvider(root)) {
+            assertThat(reopened.exists("first")).isTrue();
+        }
+    }
+
+    @Test
     void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider first =
                 new FileNativeGitRepositoryProvider(rootDirectory);
@@ -172,7 +187,7 @@ class FileNativeGitRepositoryProviderTest {
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
-            try (GitIndexAccess access1 = reopened.index().createAccess()) {
+            reopened.index().withAccess(access1 -> {
                 reopened.writePack(access1.packs(id).getFirst(),
                         new OutputStreamBufferedByteOutput(exported));
                 assertThat(exported.toByteArray()).isEqualTo(bytes);
@@ -182,7 +197,8 @@ class FileNativeGitRepositoryProviderTest {
                 assertPublishedObject(reopened, blobId(first), first);
                 assertPublishedObject(reopened, blobId(second), second);
                 assertThat(reopened.readObject(new ObjectId("f".repeat(40)))).isEmpty();
-            }
+                return null;
+            });
         }
     }
 
@@ -201,18 +217,23 @@ class FileNativeGitRepositoryProviderTest {
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
-            try (GitIndexAccess access2 = reopened.index().createAccess()) {
-                assertThat(access2.objects(access2.packs(id).getFirst().packId()))
-                        .extracting(IndexedObject::objectId)
-                        .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
-                assertPublishedObject(reopened, blobId(target), target);
-                assertThat(GitObjectRead.read(reopened.storage(), access2, new ObjectId(blobId(target)),
-                        new ResolvedGitObjectRead<>(reopened.storage(), access2, (type, size, baseId, input) -> {
-                            assertThat(type).isEqualTo(GitObjectType.BLOB);
-                            assertThat(size).isEqualTo(target.length);
-                            return input.readBytes(7);
-                        }))).hasValueSatisfying(prefix ->
-                                assertThat(prefix).isEqualTo("hello n".getBytes(StandardCharsets.UTF_8)));
+            {
+                GitIndexAccess access2 = reopened.index().createAccess();
+                try {
+                    assertThat(access2.objects(access2.packs(id).getFirst().packId()))
+                            .extracting(IndexedObject::objectId)
+                            .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
+                    assertPublishedObject(reopened, blobId(target), target);
+                    assertThat(GitObjectRead.read(reopened.storage(), access2, new ObjectId(blobId(target)),
+                            new ResolvedGitObjectRead<>(reopened.storage(), access2, (type, size, baseId, input) -> {
+                                assertThat(type).isEqualTo(GitObjectType.BLOB);
+                                assertThat(size).isEqualTo(target.length);
+                                return input.readBytes(7);
+                    }))).hasValueSatisfying(prefix ->
+                                    assertThat(prefix).isEqualTo("hello n".getBytes(StandardCharsets.UTF_8)));
+                } finally {
+                    access2.discard();
+                }
             }
         }
     }
@@ -231,13 +252,14 @@ class FileNativeGitRepositoryProviderTest {
                 bytes[bytes.length - 1] ^= 1;
                 Files.write(path, bytes);
             }
-            try (GitIndexAccess access3 = repository.index().createAccess()) {
+            repository.index().withAccess(access3 -> {
                 List<PackMetadata> before = access3.packs();
                 assertThatThrownBy(() -> persist(repository, packWithReferenceDelta(blobId(base), base, target)))
                         .isInstanceOf(IOException.class);
                 assertThat(access3.packs()).containsExactlyElementsOf(before);
                 assertThat(repository.refs()).isEmpty();
-            }
+                return null;
+            });
         }
     }
 
@@ -248,10 +270,11 @@ class FileNativeGitRepositoryProviderTest {
             byte[] bytes = pack("broken".getBytes(StandardCharsets.UTF_8));
             bytes[bytes.length - 1] ^= 1;
             assertThatThrownBy(() -> persist(repository, bytes)).isInstanceOf(IOException.class);
-            try (GitIndexAccess access4 = repository.index().createAccess()) {
+            repository.index().withAccess(access4 -> {
                 assertThat(access4.packs()).isEmpty();
                 assertThat(repository.refs()).isEmpty();
-            }
+                return null;
+            });
         }
     }
 

@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
@@ -70,18 +69,19 @@ final class OrionGitPackfileHandler {
             exchange.sendError(SC_NOT_FOUND);
             return;
         }
-        try (GitIndexAccess access = repository.orElseThrow().index().createAccess()) {
+        repository.orElseThrow().index().withAccess(access -> {
             List<PackMetadata> packs = access.packs(new PackChecksum(packId));
             if (packs.isEmpty()) {
                 exchange.sendError(SC_NOT_FOUND);
-                return;
+                return null;
             }
             PackMetadata pack = packs.getFirst();
             OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, PACK_CONTENT_TYPE)
                     .withHeader("Cache-Control", "no-cache")
                     .withContentLength(pack.packSize());
             repository.get().writePack(pack, new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata)));
-        }
+            return null;
+        });
     }
 
     private Optional<NativeGitRepository> repository(

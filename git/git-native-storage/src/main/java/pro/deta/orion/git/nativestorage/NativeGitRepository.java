@@ -13,7 +13,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -85,12 +84,14 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public Map<String, String> refs() {
-        try (GitIndexAccess access = index.createAccess()) {
-            Map<String, String> refs = new LinkedHashMap<>();
-            for (Map.Entry<RefId, ObjectId> ref : access.snapshotRefs().refs().entrySet()) {
-                refs.put(ref.getKey().value(), ref.getValue().toHex());
-            }
-            return Map.copyOf(refs);
+        try {
+            return index.withAccess(access -> {
+                Map<String, String> refs = new LinkedHashMap<>();
+                for (Map.Entry<RefId, ObjectId> ref : access.snapshotRefs().refs().entrySet()) {
+                    refs.put(ref.getKey().value(), ref.getValue().toHex());
+                }
+                return Map.copyOf(refs);
+            });
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
@@ -127,39 +128,44 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public Optional<LooseObject> readObject(ObjectId id) {
-        try (GitIndexAccess access = index.createAccess()) {
-            return GitObjectRead.read(storage(), access, id, new ResolvedGitObjectRead<>(storage(), access,
-                    (type, size, base, input) -> new LooseObject(id, type,
-                            input.readBytes(Math.toIntExact(size)))));
+        try {
+            return index.withAccess(access -> {
+                return GitObjectRead.read(storage(), access, id, new ResolvedGitObjectRead<>(storage(), access,
+                        (type, size, base, input) -> new LooseObject(id, type,
+                        input.readBytes(Math.toIntExact(size)))));
+            });
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
     }
 
     public PackMetadata ingest(BufferedByteInputV2 input) throws IOException {
-        try (GitIndexAccess access = index.createAccess();
-             PackIngestor ingestor = new PackIngestor(input, storage(), access)) {
-            return ingestor.ingest();
-        }
+        return index.withAccess(access -> {
+            try (PackIngestor ingestor = new PackIngestor(input, storage(), access)) {
+                return ingestor.ingest();
+            }
+        });
     }
 
     public PackMetadata publishPack(PackMetadata pack) throws IOException {
         if (!storage().exists(pack.packId())) {
             throw new IOException("Cannot publish missing pack: " + pack.packId());
         }
-        try (GitIndexAccess access = index.createAccess()) {
+        return index.withAccess(access -> {
             return access.publishIndex(pack);
-        }
+        });
     }
 
     public void writePack(PackMetadata pack, BufferedByteOutput output) throws IOException {
-        try (GitIndexAccess access = index.createAccess();
-             PackWriter writer = new PackWriter(output, pack.objectCount())) {
-            writer.writeObjects(storage(), access.objects(pack.packId()));
-            if (!writer.finish().equals(pack.packChecksum())) {
-                throw new IOException("Exported pack checksum differs from published metadata");
+        index.withAccess(access -> {
+            try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                writer.writeObjects(storage(), access.objects(pack.packId()));
+                if (!writer.finish().equals(pack.packChecksum())) {
+                    throw new IOException("Exported pack checksum differs from published metadata");
+                }
             }
-        }
+            return null;
+        });
     }
 
     public List<RefUpdateResult> publishPack(byte[] bytes, List<RefUpdate> updates, boolean atomic,
@@ -220,8 +226,10 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public boolean hasCompleteObjectClosure(ObjectId root) {
-        try (GitIndexAccess access = index.createAccess()) {
-            return new GitObjectGraph(storage(), access).hasCompleteClosure(root);
+        try {
+            return index.withAccess(access -> {
+                return new GitObjectGraph(storage(), access).hasCompleteClosure(root);
+            });
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
@@ -229,7 +237,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     @Override
     public void close() {
-        try (storage) {
+        try (storage; index) {
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

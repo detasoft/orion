@@ -46,7 +46,7 @@ class FetchCommandTest {
         request.wants().add(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1}));
         request.initialMessages().add(new NegotiationMessage.Have(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2})));
         request.initialMessages().add(NegotiationMessage.Control.DONE);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
 
@@ -57,7 +57,8 @@ class FetchCommandTest {
             assertThat(iterator.getContext().doneReceived()).isFalse();
             assertThat(iterator.getContext().ready()).isFalse();
             assertThat(iterator.getResponsesToSend()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
@@ -65,11 +66,12 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.capabilities().add(value(GitCapability.THIN_PACK));
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                     .isInstanceOf(IOException.class).hasMessageContaining("thin-pack");
-        }
+            return null;
+        });
     }
 
     @Test
@@ -78,17 +80,18 @@ class FetchCommandTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("refs/heads/main");
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP))
                     .isInstanceOf(IOException.class).hasMessageContaining("ref-in-want");
-        }
+            return null;
+        });
     }
 
     @Test
     void separateRequestsGetIndependentNegotiationState() throws Exception {
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var command = new FetchCommand(storage, index, capabilities());
             var first = command.prepareNegotiation(new FetchRequest(), SSH);
             first.next(NegotiationMessage.Control.DONE);
@@ -98,19 +101,21 @@ class FetchCommandTest {
             assertThat(second.getContext()).isNotSameAs(first.getContext());
             assertThat(second.getContext().doneReceived()).isFalse();
             assertThat(second.getResponsesToSend()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
     void defaultAccessAllowsAnExistingObjectWithoutRequiringAnAdvertisedRef() throws Exception {
         var request = new FetchRequest();
         request.wants().add(FIRST);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities());
             var iterator = command.prepareNegotiation(request, SSH);
             assertThat(iterator.getContext().wantedObjects()).containsExactly(FIRST);
-        }
+            return null;
+        });
     }
 
     @Test
@@ -120,7 +125,7 @@ class FetchCommandTest {
         request.wants().add(FIRST);
         request.wantRefs().addAll(List.of(MAIN.value(), "HEAD"));
         InMemoryIndex indexApi = new InMemoryIndex();
-        try (GitIndexAccess index = indexApi.createAccess()) {
+        indexApi.withAccess(index -> {
             var storage = storage(Set.of(FIRST), index);
             publishRefs(
                     storage, indexApi,
@@ -131,19 +136,21 @@ class FetchCommandTest {
 
             assertThat(iterator.getContext().wantedRefs()).containsExactly(
                     Map.entry(MAIN, FIRST), Map.entry(new RefId("HEAD"), FIRST));
-        }
+            return null;
+        });
     }
 
     @Test
     void missingExplicitObjectFailsBeforeNegotiation() throws Exception {
         var request = new FetchRequest();
         request.wants().addAll(List.of(FIRST, SECOND));
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        new InMemoryIndex().withAccess(index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                     .isInstanceOf(IOException.class).hasMessageContaining(SECOND.toHex());
-        }
+            return null;
+        });
     }
 
     @Test
@@ -153,7 +160,7 @@ class FetchCommandTest {
         request.wantRefs().add(MAIN.value());
         request.wants().add(SECOND);
         InMemoryIndex indexApi = new InMemoryIndex();
-        try (GitIndexAccess index = indexApi.createAccess()) {
+        indexApi.withAccess(index -> {
             GitStorageApi storage = storage(Set.of(FIRST), index);
             publishRefs(
                     storage, indexApi,
@@ -171,7 +178,8 @@ class FetchCommandTest {
             };
             FetchCommand command = new FetchCommand(repository, capabilities(GitCapability.REF_IN_WANT));
             assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP)).isSameAs(denied);
-        }
+            return null;
+        });
     }
 
     private static GitStorageApi storage(Set<ObjectId> ids, GitIndexAccess index) throws Exception {

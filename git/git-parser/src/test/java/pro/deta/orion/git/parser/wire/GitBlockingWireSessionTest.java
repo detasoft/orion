@@ -56,7 +56,15 @@ class GitBlockingWireSessionTest {
 
     @AfterEach
     void closeStorage() throws Exception {
-        try (GitStorageApi ownedStorage = storage; GitIndexAccess ownedIndex = index) {
+        {
+            try (GitStorageApi ownedStorage = storage) {
+                GitIndexAccess ownedIndex = index;
+                try {
+
+                } finally {
+                    ownedIndex.discard();
+                }
+            }
         }
         if (servedAccess != null) {
             assertThatThrownBy(servedAccess::snapshotRefs).isInstanceOf(IOException.class);
@@ -150,8 +158,13 @@ class GitBlockingWireSessionTest {
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.UPLOAD_PACK));
         byte[] received = response.toByteArray();
         assertThat(new String(received, 0, 8, StandardCharsets.US_ASCII)).isEqualTo("0008NAK\n");
-        try (GitIndexAccess pack = PackTestData.inspect(Arrays.copyOfRange(received, 8, received.length))) {
-            assertThat(pack.locations(id)).isNotEmpty();
+        {
+            GitIndexAccess pack = PackTestData.inspect(Arrays.copyOfRange(received, 8, received.length));
+            try {
+                assertThat(pack.locations(id)).isNotEmpty();
+            } finally {
+                pack.discard();
+            }
         }
     }
 
@@ -323,9 +336,14 @@ class GitBlockingWireSessionTest {
             assertThat(data.content()[0]).isEqualTo((byte) 1);
             bytes.write(data.content(), 1, data.content().length - 1);
         }
-        try (GitIndexAccess pack = PackTestData.inspect(bytes.toByteArray())) {
-            assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
-            assertThat(pack.locations(id)).isNotEmpty();
+        {
+            GitIndexAccess pack = PackTestData.inspect(bytes.toByteArray());
+            try {
+                assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
+                assertThat(pack.locations(id)).isNotEmpty();
+            } finally {
+                pack.discard();
+            }
         }
     }
 }

@@ -40,29 +40,35 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsExactCompressedRangesFromRepositoryLocations(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
-             GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess()) {
-            byte[] first = {1, 2, 3};
-            byte[] second = {4, 5};
-            PackMetadata pair = PackTestData.publish(
-                    PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage, index);
-            List<IndexedObject> locations = index.objects(pair.packId());
-            assertThat(locations).hasSize(2);
-            assertThat(locations.getFirst().packOffset() + locations.getFirst().compressedSize())
-                    .isEqualTo(locations.getLast().packOffset());
-            byte[][] contents = {first, second};
-            for (int i = 0; i < contents.length; i++) {
-                byte[] expected = contents[i];
-                byte[] compressed = GitObjectRead.read(storage, locations.get(i), (type, size, base, input) -> {
-                    assertThat(type).isEqualTo(GitObjectType.BLOB);
-                    assertThat(size).isEqualTo(expected.length);
-                    assertThat(base).isEmpty();
-                    return input.newInputStream().readAllBytes();
-                });
-                assertThat(compressed).isEqualTo(PackTestData.compressed(expected));
-                assertThat(GitObjectRead.read(storage, index, locations.get(i).objectId(),
-                        new ContentGitObjectRead<>((type, size, base, input) -> input.readBytes((int) size))))
-                        .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(expected));
+        {
+            try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
+                GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess();
+                try {
+                    byte[] first = {1, 2, 3};
+                    byte[] second = {4, 5};
+                    PackMetadata pair = PackTestData.publish(
+                            PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage, index);
+                    List<IndexedObject> locations = index.objects(pair.packId());
+                    assertThat(locations).hasSize(2);
+                    assertThat(locations.getFirst().packOffset() + locations.getFirst().compressedSize())
+                            .isEqualTo(locations.getLast().packOffset());
+                    byte[][] contents = {first, second};
+                    for (int i = 0; i < contents.length; i++) {
+                        byte[] expected = contents[i];
+                        byte[] compressed = GitObjectRead.read(storage, locations.get(i), (type, size, base, input) -> {
+                            assertThat(type).isEqualTo(GitObjectType.BLOB);
+                            assertThat(size).isEqualTo(expected.length);
+                            assertThat(base).isEmpty();
+                            return input.newInputStream().readAllBytes();
+                        });
+                        assertThat(compressed).isEqualTo(PackTestData.compressed(expected));
+                        assertThat(GitObjectRead.read(storage, index, locations.get(i).objectId(),
+                                new ContentGitObjectRead<>((type, size, base, input) -> input.readBytes((int) size))))
+                                .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(expected));
+                    }
+                } finally {
+                    index.discard();
+                }
             }
         }
     }
@@ -114,20 +120,24 @@ class GitStorageApiTest {
 
     @Test
     void rawReadRemainsAvailableAfterIndexClosesAndMissingObjectsDoNotInvokeReader() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
-            ObjectId absent = new ObjectId("1".repeat(40));
-            assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
-            assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {
-                throw new AssertionError("Missing object must not invoke a reader");
-            })).isEmpty();
-            ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
-            IndexedObject location = index.locations(object).getFirst();
-            index.close();
-            assertThat(storage.exists(location.packId())).isTrue();
-            assertThat(GitObjectRead.<Integer>read(storage, location,
-                    new ContentGitObjectRead<>((type, size, base, input) -> input.readUnsignedByte())))
-                    .isEqualTo(42);
+        {
+            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+                new LocalGitIndex(directory).withAccess(index -> {
+                    ObjectId absent = new ObjectId("1".repeat(40));
+                    assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
+                    assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {
+                        throw new AssertionError("Missing object must not invoke a reader");
+                    })).isEmpty();
+                    ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+                    IndexedObject location = index.locations(object).getFirst();
+                    index.discard();
+                    assertThat(storage.exists(location.packId())).isTrue();
+                    assertThat(GitObjectRead.<Integer>read(storage, location,
+                            new ContentGitObjectRead<>((type, size, base, input) -> input.readUnsignedByte())))
+                            .isEqualTo(42);
+                    return null;
+                });
+            }
         }
     }
 }

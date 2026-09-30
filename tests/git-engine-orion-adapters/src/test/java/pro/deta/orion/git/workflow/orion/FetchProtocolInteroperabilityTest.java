@@ -106,14 +106,24 @@ class FetchProtocolInteroperabilityTest {
             GitRemoteRepository remote = seed(server, source);
             RepositorySnapshot before = server.snapshot(remote);
             String want = "want " + source.head();
-            try (GitIndexAccess pack = fetch(remote, List.of(want, "done"))) {
-                RepositorySnapshot.Commit commit = before.commits().get(source.head());
-                assertThat(pack.objects(pack.packs().getFirst().packId()))
-                        .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()), new ObjectId(commit.tree()),
-                        new ObjectId(commit.entries().get("README.md").objectId()));
+            {
+                GitIndexAccess pack = fetch(remote, List.of(want, "done"));
+                try {
+                    RepositorySnapshot.Commit commit = before.commits().get(source.head());
+                    assertThat(pack.objects(pack.packs().getFirst().packId()))
+                            .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()), new ObjectId(commit.tree()),
+                            new ObjectId(commit.entries().get("README.md").objectId()));
+                } finally {
+                    pack.discard();
+                }
             }
-            try (GitIndexAccess pack = fetch(remote, List.of(want, "have " + source.head(), "done"))) {
-                assertThat(pack.packs().getFirst().objectCount()).isZero();
+            {
+                GitIndexAccess pack = fetch(remote, List.of(want, "have " + source.head(), "done"));
+                try {
+                    assertThat(pack.packs().getFirst().objectCount()).isZero();
+                } finally {
+                    pack.discard();
+                }
             }
             assertThat(before.difference(server.snapshot(remote))).isNull();
         }
@@ -131,16 +141,26 @@ class FetchProtocolInteroperabilityTest {
                     List.of("want " + source.head(), "deepen 0", "done"),
                     List.of("want " + "1".repeat(40), "done"))) {
                 assertThatThrownBy(() -> {
-                    try (GitIndexAccess ignored = fetch(remote, arguments)) {
-                        // A completed pack would mean that the invalid request was accepted.
+                    {
+                        GitIndexAccess ignored = fetch(remote, arguments);
+                        try {
+                            // A completed pack would mean that the invalid request was accepted.
+                        } finally {
+                            ignored.discard();
+                        }
                     }
                 }).isInstanceOf(IOException.class)
                         .isNotInstanceOf(SocketTimeoutException.class)
                         .isNotInstanceOf(HttpTimeoutException.class);
                 assertThat(before.difference(server.snapshot(remote))).isNull();
-                try (GitIndexAccess pack = fetch(remote, List.of("want " + source.head(), "done"))) {
-                    assertThat(pack.objects(pack.packs().getFirst().packId()))
-                            .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()));
+                {
+                    GitIndexAccess pack = fetch(remote, List.of("want " + source.head(), "done"));
+                    try {
+                        assertThat(pack.objects(pack.packs().getFirst().packId()))
+                                .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()));
+                    } finally {
+                        pack.discard();
+                    }
                 }
             }
         }

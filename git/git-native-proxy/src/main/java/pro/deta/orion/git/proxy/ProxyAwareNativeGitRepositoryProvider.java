@@ -48,6 +48,17 @@ import java.util.function.Supplier;
 
 @Singleton
 public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
+    @Override
+    public synchronized void close() {
+        try {
+            backend.close();
+        } finally {
+            provisionalBindings.clear();
+            provisionalSources.clear();
+            activeBindings = Map.of();
+        }
+    }
+
     private final NativeGitRepositoryProvider backend;
     private final BootstrapGitTransportFactory transportFactory;
     private final BootstrapSecretResolver secretResolver;

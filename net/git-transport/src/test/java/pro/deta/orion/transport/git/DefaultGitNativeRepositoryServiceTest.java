@@ -55,6 +55,12 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
 
 class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvider, GitNativeRepositoryAccessHook {
+    @Override
+    public void close() {
+        backend.close();
+        if (replacement != null) replacement.close();
+    }
+
     private NativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
     private NativeGitRepositoryProvider replacement;
     private final List<String> calls = new ArrayList<>();
@@ -146,9 +152,10 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                     .containsExactly(EXPECTED_OLD_MISMATCH, atomic ? ATOMIC_ABORTED : APPLIED);
             assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
             assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
-            try (GitIndexAccess access1 = repository.index().createAccess()) {
+            repository.index().withAccess(access1 -> {
                 assertThat(GitObjectRead.exists(repository.storage(), access1, feature.newId().orElseThrow())).isTrue();
-            }
+                return null;
+            });
         }
     }
 
@@ -171,10 +178,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
                     .valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
-            try (GitIndexAccess access2 = reopened.index().createAccess()) {
+            reopened.index().withAccess(access2 -> {
                 assertThat(GitObjectRead.exists(reopened.storage(), access2,
                         update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
-            }
+                return null;
+            });
         }
     }
 
@@ -303,10 +311,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         if (!wantedRef.equals("HEAD")) {
             assertThat(repository.updateRef(wantedRef, NULL_ID, allowed.toHex()).status()).isEqualTo(APPLIED);
         } else if (detached) {
-            try (GitIndexAccess access3 = repository.index().createAccess()) {
+            repository.index().withAccess(access3 -> {
                 access3.updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
                 access3.apply();
-            }
+                return null;
+            });
         }
         List<List<String>> checkedBranches = new ArrayList<>();
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -320,10 +329,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                     Head next = detached ? new Head.Detached(new CommitId(denied.toBytes()))
                             : new Head.Symbolic(new RefId("refs/heads/secret"));
                     assertThatCode(() -> {
-                        try (GitIndexAccess access = repository.index().createAccess()) {
+                        repository.index().withAccess(access -> {
                             access.updateHead(next);
                             access.apply();
-                        }
+                            return null;
+                        });
                     }).doesNotThrowAnyException();
                 } else {
                     assertThat(repository.updateRef(wantedRef, allowed.toHex(), denied.toHex()).status())
@@ -410,10 +420,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             if (ref.equals("tag")) {
                 repository.updateRef("refs/tags/release", NULL_ID, tip);
             } else {
-                try (GitIndexAccess access5 = repository.index().createAccess()) {
+                repository.index().withAccess(access5 -> {
                     access5.updateHead(new Head.Detached(new CommitId(tip)));
                     access5.apply();
-                }
+                    return null;
+                });
             }
             repository.updateRef("refs/heads/main", tip, NULL_ID);
         }

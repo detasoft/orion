@@ -29,6 +29,11 @@ import java.util.function.Supplier;
 
 /** Routes XML-bound repositories through the application-owned shared S3 transport. */
 public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
+    @Override
+    public void close() {
+        bootstrap.close();
+    }
+
     private final NativeGitRepositoryProvider bootstrap;
     private final S3Transport client;
     private volatile RuntimeConfiguration runtime;

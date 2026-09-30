@@ -81,10 +81,11 @@ class NativeGitReceivePackTest {
         assertThatThrownBy(() -> repository.publishPack(
                 prepared.pack(), prepared.refUpdates(), true, denied))
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
-        try (GitIndexAccess access1 = repository.index().createAccess()) {
+        repository.index().withAccess(access1 -> {
             assertThat(access1.packs()).isEmpty();
             assertThat(repository.refs()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test

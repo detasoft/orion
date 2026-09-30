@@ -27,6 +27,10 @@ final class S3GitIndex implements GitIndexApi {
     }
 
     @Override
+    public void close() {
+    }
+
+    @Override
     public GitHashAlgorithm hashAlgorithm() {
         return GitHashAlgorithm.SHA1;
     }

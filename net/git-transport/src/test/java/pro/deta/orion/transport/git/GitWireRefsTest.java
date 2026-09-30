@@ -115,7 +115,7 @@ class GitWireRefsTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        try (GitIndexAccess access1 = repository.index().createAccess()) {
+        repository.index().withAccess(access1 -> {
             access1.updateHead(new Head.Detached(new CommitId(TAG_ID)));
             access1.apply();
             DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -124,7 +124,8 @@ class GitWireRefsTest {
                     List.of("HEAD")));
 
             assertThat(response.refs()).containsExactly(direct(TAG_ID, "HEAD"));
-        }
+            return null;
+        });
     }
 
     @Test

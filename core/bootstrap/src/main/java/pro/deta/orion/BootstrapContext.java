@@ -64,7 +64,6 @@ public final class BootstrapContext implements AutoCloseable {
     private final OrionKeyMaterial keyMaterial;
     private final ConfiguredNativeGitRepositoryProvider storageProvider;
     private final S3Transport s3Transport;
-    private final S3NativeGitRepositoryProvider standaloneS3;
     private final SshHostKeyCapability sshHostKeys;
     private final Optional<AccessControlSnapshot> initialConfiguration;
 
@@ -74,8 +73,7 @@ public final class BootstrapContext implements AutoCloseable {
             OrionKeyMaterial keyMaterial,
             SshHostKeyCapability sshHostKeys,
             Optional<AccessControlSnapshot> initialConfiguration,
-            ConfiguredNativeGitRepositoryProvider storageProvider, S3Transport s3Transport,
-            S3NativeGitRepositoryProvider standaloneS3) {
+            ConfiguredNativeGitRepositoryProvider storageProvider, S3Transport s3Transport) {
         this.repositoryProvider = repositoryProvider;
         this.repositorySources = repositorySources;
         this.keyMaterial = keyMaterial;
@@ -83,7 +81,6 @@ public final class BootstrapContext implements AutoCloseable {
         this.initialConfiguration = initialConfiguration;
         this.storageProvider = storageProvider;
         this.s3Transport = s3Transport;
-        this.standaloneS3 = standaloneS3;
     }
 
     public static BootstrapContext open(
@@ -128,7 +125,6 @@ public final class BootstrapContext implements AutoCloseable {
             boolean createIfMissing) {
         OrionKeyMaterial keyMaterial = null;
         S3Transport s3Transport = new S3Transport();
-        S3NativeGitRepositoryProvider standaloneS3 = backend instanceof S3NativeGitRepositoryProvider s3 ? s3 : null;
         ConfiguredNativeGitRepositoryProvider storageProvider =
                 new ConfiguredNativeGitRepositoryProvider(backend, s3Transport);
         try {
@@ -176,9 +172,13 @@ public final class BootstrapContext implements AutoCloseable {
                     keyMaterial.sshHostKeyMaterial(),
                     sshHostKeyReferences(configuration));
             return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys, initialConfiguration,
-                    storageProvider, s3Transport, standaloneS3);
+                    storageProvider, s3Transport);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            closeResources(s3Transport, standaloneS3, keyMaterial);
+            try {
+                closeResources(s3Transport, storageProvider, keyMaterial);
+            } catch (RuntimeException cleanup) {
+                failure.addSuppressed(cleanup);
+            }
             throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
     }
@@ -351,16 +351,16 @@ public final class BootstrapContext implements AutoCloseable {
 
     @Override
     public void close() {
-        closeResources(s3Transport, standaloneS3, keyMaterial);
+        closeResources(s3Transport, repositoryProvider, keyMaterial);
     }
 
-    private static void closeResources(S3Transport transport, S3NativeGitRepositoryProvider standalone,
+    private static void closeResources(S3Transport transport, NativeGitRepositoryProvider provider,
             OrionKeyMaterial material) {
         try {
             transport.close();
         } finally {
             try {
-                if (standalone != null) standalone.close();
+                provider.close();
             } finally {
                 if (material != null) material.close();
             }

@@ -235,11 +235,16 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
-                    try (GitIndexAccess access1 = repository.index().createAccess()) {
-                        repository.writePack(access1.packs(received.orElseThrow()).getFirst(),
-                                new OutputStreamBufferedByteOutput(exported));
-                        forwarded.add(exported.toByteArray());
-                        return Collections.nCopies(updates.size(), true);
+                    {
+                        GitIndexAccess access1 = repository.index().createAccess();
+                        try {
+                            repository.writePack(access1.packs(received.orElseThrow()).getFirst(),
+                                    new OutputStreamBufferedByteOutput(exported));
+                            forwarded.add(exported.toByteArray());
+                            return Collections.nCopies(updates.size(), true);
+                        } finally {
+                            access1.discard();
+                        }
                     }
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
@@ -464,11 +469,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         NativeGitRepository repository = provider.openForRead(repositoryName).valueOrFailure("open proxy");
         repository.refs();
         repository.readObject(new ObjectId("0".repeat(40)));
-        try (GitIndexAccess access2 = repository.index().createAccess()) {
+        repository.index().withAccess(access2 -> {
             GitObjectRead.exists(repository.storage(), access2, new ObjectId("0".repeat(40)));
 
             assertThat(refreshes).hasValue(2);
-        }
+            return null;
+        });
     }
 
     @Test

@@ -42,7 +42,7 @@ class ResolvedGitObjectReadTest {
 
     @AfterEach
     void closeIndex() throws Exception {
-        index.close();
+        index.discard();
     }
 
     @Test

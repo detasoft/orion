@@ -40,6 +40,11 @@ class DefaultOperatorDomainSourceTest {
     @Test
     void returnsOneFailureInsteadOfAPartialRepositorySnapshot() {
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        @Override
+        public void close() {
+
+            }
+
             @Override
             public List<String> repositoryNames() {
                 return List.of("available", "broken");

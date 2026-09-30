@@ -333,6 +333,11 @@ class NativeGitAccessControlStorageTest {
     }
 
     private static final class RecordingProvider implements NativeGitRepositoryProvider {
+        @Override
+        public void close() {
+            backend.close();
+        }
+
         private final NativeGitRepositoryProvider backend;
         private final AtomicInteger reads = new AtomicInteger();
         private final AtomicInteger saves = new AtomicInteger();

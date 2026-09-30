@@ -54,6 +54,11 @@ class GitBlockingWireSessionTest {
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+        @Override
+        public void close() {
+            backend.close();
+            }
+
             @Override
             public boolean exists(String name) {
                 return backend.exists(name);
@@ -74,11 +79,12 @@ class GitBlockingWireSessionTest {
                     List<RefUpdate> updates, boolean atomic) {
                 try {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
-                    try (GitIndexAccess access1 = selected.index().createAccess()) {
+                    selected.index().withAccess(access1 -> {
                         selected.writePack(access1.packs(received.orElseThrow()).getFirst(),
                                 new OutputStreamBufferedByteOutput(exported));
                         assertThat(exported.toByteArray()).isEqualTo(original);
-                    }
+                        return null;
+                    });
                 } catch (IOException failure) {
                     throw new UncheckedIOException(failure);
                 }

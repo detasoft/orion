@@ -218,8 +218,11 @@ final class OrionGitServer implements GitServer {
             if (executor != null) {
                 executor.shutdownNow();
             }
-            for (NativeGitRepository repository : repositories.values()) {
-                repository.close();
+            try {
+                if (provider != null) provider.close();
+            } catch (RuntimeException cleanupFailure) {
+                if (failure == null) failure = cleanupFailure;
+                else failure.addSuppressed(cleanupFailure);
             }
             repositories.clear();
             try {

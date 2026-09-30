@@ -190,6 +190,11 @@ class NativeGitKeyMaterialContentStoreTest {
     }
 
     private static final class InterleavingProvider implements NativeGitRepositoryProvider {
+        @Override
+        public void close() {
+            delegate.close();
+        }
+
         private final NativeGitRepositoryProvider delegate;
         private final Runnable beforePublish;
         private boolean interleaved;

@@ -199,7 +199,7 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                new InMemoryIndex().withAccess(index -> {
                     var command = new FetchCommand(storage, index, capabilities());
                     assertThatThrownBy(() -> command.action(protocol))
                             .isInstanceOf(IOException.class).hasMessageContaining("not advertised");
@@ -210,7 +210,8 @@ class FetchNegotiatorRequestTest {
                         assertThat(FetchCommand.readNegotiationMessage(reader))
                                 .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
                     }
-                }
+                    return null;
+                });
             }
         }
     }
@@ -226,7 +227,7 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 var storage = FetchTestSupport.storage(directory);
-                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                new InMemoryIndex().withAccess(index -> {
                     var command = new FetchCommand(storage, index, capabilities());
 
                     assertThatThrownBy(() -> command.action(protocol))
@@ -239,7 +240,8 @@ class FetchNegotiatorRequestTest {
                         assertThat(FetchCommand.readNegotiationMessage(reader))
                                 .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
                     }
-                }
+                    return null;
+                });
             }
         }
     }
@@ -250,7 +252,7 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
                 var plan = negotiate(command, protocol).orElseThrow();
@@ -258,7 +260,8 @@ class FetchNegotiatorRequestTest {
                 assertThat(plan.wantedObjects()).containsExactly(new ObjectId(WANT));
                 assertThat(plan.commonObjects()).isEmpty();
                 assertThat(bytes.size()).isZero();
-            }
+                return null;
+            });
         }
     }
 
@@ -268,14 +271,15 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities());
                 assertThat(negotiate(command, protocol)).isEmpty();
                 assertThat(bytes.toString(StandardCharsets.UTF_8))
                         .isEqualTo(packet("acknowledgments\n") + packet("NAK\n") + "0000");
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
-            }
+                return null;
+            });
         }
     }
 
@@ -313,11 +317,12 @@ class FetchNegotiatorRequestTest {
                 var bytes = new ByteArrayOutputStream();
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                new InMemoryIndex().withAccess(index -> {
                     assertThat(negotiate(new FetchCommand(storage, index, capabilities()), protocol)).isEmpty();
                     assertThat(input.readUnsignedByte()).isEqualTo('N');
                     assertThat(bytes.size()).isZero();
-                }
+                    return null;
+                });
             }
         }
     }
@@ -344,7 +349,7 @@ class FetchNegotiatorRequestTest {
                 }
             };
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context).isSameAs(checks);
@@ -354,7 +359,8 @@ class FetchNegotiatorRequestTest {
                 assertThat(context.ready()).isFalse();
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.size()).isZero();
-            }
+                return null;
+            });
         }
     }
 
@@ -388,7 +394,7 @@ class FetchNegotiatorRequestTest {
                 FetchRequest request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
                 var checks = checks(request, false, GitCapability.MULTI_ACK_DETAILED, GitCapability.SIDE_BAND_64K);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                new InMemoryIndex().withAccess(index -> {
                     NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                             new FetchNegotiatorIterator(checks, SSH), protocol.reader(), protocol.writer());
                     assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
@@ -397,7 +403,8 @@ class FetchNegotiatorRequestTest {
                     assertThat(bytes.flushes).isEqualTo(3);
                     assertThat(bytes.toString(StandardCharsets.US_ASCII))
                             .isEqualTo("0038ACK " + HAVE + " common\n0008NAK\n0031ACK " + HAVE + "\n");
-                }
+                    return null;
+                });
             }
         }
     }
@@ -411,7 +418,7 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.SIDEBAND_ALL);
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context.ready()).isTrue();
@@ -419,7 +426,8 @@ class FetchNegotiatorRequestTest {
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
                         "0015\u0001acknowledgments\n0032\u0001ACK " + HAVE + "\n000b\u0001ready\n0001");
-            }
+                return null;
+            });
         }
     }
 
@@ -432,7 +440,7 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.WAIT_FOR_DONE);
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context.ready()).isFalse();
@@ -440,7 +448,8 @@ class FetchNegotiatorRequestTest {
                 assertThat(input.readUnsignedByte()).isEqualTo('N');
                 assertThat(bytes.toString(StandardCharsets.US_ASCII))
                         .isEqualTo("0014acknowledgments\n0031ACK " + HAVE + "\n0000");
-            }
+                return null;
+            });
         }
     }
 
@@ -495,11 +504,12 @@ class FetchNegotiatorRequestTest {
         try (var input = input(packet("want " + WANT + " object-format=sha256") + "0000")) {
             var request = FetchRequest.parseLegacy(reader(input));
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+            new InMemoryIndex().withAccess(index -> {
                 var command = new FetchCommand(storage, index, capabilities(GitCapability.OBJECT_FORMAT));
                 assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                         .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
-            }
+                return null;
+            });
         }
     }
 

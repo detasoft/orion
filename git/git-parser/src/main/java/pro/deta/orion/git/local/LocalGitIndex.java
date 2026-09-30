@@ -56,6 +56,7 @@ public final class LocalGitIndex implements GitIndexApi {
     private static final ConcurrentMap<Path, SharedStore> STORES = new ConcurrentHashMap<>();
     private final Path path;
     private final GitLock lock;
+    private boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
 
     public LocalGitIndex(Path repository) throws IOException {
@@ -145,6 +146,7 @@ public final class LocalGitIndex implements GitIndexApi {
 
     private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates) throws IOException {
         try (GitLock.Lease lease = lockIndex()) {
+            if (closed) throw new IOException("Repository index is closed");
             SharedStore shared = STORES.get(path);
             if (shared == null) {
                 if (!Files.isRegularFile(path)) {
@@ -190,6 +192,28 @@ public final class LocalGitIndex implements GitIndexApi {
             }
         } catch (MVStoreException | IllegalArgumentException error) {
             throw storageFailure(error);
+        }
+    }
+
+    @Override
+    public void close() {
+        try (GitLock.Lease lease = lockForCleanup()) {
+            closed = true;
+        }
+    }
+
+    private GitLock.Lease lockForCleanup() {
+        boolean interrupted = false;
+        try {
+            for (;;) {
+                try {
+                    return lock.lock();
+                } catch (InterruptedException failure) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 
@@ -464,13 +488,13 @@ public final class LocalGitIndex implements GitIndexApi {
                 });
             } catch (IOException | RuntimeException | Error failure) {
                 try {
-                    close();
+                    discard();
                 } catch (IOException | RuntimeException | Error cleanup) {
                     failure.addSuppressed(cleanup);
                 }
                 throw failure;
             }
-            close();
+            discard();
         }
 
         private void overlay(Map<RefId, ObjectId> target, Map<RefId, Optional<ObjectId>> changes) {
@@ -484,11 +508,15 @@ public final class LocalGitIndex implements GitIndexApi {
         }
 
         @Override
-        public void close() throws IOException {
-            try (GitLock.Lease lease = lockIndex()) {
+        public void discard() throws IOException {
+            boolean interrupted = false;
+            try (GitLock.Lease lease = lockForCleanup()) {
+                interrupted = Thread.interrupted();
                 release();
             } catch (MVStoreException | IllegalArgumentException error) {
                 throw storageFailure(error);
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
             }
         }
 

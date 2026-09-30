@@ -1,6 +1,5 @@
 package pro.deta.orion.git.sync;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitReceivePackResult;
@@ -50,28 +49,31 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         }
         Set<String> wants = new LinkedHashSet<>(heads.heads().values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
-        try (GitIndexAccess access = checked.index().createAccess();
-             PackIngestionOutput target = new PackIngestionOutput(
-                checked.storage(), access)) {
-            GitUploadPackRequest request = new GitUploadPackRequest(
-                    List.copyOf(wants),
-                    List.copyOf(haves),
-                    target,
-                    ignored -> { });
-            requireSuccess(
-                    connection.uploadPack().fetch(
-                            connection.uri(),
-                            connection.options(),
-                            request),
-                    "fetch");
-            checked.publishPack(target.complete());
-            for (String root : wants) {
-                if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
-                    throw GitRemoteException.local("complete object validation", false, null);
+        try {
+            return checked.index().<GitHeads, GitRemoteException>withAccess(access -> {
+                try (PackIngestionOutput target = new PackIngestionOutput(
+                        checked.storage(), access)) {
+                    GitUploadPackRequest request = new GitUploadPackRequest(
+                            List.copyOf(wants),
+                            List.copyOf(haves),
+                            target,
+                            ignored -> { });
+                    requireSuccess(
+                            connection.uploadPack().fetch(
+                                    connection.uri(),
+                                    connection.options(),
+                                    request),
+                            "fetch");
+                    checked.publishPack(target.complete());
+                    for (String root : wants) {
+                        if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
+                            throw GitRemoteException.local("complete object validation", false, null);
+                        }
+                    }
+                    publishTrackingRefs(checked, heads);
+                    return heads;
                 }
-            }
-            publishTrackingRefs(checked, heads);
-            return heads;
+            });
         } catch (IOException | RuntimeException error) {
             throw GitRemoteException.local("fetch publication", true, error);
         }
@@ -154,13 +156,14 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         return new GitReceivePackRequest(
                 List.of(command),
                 output -> {
-                    try (GitIndexAccess access = repository.index().createAccess()) {
+                    repository.index().withAccess(access -> {
                         FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
                         try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
                             pack.writeTo(writer);
                             writer.finish();
                         }
-                    }
+                        return null;
+                    });
                 });
     }
 

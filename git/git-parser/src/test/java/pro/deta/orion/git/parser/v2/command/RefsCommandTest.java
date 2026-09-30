@@ -52,7 +52,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     @Test
     void listsRefsWithSymbolicHeadAndFiltersByAnyRequestedPrefix() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             addRef("refs/heads/main", commit);
             addRef("refs/heads/ветка", commit);
@@ -64,13 +64,14 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                     .containsExactly(commit + " HEAD", commit + " refs/heads/ветка");
             assertThat(execute(storage, index, "ref-prefix absent")).isEmpty();
             assertThat(execute(storage, index, "ref-prefix ")).hasSize(4);
-        }
+            return null;
+        });
     }
 
     @Test
     void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             List<RefUpdate> updates = new ArrayList<>();
             List<String> expected = new ArrayList<>();
@@ -100,13 +101,14 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
                 assertThat(GitPktLine.readNextFrom(input)).isEmpty();
             }
-        }
+            return null;
+        });
     }
 
     @Test
     void handlesUnbornAndDetachedHead() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             assertThat(execute(storage, index)).isEmpty();
             assertThat(execute(storage, index, "symrefs")).isEmpty();
             assertThat(execute(storage, index, "unborn")).isEmpty();
@@ -116,13 +118,14 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             index.updateHead(new Head.Detached(new CommitId(commit.toBytes())));
             assertThat(execute(storage, index, "symrefs", "unborn")).containsExactly(commit + " HEAD");
-        }
+            return null;
+        });
     }
 
     @Test
     void peelsNestedTagsIncludingRefsOutsideTheTagsNamespace() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId blob = publish(storage, index, GitObjectType.BLOB, "content");
             ObjectId inner = publish(storage, index, GitObjectType.TAG, tag(blob, "blob", "inner"));
             ObjectId outer = publish(storage, index, GitObjectType.TAG, tag(inner, "tag", "outer"));
@@ -136,13 +139,14 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                     blob + " refs/tags/lightweight", outer + " refs/tags/nested peeled:" + blob);
             assertThat(execute(storage, index, "ref-prefix refs/tags/nested"))
                     .containsExactly(outer + " refs/tags/nested");
-        }
+            return null;
+        });
     }
 
     @Test
     void consumesOnlyThisRequestAndWritesNothingBeforeItsFlush() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             OutputStreamBufferedByteOutput request = new OutputStreamBufferedByteOutput(bytes);
             GitPktLine.Control.FLUSH.writeTo(request);
@@ -163,13 +167,14 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                         .isInstanceOf(IOException.class);
             }
             assertThat(response.size()).isZero();
-        }
+            return null;
+        });
     }
 
     @Test
     void rejectsInvalidArgumentsControlsAndUnadvertisedUnborn() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             for (String argument : List.of("peel extra", "ref-prefix", "unknown", "symrefs\t")) {
                 assertThatThrownBy(() -> execute(storage, index, argument)).isInstanceOf(IOException.class);
             }
@@ -198,25 +203,27 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                         GitProtocolVersion.V1, GitTransport.SSH);
                 assertThatThrownBy(() -> command(storage, index).action(legacy)).isInstanceOf(IOException.class);
             }
-        }
+            return null;
+        });
     }
 
     @Test
     void omitsPeeledAttributeForMissingTagTarget() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId missing = new ObjectId("f".repeat(40));
             ObjectId tag = publish(storage, index, GitObjectType.TAG, tag(missing, "blob", "broken"));
             addRef("refs/tags/broken", tag);
             assertThat(execute(storage, index)).containsExactly(tag + " refs/tags/broken");
             assertThat(execute(storage, index, "peel")).containsExactly(tag + " refs/tags/broken");
-        }
+            return null;
+        });
     }
 
     @Test
     void rejectsExcessivePrefixesAndMalformedUtf8BeforeResponding() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             String[] prefixes = new String[257];
             Arrays.fill(prefixes, "ref-prefix refs/heads/");
             assertThatThrownBy(() -> execute(storage, index, prefixes)).isInstanceOf(IOException.class)
@@ -231,7 +238,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                         .isInstanceOf(IOException.class);
             }
             assertThat(response.size()).isZero();
-        }
+            return null;
+        });
     }
 
     private RefsCommand command(GitStorageApi storage, GitIndexAccess index) {
@@ -270,9 +278,10 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     private void addRef(String name, ObjectId id) throws IOException {
         List<RefUpdate> updates = List.of(new RefUpdate(new RefId(name), Optional.empty(), Optional.of(id)));
-        try (GitIndexAccess access = new LocalGitIndex(repository).createAccess(updates)) {
+        new LocalGitIndex(repository).withAccess(updates, access -> {
             access.apply();
-        }
+            return null;
+        });
     }
 
     private ObjectId publish(GitStorageApi storage, GitIndexAccess index, GitObjectType type, String text) throws Exception {

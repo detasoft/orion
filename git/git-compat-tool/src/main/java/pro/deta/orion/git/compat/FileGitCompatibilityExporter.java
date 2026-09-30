@@ -60,8 +60,7 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
         }
         Path temporary = Files.createTempDirectory(parent, ".orion-git-export-");
         boolean published = false;
-        try {
-            FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(sourceStore);
+        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(sourceStore)) {
             if (!provider.exists(repositoryName)) {
                 throw new IOException("Source repository does not exist: " + repositoryName);
             }

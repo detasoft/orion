@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * shared providers borrow their connection and closing them does not close it. Repository handles own no S3
  * resources. Git data is unsupported.
  */
-public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryProvider, AutoCloseable {
+public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     private static final String METADATA_FILE = "orion-native-repository.properties";
     private static final String DEFAULT_HEAD = "refs/heads/main";
     private static final int MAX_METADATA_BYTES = 8192;

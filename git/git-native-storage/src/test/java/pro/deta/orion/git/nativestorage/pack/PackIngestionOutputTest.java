@@ -26,30 +26,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PackIngestionOutputTest {
     @Test
     void ingestsFragmentedBytesAndTransfersPackOwnership() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
-            NativeGitFileUpdate prepared = prepared();
-            byte[] bytes = prepared.pack();
-            PackMetadata pack;
-            try (PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
-                for (int offset = 0; offset < bytes.length; offset += 3) {
-                    ByteBuf fragment = Unpooled.wrappedBuffer(bytes, offset, Math.min(3, bytes.length - offset));
-                    try {
-                        int position = fragment.readerIndex();
-                        output.write(fragment);
-                        assertThat(fragment.readerIndex()).isEqualTo(position);
-                    } finally {
-                        fragment.release();
+        {
+            try (GitStorageApi storage = new InMemoryStorage()) {
+                GitIndexAccess index = new InMemoryIndex().createAccess();
+                try {
+                    NativeGitFileUpdate prepared = prepared();
+                    byte[] bytes = prepared.pack();
+                    PackMetadata pack;
+                    try (PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
+                        for (int offset = 0; offset < bytes.length; offset += 3) {
+                            ByteBuf fragment = Unpooled.wrappedBuffer(bytes, offset, Math.min(3, bytes.length - offset));
+                            try {
+                                int position = fragment.readerIndex();
+                                output.write(fragment);
+                                assertThat(fragment.readerIndex()).isEqualTo(position);
+                            } finally {
+                                fragment.release();
+                            }
+                        }
+                        pack = output.complete();
+                        assertThat(index.packs()).isEmpty();
+                        assertThatThrownBy(() -> output.write(new byte[]{1})).isInstanceOf(IOException.class);
+                        assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
                     }
+                    ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
+                    assertThat(index.findObject(pack.packId(), commit)).isPresent();
+                    index.publishIndex(pack);
+                    assertThat(GitObjectRead.exists(storage, index, commit)).isTrue();
+                } finally {
+                    index.discard();
                 }
-                pack = output.complete();
-                assertThat(index.packs()).isEmpty();
-                assertThatThrownBy(() -> output.write(new byte[]{1})).isInstanceOf(IOException.class);
-                assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
             }
-            ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
-            assertThat(index.findObject(pack.packId(), commit)).isPresent();
-            index.publishIndex(pack);
-            assertThat(GitObjectRead.exists(storage, index, commit)).isTrue();
         }
     }
 
@@ -60,25 +67,36 @@ class PackIngestionOutputTest {
         corrupt[corrupt.length - 1] ^= 1;
         for (byte[] invalid : new byte[][]{
                 Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
-            try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
-                 PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
-                output.write(invalid);
-                assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
-                assertThat(index.packs()).isEmpty();
+            {
+                try (GitStorageApi storage = new InMemoryStorage()) {
+                    new InMemoryIndex().withAccess(index -> {
+                        try (PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
+                            output.write(invalid);
+                            assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
+                            assertThat(index.packs()).isEmpty();
+                        }
+                        return null;
+                    });
+                }
             }
         }
     }
 
     @Test
     void closeAbandonsIncompleteBytesAndRejectsFurtherWrites() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
-            PackIngestionOutput output = new PackIngestionOutput(storage, index);
-            output.write(new byte[]{'P', 'A'});
-            output.close();
-            output.close();
-            assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
-            assertThatThrownBy(() -> output.write(new byte[]{1})).isInstanceOf(IOException.class);
-            assertThat(index.packs()).isEmpty();
+        {
+            try (GitStorageApi storage = new InMemoryStorage()) {
+                new InMemoryIndex().withAccess(index -> {
+                    PackIngestionOutput output = new PackIngestionOutput(storage, index);
+                    output.write(new byte[]{'P', 'A'});
+                    output.close();
+                    output.close();
+                    assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
+                    assertThatThrownBy(() -> output.write(new byte[]{1})).isInstanceOf(IOException.class);
+                    assertThat(index.packs()).isEmpty();
+                    return null;
+                });
+            }
         }
     }
 

@@ -87,7 +87,7 @@ class NativeBootstrapGitPackReplayTest {
             byte[] original = bytes.toByteArray();
             Optional<PackChecksum> received = ingest(repository, original);
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
-            try (GitIndexAccess access1 = repository.index().createAccess()) {
+            repository.index().withAccess(access1 -> {
                 PackMetadata metadata = access1.packs(received.orElseThrow()).getFirst();
                 repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
                 byte[] completed = exported.toByteArray();
@@ -118,7 +118,8 @@ class NativeBootstrapGitPackReplayTest {
                     assertThat(upstream.getRepository().open(ObjectId.fromString(targetId.toHex())).getBytes())
                             .isEqualTo(target);
                 }
-            }
+                return null;
+            });
         }
     }
 

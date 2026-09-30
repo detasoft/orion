@@ -11,24 +11,50 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
+    private boolean closed;
+
+    private void requireOpen() {
+        if (closed) throw new IllegalStateException("Repository provider is closed");
+    }
+
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        RuntimeException failure = null;
+        for (NativeGitRepository repository : repositories.values()) {
+            try {
+                repository.close();
+            } catch (RuntimeException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+        }
+        repositories.clear();
+        if (failure != null) throw failure;
+    }
+
     private static final String DEFAULT_HEAD = "refs/heads/main";
 
     private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
 
     @Override
-    public List<String> repositoryNames() {
+    public synchronized List<String> repositoryNames() {
+        requireOpen();
         List<String> names = new ArrayList<>(repositories.keySet());
         names.sort(String::compareTo);
         return List.copyOf(names);
     }
 
     @Override
-    public boolean exists(String repositoryName) {
+    public synchronized boolean exists(String repositoryName) {
+        requireOpen();
         return repositories.containsKey(requireName(repositoryName));
     }
 
     @Override
-    public Result<NativeGitRepository> find(String repositoryName) {
+    public synchronized Result<NativeGitRepository> find(String repositoryName) {
+        requireOpen();
         String name = requireName(repositoryName);
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
@@ -40,7 +66,8 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
     }
 
     @Override
-    public Result<NativeGitRepository> create(String repositoryName) {
+    public synchronized Result<NativeGitRepository> create(String repositoryName) {
+        requireOpen();
         String name = requireName(repositoryName);
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(

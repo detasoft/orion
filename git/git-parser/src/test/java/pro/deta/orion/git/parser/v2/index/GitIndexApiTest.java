@@ -41,16 +41,23 @@ class GitIndexApiTest {
     void closingOneConnectionPreservesOthersAndAllowsReopening(boolean local) throws Exception {
         GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
         IndexedObject object = object(PackId.create(), "a", 12);
-        try (GitIndexAccess first = factory.createAccess(); GitIndexAccess second = factory.createAccess()) {
-            first.addObject(object);
-            first.close();
-            assertThatThrownBy(first::snapshotRefs).isInstanceOf(IOException.class);
-            assertThat(second.objects(object.packId())).containsExactly(object);
-            second.publishIndex(pack(object.packId(), "b", 1));
-        }
-        try (GitIndexAccess reopened = factory.createAccess()) {
+        factory.withAccess(first -> {
+            GitIndexAccess second = factory.createAccess();
+            try {
+                first.addObject(object);
+                first.discard();
+                assertThatThrownBy(first::snapshotRefs).isInstanceOf(IOException.class);
+                assertThat(second.objects(object.packId())).containsExactly(object);
+                second.publishIndex(pack(object.packId(), "b", 1));
+            } finally {
+                second.discard();
+            }
+            return null;
+        });
+        factory.withAccess(reopened -> {
             assertThat(reopened.locations(object.objectId())).containsExactly(object);
-        }
+            return null;
+        });
     }
 
     @Test
@@ -58,84 +65,100 @@ class GitIndexApiTest {
         PackId id = PackId.create();
         PackMetadata metadata = pack(id, "b", 100);
         IndexedObject abandoned = object(PackId.create(), "c", 12);
-        try (GitIndexAccess first = new LocalGitIndex(directory).createAccess();
-             GitIndexAccess second = new LocalGitIndex(directory).createAccess()) {
-            byte[] before = Files.readAllBytes(directory.resolve("refs.mv"));
-            for (int i = 0; i < 100; i++) {
-                first.addObject(object(id, "a", 12 + i * 10));
+        new LocalGitIndex(directory).withAccess(first -> {
+            GitIndexAccess second = new LocalGitIndex(directory).createAccess();
+            try {
+                byte[] before = Files.readAllBytes(directory.resolve("refs.mv"));
+                for (int i = 0; i < 100; i++) {
+                    first.addObject(object(id, "a", 12 + i * 10));
+                }
+                assertThat(second.objects(id)).hasSize(100);
+                assertThat(second.locations(new ObjectId("a".repeat(40)))).isEmpty();
+                assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isEqualTo(before);
+                first.discard();
+                assertThatThrownBy(first::packs).isInstanceOf(IOException.class);
+                second.publishIndex(metadata);
+                assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isNotEqualTo(before);
+                second.addObject(abandoned);
+            } finally {
+                second.discard();
             }
-            assertThat(second.objects(id)).hasSize(100);
-            assertThat(second.locations(new ObjectId("a".repeat(40)))).isEmpty();
-            assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isEqualTo(before);
-            first.close();
-            assertThatThrownBy(first::packs).isInstanceOf(IOException.class);
-            second.publishIndex(metadata);
-            assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isNotEqualTo(before);
-            second.addObject(abandoned);
-        }
-        try (GitIndexAccess reopened = new LocalGitIndex(directory).createAccess()) {
+            return null;
+        });
+        new LocalGitIndex(directory).withAccess(reopened -> {
             assertThat(reopened.findPack(id)).contains(metadata);
             assertThat(reopened.objects(id)).hasSize(100);
             assertThat(reopened.findObject(abandoned.packId(), abandoned.objectId())).contains(abandoned);
             assertThat(reopened.locations(abandoned.objectId())).isEmpty();
-        }
+            return null;
+        });
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void verifiedObjectsRemainPrivateUntilPublication(boolean local) throws Exception {
-        try (GitIndexAccess index = index(local)) {
-            PackId id = PackId.create();
-            IndexedObject base = object(id, "a", 12);
-            IndexedObject delta = new IndexedObject(id, new ObjectId("b".repeat(40)), GitObjectType.BLOB,
-                    20, 30, 8, Optional.of(new IndexedObject.Delta(base.objectId(), 5)));
-            PackMetadata pack = pack(id, "c", 2);
-            index.addObject(delta);
-            List<IndexedObject> pending = index.objects(id);
-            assertThat(index.findObject(id, delta.objectId())).contains(delta);
-            assertThat(index.locations(delta.objectId())).isEmpty();
-            assertThat(index.findPack(id)).isEmpty();
-            assertThat(index.packs(pack.packChecksum())).isEmpty();
-            assertThat(index.packs()).isEmpty();
-            assertThatThrownBy(() -> index.publishIndex(pack)).isInstanceOf(IOException.class);
-            assertThatThrownBy(() -> index.publishIndex(pack(id, "c", 1))).isInstanceOf(IOException.class);
-            assertThat(index.packs()).isEmpty();
-            index.addObject(base);
-            assertThat(pending).containsExactly(delta);
-            assertThat(index.objects(id)).containsExactly(base, delta);
-            assertThat(index.publishIndex(pack)).isEqualTo(pack);
-            assertThat(index.publishIndex(pack)).isEqualTo(pack);
-            assertThat(index.findPack(id)).contains(pack);
-            assertThat(index.packs(pack.packChecksum())).contains(pack);
-            assertThat(index.locations(base.objectId())).containsExactly(base);
-            assertThat(index.locations(delta.objectId())).containsExactly(delta);
-            index.addObject(base);
-            assertThatThrownBy(() -> index.addObject(object(id, "d", 50))).isInstanceOf(IOException.class);
-            assertThatThrownBy(() -> index.publishIndex(pack(id, "d", 2))).isInstanceOf(IOException.class);
-            assertThat(index.packs()).containsExactly(pack);
+        {
+            GitIndexAccess index = index(local);
+            try {
+                PackId id = PackId.create();
+                IndexedObject base = object(id, "a", 12);
+                IndexedObject delta = new IndexedObject(id, new ObjectId("b".repeat(40)), GitObjectType.BLOB,
+                        20, 30, 8, Optional.of(new IndexedObject.Delta(base.objectId(), 5)));
+                PackMetadata pack = pack(id, "c", 2);
+                index.addObject(delta);
+                List<IndexedObject> pending = index.objects(id);
+                assertThat(index.findObject(id, delta.objectId())).contains(delta);
+                assertThat(index.locations(delta.objectId())).isEmpty();
+                assertThat(index.findPack(id)).isEmpty();
+                assertThat(index.packs(pack.packChecksum())).isEmpty();
+                assertThat(index.packs()).isEmpty();
+                assertThatThrownBy(() -> index.publishIndex(pack)).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> index.publishIndex(pack(id, "c", 1))).isInstanceOf(IOException.class);
+                assertThat(index.packs()).isEmpty();
+                index.addObject(base);
+                assertThat(pending).containsExactly(delta);
+                assertThat(index.objects(id)).containsExactly(base, delta);
+                assertThat(index.publishIndex(pack)).isEqualTo(pack);
+                assertThat(index.publishIndex(pack)).isEqualTo(pack);
+                assertThat(index.findPack(id)).contains(pack);
+                assertThat(index.packs(pack.packChecksum())).contains(pack);
+                assertThat(index.locations(base.objectId())).containsExactly(base);
+                assertThat(index.locations(delta.objectId())).containsExactly(delta);
+                index.addObject(base);
+                assertThatThrownBy(() -> index.addObject(object(id, "d", 50))).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> index.publishIndex(pack(id, "d", 2))).isInstanceOf(IOException.class);
+                assertThat(index.packs()).containsExactly(pack);
+            } finally {
+                index.discard();
+            }
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void findsAllPublishedLocationsIncludingRepeatedObjectsInOnePack(boolean local) throws Exception {
-        try (GitIndexAccess index = index(local)) {
-            IndexedObject first = object(PackId.create(), "a", 12);
-            IndexedObject repeated = object(first.packId(), "a", 25);
-            IndexedObject other = object(PackId.create(), "a", 12);
-            index.addObject(first);
-            index.addObject(first);
-            assertThat(index.objects(first.packId())).containsExactly(first);
-            assertThatThrownBy(() -> index.addObject(object(first.packId(), "b", 12)))
-                    .isInstanceOf(IOException.class);
-            index.addObject(repeated);
-            index.addObject(other);
-            index.publishIndex(pack(first.packId(), "b", 2));
-            assertThat(index.locations(first.objectId())).containsExactlyInAnyOrder(first, repeated);
-            index.publishIndex(pack(other.packId(), "c", 1));
-            assertThat(index.locations(first.objectId())).containsExactlyInAnyOrder(first, repeated, other);
-            assertThat(index.findObject(first.packId(), first.objectId())).contains(first);
-            assertThat(index.findObject(PackId.create(), first.objectId())).isEmpty();
+        {
+            GitIndexAccess index = index(local);
+            try {
+                IndexedObject first = object(PackId.create(), "a", 12);
+                IndexedObject repeated = object(first.packId(), "a", 25);
+                IndexedObject other = object(PackId.create(), "a", 12);
+                index.addObject(first);
+                index.addObject(first);
+                assertThat(index.objects(first.packId())).containsExactly(first);
+                assertThatThrownBy(() -> index.addObject(object(first.packId(), "b", 12)))
+                        .isInstanceOf(IOException.class);
+                index.addObject(repeated);
+                index.addObject(other);
+                index.publishIndex(pack(first.packId(), "b", 2));
+                assertThat(index.locations(first.objectId())).containsExactlyInAnyOrder(first, repeated);
+                index.publishIndex(pack(other.packId(), "c", 1));
+                assertThat(index.locations(first.objectId())).containsExactlyInAnyOrder(first, repeated, other);
+                assertThat(index.findObject(first.packId(), first.objectId())).contains(first);
+                assertThat(index.findObject(PackId.create(), first.objectId())).isEmpty();
+            } finally {
+                index.discard();
+            }
         }
     }
 
@@ -143,48 +166,63 @@ class GitIndexApiTest {
     @ValueSource(booleans = {false, true})
     void concurrentEqualChecksumsPublishBothPacksForTheClientToChoose(boolean local) throws Exception {
         GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
-        try (GitIndexAccess first = factory.createAccess();
-             GitIndexAccess second = factory.createAccess();
-             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            IndexedObject a = object(PackId.create(), "a", 12);
-            IndexedObject b = object(PackId.create(), "a", 12);
-            first.addObject(a);
-            second.addObject(b);
-            CyclicBarrier start = new CyclicBarrier(2);
-            Future<PackMetadata> one = executor.submit(() -> {
-                start.await(5, TimeUnit.SECONDS);
-                return first.publishIndex(pack(a.packId(), "b", 1));
-            });
-            Future<PackMetadata> two = executor.submit(() -> {
-                start.await(5, TimeUnit.SECONDS);
-                return second.publishIndex(pack(b.packId(), "b", 1));
-            });
-            PackMetadata left = one.get(10, TimeUnit.SECONDS);
-            PackMetadata right = two.get(10, TimeUnit.SECONDS);
-            assertThat(left.packId()).isEqualTo(a.packId());
-            assertThat(right.packId()).isEqualTo(b.packId());
-            assertThat(first.packs()).containsExactlyInAnyOrder(left, right);
-            assertThat(first.packs(left.packChecksum())).containsExactlyInAnyOrder(left, right);
-            assertThat(second.locations(a.objectId())).containsExactlyInAnyOrder(a, b);
-            assertThat(first.objects(a.packId())).containsExactly(a);
-            assertThat(second.objects(b.packId())).containsExactly(b);
+        {
+            GitIndexAccess first = factory.createAccess();
+            try {
+                GitIndexAccess second = factory.createAccess();
+                try {
+                    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                        IndexedObject a = object(PackId.create(), "a", 12);
+                        IndexedObject b = object(PackId.create(), "a", 12);
+                        first.addObject(a);
+                        second.addObject(b);
+                        CyclicBarrier start = new CyclicBarrier(2);
+                        Future<PackMetadata> one = executor.submit(() -> {
+                            start.await(5, TimeUnit.SECONDS);
+                            return first.publishIndex(pack(a.packId(), "b", 1));
+                        });
+                        Future<PackMetadata> two = executor.submit(() -> {
+                            start.await(5, TimeUnit.SECONDS);
+                            return second.publishIndex(pack(b.packId(), "b", 1));
+                        });
+                        PackMetadata left = one.get(10, TimeUnit.SECONDS);
+                        PackMetadata right = two.get(10, TimeUnit.SECONDS);
+                        assertThat(left.packId()).isEqualTo(a.packId());
+                        assertThat(right.packId()).isEqualTo(b.packId());
+                        assertThat(first.packs()).containsExactlyInAnyOrder(left, right);
+                        assertThat(first.packs(left.packChecksum())).containsExactlyInAnyOrder(left, right);
+                        assertThat(second.locations(a.objectId())).containsExactlyInAnyOrder(a, b);
+                        assertThat(first.objects(a.packId())).containsExactly(a);
+                        assertThat(second.objects(b.packId())).containsExactly(b);
+                    }
+                } finally {
+                    second.discard();
+                }
+            } finally {
+                first.discard();
+            }
         }
-        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void publishesAnEmptyPackAndRejectsInvalidObjectMetadata(boolean local) throws Exception {
-        try (GitIndexAccess index = index(local)) {
-            PackMetadata empty = pack(PackId.create(), "a", 0);
-            assertThat(index.objects(empty.packId())).isEmpty();
-            assertThat(index.publishIndex(empty)).isEqualTo(empty);
-            assertThat(index.packs()).containsExactly(empty);
-            assertThatThrownBy(() -> new IndexedObject(empty.packId(), new ObjectId("a".repeat(40)),
-                    GitObjectType.REF_DELTA, 4, 12, 10, Optional.empty()))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new IndexedObject(empty.packId(), new ObjectId("a".repeat(40)),
-                    GitObjectType.BLOB, 4, Long.MAX_VALUE, 10, Optional.empty()))
-                    .isInstanceOf(IllegalArgumentException.class);
+        {
+            GitIndexAccess index = index(local);
+            try {
+                PackMetadata empty = pack(PackId.create(), "a", 0);
+                assertThat(index.objects(empty.packId())).isEmpty();
+                assertThat(index.publishIndex(empty)).isEqualTo(empty);
+                assertThat(index.packs()).containsExactly(empty);
+                assertThatThrownBy(() -> new IndexedObject(empty.packId(), new ObjectId("a".repeat(40)),
+                        GitObjectType.REF_DELTA, 4, 12, 10, Optional.empty()))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> new IndexedObject(empty.packId(), new ObjectId("a".repeat(40)),
+                        GitObjectType.BLOB, 4, Long.MAX_VALUE, 10, Optional.empty()))
+                        .isInstanceOf(IllegalArgumentException.class);
+            } finally {
+                index.discard();
+            }
         }
     }
 
@@ -196,48 +234,63 @@ class GitIndexApiTest {
                 GitObjectType.BLOB, 5, 40, 9, Optional.of(new IndexedObject.Delta(available.objectId(), 3)));
         PackMetadata pack = new PackMetadata(available.packId(), new PackChecksum("b".repeat(40)),
                 "packs/каталог:pack\tdata", 2, 64);
-        try (GitIndexAccess index = index(true)) {
-            index.addObject(available);
-            index.addObject(delta);
-            index.addObject(abandoned);
-            index.publishIndex(pack);
+        {
+            GitIndexAccess index = index(true);
+            try {
+                index.addObject(available);
+                index.addObject(delta);
+                index.addObject(abandoned);
+                index.publishIndex(pack);
+            } finally {
+                index.discard();
+            }
         }
-        try (GitIndexAccess index = index(true)) {
-            assertThat(index.packs()).containsExactly(pack);
-            assertThat(index.packs(pack.packChecksum())).contains(pack);
-            assertThat(index.locations(available.objectId())).containsExactly(available);
-            assertThat(index.locations(delta.objectId())).containsExactly(delta);
-            assertThat(index.objects(available.packId())).containsExactly(available, delta);
-            assertThat(index.findObject(abandoned.packId(), abandoned.objectId())).contains(abandoned);
-            assertThat(index.objects(abandoned.packId())).containsExactly(abandoned);
+        {
+            GitIndexAccess index = index(true);
+            try {
+                assertThat(index.packs()).containsExactly(pack);
+                assertThat(index.packs(pack.packChecksum())).contains(pack);
+                assertThat(index.locations(available.objectId())).containsExactly(available);
+                assertThat(index.locations(delta.objectId())).containsExactly(delta);
+                assertThat(index.objects(available.packId())).containsExactly(available, delta);
+                assertThat(index.findObject(abandoned.packId(), abandoned.objectId())).contains(abandoned);
+                assertThat(index.objects(abandoned.packId())).containsExactly(abandoned);
+            } finally {
+                index.discard();
+            }
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void repositoryDefaultsToSha1AndRejectsMixedAlgorithms(boolean local) throws Exception {
-        try (GitIndexAccess index = index(local)) {
-            assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex()).hashAlgorithm())
-                    .isEqualTo(GitHashAlgorithm.SHA1);
-            PackId packId = PackId.create();
-            ObjectId sha256 = new ObjectId("a".repeat(64));
-            assertThatThrownBy(() -> index.addObject(new IndexedObject(packId, sha256,
-                    GitObjectType.BLOB, 3, 12, 8, Optional.empty())))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.addObject(new IndexedObject(packId, new ObjectId("a".repeat(40)),
-                    GitObjectType.BLOB, 3, 12, 8, Optional.of(new IndexedObject.Delta(sha256, 2)))))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.publishIndex(new PackMetadata(packId,
-                    new PackChecksum("b".repeat(64)), "pack", 0, 44)))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.updateHead(new Head.Detached(new CommitId(sha256.toBytes()))))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.updateRefs(List.of(new RefUpdate(new RefId("refs/heads/main"),
-                    Optional.empty(), Optional.of(sha256))), true))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThat(index.objects(packId)).isEmpty();
-            assertThat(index.packs()).isEmpty();
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+        {
+            GitIndexAccess index = index(local);
+            try {
+                assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex()).hashAlgorithm())
+                        .isEqualTo(GitHashAlgorithm.SHA1);
+                PackId packId = PackId.create();
+                ObjectId sha256 = new ObjectId("a".repeat(64));
+                assertThatThrownBy(() -> index.addObject(new IndexedObject(packId, sha256,
+                        GitObjectType.BLOB, 3, 12, 8, Optional.empty())))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> index.addObject(new IndexedObject(packId, new ObjectId("a".repeat(40)),
+                        GitObjectType.BLOB, 3, 12, 8, Optional.of(new IndexedObject.Delta(sha256, 2)))))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> index.publishIndex(new PackMetadata(packId,
+                        new PackChecksum("b".repeat(64)), "pack", 0, 44)))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> index.updateHead(new Head.Detached(new CommitId(sha256.toBytes()))))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThatThrownBy(() -> index.updateRefs(List.of(new RefUpdate(new RefId("refs/heads/main"),
+                        Optional.empty(), Optional.of(sha256))), true))
+                        .isInstanceOf(IllegalArgumentException.class);
+                assertThat(index.objects(packId)).isEmpty();
+                assertThat(index.packs()).isEmpty();
+                assertThat(index.snapshotRefs().refs()).isEmpty();
+            } finally {
+                index.discard();
+            }
         }
     }
 
@@ -251,30 +304,36 @@ class GitIndexApiTest {
         PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(64)), "pack", 1, 64);
         RefId ref = new RefId("refs/heads/main");
         Head head = new Head.Detached(new CommitId(objectId.toBytes()));
-        try (GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))
-                : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))) {
-            assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex(GitHashAlgorithm.SHA256))
-                    .hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
-            index.addObject(object);
-            index.publishIndex(pack);
-            assertThat(index.locations(objectId)).containsExactly(object);
-            assertThat(index.packs(pack.packChecksum())).containsExactly(pack);
-            assertThat(index.updateRefs(List.of(new RefUpdate(ref, Optional.empty(), Optional.of(objectId))), true))
-                    .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            index.updateHead(head);
-            assertThat(index.snapshotRefs().head()).isEqualTo(head);
-            assertThatThrownBy(() -> index.publishIndex(pack(PackId.create(), "a", 0)))
-                    .isInstanceOf(IllegalArgumentException.class);
-            index.apply();
+        {
+            GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))
+                            : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref));
+            try {
+                assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex(GitHashAlgorithm.SHA256))
+                        .hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+                index.addObject(object);
+                index.publishIndex(pack);
+                assertThat(index.locations(objectId)).containsExactly(object);
+                assertThat(index.packs(pack.packChecksum())).containsExactly(pack);
+                assertThat(index.updateRefs(List.of(new RefUpdate(ref, Optional.empty(), Optional.of(objectId))), true))
+                        .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
+                index.updateHead(head);
+                assertThat(index.snapshotRefs().head()).isEqualTo(head);
+                assertThatThrownBy(() -> index.publishIndex(pack(PackId.create(), "a", 0)))
+                        .isInstanceOf(IllegalArgumentException.class);
+                index.apply();
+            } finally {
+                index.discard();
+            }
         }
         if (local) {
-            try (GitIndexAccess reopened = new LocalGitIndex(directory).createAccess()) {
+            new LocalGitIndex(directory).withAccess(reopened -> {
                 assertThat(new LocalGitIndex(directory).hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
                 assertThat(reopened.locations(objectId)).containsExactly(object);
                 assertThat(reopened.packs(pack.packChecksum())).containsExactly(pack);
                 assertThat(reopened.snapshotRefs().refs()).containsEntry(ref, objectId);
                 assertThat(reopened.snapshotRefs().head()).isEqualTo(head);
-            }
+                return null;
+            });
             byte[] original = Files.readAllBytes(directory.resolve("refs.mv"));
             assertThatThrownBy(() -> new LocalGitIndex(directory, GitHashAlgorithm.SHA1).createAccess())
                     .isInstanceOf(IOException.class).hasMessageContaining("hash algorithm");

@@ -473,6 +473,11 @@ class LegacySshCommandCatalogTest {
 
     private static final class RepositoryProvider implements NativeGitRepositoryProvider {
         @Override
+        public void close() {
+
+        }
+
+        @Override
         public List<String> repositoryNames() {
             return List.of("zeta", "alpha");
         }

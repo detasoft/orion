@@ -55,7 +55,7 @@ public class GitRepositoryContext implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        index.close();
+        index.discard();
     }
 
     public Optional<URI> packUri(PackChecksum id) {
@@ -82,54 +82,56 @@ public class GitRepositoryContext implements AutoCloseable {
 
     public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexApi index,
                                                     List<RefUpdate> updates, boolean atomic) {
-        updates = List.copyOf(updates);
+        List<RefUpdate> requested = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();
-        for (RefUpdate update : updates) {
+        for (RefUpdate update : requested) {
             update.ref().requireFullName();
             if (!names.add(update.ref())) {
                 throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
             }
         }
-        try (GitIndexAccess reader = index.createAccess()) {
-            List<RefUpdate> ready = new ArrayList<>(updates.size());
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
-                boolean missing = update.newId().isPresent()
-                        && !GitObjectRead.exists(storage, reader, update.newId().orElseThrow());
-                results.add(new RefUpdateResult(update, missing ? RefUpdateResult.Status.OBJECT_NOT_FOUND
-                        : RefUpdateResult.Status.APPLIED, Optional.empty()));
-                if (!missing) {
-                    ready.add(update);
-                }
-            }
-            if (atomic && ready.size() != updates.size()) {
-                for (int position = 0; position < results.size(); position++) {
-                    RefUpdateResult result = results.get(position);
-                    if (result.status() == RefUpdateResult.Status.APPLIED) {
-                        results.set(position, new RefUpdateResult(result.update(),
-                                RefUpdateResult.Status.ATOMIC_ABORTED, Optional.empty()));
+        try {
+            return index.withAccess(reader -> {
+                List<RefUpdate> ready = new ArrayList<>(requested.size());
+                List<RefUpdateResult> results = new ArrayList<>(requested.size());
+                for (RefUpdate update : requested) {
+                    boolean missing = update.newId().isPresent()
+                    && !GitObjectRead.exists(storage, reader, update.newId().orElseThrow());
+                    results.add(new RefUpdateResult(update, missing ? RefUpdateResult.Status.OBJECT_NOT_FOUND
+                            : RefUpdateResult.Status.APPLIED, Optional.empty()));
+                    if (!missing) {
+                        ready.add(update);
                     }
                 }
-            } else {
-                List<RefUpdateResult> committed = new ArrayList<>();
-                if (atomic) {
-                    committed.addAll(applyRefs(index, ready));
+                if (atomic && ready.size() != requested.size()) {
+                    for (int position = 0; position < results.size(); position++) {
+                        RefUpdateResult result = results.get(position);
+                        if (result.status() == RefUpdateResult.Status.APPLIED) {
+                            results.set(position, new RefUpdateResult(result.update(),
+                                    RefUpdateResult.Status.ATOMIC_ABORTED, Optional.empty()));
+                        }
+                    }
                 } else {
-                    for (RefUpdate update : ready) {
-                        committed.addAll(applyRefs(index, List.of(update)));
+                    List<RefUpdateResult> committed = new ArrayList<>();
+                    if (atomic) {
+                        committed.addAll(applyRefs(index, ready));
+                    } else {
+                        for (RefUpdate update : ready) {
+                            committed.addAll(applyRefs(index, List.of(update)));
+                        }
+                    }
+                    Iterator<RefUpdateResult> applied = committed.iterator();
+                    for (int position = 0; position < results.size(); position++) {
+                        if (results.get(position).status() == RefUpdateResult.Status.APPLIED) {
+                            results.set(position, applied.next());
+                        }
                     }
                 }
-                Iterator<RefUpdateResult> applied = committed.iterator();
-                for (int position = 0; position < results.size(); position++) {
-                    if (results.get(position).status() == RefUpdateResult.Status.APPLIED) {
-                        results.set(position, applied.next());
-                    }
-                }
-            }
-            return List.copyOf(results);
+                return List.copyOf(results);
+            });
         } catch (IOException error) {
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
+            List<RefUpdateResult> results = new ArrayList<>(requested.size());
+            for (RefUpdate update : requested) {
                 results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
                         Optional.ofNullable(error.getMessage())));
             }
@@ -141,13 +143,15 @@ public class GitRepositoryContext implements AutoCloseable {
         if (updates.isEmpty()) {
             return List.of();
         }
-        try (GitIndexAccess access = index.createAccess(updates)) {
-            access.apply();
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            for (RefUpdate update : updates) {
-                results.add(new RefUpdateResult(update, RefUpdateResult.Status.APPLIED, Optional.empty()));
-            }
-            return List.copyOf(results);
+        try {
+            return index.withAccess(updates, access -> {
+                access.apply();
+                List<RefUpdateResult> results = new ArrayList<>(updates.size());
+                for (RefUpdate update : updates) {
+                    results.add(new RefUpdateResult(update, RefUpdateResult.Status.APPLIED, Optional.empty()));
+                }
+                return List.copyOf(results);
+            });
         } catch (GitRefConflictException conflict) {
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
             for (RefUpdate update : updates) {

@@ -1,6 +1,5 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -93,7 +92,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             Optional<PackChecksum> received,
             List<RefUpdate> updates,
             BufferedByteOutput output) throws IOException {
-        try (GitIndexAccess access = repository.index().createAccess()) {
+        repository.index().withAccess(access -> {
             Set<ObjectId> wants = new LinkedHashSet<>();
             Set<ObjectId> haves = new LinkedHashSet<>();
             for (RefUpdate update : updates) {
@@ -105,7 +104,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
                 }
             }
             if (wants.isEmpty()) {
-                return;
+                return null;
             }
             if (received.isPresent()) {
                 GitObjectGraph graph = new GitObjectGraph(repository.storage(), access);
@@ -120,7 +119,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
                     if (covered.containsAll(required)) {
                         repository.writePack(pack, output);
                         output.flush();
-                        return;
+                        return null;
                     }
                 }
             }
@@ -132,6 +131,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
                 writer.finish();
             }
             output.flush();
-        }
+            return null;
+        });
     }
 }

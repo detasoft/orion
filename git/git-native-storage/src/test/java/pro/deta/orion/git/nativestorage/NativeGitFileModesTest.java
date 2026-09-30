@@ -206,7 +206,7 @@ class NativeGitFileModesTest {
 
     private static void copyPacks(NativeGitRepository source, InMemoryRepository destination) throws Exception {
         try (ObjectInserter inserter = destination.newObjectInserter()) {
-            try (GitIndexAccess access1 = source.index().createAccess()) {
+            source.index().withAccess(access1 -> {
                 for (PackMetadata metadata : access1.packs()) {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
                     source.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
@@ -214,7 +214,8 @@ class NativeGitFileModesTest {
                     inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);
                 }
                 inserter.flush();
-            }
+                return null;
+            });
         }
     }
 

@@ -53,7 +53,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void persistsRefsAndBothFormsOfHeadAcrossFacadeInstances() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             assertThat(index.snapshotRefs()).isEqualTo(new RefsSnapshot(Map.of(), new Head.Symbolic(MAIN)));
             ObjectId first = publish(storage, index, "first");
             ObjectId second = publish(storage, index, "second");
@@ -64,28 +64,34 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                     storage, new LocalGitIndex(repository),
                     List.of(new RefUpdate(MAIN, Optional.of(first), Optional.of(second))), true);
             GitStorageApi reopened = new LocalGitStorage(repository);
-            try (GitIndexAccess reopenedIndex = new LocalGitIndex(repository).createAccess()) {
-                assertThat(reopenedIndex.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, second));
-                assertThat(before.refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
+            {
+                GitIndexAccess reopenedIndex = new LocalGitIndex(repository).createAccess();
+                try {
+                    assertThat(reopenedIndex.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, second));
+                    assertThat(before.refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
 
-                Head detached = new Head.Detached(new CommitId(second.toBytes()));
-                updateHead(detached);
-                assertThat(index.snapshotRefs().head()).isEqualTo(detached);
-                updateHead(new Head.Symbolic(OTHER));
-                assertThat(new LocalGitIndex(repository).createAccess().snapshotRefs().head()).isEqualTo(new Head.Symbolic(OTHER));
-                publishRefs(
-                        storage, new LocalGitIndex(repository),
-                        List.of(new RefUpdate(MAIN, Optional.of(second), Optional.empty())), true);
-                assertThat(reopenedIndex.snapshotRefs().refs()).isEmpty();
-                assertThat(Files.isRegularFile(repository.resolve("refs.mv"))).isTrue();
+                    Head detached = new Head.Detached(new CommitId(second.toBytes()));
+                    updateHead(detached);
+                    assertThat(index.snapshotRefs().head()).isEqualTo(detached);
+                    updateHead(new Head.Symbolic(OTHER));
+                    assertThat(new LocalGitIndex(repository).createAccess().snapshotRefs().head()).isEqualTo(new Head.Symbolic(OTHER));
+                    publishRefs(
+                            storage, new LocalGitIndex(repository),
+                            List.of(new RefUpdate(MAIN, Optional.of(second), Optional.empty())), true);
+                    assertThat(reopenedIndex.snapshotRefs().refs()).isEmpty();
+                    assertThat(Files.isRegularFile(repository.resolve("refs.mv"))).isTrue();
+                } finally {
+                    reopenedIndex.discard();
+                }
             }
-        }
+            return null;
+        });
     }
 
     @Test
     void atomicBatchAbortsWhileNonAtomicBatchAppliesValidUpdates() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId first = publish(storage, index, "first");
             ObjectId second = publish(storage, index, "second");
             publishRefs(storage, new LocalGitIndex(repository), List.of(create(MAIN, first)), true);
@@ -103,13 +109,14 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                     Map.of(MAIN, first, OTHER, second));
             assertThat(publishRefs(storage, new LocalGitIndex(repository), List.of(create(MAIN, first)), true))
                     .extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
-        }
+            return null;
+        });
     }
 
     @Test
     void missingObjectsAbortAtomicBatchAndDuplicateRefsAreRejected() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId first = publish(storage, index, "first");
             assertThat(publishRefs(
                     storage, new LocalGitIndex(repository), List.of(create(MAIN, first), create(OTHER, MISSING)), true))
@@ -126,13 +133,14 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                     storage, new LocalGitIndex(repository), List.of(create(MAIN, first), create(OTHER, MISSING)), false))
                     .extracting(RefUpdateResult::status).containsExactly(APPLIED, OBJECT_NOT_FOUND);
             assertThat(index.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
-        }
+            return null;
+        });
     }
 
     @Test
     void objectValidationPreservesResultOrderAndDoesNotRequireObjectsForDeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId first = publish(storage, index, "first");
             ObjectId second = publish(storage, index, "second");
             RefId stale = new RefId("refs/heads/stale");
@@ -158,49 +166,61 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                     .containsExactly(OBJECT_NOT_FOUND, APPLIED, EXPECTED_OLD_MISMATCH, APPLIED);
             assertThat(index.snapshotRefs().refs())
                     .containsExactlyInAnyOrderEntriesOf(Map.of(stale, first, created, second));
-        }
+            return null;
+        });
     }
 
     @Test
     void rejectsDuplicateRefsEvenWhenOneTargetObjectIsMissing() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId first = publish(storage, index, "first");
             assertThatThrownBy(() -> publishRefs(
                     storage, new LocalGitIndex(repository), List.of(create(MAIN, MISSING), create(MAIN, first)), false))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(index.snapshotRefs().refs()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
     void concurrentVirtualThreadUpdatesCompareAgainstThePublishedValue() throws Exception {
         GitStorageApi firstStorage = new LocalGitStorage(repository);
-        try (GitIndexAccess firstStorageIndex = new LocalGitIndex(repository).createAccess()) {
-            GitStorageApi secondStorage = new LocalGitStorage(repository);
-            try (GitIndexAccess secondStorageIndex = new LocalGitIndex(repository).createAccess()) {
-                ObjectId first = publish(firstStorage, firstStorageIndex, "first");
-                ObjectId second = publish(firstStorage, firstStorageIndex, "second");
-                ObjectId third = publish(firstStorage, firstStorageIndex, "third");
-                publishRefs(firstStorage, new LocalGitIndex(repository), List.of(create(MAIN, first)), true);
-                CountDownLatch start = new CountDownLatch(1);
-                try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                    Future<List<RefUpdateResult>> left = executor.submit(() -> {
-                        start.await();
-                        return publishRefs(firstStorage, new LocalGitIndex(repository), List.of(
-                                new RefUpdate(MAIN, Optional.of(first), Optional.of(second))), true);
-                    });
-                    Future<List<RefUpdateResult>> right = executor.submit(() -> {
-                        start.await();
-                        return publishRefs(secondStorage, new LocalGitIndex(repository), List.of(
-                                new RefUpdate(MAIN, Optional.of(first), Optional.of(third))), true);
-                    });
-                    start.countDown();
-                    assertThat(List.of(left.get(10, TimeUnit.SECONDS).getFirst().status(),
-                            right.get(10, TimeUnit.SECONDS).getFirst().status()))
-                            .containsExactlyInAnyOrder(APPLIED, EXPECTED_OLD_MISMATCH);
+        {
+            GitIndexAccess firstStorageIndex = new LocalGitIndex(repository).createAccess();
+            try {
+                GitStorageApi secondStorage = new LocalGitStorage(repository);
+                {
+                    GitIndexAccess secondStorageIndex = new LocalGitIndex(repository).createAccess();
+                    try {
+                        ObjectId first = publish(firstStorage, firstStorageIndex, "first");
+                        ObjectId second = publish(firstStorage, firstStorageIndex, "second");
+                        ObjectId third = publish(firstStorage, firstStorageIndex, "third");
+                        publishRefs(firstStorage, new LocalGitIndex(repository), List.of(create(MAIN, first)), true);
+                        CountDownLatch start = new CountDownLatch(1);
+                        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                            Future<List<RefUpdateResult>> left = executor.submit(() -> {
+                                start.await();
+                                return publishRefs(firstStorage, new LocalGitIndex(repository), List.of(
+                                        new RefUpdate(MAIN, Optional.of(first), Optional.of(second))), true);
+                            });
+                            Future<List<RefUpdateResult>> right = executor.submit(() -> {
+                                start.await();
+                                return publishRefs(secondStorage, new LocalGitIndex(repository), List.of(
+                                        new RefUpdate(MAIN, Optional.of(first), Optional.of(third))), true);
+                            });
+                            start.countDown();
+                            assertThat(List.of(left.get(10, TimeUnit.SECONDS).getFirst().status(),
+                                    right.get(10, TimeUnit.SECONDS).getFirst().status()))
+                                    .containsExactlyInAnyOrder(APPLIED, EXPECTED_OLD_MISMATCH);
+                        }
+                        assertThat(firstStorageIndex.snapshotRefs().refs().get(MAIN)).isIn(second, third);
+                    } finally {
+                        secondStorageIndex.discard();
+                    }
                 }
-                assertThat(firstStorageIndex.snapshotRefs().refs().get(MAIN)).isIn(second, third);
+            } finally {
+                firstStorageIndex.discard();
             }
         }
     }
@@ -208,42 +228,52 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void snapshotsNeverObservePartOfAnAtomicBatch() throws Exception {
         GitStorageApi writer = new LocalGitStorage(repository);
-        try (GitIndexAccess writerIndex = new LocalGitIndex(repository).createAccess()) {
-            GitStorageApi reader = new LocalGitStorage(repository);
-            try (GitIndexAccess readerIndex = new LocalGitIndex(repository).createAccess()) {
-                ObjectId first = publish(writer, writerIndex, "first");
-                ObjectId second = publish(writer, writerIndex, "second");
-                assertThat(publishRefs(
-                        writer, new LocalGitIndex(repository),
-                        List.of(create(MAIN, first), create(OTHER, first)), true))
-                        .extracting(RefUpdateResult::status).containsExactly(APPLIED, APPLIED);
-                CountDownLatch start = new CountDownLatch(1);
-                try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                    Future<?> writing = executor.submit(() -> {
-                        start.await();
-                        for (int iteration = 0; iteration < 20; iteration++) {
-                            ObjectId previous = iteration % 2 == 0 ? first : second;
-                            ObjectId next = iteration % 2 == 0 ? second : first;
-                            assertThat(publishRefs(writer, new LocalGitIndex(repository), List.of(
-                                    new RefUpdate(MAIN, Optional.of(previous), Optional.of(next)),
-                                    new RefUpdate(OTHER, Optional.of(previous), Optional.of(next))), true))
-                                    .extracting(RefUpdateResult::status).containsExactly(APPLIED, APPLIED);
+        {
+            GitIndexAccess writerIndex = new LocalGitIndex(repository).createAccess();
+            try {
+                GitStorageApi reader = new LocalGitStorage(repository);
+                {
+                    GitIndexAccess readerIndex = new LocalGitIndex(repository).createAccess();
+                    try {
+                        ObjectId first = publish(writer, writerIndex, "first");
+                        ObjectId second = publish(writer, writerIndex, "second");
+                        assertThat(publishRefs(
+                                writer, new LocalGitIndex(repository),
+                                List.of(create(MAIN, first), create(OTHER, first)), true))
+                                .extracting(RefUpdateResult::status).containsExactly(APPLIED, APPLIED);
+                        CountDownLatch start = new CountDownLatch(1);
+                        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                            Future<?> writing = executor.submit(() -> {
+                                start.await();
+                                for (int iteration = 0; iteration < 20; iteration++) {
+                                    ObjectId previous = iteration % 2 == 0 ? first : second;
+                                    ObjectId next = iteration % 2 == 0 ? second : first;
+                                    assertThat(publishRefs(writer, new LocalGitIndex(repository), List.of(
+                                            new RefUpdate(MAIN, Optional.of(previous), Optional.of(next)),
+                                            new RefUpdate(OTHER, Optional.of(previous), Optional.of(next))), true))
+                                            .extracting(RefUpdateResult::status).containsExactly(APPLIED, APPLIED);
+                                }
+                                return null;
+                            });
+                            Future<?> reading = executor.submit(() -> {
+                                start.await();
+                                for (int iteration = 0; iteration < 40; iteration++) {
+                                    RefsSnapshot snapshot = readerIndex.snapshotRefs();
+                                    assertThat(snapshot.refs().get(MAIN)).isEqualTo(snapshot.refs().get(OTHER));
+                                    assertThat(snapshot.head()).isEqualTo(new Head.Symbolic(MAIN));
+                                }
+                                return null;
+                            });
+                            start.countDown();
+                            writing.get(10, TimeUnit.SECONDS);
+                            reading.get(10, TimeUnit.SECONDS);
                         }
-                        return null;
-                    });
-                    Future<?> reading = executor.submit(() -> {
-                        start.await();
-                        for (int iteration = 0; iteration < 40; iteration++) {
-                            RefsSnapshot snapshot = readerIndex.snapshotRefs();
-                            assertThat(snapshot.refs().get(MAIN)).isEqualTo(snapshot.refs().get(OTHER));
-                            assertThat(snapshot.head()).isEqualTo(new Head.Symbolic(MAIN));
-                        }
-                        return null;
-                    });
-                    start.countDown();
-                    writing.get(10, TimeUnit.SECONDS);
-                    reading.get(10, TimeUnit.SECONDS);
+                    } finally {
+                        readerIndex.discard();
+                    }
                 }
+            } finally {
+                writerIndex.discard();
             }
         }
     }
@@ -251,21 +281,23 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     @Test
     void unreadableStoreIsReportedInsteadOfReturningAnEmptySnapshot() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
-        try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(index -> {
             ObjectId first = publish(storage, index, "first");
             Files.delete(repository.resolve("refs.mv"));
             Files.createDirectory(repository.resolve("refs.mv"));
             assertThatThrownBy(index::snapshotRefs).isInstanceOf(IOException.class);
             assertThat(publishRefs(storage, new LocalGitIndex(repository), List.of(create(MAIN, first)), true))
                     .extracting(RefUpdateResult::status).containsExactly(STORAGE_ERROR);
-        }
+            return null;
+        });
     }
 
     private void updateHead(Head head) throws IOException {
-        try (GitIndexAccess access = new LocalGitIndex(repository).createAccess()) {
+        new LocalGitIndex(repository).withAccess(access -> {
             access.updateHead(head);
             access.apply();
-        }
+            return null;
+        });
     }
 
     private static RefUpdate create(RefId ref, ObjectId id) {

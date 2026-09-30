@@ -38,44 +38,50 @@ class PackIndexStorageTest {
         byte[] bytes = pack(full, delta(base, new byte[]{1, 1, 1, 2}));
         bytes[bytes.length - 1] ^= 1;
         AtomicReference<PackId> packId = new AtomicReference<>();
-        try (GitStorageApi backend = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess()) {
-            GitStorageApi recording = new GitStorageApi() {
-                public PackDataStorage newPack(PackId id) throws IOException {
-                    packId.set(id);
-                    return backend.newPack(id);
-        }
-                public <R> R readPack(PackId id, long offset, long length, GitPackRead<R> reader) throws IOException {
-                    return backend.readPack(id, offset, length, reader);
-                }
-                public boolean exists(PackId id) throws IOException { return backend.exists(id); }
-                public void close() {}
-            };
-            BufferedByteInputV2.Source source = new BufferedByteInputV2.Source() {
-                private int position;
-                public ByteBuffer read() throws IOException {
-                    if (position == bytes.length - 20) {
-                        assertThat(index.findObject(packId.get(), base)).isPresent();
-                        assertThat(index.findObject(packId.get(), target)).isEmpty();
-                        assertThat(index.locations(base)).isEmpty();
-                        assertThat(index.packs()).isEmpty();
+        {
+            try (GitStorageApi backend = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+                GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
+                try {
+                        GitStorageApi recording = new GitStorageApi() {
+                            public PackDataStorage newPack(PackId id) throws IOException {
+                                packId.set(id);
+                                return backend.newPack(id);
+                        }
+                            public <R> R readPack(PackId id, long offset, long length, GitPackRead<R> reader) throws IOException {
+                                return backend.readPack(id, offset, length, reader);
+                        }
+                            public boolean exists(PackId id) throws IOException { return backend.exists(id); }
+                            public void close() {}
+                    };
+                        BufferedByteInputV2.Source source = new BufferedByteInputV2.Source() {
+                            private int position;
+                            public ByteBuffer read() throws IOException {
+                                if (position == bytes.length - 20) {
+                                    assertThat(index.findObject(packId.get(), base)).isPresent();
+                                    assertThat(index.findObject(packId.get(), target)).isEmpty();
+                                    assertThat(index.locations(base)).isEmpty();
+                                    assertThat(index.packs()).isEmpty();
+                            }
+                                return position == bytes.length ? null : ByteBuffer.wrap(bytes, position++, 1);
+                        }
+                            public void release() {}
+                            public void close() {}
+                    };
+                        try (BufferedByteInputV2 input = new BufferedByteInputV2(source);
+                             PackIngestor ingestor = new PackIngestor(input, recording, index)) {
+                            assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
+                                    .hasMessage("Pack checksum mismatch");
                     }
-                    return position == bytes.length ? null : ByteBuffer.wrap(bytes, position++, 1);
+                        assertThat(index.objects(packId.get())).hasSize(1);
+                        assertThat(index.locations(base)).isEmpty();
+                        assertThat(backend.exists(packId.get())).isTrue();
+                        publish(pack(full), backend, index);
+                        assertThat(index.locations(base)).hasSize(1);
+                        assertThat(index.locations(base).getFirst().packId()).isNotEqualTo(packId.get());
+                } finally {
+                    index.discard();
                 }
-                public void release() {}
-                public void close() {}
-            };
-            try (BufferedByteInputV2 input = new BufferedByteInputV2(source);
-                 PackIngestor ingestor = new PackIngestor(input, recording, index)) {
-                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
-                        .hasMessage("Pack checksum mismatch");
             }
-            assertThat(index.objects(packId.get())).hasSize(1);
-            assertThat(index.locations(base)).isEmpty();
-            assertThat(backend.exists(packId.get())).isTrue();
-            publish(pack(full), backend, index);
-            assertThat(index.locations(base)).hasSize(1);
-            assertThat(index.locations(base).getFirst().packId()).isNotEqualTo(packId.get());
         }
     }
 }

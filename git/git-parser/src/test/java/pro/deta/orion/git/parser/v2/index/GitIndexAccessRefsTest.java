@@ -41,10 +41,11 @@ class GitIndexAccessRefsTest {
                 .isInstanceOfSatisfying(GitRefConflictException.class, conflict -> {
                     assertThat(conflict.update()).isEqualTo(update(MAIN, SECOND, FIRST));
                     assertThat(conflict.actual()).contains(FIRST);
-                });
-        try (GitIndexAccess access = index.createAccess(List.of(update(MAIN, FIRST, SECOND)))) {
+        });
+        index.withAccess(List.of(update(MAIN, FIRST, SECOND)), access -> {
             access.apply();
-        }
+            return null;
+        });
         assertRefs(index, Map.of(MAIN, SECOND));
     }
 
@@ -52,13 +53,14 @@ class GitIndexAccessRefsTest {
     @ValueSource(booleans = {false, true})
     void refsStayPrivateUntilApplyAndDiscardLeavesThemUnchanged(boolean local) throws Exception {
         GitIndexApi index = index(local);
-        try (GitIndexAccess access = index.createAccess(Set.of(MAIN))) {
+        index.withAccess(Set.of(MAIN), access -> {
             stage(access, MAIN, null, FIRST);
             assertThat(access.snapshotRefs().refs()).containsEntry(MAIN, FIRST);
             assertRefs(index, Map.of());
             access.discard();
             access.discard();
-        }
+            return null;
+        });
         assertRefs(index, Map.of());
         publish(index, MAIN, null, FIRST);
         assertRefs(index, Map.of(MAIN, FIRST));
@@ -68,16 +70,18 @@ class GitIndexAccessRefsTest {
     @ValueSource(booleans = {false, true})
     void rejectsUndeclaredRefsBeforeChangingAnyPendingState(boolean local) throws Exception {
         GitIndexApi index = index(local);
-        try (GitIndexAccess access = index.createAccess()) {
+        index.withAccess(access -> {
             assertThatThrownBy(() -> stage(access, MAIN, null, FIRST))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("declared");
-        }
-        try (GitIndexAccess access = index.createAccess(Set.of(MAIN))) {
+            return null;
+        });
+        index.withAccess(Set.of(MAIN), access -> {
             assertThatThrownBy(() -> access.updateRefs(List.of(
                     update(MAIN, null, FIRST), update(OTHER, null, FIRST)), true))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("declared");
             access.apply();
-        }
+            return null;
+        });
         assertRefs(index, Map.of());
     }
 
@@ -86,7 +90,7 @@ class GitIndexAccessRefsTest {
     void keepsCapturedValueAndRejectsConcurrentChangeAtApply(boolean local) throws Exception {
         GitIndexApi index = index(local);
         publish(index, MAIN, null, FIRST);
-        try (GitIndexAccess access = index.createAccess(Set.of(MAIN, OTHER))) {
+        index.withAccess(Set.of(MAIN, OTHER), access -> {
             publish(index, MAIN, FIRST, SECOND);
             assertThat(access.snapshotRefs().refs()).containsEntry(MAIN, FIRST);
             access.updateRefs(List.of(update(MAIN, FIRST, null), update(OTHER, null, FIRST)), true);
@@ -94,9 +98,10 @@ class GitIndexAccessRefsTest {
                     .isInstanceOfSatisfying(GitRefConflictException.class, conflict -> {
                         assertThat(conflict.update()).isEqualTo(update(MAIN, FIRST, null));
                         assertThat(conflict.actual()).contains(SECOND);
-                    });
+            });
             assertThatThrownBy(access::snapshotRefs).isInstanceOf(IOException.class);
-        }
+            return null;
+        });
         assertRefs(index, Map.of(MAIN, SECOND));
     }
 
@@ -104,11 +109,16 @@ class GitIndexAccessRefsTest {
     @ValueSource(booleans = {false, true})
     void distinguishesExpectedAbsenceFromUndeclaredAndDetectsConcurrentCreation(boolean local) throws Exception {
         GitIndexApi index = index(local);
-        try (GitIndexAccess first = index.createAccess(List.of(update(MAIN, null, FIRST)));
-             GitIndexAccess second = index.createAccess(List.of(update(MAIN, null, SECOND)))) {
-            first.apply();
-            assertThatThrownBy(second::apply).isInstanceOf(GitRefConflictException.class);
-        }
+        index.withAccess(List.of(update(MAIN, null, FIRST)), first -> {
+            GitIndexAccess second = index.createAccess(List.of(update(MAIN, null, SECOND)));
+            try {
+                first.apply();
+                assertThatThrownBy(second::apply).isInstanceOf(GitRefConflictException.class);
+            } finally {
+                second.discard();
+            }
+            return null;
+        });
         assertRefs(index, Map.of(MAIN, FIRST));
     }
 
@@ -116,11 +126,12 @@ class GitIndexAccessRefsTest {
     @ValueSource(booleans = {false, true})
     void onlyChecksModifiedRefsAndPreservesConcurrentUnrelatedUpdates(boolean local) throws Exception {
         GitIndexApi index = index(local);
-        try (GitIndexAccess access = index.createAccess(Set.of(MAIN, OTHER))) {
+        index.withAccess(Set.of(MAIN, OTHER), access -> {
             publish(index, OTHER, null, SECOND);
             stage(access, MAIN, null, FIRST);
             access.apply();
-        }
+            return null;
+        });
         assertRefs(index, Map.of(MAIN, FIRST, OTHER, SECOND));
         publish(index, MAIN, FIRST, null);
         assertRefs(index, Map.of(OTHER, SECOND));
@@ -143,9 +154,10 @@ class GitIndexAccessRefsTest {
     }
 
     private static void publish(GitIndexApi index, RefId ref, ObjectId old, ObjectId next) throws IOException {
-        try (GitIndexAccess access = index.createAccess(List.of(update(ref, old, next)))) {
+        index.withAccess(List.of(update(ref, old, next)), access -> {
             access.apply();
-        }
+            return null;
+        });
     }
 
     private static void stage(GitIndexAccess access, RefId ref, ObjectId old, ObjectId next) {
@@ -157,8 +169,9 @@ class GitIndexAccessRefsTest {
     }
 
     private static void assertRefs(GitIndexApi index, Map<RefId, ObjectId> expected) throws IOException {
-        try (GitIndexAccess access = index.createAccess()) {
+        index.withAccess(access -> {
             assertThat(access.snapshotRefs().refs()).containsExactlyInAnyOrderEntriesOf(expected);
-        }
+            return null;
+        });
     }
 }

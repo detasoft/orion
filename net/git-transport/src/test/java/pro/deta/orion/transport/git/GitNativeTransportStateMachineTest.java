@@ -473,6 +473,11 @@ class GitNativeTransportStateMachineTest {
 
     private static final class RecordingNativeGitRepositoryProvider
             implements NativeGitRepositoryProvider {
+        @Override
+        public void close() {
+            delegate.close();
+        }
+
         private final InMemoryNativeGitRepositoryProvider delegate =
                 new InMemoryNativeGitRepositoryProvider();
         private final CountDownLatch handled;

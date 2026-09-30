@@ -69,7 +69,7 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository")) {
             repository.files().saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
             Map<String, String> refs = repository.refs();
-            try (GitIndexAccess access1 = repository.index().createAccess()) {
+            repository.index().withAccess(access1 -> {
                 Set<PackMetadata> packs = Set.copyOf(access1.packs());
                 for (String path : List.of("../config.txt", "./config.txt")) {
                     assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
@@ -77,7 +77,8 @@ class NativeGitFileUpdateTest {
                     assertThat(repository.refs()).isEqualTo(refs);
                     assertThat(access1.packs()).containsExactlyInAnyOrderElementsOf(packs);
                 }
-            }
+                return null;
+            });
         }
     }
 
@@ -87,8 +88,7 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository");
 
         repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
-        try (GitIndexAccess access2 = repository.index().createAccess()) {
-
+        repository.index().withAccess(access2 -> {
             assertThat(access2.packs()).hasSize(1);
             PackMetadata metadata = access2.packs().getFirst();
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
@@ -99,7 +99,8 @@ class NativeGitFileUpdateTest {
                     .find("demo").valueOrFailure("repository");
             assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
                     .containsAllEntriesOf(files("first"));
-        }
+            return null;
+        });
     }
 
     @Test
@@ -124,10 +125,11 @@ class NativeGitFileUpdateTest {
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
         assertThat(repository.files().loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
-        try (GitIndexAccess access3 = repository.index().createAccess()) {
+        repository.index().withAccess(access3 -> {
             assertThat(access3.packs()).hasSize(3);
             assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
-        }
+            return null;
+        });
     }
 
     @Test
@@ -181,9 +183,10 @@ class NativeGitFileUpdateTest {
                     rejected, update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .isInstanceOf(GitOperationException.class);
             assertThat(repository.refs()).isEmpty();
-            try (GitIndexAccess access4 = repository.index().createAccess()) {
+            repository.index().withAccess(access4 -> {
                 assertThat(access4.packs()).isEmpty();
-            }
+                return null;
+            });
         }
     }
 

@@ -59,23 +59,28 @@ class PushCommandTest {
     @Test
     void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
         indexApi = new InMemoryIndex();
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess()) {
-            ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1});
-            ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
-            byte[] response = execute(storage, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
-                    ZERO + " " + result + " " + REF + "\0report-status"));
-            assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
-            assertThat(index.snapshotRefs().refs()).containsEntry(REF, result);
-            assertThat(GitObjectRead.read(storage, index, result, new ResolvedGitObjectRead<>(storage, index,
-                    (type, size, unused, input) -> input.readBytes((int) size))))
-                    .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
+        {
+            try (GitStorageApi storage = new InMemoryStorage()) {
+                indexApi.withAccess(index -> {
+                    ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+                    ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
+                    byte[] response = execute(storage, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
+                            ZERO + " " + result + " " + REF + "\0report-status"));
+                    assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
+                    assertThat(index.snapshotRefs().refs()).containsEntry(REF, result);
+                    assertThat(GitObjectRead.read(storage, index, result, new ResolvedGitObjectRead<>(storage, index,
+                            (type, size, unused, input) -> input.readBytes((int) size))))
+                            .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
+                    return null;
+                });
+            }
         }
     }
 
     @Test
     void publishesAThinPackWithItsExternalBaseAndLeavesTheInputOpen() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
             byte[] source = pack(delta(base, new byte[]{3, 4, (byte) 0x90, 3, 1, 4}));
             ObjectId result = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3, 4});
@@ -88,23 +93,29 @@ class PushCommandTest {
             }
             assertThat(output.toByteArray()).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
             GitStorageApi reopened = new LocalGitStorage(directory);
-            try (GitIndexAccess reopenedIndex = new LocalGitIndex(directory).createAccess()) {
-                assertThat(reopenedIndex.snapshotRefs().refs()).containsEntry(REF, result);
-                assertThat(GitObjectRead.read(reopened, reopenedIndex, result, new ResolvedGitObjectRead<>(reopened, reopenedIndex,
-                        (type, size, unused, input) -> input.readBytes((int) size))))
-                        .hasValueSatisfying(content -> assertThat(content).containsExactly(1, 2, 3, 4));
-                var location = reopenedIndex.locations(result).getFirst();
-                assertThat(reopenedIndex.objects(location.packId())).hasSize(2);
-                assertThat(reopenedIndex.findObject(location.packId(), base).orElseThrow().type())
-                        .isEqualTo(GitObjectType.BLOB);
+            {
+                GitIndexAccess reopenedIndex = new LocalGitIndex(directory).createAccess();
+                try {
+                    assertThat(reopenedIndex.snapshotRefs().refs()).containsEntry(REF, result);
+                    assertThat(GitObjectRead.read(reopened, reopenedIndex, result, new ResolvedGitObjectRead<>(reopened, reopenedIndex,
+                            (type, size, unused, input) -> input.readBytes((int) size))))
+                            .hasValueSatisfying(content -> assertThat(content).containsExactly(1, 2, 3, 4));
+                    var location = reopenedIndex.locations(result).getFirst();
+                    assertThat(reopenedIndex.objects(location.packId())).hasSize(2);
+                    assertThat(reopenedIndex.findObject(location.packId(), base).orElseThrow().type())
+                            .isEqualTo(GitObjectType.BLOB);
+                } finally {
+                    reopenedIndex.discard();
+                }
             }
-        }
+            return null;
+        });
     }
 
     @Test
     void keepsFailuresPrivateAfterMissingBasesMalformedDeltasAndCorruptInput() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
             byte[] corrupt = pack(blob(new byte[]{1}));
             corrupt[corrupt.length - 1] ^= 1;
@@ -120,7 +131,8 @@ class PushCommandTest {
                 assertThat(index.packs()).isEmpty();
                 assertThat(index.snapshotRefs().refs()).isEmpty();
             }
-        }
+            return null;
+        });
     }
 
     @ParameterizedTest
@@ -128,7 +140,7 @@ class PushCommandTest {
             "report-status-v2 side-band-64k", " report-status", " report-status-v2 side-band-64k"})
     void createsUpdatesAndDeletesRefsWithNegotiatedStatus(String capabilities) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
             ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
             byte[] expected = report("unpack ok\n", "ok " + REF + "\n");
@@ -144,13 +156,14 @@ class PushCommandTest {
                     + "\0" + capabilities));
             assertThat(status(deleted, capabilities)).isEqualTo(expected);
             assertThat(new LocalGitIndex(directory).createAccess().snapshotRefs().refs()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
     void consumesEmptyPackWhenCreatingARefToAnExistingObject() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             byte[] request = request(pack(), ZERO + " " + id + " " + REF + "\0report-status");
             try (BufferedByteInputV2 input = new BufferedByteInputV2(
@@ -159,14 +172,15 @@ class PushCommandTest {
                 assertThat(input.readUnsignedByte()).isEqualTo(42);
             }
             assertThat(index.snapshotRefs().refs()).containsEntry(REF, id);
-        }
+            return null;
+        });
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void preservesExpectedOldAndAtomicSemantics(boolean atomic) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId stale = objectId(GitObjectType.BLOB, new byte[]{2});
             ObjectId next = objectId(GitObjectType.BLOB, new byte[]{3});
@@ -186,25 +200,27 @@ class PushCommandTest {
                 assertThat(index.snapshotRefs().refs()).containsEntry(other, next);
             }
             assertThat(GitObjectRead.exists(storage, index, next)).isTrue();
-        }
+            return null;
+        });
     }
 
     @Test
     void reportsMissingTargetsWithoutCreatingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId missing = objectId(GitObjectType.BLOB, new byte[]{1});
             byte[] response = execute(storage, request(pack(),
                     ZERO + " " + missing + " " + REF + "\0report-status"));
             assertThat(response).isEqualTo(report("unpack ok\n", "ng " + REF + " missing necessary objects\n"));
             assertThat(index.snapshotRefs().refs()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
     void reportsUnpackFailureAndDoesNotApplyEvenADeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             publishRefs(
                     storage, indexApi,
@@ -219,26 +235,28 @@ class PushCommandTest {
                     "ng " + REF + " unpacker error\n", "ng refs/tags/other unpacker error\n"));
             assertThat(index.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, first);
             assertThat(GitObjectRead.exists(storage, index, next)).isFalse();
-        }
+            return null;
+        });
     }
 
     @Test
     void sendsOnlyTheNegotiatedResponseAndAcceptsCancellation() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             assertThat(execute(storage, request(pack(), ZERO + " " + id + " " + REF))).isEmpty();
             assertThat(execute(storage, request(new byte[0], id + " " + ZERO + " " + REF + "\0side-band-64k")))
                     .isEqualTo("0000".getBytes(StandardCharsets.US_ASCII));
             assertThat(execute(storage, request(new byte[0]))).isEmpty();
             assertThat(index.snapshotRefs().refs()).isEmpty();
-        }
+            return null;
+        });
     }
 
     @Test
     void rejectsMalformedRequestsWithoutChangingExistingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             ObjectId existing = store(storage, index, GitObjectType.BLOB, new byte[]{2});
             publishRefs(
                     storage, indexApi,
@@ -277,13 +295,14 @@ class PushCommandTest {
             }
 
             assertThat(GitObjectRead.exists(storage, index, existing)).isTrue();
-        }
+            return null;
+        });
     }
 
     @Test
     void rejectsUnadvertisedCapabilitiesAndDeletionAndV2() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+        new LocalGitIndex(directory).withAccess(index -> {
             String id = objectId(GitObjectType.BLOB, new byte[]{1}).toHex();
             for (String line : List.of(ZERO + " " + id + " " + REF + "\0atomic",
                     id + " " + ZERO + " " + REF)) {
@@ -300,7 +319,8 @@ class PushCommandTest {
                 assertThatThrownBy(() -> runPush(storage, advertised(), context))
                         .isInstanceOf(IOException.class).hasMessageContaining("legacy push protocol");
             }
-        }
+            return null;
+        });
     }
 
     @Test

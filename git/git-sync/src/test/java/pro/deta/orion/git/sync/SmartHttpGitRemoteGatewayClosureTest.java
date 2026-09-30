@@ -99,12 +99,13 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static void persist(NativeGitRepository repository, byte[] bytes) throws IOException {
-        try (GitIndexAccess access1 = repository.index().createAccess()) {
+        repository.index().withAccess(access1 -> {
             try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), access1)) {
                 output.write(bytes);
                 repository.publishPack(output.complete()).packChecksum();
             }
-        }
+            return null;
+        });
     }
 
     private static byte[] pack(Entry... entries) throws IOException {

@@ -32,6 +32,7 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 /** In-memory repository index; pending objects become visible together when their pack is published. */
 public final class InMemoryIndex implements GitIndexApi {
+    private boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
     private final Map<PackId, NavigableMap<Long, IndexedObject>> objects = new LinkedHashMap<>();
     private final Map<ObjectId, List<IndexedObject>> locations = new LinkedHashMap<>();
@@ -65,6 +66,7 @@ public final class InMemoryIndex implements GitIndexApi {
             ref.requireFullName();
         }
         synchronized (this) {
+            requireFactoryOpen();
             return new Access(names);
         }
     }
@@ -82,6 +84,7 @@ public final class InMemoryIndex implements GitIndexApi {
             }
         }
         synchronized (this) {
+            requireFactoryOpen();
             for (RefUpdate update : updates) {
                 Optional<ObjectId> actual = Optional.ofNullable(refs.get(update.ref()));
                 if (!actual.equals(update.expectedOld())) {
@@ -94,6 +97,15 @@ public final class InMemoryIndex implements GitIndexApi {
             }
             return access;
         }
+    }
+
+    @Override
+    public synchronized void close() {
+        closed = true;
+    }
+
+    private void requireFactoryOpen() {
+        if (closed) throw new IllegalStateException("Repository index is closed");
     }
 
     private final class Access implements GitIndexAccess {
@@ -313,7 +325,7 @@ public final class InMemoryIndex implements GitIndexApi {
                         head = changedHead;
                     }
                 } finally {
-                    close();
+                    discard();
                 }
             }
         }
@@ -335,7 +347,7 @@ public final class InMemoryIndex implements GitIndexApi {
         }
 
         @Override
-        public void close() {
+        public void discard() {
             synchronized (InMemoryIndex.this) {
                 closed = true;
                 changedRefs.clear();

@@ -1,6 +1,5 @@
 package pro.deta.orion.git.workflow.orion;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.NullProgressMonitor;
@@ -84,10 +83,11 @@ final class OrionGitWorkTree implements GitWorkTree {
         Files.createDirectories(gitDirectory);
         GitStorageApi storage = new LocalGitStorage(gitDirectory);
         GitIndexApi index = new LocalGitIndex(gitDirectory);
-        try (GitIndexAccess access = index.createAccess()) {
+        index.withAccess(access -> {
             access.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
             access.apply();
-        }
+            return null;
+        });
         NativeGitRepository repository = new NativeGitRepository(
                 workTree.getFileName().toString(), storage, index, MAIN_REF);
         return new OrionGitWorkTree(client, workTree, repository);
@@ -115,13 +115,14 @@ final class OrionGitWorkTree implements GitWorkTree {
         FetchPlan plan = new FetchPlan(roots, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        try (GitIndexAccess access = repository.index().createAccess()) {
+        repository.index().withAccess(access -> {
             FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
             try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), pack.objectCount())) {
                 pack.writeTo(writer);
                 writer.finish();
             }
-        }
+            return null;
+        });
         try (InMemoryRepository observer = new InMemoryRepository(new DfsRepositoryDescription());
              ObjectInserter inserter = observer.newObjectInserter()) {
             inserter.newPackParser(new ByteArrayInputStream(bytes.toByteArray())).parse(NullProgressMonitor.INSTANCE);
@@ -242,17 +243,18 @@ final class OrionGitWorkTree implements GitWorkTree {
                 output -> {
                     if (wants.isEmpty()) {
                         return;
-                    }
+            }
                     FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                             OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
-                    try (GitIndexAccess access = repository.index().createAccess()) {
+                    repository.index().withAccess(access -> {
                         FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
                         try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
                             pack.writeTo(writer);
                             writer.finish();
-                        }
-                    }
-                });
+                }
+                        return null;
+            });
+        });
         OrionGitClient.requireAccepted(OrionGitClient.requireSuccess(
                 client.receivePack().push(client.uri(remote), client.options(), request),
                 "receive-pack"));
@@ -306,7 +308,7 @@ final class OrionGitWorkTree implements GitWorkTree {
 
     @Override
     public void pull(String remote, String branch) throws Exception {
-        try (GitIndexAccess access = repository.index().createAccess()) {
+        repository.index().withAccess(access -> {
             fetchBranch(remote, branch);
             String localRef = "refs/heads/" + branch;
             String trackingRef = trackingRef(remote, branch);
@@ -317,7 +319,8 @@ final class OrionGitWorkTree implements GitWorkTree {
                 throw new IllegalStateException("Orion pull is not a fast-forward for " + localRef);
             }
             updateRef(localRef, trackingRef);
-        }
+            return null;
+        });
     }
 
     @Override
@@ -331,7 +334,7 @@ final class OrionGitWorkTree implements GitWorkTree {
 
     @Override
     public void checkout(String branch, String startPoint) throws Exception {
-        try (GitIndexAccess access = repository.index().createAccess()) {
+        repository.index().withAccess(access -> {
             String refName = "refs/heads/" + branch;
             if (!repository.refs().containsKey(refName)) {
                 updateRef(refName, startPoint);
@@ -339,7 +342,8 @@ final class OrionGitWorkTree implements GitWorkTree {
             currentBranch = branch;
             access.updateHead(new Head.Symbolic(new RefId(refName)));
             access.apply();
-        }
+            return null;
+        });
     }
 
     @Override
@@ -372,26 +376,28 @@ final class OrionGitWorkTree implements GitWorkTree {
         for (String objectId : repository.refs().values()) {
             haves.add(new ObjectId(objectId));
         }
-        try (GitIndexAccess access = repository.index().createAccess();
-             PackIngestionOutput target = new PackIngestionOutput(
-                repository.storage(), access)) {
-            GitUploadPackRequest request = new GitUploadPackRequest(
-                    List.of(wantedId),
-                    haves.stream().map(ObjectId::toHex).toList(),
-                    target,
-                    ignored -> { });
-            OrionGitClient.requireSuccess(
-                    client.uploadPack().fetch(client.uri(remote), client.options(), request),
-                    "upload-pack");
-            repository.publishPack(target.complete());
-            String localTrackingRef = trackingRef(remoteName, branch);
-            String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
-            List<RefUpdateResult> results = repository.publishRefs(
-                    List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
-            if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
-                throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
+        repository.index().withAccess(access -> {
+            try (PackIngestionOutput target = new PackIngestionOutput(
+                    repository.storage(), access)) {
+                GitUploadPackRequest request = new GitUploadPackRequest(
+                        List.of(wantedId),
+                        haves.stream().map(ObjectId::toHex).toList(),
+                        target,
+                        ignored -> { });
+                OrionGitClient.requireSuccess(
+                        client.uploadPack().fetch(client.uri(remote), client.options(), request),
+                        "upload-pack");
+                repository.publishPack(target.complete());
+                String localTrackingRef = trackingRef(remoteName, branch);
+                String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
+                List<RefUpdateResult> results = repository.publishRefs(
+                        List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
+                if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
+                    throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
+                }
             }
-        }
+            return null;
+        });
         return true;
     }
 
@@ -425,12 +431,12 @@ final class OrionGitWorkTree implements GitWorkTree {
     }
 
     private boolean isFastForward(String refName, String oldId, String newId) throws IOException {
-        try (GitIndexAccess access = repository.index().createAccess()) {
+        return repository.index().withAccess(access -> {
             if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
                 return true;
             }
             return new GitObjectGraph(repository.storage(), access).isAncestor(new ObjectId(oldId), new ObjectId(newId));
-        }
+        });
     }
 
     private static String requireFilePath(String pathspec) {

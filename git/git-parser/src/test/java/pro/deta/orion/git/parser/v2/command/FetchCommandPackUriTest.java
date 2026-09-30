@@ -55,7 +55,14 @@ class FetchCommandPackUriTest {
 
     @AfterEach
     void closeStorage() throws IOException {
-        try (storage; index) {
+        {
+            try (storage) {
+                try {
+
+                } finally {
+                    index.discard();
+                }
+            }
         }
     }
 
@@ -79,9 +86,14 @@ class FetchCommandPackUriTest {
             pack.writeTo(writer);
             writer.finish();
         }
-        try (GitIndexAccess inline = ingest(output.toByteArray())) {
-            assertThat(inline.objects(inline.packs().getFirst().packId()))
-                    .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(inlineIds);
+        {
+            GitIndexAccess inline = ingest(output.toByteArray());
+            try {
+                assertThat(inline.objects(inline.packs().getFirst().packId()))
+                        .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(inlineIds);
+            } finally {
+                inline.discard();
+            }
         }
         assertThat(pack.packUris()).isEqualTo(expectedUris);
         assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
@@ -94,8 +106,13 @@ class FetchCommandPackUriTest {
         byte[] response = fetch(ids, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains("packfile-uris\n", packId.toHex() + " " + repository.packUri(packId).orElseThrow() + "\n");
-        try (GitIndexAccess inline = inlinePack(response)) {
-            assertThat(inline.packs().getFirst().objectCount()).isZero();
+        {
+            GitIndexAccess inline = inlinePack(response);
+            try {
+                assertThat(inline.packs().getFirst().objectCount()).isZero();
+            } finally {
+                inline.discard();
+            }
         }
         assertThat(index.objects(index.packs(packId).getFirst().packId()))
                 .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(ids);
@@ -111,10 +128,15 @@ class FetchCommandPackUriTest {
         byte[] response = fetch(wanted, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains(externalPack.toHex() + " " + repository.packUri(externalPack).orElseThrow() + "\n");
-        try (GitIndexAccess inline = inlinePack(response)) {
-            assertThat(inline.packs().getFirst().objectCount()).isEqualTo(1);
-            assertThat(inline.objects(inline.packs().getFirst().packId()))
-                    .extracting(IndexedObject::objectId).containsExactly(shared.getFirst());
+        {
+            GitIndexAccess inline = inlinePack(response);
+            try {
+                assertThat(inline.packs().getFirst().objectCount()).isEqualTo(1);
+                assertThat(inline.objects(inline.packs().getFirst().packId()))
+                        .extracting(IndexedObject::objectId).containsExactly(shared.getFirst());
+            } finally {
+                inline.discard();
+            }
         }
     }
 
@@ -123,9 +145,14 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1});
         byte[] response = fetch(ids, "http");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (GitIndexAccess inline = inlinePack(response)) {
-            assertThat(inline.objects(inline.packs().getFirst().packId()))
-                    .extracting(IndexedObject::objectId).containsExactlyElementsOf(ids);
+        {
+            GitIndexAccess inline = inlinePack(response);
+            try {
+                assertThat(inline.objects(inline.packs().getFirst().packId()))
+                        .extracting(IndexedObject::objectId).containsExactlyElementsOf(ids);
+            } finally {
+                inline.discard();
+            }
         }
     }
 
@@ -134,9 +161,14 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
         byte[] response = fetch(List.of(ids.getFirst()), "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (GitIndexAccess inline = inlinePack(response)) {
-            assertThat(inline.objects(inline.packs().getFirst().packId()))
-                    .extracting(IndexedObject::objectId).containsExactly(ids.getFirst());
+        {
+            GitIndexAccess inline = inlinePack(response);
+            try {
+                assertThat(inline.objects(inline.packs().getFirst().packId()))
+                        .extracting(IndexedObject::objectId).containsExactly(ids.getFirst());
+            } finally {
+                inline.discard();
+            }
         }
     }
 

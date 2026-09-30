@@ -13,7 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public interface NativeGitRepositoryProvider {
+/** Owns opened repositories and releases them when the provider is closed. */
+public interface NativeGitRepositoryProvider extends AutoCloseable {
+    @Override
+    void close();
+
     default List<String> repositoryNames() {
         return List.of();
     }

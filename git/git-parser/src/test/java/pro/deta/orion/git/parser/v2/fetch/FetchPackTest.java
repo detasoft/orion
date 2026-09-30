@@ -39,57 +39,66 @@ class FetchPackTest {
 
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
-            ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
-            byte[] rootBytes = commit(tree);
-            ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, rootBytes);
-            byte[] tipBytes = commit(tree, root);
-            ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, tipBytes);
-            Path rootPath = directory.resolve("packs")
-                    .resolve("pack-" + index.locations(root).getFirst().packId() + ".data");
-            FetchPlan commonOnly = plan(Set.of(), Set.of(root), Set.of(), OptionalInt.empty());
-            FetchPlan wanted = plan(Set.of(tip), Set.of(root), Set.of(), OptionalInt.empty());
-            long commonReads = contentReads(storage, index, commonOnly, rootPath, "common.jfr");
-            assertThat(commonReads).isPositive();
-            assertThat(contentReads(storage, index, wanted, rootPath, "wanted.jfr")).isEqualTo(commonReads);
-            FetchPack pack = FetchPack.prepare(storage, index, wanted);
-            assertThat(pack.shallowCommits()).isEmpty();
-            assertThat(pack.unshallowCommits()).isEmpty();
-            assertThat(pack.objectCount()).isEqualTo(1);
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
-                pack.writeTo(writer);
-                writer.finish();
+        {
+            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+                new LocalGitIndex(directory).withAccess(index -> {
+                    ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
+                    byte[] rootBytes = commit(tree);
+                    ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, rootBytes);
+                    byte[] tipBytes = commit(tree, root);
+                    ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, tipBytes);
+                    Path rootPath = directory.resolve("packs")
+                            .resolve("pack-" + index.locations(root).getFirst().packId() + ".data");
+                    FetchPlan commonOnly = plan(Set.of(), Set.of(root), Set.of(), OptionalInt.empty());
+                    FetchPlan wanted = plan(Set.of(tip), Set.of(root), Set.of(), OptionalInt.empty());
+                    long commonReads = contentReads(storage, index, commonOnly, rootPath, "common.jfr");
+                    assertThat(commonReads).isPositive();
+                    assertThat(contentReads(storage, index, wanted, rootPath, "wanted.jfr")).isEqualTo(commonReads);
+                    FetchPack pack = FetchPack.prepare(storage, index, wanted);
+                    assertThat(pack.shallowCommits()).isEmpty();
+                    assertThat(pack.unshallowCommits()).isEmpty();
+                    assertThat(pack.objectCount()).isEqualTo(1);
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
+                        pack.writeTo(writer);
+                        writer.finish();
+                    }
+                    assertThat(output.toByteArray()).isEqualTo(
+                            PackTestData.pack(PackTestData.entry(GitObjectType.COMMIT, tipBytes)));
+                    return null;
+                });
             }
-            assertThat(output.toByteArray()).isEqualTo(
-                    PackTestData.pack(PackTestData.entry(GitObjectType.COMMIT, tipBytes)));
         }
     }
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
-            ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
-            ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree));
-            ObjectId boundary = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, root));
-            ObjectId common = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, boundary));
-            ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, common));
-            FetchPack ordinary = FetchPack.prepare(storage, index,
-                    plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.empty()));
-            assertThat(ordinary.objectCount()).isEqualTo(1);
-            assertThat(ordinary.shallowCommits()).isEmpty();
-            assertThat(ordinary.unshallowCommits()).isEmpty();
-            FetchPack deepened = FetchPack.prepare(storage, index,
-                    plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.of(4)));
-            assertThat(deepened.objectCount()).isEqualTo(2);
-            assertThat(deepened.shallowCommits()).isEmpty();
-            assertThat(deepened.unshallowCommits()).containsExactly(boundary);
-            FetchPack shallow = FetchPack.prepare(storage, index,
-                    plan(Set.of(tip), Set.of(common), Set.of(tip), OptionalInt.empty()));
-            assertThat(shallow.objectCount()).isEqualTo(1);
-            assertThat(shallow.shallowCommits()).containsExactly(tip);
-            assertThat(shallow.unshallowCommits()).isEmpty();
+        {
+            try (GitStorageApi storage = new InMemoryStorage()) {
+                new InMemoryIndex().withAccess(index -> {
+                    ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
+                    ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree));
+                    ObjectId boundary = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, root));
+                    ObjectId common = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, boundary));
+                    ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, common));
+                    FetchPack ordinary = FetchPack.prepare(storage, index,
+                            plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.empty()));
+                    assertThat(ordinary.objectCount()).isEqualTo(1);
+                    assertThat(ordinary.shallowCommits()).isEmpty();
+                    assertThat(ordinary.unshallowCommits()).isEmpty();
+                    FetchPack deepened = FetchPack.prepare(storage, index,
+                            plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.of(4)));
+                    assertThat(deepened.objectCount()).isEqualTo(2);
+                    assertThat(deepened.shallowCommits()).isEmpty();
+                    assertThat(deepened.unshallowCommits()).containsExactly(boundary);
+                    FetchPack shallow = FetchPack.prepare(storage, index,
+                            plan(Set.of(tip), Set.of(common), Set.of(tip), OptionalInt.empty()));
+                    assertThat(shallow.objectCount()).isEqualTo(1);
+                    assertThat(shallow.shallowCommits()).containsExactly(tip);
+                    assertThat(shallow.unshallowCommits()).isEmpty();
+                    return null;
+                });
+            }
         }
     }
 
@@ -138,25 +147,29 @@ class FetchPackTest {
 
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
-            byte[] first = {1, 2, 3};
-            byte[] second = {4, 5};
-            ObjectId firstId = PackTestData.store(storage, index, GitObjectType.BLOB, first);
-            ObjectId secondId = PackTestData.store(storage, index, GitObjectType.BLOB, second);
-            FetchPlan plan = new FetchPlan(new LinkedHashSet<>(List.of(secondId, firstId)), Map.of(),
-                    Set.of(), Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
-                    new GitCapabilities(), Set.of());
-            FetchPack pack = FetchPack.prepare(storage, index, plan);
-            assertThat(pack.objectCount()).isEqualTo(2);
-            index.close();
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
-                pack.writeTo(writer);
-                writer.finish();
+        {
+            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+                new LocalGitIndex(directory).withAccess(index -> {
+                    byte[] first = {1, 2, 3};
+                    byte[] second = {4, 5};
+                    ObjectId firstId = PackTestData.store(storage, index, GitObjectType.BLOB, first);
+                    ObjectId secondId = PackTestData.store(storage, index, GitObjectType.BLOB, second);
+                    FetchPlan plan = new FetchPlan(new LinkedHashSet<>(List.of(secondId, firstId)), Map.of(),
+                            Set.of(), Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
+                            new GitCapabilities(), Set.of());
+                    FetchPack pack = FetchPack.prepare(storage, index, plan);
+                    assertThat(pack.objectCount()).isEqualTo(2);
+                    index.discard();
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
+                        pack.writeTo(writer);
+                        writer.finish();
+                    }
+                    assertThat(output.toByteArray()).isEqualTo(
+                            PackTestData.pack(PackTestData.blob(second), PackTestData.blob(first)));
+                    return null;
+                });
             }
-            assertThat(output.toByteArray()).isEqualTo(
-                    PackTestData.pack(PackTestData.blob(second), PackTestData.blob(first)));
         }
     }
 }

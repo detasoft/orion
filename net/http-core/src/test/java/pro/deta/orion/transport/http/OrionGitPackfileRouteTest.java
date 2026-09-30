@@ -272,6 +272,11 @@ class OrionGitPackfileRouteTest {
     }
 
     private static final class RecordingProvider implements NativeGitRepositoryProvider {
+        @Override
+        public void close() {
+            backend.close();
+        }
+
         private final NativeGitRepositoryProvider backend;
         private int readCalls;
         private String lastReadName;

@@ -23,6 +23,29 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class FileNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
+    private boolean closed;
+
+    private void requireOpen() {
+        if (closed) throw new IllegalStateException("Repository provider is closed");
+    }
+
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        RuntimeException failure = null;
+        for (NativeGitRepository repository : repositories.values()) {
+            try {
+                repository.close();
+            } catch (RuntimeException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+        }
+        repositories.clear();
+        if (failure != null) throw failure;
+    }
+
     private static final String DEFAULT_HEAD = "refs/heads/main";
     private static final String METADATA_FILE = "orion-native-repository.properties";
     private static final String NAME_PROPERTY = "name";
@@ -40,6 +63,7 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
 
     @Override
     public synchronized List<String> repositoryNames() {
+        requireOpen();
         List<String> names = new ArrayList<>();
         try (var entries = Files.newDirectoryStream(rootDirectory)) {
             for (Path entry : entries) {
@@ -56,12 +80,14 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
 
     @Override
     public synchronized boolean exists(String repositoryName) {
+        requireOpen();
         String name = requireName(repositoryName);
         return Files.isRegularFile(metadataPath(name));
     }
 
     @Override
     public synchronized Result<NativeGitRepository> find(String repositoryName) {
+        requireOpen();
         String name = requireName(repositoryName);
         if (!Files.isRegularFile(metadataPath(name))) {
             return new Result.Failure<>(
@@ -73,6 +99,7 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
 
     @Override
     public synchronized Result<NativeGitRepository> create(String repositoryName) {
+        requireOpen();
         String name = requireName(repositoryName);
         Path metadata = metadataPath(name);
         if (Files.isRegularFile(metadata)) {
