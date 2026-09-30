@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.eclipse.jgit.revwalk.RevCommit;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 
 class RuntimeHttpAdminAclUpdateIT {
@@ -57,9 +59,8 @@ class RuntimeHttpAdminAclUpdateIT {
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
             originalXml = initial.body();
             byte[] originalContent = originalXml.getBytes(StandardCharsets.UTF_8);
-            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
-                    "application/xml", withPasswordUser(originalXml, "rollback-user"), initial.etag()).status())
-                    .isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.updateConfiguration(
+                    orion, withPasswordUser(originalXml, "rollback-user"), initial.etag());
             RuntimeHttpTestSupport.HttpResponse changed = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
             assertThat(changed.etag()).isNotEqualTo(initial.etag());
@@ -69,9 +70,8 @@ class RuntimeHttpAdminAclUpdateIT {
             assertThat(orion.accessControlService().verifyToken(userToken))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
 
-            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
-                    "application/xml", originalContent, initial.etag()).status())
-                    .isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            assertThatThrownBy(() -> RuntimeHttpTestSupport.updateConfiguration(orion, originalContent, initial.etag()))
+                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
             RuntimeHttpTestSupport.HttpResponse afterConflict = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
             assertThat(afterConflict.etag()).isEqualTo(changed.etag());
@@ -80,9 +80,7 @@ class RuntimeHttpAdminAclUpdateIT {
             assertThat(orion.accessControlService().verifyToken(userToken))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
 
-            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
-                    "application/xml", originalContent, changed.etag()).status())
-                    .isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.updateConfiguration(orion, originalContent, changed.etag());
             RuntimeHttpTestSupport.HttpResponse rolledBack = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
             rollbackEtag = rolledBack.etag();
@@ -106,7 +104,6 @@ class RuntimeHttpAdminAclUpdateIT {
                     new ObjectId(rollback.getParent(0).name())).orElseThrow().data());
             assertThat(previous.getParentCount()).isEqualTo(1);
             assertThat(previous.getParent(0).name()).isEqualTo(initial.etag().replace("\"", ""));
-            assertConfigurationCommitAuthor(orion, "root");
             RuntimeHttpTestSupport.HttpResponse status = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/configuration/status"), bearer);
             assertThat(status.status()).isEqualTo(HttpURLConnection.HTTP_OK);
@@ -146,33 +143,15 @@ class RuntimeHttpAdminAclUpdateIT {
             operator.addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
             draft.getUsers().add(operator);
             byte[] xml = serialize(draft.toAccessControl());
-            RuntimeHttpTestSupport.HttpResponse created = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken),
-                    "application/xml", xml, initial.etag());
-            assertThat(created.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
-            assertConfigurationCommitAuthor(orion, "root");
+            RuntimeHttpTestSupport.updateConfiguration(orion, xml, initial.etag());
 
             String operatorToken = TestBearerTokens.issueToken(orion.httpUrl("/api/admin/token"),
                     "operator", TEST_PASSWORD.toCharArray(), 600);
             String bearer = TestBearerTokens.bearer(operatorToken);
             RuntimeHttpTestSupport.HttpResponse current = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), bearer);
-            operator.setEmail("updated@example.test");
-            xml = serialize(draft.toAccessControl());
-            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"), bearer,
-                    "application/xml", xml, current.etag()).status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
-            assertConfigurationCommitAuthor(orion, "operator");
-            RuntimeHttpTestSupport.HttpResponse changed = RuntimeHttpTestSupport.request(
-                    "GET", orion.httpUrl("/api/admin/acl"), bearer);
-            assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"),
-                    TestBearerTokens.bearer(rootToken), "application/xml", xml, current.etag()).status())
-                    .isEqualTo(HttpURLConnection.HTTP_CONFLICT);
-            assertThat(RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/acl"), bearer).etag())
-                    .isEqualTo(changed.etag());
-            assertConfigurationCommitAuthor(orion, "operator");
-
             Map<String, Object> command = Map.of("action", "create", "scope", "system", "alias", "archive",
-                    "revision", changed.etag().replace("\"", ""),
+                    "revision", current.etag().replace("\"", ""),
                     "upstream", tempDir.resolve("offline.git").toUri().toString(),
                     "ref", "main", "credentialKind", "NONE");
             RuntimeHttpTestSupport.HttpResponse proxy = RuntimeHttpTestSupport.request(
@@ -202,7 +181,7 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     @Test
-    void oidcSecretIsEncryptedInGitAndPlaintextXmlIsRejectedBeforeCommit() throws Exception {
+    void oidcSecretIsEncryptedInGitAndPlaintextConfigurationIsRejectedBeforeCommit() throws Exception {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("oidc-secret"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -214,10 +193,8 @@ class RuntimeHttpAdminAclUpdateIT {
                     initial.body().getBytes(StandardCharsets.UTF_8)));
             OrionDocument.Organization acme = new OrionDocument.Organization(new OrganizationId("acme"), "Acme",
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
-            RuntimeHttpTestSupport.HttpResponse organization = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), bearer, "application/xml",
+            RuntimeHttpTestSupport.updateConfiguration(orion,
                     serializeDocument(new OrionDocument(base.system(), List.of(acme))), initial.etag());
-            assertThat(organization.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
 
             RuntimeHttpTestSupport.HttpResponse listing = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/oidc"), bearer);
@@ -247,11 +224,9 @@ class RuntimeHttpAdminAclUpdateIT {
                     system.accessControl(), system.https(),
                     List.of(new ConfigurationSecret("plain", "open-xml-secret")),
                     system.proxies(), system.connections()), stored.organizations());
-            RuntimeHttpTestSupport.HttpResponse rejected = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), bearer, "application/xml",
-                    serializeDocument(plaintext), current.etag());
-            assertThat(rejected.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
-            assertThat(rejected.body()).doesNotContain("open-xml-secret");
+            assertThatThrownBy(() -> RuntimeHttpTestSupport.updateConfiguration(
+                    orion, serializeDocument(plaintext), current.etag()))
+                    .isInstanceOf(IllegalStateException.class);
             assertThat(readFileFromAclRepository(orion)).containsExactly(persisted);
             assertThat(RuntimeHttpTestSupport.request("GET", orion.httpUrl("/api/admin/acl"), bearer).etag())
                     .isEqualTo(current.etag());
@@ -283,7 +258,7 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     @Test
-    void postAccessControlReloadsRuntimeAclAndSurvivesRestart() throws Exception {
+    void configurationUpdateReloadsRuntimeAclAndSurvivesRestart() throws Exception {
         Path orionRoot = tempDir.resolve("orion-update");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
@@ -299,15 +274,7 @@ class RuntimeHttpAdminAclUpdateIT {
             assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8))).containsExactly("root");
 
             byte[] updatedAcl = serialize(accessControlWithPasswordUser("http-updated-user"));
-            RuntimeHttpTestSupport.HttpResponse update = RuntimeHttpTestSupport.request(
-                    "POST",
-                    orion.httpUrl("/api/admin/acl"),
-                    TestBearerTokens.bearer(token),
-                    "application/xml",
-                    updatedAcl,
-                    initialAcl.etag());
-
-            assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.updateConfiguration(orion, updatedAcl, initialAcl.etag());
             assertUserAuthenticates(orion, "http-updated-user");
             assertThat(orion.accessControlService().verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Failure.class);
@@ -322,7 +289,7 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     @Test
-    void invalidAccessControlPostKeepsActiveAndStoredAclUnchanged() throws Exception {
+    void xmlUploadIsRejectedAndKeepsActiveAndStoredAclUnchanged() throws Exception {
         Path orionRoot = tempDir.resolve("orion-invalid-update");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
@@ -342,7 +309,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     "<AccessControl><users>".getBytes(StandardCharsets.UTF_8),
                     activeBefore.etag());
 
-            assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_BAD_METHOD);
             assertThat(readFileFromAclRepository(orion)).containsExactly(storedBefore);
             RuntimeHttpTestSupport.HttpResponse activeAfter = RuntimeHttpTestSupport.request(
                     "GET",
@@ -354,29 +321,19 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     @Test
-    void staleAccessControlPostCannotReplaceANewerCommit() throws Exception {
+    void staleConfigurationUpdateCannotReplaceANewerCommit() throws Exception {
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-stale"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String token = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token));
             assertThat(initial.etag()).isNotBlank();
-
-            RuntimeHttpTestSupport.HttpResponse missingRevision = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
-                    "application/xml", withPasswordUser(initial.body(), "missing"));
-            assertThat(missingRevision.status()).isEqualTo(428);
-
-            RuntimeHttpTestSupport.HttpResponse first = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
-                    "application/xml", withPasswordUser(initial.body(), "first"), initial.etag());
-            assertThat(first.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            RuntimeHttpTestSupport.updateConfiguration(
+                    orion, withPasswordUser(initial.body(), "first"), initial.etag());
             byte[] storedAfterFirst = readFileFromAclRepository(orion);
-
-            RuntimeHttpTestSupport.HttpResponse stale = RuntimeHttpTestSupport.request(
-                    "POST", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(token),
-                    "application/xml", withPasswordUser(initial.body(), "second"), initial.etag());
-            assertThat(stale.status()).isEqualTo(HttpURLConnection.HTTP_CONFLICT);
+            assertThatThrownBy(() -> RuntimeHttpTestSupport.updateConfiguration(
+                    orion, withPasswordUser(initial.body(), "second"), initial.etag()))
+                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
             assertThat(readFileFromAclRepository(orion)).containsExactly(storedAfterFirst);
             assertUserAuthenticates(orion, "first");
         }

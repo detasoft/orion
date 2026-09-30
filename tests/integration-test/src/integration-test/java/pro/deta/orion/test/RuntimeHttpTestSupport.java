@@ -5,7 +5,11 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -65,6 +69,12 @@ final class RuntimeHttpTestSupport {
 
     static HttpResponse request(String method, URL url, String authorization) throws IOException {
         return request(method, url, authorization, null, new byte[0]);
+    }
+
+    static void updateConfiguration(StartedOrion orion, byte[] content, String etag) throws IOException {
+        OrionDocument document = OrionXml.read(new ByteArrayInputStream(content));
+        orion.accessControlService().updatePrimaryConfiguration(
+                etag.replace("\"", ""), ignored -> document, "Update test configuration", UserEmail.EMPTY);
     }
 
     static String aclEtag(StartedOrion orion, String token) throws IOException {

@@ -175,7 +175,7 @@ class RuntimeHttpAdminApiIT {
             assertThat(routes.contentType()).startsWith("application/json");
             JsonNode routeTable = OBJECT_MAPPER.readTree(routes.body()).get("routes");
             assertThat(routeWithPattern(routeTable, "/api/admin/acl").get("methods").toString())
-                    .isEqualTo("[\"GET\",\"POST\"]");
+                    .isEqualTo("[\"GET\"]");
             assertThat(routeWithPattern(routeTable, "/api/admin/routes").get("authorization").asText())
                     .isEqualTo("application-admin");
             assertThat(routeWithPattern(routeTable, "/api/admin/lifecycle/state").get("authorization").asText())
@@ -186,7 +186,7 @@ class RuntimeHttpAdminApiIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(token));
             assertThat(wrongMethod.status()).isEqualTo(HttpURLConnection.HTTP_BAD_METHOD);
-            assertThat(wrongMethod.allow()).isEqualTo("GET, POST");
+            assertThat(wrongMethod.allow()).isEqualTo("GET");
 
             RuntimeHttpTestSupport.HttpResponse unknownPath = RuntimeHttpTestSupport.request(
                     "GET",

@@ -7,6 +7,7 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -116,9 +117,9 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                             var updated = current.replaceAccessControl(
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
-                            var update = RuntimeHttpTestSupport.request("POST", aclUrl, authorization,
-                                    "application/xml", serialize(updated), initialAcl.etag());
-                            assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+                            component.orionAccessControlService().updatePrimaryConfiguration(
+                                    initialAcl.etag().replace("\"", ""), ignored -> updated,
+                                    "Update remote configuration", UserEmail.EMPTY);
                             assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
                             assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
                                     .isEqualTo(materialBeforeUpdate);

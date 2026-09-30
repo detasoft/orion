@@ -4,6 +4,7 @@ import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.auth.SshCredentialFailureCode;
@@ -231,9 +232,11 @@ class InternalConfigurationRepositoryLifecycleIT {
                     "legacy-jwt-public-key");
             root.addGrant("ROOT_DIRECT")
                     .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
-            first.orionAccessControlService().saveAccessControlConfigurationFile(
-                    accessControlBytes(draft.toAccessControl()),
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
+            OrionDocument replacement = OrionXml.read(
+                    new ByteArrayInputStream(accessControlBytes(draft.toAccessControl())));
+            first.orionAccessControlService().updatePrimaryConfiguration(
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
+                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
             beforeReset = OrionXml.read(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
@@ -378,8 +381,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            first.orionAccessControlService().saveAccessControlConfigurationFile(missingRootAclBytes(),
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
+            OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(missingRootAclBytes()));
+            first.orionAccessControlService().updatePrimaryConfiguration(
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
+                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {
@@ -596,9 +601,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            first.orionAccessControlService().saveAccessControlConfigurationFile(
-                    defaultAclBytes("legacy-password"),
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(), "");
+            OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
+            first.orionAccessControlService().updatePrimaryConfiguration(
+                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
+                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
             assertSshAuthenticated(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);

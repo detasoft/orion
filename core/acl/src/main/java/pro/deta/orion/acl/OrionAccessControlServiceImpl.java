@@ -852,28 +852,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         };
     }
 
-    @Override
-    public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
-        if (content == null || content.length == 0) {
-            throw new AccessControlValidationException("ACL configuration content is required");
-        }
-        String primaryPath = accessControlStorage.primaryPath();
-        OrionDocument document;
-        try {
-            document = parseOrionConfiguration(content, primaryPath);
-        } catch (IllegalArgumentException failure) {
-            throw new AccessControlValidationException("Invalid ACL configuration file");
-        }
-        AccessControlSnapshot input = AccessControlSnapshot.singleFile(
-                primaryPath, serializeOrionConfiguration(document));
-        if (documentFrom(input) instanceof Result.Failure<OrionDocument>) {
-            throw new AccessControlValidationException("Invalid ACL configuration file");
-        }
-        updatePrimaryConfiguration(expectedRevision, ignored -> document,
-                "saveAccessControlConfigurationFile() " + primaryPath,
-                new UserEmail(Objects.requireNonNull(authorId, "configuration author"), ""));
-    }
-
     private AccessControl parseAccessControlConfiguration(byte[] content, String sourceName) {
         return parseOrionConfiguration(content, sourceName).system().accessControl();
     }

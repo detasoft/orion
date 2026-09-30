@@ -312,10 +312,5 @@ class SshCredentialCommandCatalogTest {
         public ConfigurationFile accessControlConfigurationFile() {
             throw new UnsupportedOperationException();
         }
-
-        @Override
-        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
-            throw new UnsupportedOperationException();
-        }
     }
 }

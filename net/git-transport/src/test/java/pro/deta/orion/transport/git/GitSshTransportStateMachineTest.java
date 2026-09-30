@@ -421,11 +421,6 @@ class GitSshTransportStateMachineTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
-            throw new UnsupportedOperationException();
-        }
-
         private boolean keyMatches(byte[] encodedPublicKey) {
             return acceptedKey != null
                     && Arrays.equals(acceptedKey.getPublic().getEncoded(), encodedPublicKey);

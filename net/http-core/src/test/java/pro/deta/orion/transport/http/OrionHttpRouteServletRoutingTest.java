@@ -219,7 +219,7 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     @Test
-    void aclRoutesOnlyClassifyDeclaredValidationFailuresAsClientErrors() throws Exception {
+    void userUpdateOnlyClassifiesDeclaredValidationFailuresAsClientErrors() throws Exception {
         for (boolean invalidInput : List.of(true, false)) {
             OrionAccessControlService service = stub(OrionAccessControlService.class, (proxy, method, args) -> {
                 if (invalidInput) {
@@ -227,14 +227,12 @@ class OrionHttpRouteServletRoutingTest {
                 }
                 throw new IllegalArgumentException("private persistence details");
             });
-            for (OrionHttpRoute route : List.of(new OrionAdminAccessControlRoute(service),
-                    new OrionAdminCreateOrUpdateUserRoute(service, OBJECT_MAPPER))) {
-                ResponseRecorder response = new ResponseRecorder();
-                servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
-                        "{\"id\":\"alice\"}"), response.proxy());
-                assertThat(response.status).isEqualTo(invalidInput ? 400 : 500);
-                assertThat(response.errorMessage).isEqualTo(invalidInput ? "Invalid ACL input" : "Internal server error");
-            }
+            OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(service, OBJECT_MAPPER);
+            ResponseRecorder response = new ResponseRecorder();
+            servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
+                    "{\"id\":\"alice\"}"), response.proxy());
+            assertThat(response.status).isEqualTo(invalidInput ? 400 : 500);
+            assertThat(response.errorMessage).isEqualTo(invalidInput ? "Invalid ACL input" : "Internal server error");
         }
     }
 

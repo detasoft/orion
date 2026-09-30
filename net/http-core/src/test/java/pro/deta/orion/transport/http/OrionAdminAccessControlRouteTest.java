@@ -31,31 +31,23 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminAccessControlRouteTest {
     @ParameterizedTest
     @ValueSource(strings = {"alice", "José-東京-Ирина"})
-    void exportsAndImportsOriginalXmlBytesOverHttp(String userId) throws Exception {
+    void exportsOriginalXmlBytesAndRejectsUploads(String userId) throws Exception {
         AccessControlDraft draft = new AccessControlDraft();
         draft.getUsers().add(ACLUtil.createUser(userId, "user@example.test"));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(draft.toAccessControl()), output);
         byte[] content = output.toByteArray();
-        AtomicReference<byte[]> imported = new AtomicReference<>();
         OrionAccessControlService accessControl = (OrionAccessControlService) Proxy.newProxyInstance(
                 OrionAccessControlService.class.getClassLoader(), new Class<?>[]{OrionAccessControlService.class},
                 (proxy, method, arguments) -> {
                     if (method.getName().equals("accessControlConfigurationFile")) {
                         return new OrionAccessControlService.ConfigurationFile(content, Optional.of("revision-1"));
-                    }
-                    if (method.getName().equals("saveAccessControlConfigurationFile")) {
-                        assertThat(arguments[1]).isEqualTo("revision-1");
-                        assertThat(arguments[2]).isEqualTo("admin");
-                        imported.set((byte[]) arguments[0]);
-                        return null;
                     }
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });
@@ -102,8 +94,9 @@ class OrionAdminAccessControlRouteTest {
             HttpRequest upload = request.header("If-Match", exported.headers().firstValue("ETag").orElseThrow())
                     .header("Content-Type", "application/xml")
                     .POST(HttpRequest.BodyPublishers.ofByteArray(exported.body())).build();
-            assertThat(client.send(upload, HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(201);
-            assertThat(imported.get()).isEqualTo(content);
+            assertThat(client.send(upload, HttpResponse.BodyHandlers.discarding()).statusCode()).isEqualTo(405);
+            assertThat(client.send(request.GET().build(), HttpResponse.BodyHandlers.ofByteArray()).body())
+                    .isEqualTo(content);
         } finally {
             server.stop();
         }

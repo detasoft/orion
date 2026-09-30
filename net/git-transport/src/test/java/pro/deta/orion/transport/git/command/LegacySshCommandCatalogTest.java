@@ -464,11 +464,6 @@ class LegacySshCommandCatalogTest {
         public ConfigurationFile accessControlConfigurationFile() {
             throw new UnsupportedOperationException();
         }
-
-        @Override
-        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
-            throw new UnsupportedOperationException();
-        }
     }
 
     private static final class RepositoryProvider implements NativeGitRepositoryProvider {

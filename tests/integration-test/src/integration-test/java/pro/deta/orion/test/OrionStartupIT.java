@@ -12,6 +12,7 @@ import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -156,10 +157,9 @@ class OrionStartupIT {
 
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
                     accessControlWithUsers("root", "saved-remote-user"));
-            ByteArrayOutputStream updatedContent = new ByteArrayOutputStream();
-            OrionXml.write(updatedDocument, updatedContent);
-            orion.accessControlService().saveAccessControlConfigurationFile(
-                    updatedContent.toByteArray(), configurationFile.revision().orElseThrow(), "");
+            orion.accessControlService().updatePrimaryConfiguration(
+                    configurationFile.revision().orElseThrow(), ignored -> updatedDocument,
+                    "Update remote configuration", UserEmail.EMPTY);
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();

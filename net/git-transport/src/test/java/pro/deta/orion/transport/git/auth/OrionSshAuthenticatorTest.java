@@ -608,11 +608,6 @@ class OrionSshAuthenticatorTest {
             throw new UnsupportedOperationException();
         }
 
-        @Override
-        public void saveAccessControlConfigurationFile(byte[] content, String expectedRevision, String authorId) {
-            throw new UnsupportedOperationException();
-        }
-
         private AuthenticationResult success(String username) {
             authenticatedUserIds.add(username);
             return AuthenticationResult.success(new InternalUserImpl(username, List.of()));
