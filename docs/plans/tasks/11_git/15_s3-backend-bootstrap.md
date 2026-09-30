@@ -68,8 +68,13 @@ organization secret resolution, including optional session tokens, rather than
 introducing a second secret store or plaintext XML path. Keep SDK default
 credentials available when explicit credentials are omitted.
 
-The runtime owns one S3 SDK client and one HTTP connection pool, shared across
-all configured S3 connections, repositories, buckets, and prefixes. Bind
+`S3Transport` is the single outbound runtime component owning one S3 SDK client
+and one HTTP connection pool, shared across all configured S3 connections,
+repositories, buckets, and prefixes. Supply the same instance to repository
+providers through application dependency injection. Replace the interim client
+owner with this component rather than adding a forwarding wrapper or parallel
+owner. Register it as a singleton capability, not as an incoming HTTP/SSH/Git
+server in `OrionTransportModule`. Bind
 credentials and endpoint resolution to each request through SDK request
 overrides. Resolve endpoint, signing region, and bucket addressing from the
 selected scoped connection via the standard S3 endpoint provider; do not mutate
