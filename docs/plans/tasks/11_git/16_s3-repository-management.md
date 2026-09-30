@@ -2,14 +2,20 @@
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf,
   branch `codex/s3-management-01a0f177`,
-  worktree `/private/tmp/orion-s3-management-01a0f177`, paused 2026-09-30 14:59 Europe/Amsterdam;
-  next: authorize integration of reviewed commit `d1f57b697c112e8a5d63abfe379ee4b32b18e620`,
+  worktree `/private/tmp/orion-s3-management-01a0f177`, paused 2026-09-30 16:10 Europe/Amsterdam;
+  next: integrate authorized reviewed commit `d1f57b697c112e8a5d63abfe379ee4b32b18e620`
+  after the parallel owner commits overlapping main changes; no further user approval is needed.
+  Prepared commit is
   based on `fa760bd0fe9652e082283a0be3017353a9ec6d57`. Task worktree is clean.
   CONNECTION_USE correction and provider-lifecycle adaptation are verified;
   schema generation, focused checks, real MinIO and final full make test passed.
   Same Git worktree moved outside the project tree to avoid recurring external writes.
   Authorized restoration is complete; backups remain under `/tmp/s3-management-isolated-20260930`.
   No UI/SSH implementation changes have been transferred to main yet.
+  Integration preflight at main `648dcab6` found five uncommitted overlaps:
+  deleted S3NativeGitRepositoryProvider, net/git-transport/pom.xml,
+  OrionAdminCreateRepositoryRoute and its test, and OrionHttpRouteServletRoutingTest.
+  These are active main changes, not accidental task-worktree edits; preserve them.
 
 ## Required result
 
