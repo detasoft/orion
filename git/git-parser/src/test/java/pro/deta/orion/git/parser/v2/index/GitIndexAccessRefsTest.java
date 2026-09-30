@@ -16,6 +16,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -139,6 +144,48 @@ class GitIndexAccessRefsTest {
 
     private GitIndexApi index(boolean local) throws IOException {
         return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+    }
+
+    @Test
+    void concurrentApplyAcrossFacadesPublishesOnlyOneCompleteBatch() throws Exception {
+        try (GitIndexApi firstIndex = new LocalGitIndex(directory);
+             GitIndexApi secondIndex = new LocalGitIndex(directory);
+             ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            firstIndex.withAccess(reader -> {
+                for (int attempt = 0; attempt < 20; attempt++) {
+                    ObjectId previous = reader.snapshotRefs().refs().get(MAIN);
+                    ObjectId firstTarget = new ObjectId(String.format("%040x", attempt * 2 + 1));
+                    ObjectId secondTarget = new ObjectId(String.format("%040x", attempt * 2 + 2));
+                    firstIndex.withAccess(List.of(update(MAIN, previous, firstTarget),
+                            update(OTHER, previous, firstTarget)), first -> {
+                        secondIndex.withAccess(List.of(update(MAIN, previous, secondTarget),
+                                update(OTHER, previous, secondTarget)), second -> {
+                            CyclicBarrier start = new CyclicBarrier(2);
+                            Future<Boolean> left = executor.submit(() -> applyAtBarrier(first, start));
+                            Future<Boolean> right = executor.submit(() -> applyAtBarrier(second, start));
+                            boolean firstWon = left.get(10, TimeUnit.SECONDS);
+                            assertThat(right.get(10, TimeUnit.SECONDS)).isEqualTo(!firstWon);
+                            ObjectId winner = firstWon ? firstTarget : secondTarget;
+                            assertThat(reader.snapshotRefs().refs())
+                                    .containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, winner, OTHER, winner));
+                            return null;
+                        });
+                        return null;
+                    });
+                }
+                return null;
+            });
+        }
+    }
+
+    private static boolean applyAtBarrier(GitIndexAccess access, CyclicBarrier start) throws Exception {
+        start.await(5, TimeUnit.SECONDS);
+        try {
+            access.apply();
+            return true;
+        } catch (GitRefConflictException expected) {
+            return false;
+        }
     }
 
     @Test

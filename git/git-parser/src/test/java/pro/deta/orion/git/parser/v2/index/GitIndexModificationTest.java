@@ -19,6 +19,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,6 +106,32 @@ class GitIndexModificationTest {
 
     private GitIndexApi index(boolean local) throws IOException {
         return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+    }
+
+    @Test
+    void concurrentFacadesShareTheStoreUntilBothAccessesFinish() throws Exception {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            CyclicBarrier start = new CyclicBarrier(2);
+            CyclicBarrier opened = new CyclicBarrier(2);
+            for (int attempt = 0; attempt < 20; attempt++) {
+                Future<Void> first = executor.submit(() -> openTogether(start, opened));
+                Future<Void> second = executor.submit(() -> openTogether(start, opened));
+                first.get(10, TimeUnit.SECONDS);
+                second.get(10, TimeUnit.SECONDS);
+                assertFileUnlocked();
+            }
+        }
+    }
+
+    private Void openTogether(CyclicBarrier start, CyclicBarrier opened) throws Exception {
+        start.await(5, TimeUnit.SECONDS);
+        try (GitIndexApi index = new LocalGitIndex(directory)) {
+            return index.withAccess(access -> {
+                opened.await(5, TimeUnit.SECONDS);
+                assertThat(access.snapshotRefs().refs()).isEmpty();
+                return null;
+            });
+        }
     }
 
     private RefUpdate update() {
