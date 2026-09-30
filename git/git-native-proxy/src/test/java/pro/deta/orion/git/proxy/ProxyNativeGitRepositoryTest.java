@@ -56,7 +56,7 @@ class ProxyNativeGitRepositoryTest {
             return null;
         });
         AtomicInteger refreshes = new AtomicInteger();
-        ProxyNativeGitRepository proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
+        ProxyNativeGitRepository proxy = new ProxyNativeGitRepository(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (ignoredLocation, ignoredTransport, ignoredRepository) -> refreshes.incrementAndGet(),
                 (ignoredLocation, ignoredTransport, ignoredRepository, received, updates, atomic) ->
@@ -104,7 +104,8 @@ class ProxyNativeGitRepositoryTest {
             BootstrapGitTransportFactory factory = BootstrapGitTransportFactory.persistent(() -> document, secrets,
                     new ConnectionFailureHandler(registry), null);
             AtomicInteger publications = new AtomicInteger();
-            ProxyNativeGitRepository runtime = ProxyNativeGitRepository.create(repository.name(), location, repository, factory,
+            ProxyNativeGitRepository runtime = new ProxyNativeGitRepository(
+                    repository.name(), location, repository, factory,
                     (selected, transport, target) -> { if (failFetch) throw required; },
                     (selected, transport, target, received, updates, atomic) -> {
                         publications.incrementAndGet();

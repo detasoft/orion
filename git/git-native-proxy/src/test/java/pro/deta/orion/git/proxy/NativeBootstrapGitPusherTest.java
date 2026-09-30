@@ -54,7 +54,7 @@ class NativeBootstrapGitPusherTest {
             fileAccess.write("link", FileMode.SYMLINK, "run.sh".getBytes());
             return null;
         });
-        ProxyNativeGitRepository proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
+        ProxyNativeGitRepository proxy = new ProxyNativeGitRepository(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 fetcher,
                 new NativeBootstrapGitPusher());
@@ -111,7 +111,7 @@ class NativeBootstrapGitPusherTest {
                 true);
 
         assertThat(accepted).containsExactly(false);
-        var proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
+        var proxy = new ProxyNativeGitRepository(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
         assertThat(proxy.publishReceivedPack(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
@@ -131,7 +131,7 @@ class NativeBootstrapGitPusherTest {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;
         });
-        var proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
+        var proxy = new ProxyNativeGitRepository(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { },
                 (selected, transport, target, received, updates, atomic) -> new NativeBootstrapGitPusher().push(

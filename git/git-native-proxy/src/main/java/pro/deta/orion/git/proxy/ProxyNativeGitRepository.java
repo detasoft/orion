@@ -33,7 +33,7 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
             new AtomicReference<>(new SyncObservation(SyncStatus.NOT_CHECKED, null));
     private volatile boolean available = true;
 
-    private ProxyNativeGitRepository(
+    ProxyNativeGitRepository(
             String name,
             BootstrapGitLocation location,
             NativeGitRepository repository,
@@ -48,14 +48,9 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
 
-    static ProxyNativeGitRepository create(String name, BootstrapGitLocation location,
-            NativeGitRepository cache, BootstrapGitTransportFactory transportFactory,
-            BootstrapGitFetcher fetcher, BootstrapGitPusher pusher) {
-        return new ProxyNativeGitRepository(name, location, cache, transportFactory, fetcher, pusher);
-    }
-
     ProxyNativeGitRepository named(String name) {
-        ProxyNativeGitRepository result = create(name, location, repository, transportFactory, fetcher, pusher);
+        ProxyNativeGitRepository result = new ProxyNativeGitRepository(
+                name, location, repository, transportFactory, fetcher, pusher);
         result.observation = observation;
         return result;
     }

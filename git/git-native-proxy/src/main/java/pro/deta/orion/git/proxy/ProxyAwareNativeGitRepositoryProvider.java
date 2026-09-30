@@ -227,10 +227,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         provisionalSources.putIfAbsent(id, repositoryName);
         ProxyNativeGitRepository candidate = null;
         try {
-            NativeGitRepository repository = findOrCreate(repositoryName);
-            candidate = ProxyNativeGitRepository.create(
+            candidate = ProxyNativeGitRepositoryFactory.create(
                     repositoryName, location,
-                    repository,
+                    backend,
                     transportFactory,
                     fetcher,
                     pusher);
@@ -291,7 +290,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (runtime == null) runtime = candidate.get(location.proxyName());
             if (runtime == null) runtime = previousBindings.get(location.proxyName());
             if (runtime == null) {
-                runtime = ProxyNativeGitRepository.create(location.proxyName(), location, findOrCreate(location.proxyName()),
+                runtime = ProxyNativeGitRepositoryFactory.create(location.proxyName(), location,
+                        backend,
                         persistent, fetcher, pusher);
         ProxyNativeGitRepository bootstrap = previousBindings.get("bootstrap");
         if (bootstrap != null) candidate.put("bootstrap", bootstrap);
@@ -375,8 +375,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             ProxyNativeGitRepository runtime = overrides.get(configured.alias());
             if (runtime == null) runtime = candidate.get(location.proxyName());
             if (runtime == null) {
-                runtime = ProxyNativeGitRepository.create(location.proxyName(), location,
-                        findOrCreate(location.proxyName()), persistent, fetcher, pusher);
+                runtime = ProxyNativeGitRepositoryFactory.create(location.proxyName(), location,
+                        backend, persistent, fetcher, pusher);
                 try {
                     runtime.refresh();
                 } catch (BootstrapGitProxyException failure) {
@@ -572,7 +572,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         if (previous != null && !previous.equals(repositoryName)) {
             throw new IllegalStateException("Bootstrap source is already bound: " + sourceId);
         }
-        findOrCreate(repositoryName);
+        ProxyNativeGitRepositoryFactory.openOrCreate(repositoryName, backend);
         return repositoryName;
     }
 
@@ -678,18 +678,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             return activeBindings.get(repositoryName);
         }
         return provisionalBindings.get(repositoryName);
-    }
-
-    private NativeGitRepository findOrCreate(String repositoryName) {
-        if (backend.exists(repositoryName)) {
-            return backend.find(repositoryName).valueOrFailure("Cannot open Git proxy");
-        }
-        Result<NativeGitRepository> created = backend.create(repositoryName);
-        if (created instanceof Result.Failure<NativeGitRepository> failure
-                && failure.code() == Result.FailureCode.FILE_ALREADY_EXISTS) {
-            return backend.find(repositoryName).valueOrFailure("Cannot open Git proxy");
-        }
-        return created.valueOrFailure("Cannot create Git proxy");
     }
 
     private static String requireSourceId(String sourceId) {
