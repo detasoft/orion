@@ -19,6 +19,21 @@
     </configuration>
     <input>
         <plugins>
+            <plugin groupId="org.apache.maven.plugins" artifactId="maven-resources-plugin">
+                <executions>
+                    <execution>
+                        <execIds>
+                            <execId>copy-legal-notices</execId>
+                        </execIds>
+                        <dirScan>
+                            <tagScanConfigs>
+                                <tagScanConfig tagName="directory" recursive="false"
+                                               glob="{LICENSE*,NOTICE.md,RELEASES.md,THIRD_PARTY_NOTICES.md,TRADEMARKS.md}"/>
+                            </tagScanConfigs>
+                        </dirScan>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
                 <effectivePom>
                     <excludeProperties>
