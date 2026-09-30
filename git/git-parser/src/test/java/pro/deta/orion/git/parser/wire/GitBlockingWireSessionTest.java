@@ -36,6 +36,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 
 class GitBlockingWireSessionTest {
     private static final RefId MAIN = new RefId("refs/heads/main");
@@ -174,7 +175,7 @@ class GitBlockingWireSessionTest {
                 ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
         ObjectId outer = PackTestData.store(storage, index, GitObjectType.TAG,
                 ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
-        index.updateRefs(List.of(
+        publishRefs(storage, new LocalGitIndex(directory), List.of(
                 new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
                 new RefUpdate(new RefId("refs/tags/lightweight"), Optional.empty(), Optional.of(target)),
                 new RefUpdate(new RefId("refs/tags/nested"), Optional.empty(), Optional.of(outer))), true);
@@ -253,7 +254,9 @@ class GitBlockingWireSessionTest {
 
     private ObjectId publish() throws Exception {
         ObjectId id = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
-        index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
+        publishRefs(
+                storage, new LocalGitIndex(directory),
+                List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
         return id;
     }
 
@@ -268,8 +271,9 @@ class GitBlockingWireSessionTest {
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
-            servedAccess = new LocalGitIndex(directory).createAccess();
-            return new GitRepositoryContext(storage, servedAccess);
+            GitRepositoryContext repository = new GitRepositoryContext(storage, new LocalGitIndex(directory));
+            servedAccess = repository.index();
+            return repository;
         }, configuration, wire);
     }
 

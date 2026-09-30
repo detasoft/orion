@@ -12,6 +12,13 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Access with refs declared at creation. Ref updates remain private until apply checks their original
+ * values and publishes them under the index lock. Undeclared refs cannot be updated; declared refs need
+ * not be changed. Apply finishes the access; discard and close abandon pending ref and HEAD changes.
+ * Update results describe preparation, not publication. A single caller uses each access at a time.
+ * Object ingestion and pack publication retain their independent lifetime.
+ */
 public interface GitIndexAccess extends AutoCloseable {
     void addObject(IndexedObject object) throws IOException;
 
@@ -34,6 +41,12 @@ public interface GitIndexAccess extends AutoCloseable {
     void updateHead(Head head) throws IOException;
 
     List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic);
+
+    void apply() throws IOException;
+
+    default void discard() throws IOException {
+        close();
+    }
 
     void close() throws IOException;
 }

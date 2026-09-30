@@ -251,8 +251,8 @@ class GitIndexApiTest {
         PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(64)), "pack", 1, 64);
         RefId ref = new RefId("refs/heads/main");
         Head head = new Head.Detached(new CommitId(objectId.toBytes()));
-        try (GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess()
-                : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess()) {
+        try (GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))
+                : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess(java.util.Set.of(ref))) {
             assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex(GitHashAlgorithm.SHA256))
                     .hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
             index.addObject(object);
@@ -265,6 +265,7 @@ class GitIndexApiTest {
             assertThat(index.snapshotRefs().head()).isEqualTo(head);
             assertThatThrownBy(() -> index.publishIndex(pack(PackId.create(), "a", 0)))
                     .isInstanceOf(IllegalArgumentException.class);
+            index.apply();
         }
         if (local) {
             try (GitIndexAccess reopened = new LocalGitIndex(directory).createAccess()) {

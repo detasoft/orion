@@ -42,6 +42,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 
 class RefsCommandTest implements BufferedByteInputV2.Source {
     @TempDir
@@ -53,9 +54,9 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         GitStorageApi storage = new LocalGitStorage(repository);
         try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
             ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
-            addRef(index, "refs/heads/main", commit);
-            addRef(index, "refs/heads/ветка", commit);
-            addRef(index, "refs/tags/lightweight", commit);
+            addRef("refs/heads/main", commit);
+            addRef("refs/heads/ветка", commit);
+            addRef("refs/tags/lightweight", commit);
             assertThat(execute(storage, index, "symrefs")).containsExactly(
                     commit + " HEAD symref-target:refs/heads/main",
                     commit + " refs/heads/main", commit + " refs/heads/ветка", commit + " refs/tags/lightweight");
@@ -78,7 +79,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 updates.add(new RefUpdate(ref, Optional.empty(), Optional.of(commit)));
                 expected.add(commit + " " + ref.value());
             }
-            assertThat(index.updateRefs(updates, true)).hasSize(updates.size())
+            assertThat(publishRefs(
+                    storage, new LocalGitIndex(repository), updates, true)).hasSize(updates.size())
                     .allSatisfy(result -> assertThat(result.status()).isEqualTo(RefUpdateResult.Status.APPLIED));
 
             ByteArrayOutputStream response = new ByteArrayOutputStream();
@@ -124,9 +126,9 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             ObjectId blob = publish(storage, index, GitObjectType.BLOB, "content");
             ObjectId inner = publish(storage, index, GitObjectType.TAG, tag(blob, "blob", "inner"));
             ObjectId outer = publish(storage, index, GitObjectType.TAG, tag(inner, "tag", "outer"));
-            addRef(index, "refs/tags/nested", outer);
-            addRef(index, "refs/tags/lightweight", blob);
-            addRef(index, "refs/custom/tag", inner);
+            addRef("refs/tags/nested", outer);
+            addRef("refs/tags/lightweight", blob);
+            addRef("refs/custom/tag", inner);
             index.updateHead(new Head.Symbolic(new RefId("refs/custom/tag")));
             assertThat(execute(storage, index, "peel", "symrefs")).containsExactly(
                     inner + " HEAD symref-target:refs/custom/tag peeled:" + blob,
@@ -205,7 +207,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         try (GitIndexAccess index = new LocalGitIndex(repository).createAccess()) {
             ObjectId missing = new ObjectId("f".repeat(40));
             ObjectId tag = publish(storage, index, GitObjectType.TAG, tag(missing, "blob", "broken"));
-            addRef(index, "refs/tags/broken", tag);
+            addRef("refs/tags/broken", tag);
             assertThat(execute(storage, index)).containsExactly(tag + " refs/tags/broken");
             assertThat(execute(storage, index, "peel")).containsExactly(tag + " refs/tags/broken");
         }
@@ -266,10 +268,11 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 GitProtocolVersion.V2, GitTransport.SSH);
     }
 
-    private static void addRef(GitIndexAccess index, String name, ObjectId id) {
-        assertThat(index.updateRefs(List.of(new RefUpdate(new RefId(name), Optional.empty(),
-                Optional.of(id))), true)).extracting(RefUpdateResult::status)
-                .containsExactly(RefUpdateResult.Status.APPLIED);
+    private void addRef(String name, ObjectId id) throws IOException {
+        List<RefUpdate> updates = List.of(new RefUpdate(new RefId(name), Optional.empty(), Optional.of(id)));
+        try (GitIndexAccess access = new LocalGitIndex(repository).createAccess(updates)) {
+            access.apply();
+        }
     }
 
     private ObjectId publish(GitStorageApi storage, GitIndexAccess index, GitObjectType type, String text) throws Exception {

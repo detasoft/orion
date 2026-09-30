@@ -180,16 +180,7 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
-        List<RefUpdateResult> results;
-        try (GitIndexAccess access = index.createAccess()) {
-            results = GitRepositoryContext.publishRefs(storage(), access, updates, atomic);
-        } catch (IOException failure) {
-            results = new ArrayList<>();
-            for (RefUpdate update : updates) {
-                results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
-                        Optional.ofNullable(failure.getMessage())));
-            }
-        }
+        List<RefUpdateResult> results = GitRepositoryContext.publishRefs(storage(), index, updates, atomic);
         for (RefUpdateResult result : results) {
             if (result.status() != RefUpdateResult.Status.APPLIED
                     || result.update().expectedOld().equals(result.update().newId())) {

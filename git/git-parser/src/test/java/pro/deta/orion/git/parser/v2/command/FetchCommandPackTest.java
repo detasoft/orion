@@ -47,6 +47,7 @@ import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
 
 class FetchCommandPackTest implements BufferedByteInputV2.Source {
@@ -307,7 +308,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                 assertThat(pack.locations(tip)).isNotEmpty();
                 assertThat(pack.locations(parent)).isEmpty();
             }
-            index.updateRefs(List.of(new RefUpdate(
+            publishRefs(storage, new LocalGitIndex(directory), List.of(new RefUpdate(
                     new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
             byte[] excluded = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
                     "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
@@ -394,11 +395,13 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @EnumSource(GitProtocolVersion.class)
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        InMemoryIndex indexApi = new InMemoryIndex();
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess()) {
             ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
             ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             RefId main = new RefId("refs/heads/main");
-            index.updateRefs(List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
+            publishRefs(
+                    storage, indexApi, List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
             for (boolean missingObject : List.of(false, true)) {
                 String wanted = missingObject ? "11".repeat(20) : tip.toHex();
                 ByteArrayOutputStream request = new ByteArrayOutputStream();

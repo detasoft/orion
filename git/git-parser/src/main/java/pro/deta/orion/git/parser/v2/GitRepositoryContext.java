@@ -7,6 +7,8 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -29,10 +31,18 @@ import java.util.Set;
 public class GitRepositoryContext implements AutoCloseable {
     private final GitStorageApi storage;
     private final GitIndexAccess index;
+    private final GitIndexApi indexApi;
 
     public GitRepositoryContext(GitStorageApi storage, GitIndexAccess index) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
+        this.indexApi = null;
+    }
+
+    public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) throws IOException {
+        this.storage = Objects.requireNonNull(storage, "storage");
+        this.indexApi = Objects.requireNonNull(index, "index");
+        this.index = index.createAccess();
     }
 
     public final GitStorageApi storage() {
@@ -57,6 +67,9 @@ public class GitRepositoryContext implements AutoCloseable {
 
     public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
+        if (indexApi == null) {
+            throw new IllegalStateException("Ref publication requires an index factory");
+        }
         if (pack.isPresent()) {
             PackMetadata metadata = pack.orElseThrow();
             if (!storage.exists(metadata.packId())) {
@@ -64,10 +77,10 @@ public class GitRepositoryContext implements AutoCloseable {
             }
             index.publishIndex(metadata);
         }
-        return publishRefs(storage, index, updates, atomic);
+        return publishRefs(storage, indexApi, updates, atomic);
     }
 
-    public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexAccess index,
+    public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexApi index,
                                                     List<RefUpdate> updates, boolean atomic) {
         updates = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();
@@ -77,11 +90,12 @@ public class GitRepositoryContext implements AutoCloseable {
                 throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
             }
         }
-        try {
+        try (GitIndexAccess reader = index.createAccess()) {
             List<RefUpdate> ready = new ArrayList<>(updates.size());
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
             for (RefUpdate update : updates) {
-                boolean missing = update.newId().isPresent() && !GitObjectRead.exists(storage, index, update.newId().orElseThrow());
+                boolean missing = update.newId().isPresent()
+                        && !GitObjectRead.exists(storage, reader, update.newId().orElseThrow());
                 results.add(new RefUpdateResult(update, missing ? RefUpdateResult.Status.OBJECT_NOT_FOUND
                         : RefUpdateResult.Status.APPLIED, Optional.empty()));
                 if (!missing) {
@@ -97,7 +111,15 @@ public class GitRepositoryContext implements AutoCloseable {
                     }
                 }
             } else {
-                Iterator<RefUpdateResult> applied = index.updateRefs(ready, atomic).iterator();
+                List<RefUpdateResult> committed = new ArrayList<>();
+                if (atomic) {
+                    committed.addAll(applyRefs(index, ready));
+                } else {
+                    for (RefUpdate update : ready) {
+                        committed.addAll(applyRefs(index, List.of(update)));
+                    }
+                }
+                Iterator<RefUpdateResult> applied = committed.iterator();
                 for (int position = 0; position < results.size(); position++) {
                     if (results.get(position).status() == RefUpdateResult.Status.APPLIED) {
                         results.set(position, applied.next());
@@ -110,6 +132,35 @@ public class GitRepositoryContext implements AutoCloseable {
             for (RefUpdate update : updates) {
                 results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
                         Optional.ofNullable(error.getMessage())));
+            }
+            return List.copyOf(results);
+        }
+    }
+
+    private static List<RefUpdateResult> applyRefs(GitIndexApi index, List<RefUpdate> updates) {
+        if (updates.isEmpty()) {
+            return List.of();
+        }
+        try (GitIndexAccess access = index.createAccess(updates)) {
+            access.apply();
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (RefUpdate update : updates) {
+                results.add(new RefUpdateResult(update, RefUpdateResult.Status.APPLIED, Optional.empty()));
+            }
+            return List.copyOf(results);
+        } catch (GitRefConflictException conflict) {
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (RefUpdate update : updates) {
+                results.add(new RefUpdateResult(update, update.ref().equals(conflict.update().ref())
+                        ? RefUpdateResult.Status.EXPECTED_OLD_MISMATCH : RefUpdateResult.Status.ATOMIC_ABORTED,
+                        Optional.of(conflict.getMessage())));
+            }
+            return List.copyOf(results);
+        } catch (IOException failure) {
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (RefUpdate update : updates) {
+                results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR,
+                        Optional.ofNullable(failure.getMessage())));
             }
             return List.copyOf(results);
         }

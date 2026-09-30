@@ -6,7 +6,8 @@ import java.util.Optional;
 /**
  * Couples the original ref update with its storage outcome and optional diagnostic text.
  * The update, status, and message container must be non-null; callers branch on status, not message text.
- * GitStorageApi returns one result per requested update, in request order.
+ * Repository publication returns one result per requested update, in request order. GitIndexAccess
+ * update results describe preparation; publication still requires a successful apply.
  * For an atomic batch, either all updates are APPLIED or none are; updates prevented by another failure
  * receive ATOMIC_ABORTED. Ref failures do not undo previously published packs.
  */

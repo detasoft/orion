@@ -26,6 +26,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
 import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 
@@ -126,7 +127,9 @@ class FetchPlanTest {
                 value(GitCapability.INCLUDE_TAG), value(GitCapability.NO_PROGRESS),
                 value(GitCapability.DEEPEN_RELATIVE), value(GitCapability.SIDEBAND_ALL)));
         request.packfileUriProtocols().add("https");
-        index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
+        publishRefs(
+                storage, new LocalGitIndex(directory),
+                List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(WANT))), true);
         var iterator = command.prepareNegotiation(request, GitTransport.HTTP);
         iterator.next(new NegotiationMessage.Have(WANT));
         iterator.next(NegotiationMessage.Control.DONE);

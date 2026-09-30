@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.v2.storage.memory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -36,60 +35,63 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 class InMemoryStorageTest {
     @TempDir
     Path directory;
+    private final InMemoryIndex indexApi = new InMemoryIndex();
     private static final RefId FIRST = new RefId("refs/heads/first");
     private static final RefId SECOND = new RefId("refs/heads/second");
 
     @Test
     void preservesRefResultOrderAndAtomicFailurePrecedence() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess()) {
             ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
             ObjectId absent = new ObjectId("a".repeat(40));
-            assertThat(GitRepositoryContext.publishRefs(
-                    storage, index, List.of(update(FIRST, null, old)), true).getFirst().status())
+            assertThat(publishRefs(
+                    storage, indexApi, List.of(update(FIRST, null, old)), true).getFirst().status())
                     .isEqualTo(APPLIED);
             RefsSnapshot before = index.snapshotRefs();
             List<RefUpdate> changes = List.of(update(SECOND, null, next), update(FIRST, next, old));
-            assertThat(GitRepositoryContext.publishRefs(
-                    storage, index, changes, true)).extracting(RefUpdateResult::status)
+            assertThat(publishRefs(
+                    storage, indexApi, changes, true)).extracting(RefUpdateResult::status)
                     .containsExactly(ATOMIC_ABORTED, EXPECTED_OLD_MISMATCH);
             assertThat(index.snapshotRefs()).isEqualTo(before);
-            assertThat(GitRepositoryContext.publishRefs(
-                    storage, index, List.of(update(SECOND, null, absent), update(FIRST, next, old)), true))
+            assertThat(publishRefs(
+                    storage, indexApi, List.of(update(SECOND, null, absent), update(FIRST, next, old)), true))
                     .extracting(RefUpdateResult::status).containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED);
-            assertThat(GitRepositoryContext.publishRefs(
-                    storage, index, changes, false)).extracting(RefUpdateResult::status)
+            assertThat(publishRefs(
+                    storage, indexApi, changes, false)).extracting(RefUpdateResult::status)
                     .containsExactly(APPLIED, EXPECTED_OLD_MISMATCH);
             assertThat(before.refs()).containsExactly(Map.entry(FIRST, old));
             assertThat(index.snapshotRefs().refs()).containsEntry(SECOND, next);
-            assertThat(GitRepositoryContext.publishRefs(
-                    storage, index, List.of(update(SECOND, next, null)), false).getFirst().status())
+            assertThat(publishRefs(
+                    storage, indexApi, List.of(update(SECOND, next, null)), false).getFirst().status())
                     .isEqualTo(APPLIED);
             assertThat(index.snapshotRefs()).isEqualTo(before);
-            assertThatThrownBy(() -> GitRepositoryContext.publishRefs(
-                    storage, index, List.of(update(FIRST, old, next),
+            assertThatThrownBy(() -> publishRefs(
+                    storage, indexApi, List.of(update(FIRST, old, next),
                     update(FIRST, old, next)), true)).isInstanceOf(IllegalArgumentException.class);
         }
     }
 
     @Test
     void admitsOnlyOneConcurrentExpectedOldWinner() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
-            index.updateRefs(List.of(update(FIRST, null, old)), true);
+            publishRefs(storage, indexApi, List.of(update(FIRST, null, old)), true);
             CyclicBarrier start = new CyclicBarrier(2);
             List<Future<RefUpdateResult.Status>> attempts = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
                 attempts.add(executor.submit(() -> {
                     start.await(5, TimeUnit.SECONDS);
-                    return index.updateRefs(List.of(update(FIRST, old, next)), true).getFirst().status();
+                    return publishRefs(
+                            storage, indexApi, List.of(update(FIRST, old, next)), true).getFirst().status();
                 }));
             }
             assertThat(List.of(attempts.get(0).get(5, TimeUnit.SECONDS), attempts.get(1).get(5, TimeUnit.SECONDS)))
@@ -99,18 +101,21 @@ class InMemoryStorageTest {
 
     @Test
     void snapshotsNeverExposePartOfAnAtomicBatch() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId first = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId second = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
-            index.updateRefs(List.of(update(FIRST, null, first), update(SECOND, null, first)), true);
+            publishRefs(
+                    storage, indexApi, List.of(update(FIRST, null, first), update(SECOND, null, first)), true);
             CountDownLatch start = new CountDownLatch(1);
             Future<?> writer = executor.submit(() -> {
                 start.await(5, TimeUnit.SECONDS);
                 for (int i = 0; i < 1000; i++) {
                     ObjectId old = i % 2 == 0 ? first : second;
                     ObjectId next = i % 2 == 0 ? second : first;
-                    assertThat(index.updateRefs(List.of(update(FIRST, old, next), update(SECOND, old, next)), true))
+                    assertThat(publishRefs(
+                            storage, indexApi,
+                            List.of(update(FIRST, old, next), update(SECOND, old, next)), true))
                             .extracting(RefUpdateResult::status).containsExactly(APPLIED, APPLIED);
                 }
                 return null;
@@ -130,13 +135,14 @@ class InMemoryStorageTest {
 
     @Test
     void callbacksReleaseRepositoryLockAndFailuresPreservePublishedPacks() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
             PackMetadata published = index.packs().getFirst();
             assertThat(GitObjectRead.read(storage, index, object, (type, size, base, input) -> {
                 try {
-                    return executor.submit(() -> index.updateRefs(List.of(update(FIRST, null, object)), true))
+                    return executor.submit(() -> publishRefs(
+                            storage, indexApi, List.of(update(FIRST, null, object)), true))
                             .get(5, TimeUnit.SECONDS).getFirst().status();
                 } catch (Exception failure) {
                     throw new IOException(failure);
@@ -181,9 +187,10 @@ class InMemoryStorageTest {
 
     @Test
     void closingIndexLeavesStoredObjectsReadable() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = indexApi.createAccess()) {
             ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
-            assertThat(index.updateRefs(List.of(update(FIRST, null, object)), true).getFirst().status())
+            assertThat(publishRefs(
+                    storage, indexApi, List.of(update(FIRST, null, object)), true).getFirst().status())
                     .isEqualTo(APPLIED);
             IndexedObject location = index.locations(object).getFirst();
             index.close();

@@ -25,6 +25,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
 import static pro.deta.orion.git.parser.v2.data.GitTransport.HTTP;
 import static pro.deta.orion.git.parser.v2.data.GitTransport.SSH;
@@ -118,9 +119,12 @@ class FetchCommandTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wants().add(FIRST);
         request.wantRefs().addAll(List.of(MAIN.value(), "HEAD"));
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        InMemoryIndex indexApi = new InMemoryIndex();
+        try (GitIndexAccess index = indexApi.createAccess()) {
             var storage = storage(Set.of(FIRST), index);
-            index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
+            publishRefs(
+                    storage, indexApi,
+                    List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
             var command = new FetchCommand(storage, index, capabilities(GitCapability.REF_IN_WANT));
 
             var iterator = command.prepareNegotiation(request, HTTP);
@@ -148,9 +152,12 @@ class FetchCommandTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add(MAIN.value());
         request.wants().add(SECOND);
-        try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+        InMemoryIndex indexApi = new InMemoryIndex();
+        try (GitIndexAccess index = indexApi.createAccess()) {
             GitStorageApi storage = storage(Set.of(FIRST), index);
-            index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
+            publishRefs(
+                    storage, indexApi,
+                    List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
             IOException denied = new IOException("Fetch access denied");
             GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
                 @Override

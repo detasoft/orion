@@ -305,6 +305,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         } else if (detached) {
             try (GitIndexAccess access3 = repository.index().createAccess()) {
                 access3.updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
+                access3.apply();
             }
         }
         List<List<String>> checkedBranches = new ArrayList<>();
@@ -321,6 +322,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                     assertThatCode(() -> {
                         try (GitIndexAccess access = repository.index().createAccess()) {
                             access.updateHead(next);
+                            access.apply();
                         }
                     }).doesNotThrowAnyException();
                 } else {
@@ -410,6 +412,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             } else {
                 try (GitIndexAccess access5 = repository.index().createAccess()) {
                     access5.updateHead(new Head.Detached(new CommitId(tip)));
+                    access5.apply();
                 }
             }
             repository.updateRef("refs/heads/main", tip, NULL_ID);

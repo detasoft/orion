@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -54,11 +55,59 @@ public final class InMemoryIndex implements GitIndexApi {
 
     @Override
     public GitIndexAccess createAccess() {
-        return new Access();
+        return createAccess(Set.of());
+    }
+
+    @Override
+    public GitIndexAccess createAccess(Set<RefId> requested) {
+        Set<RefId> names = Set.copyOf(requested);
+        for (RefId ref : names) {
+            ref.requireFullName();
+        }
+        synchronized (this) {
+            return new Access(names);
+        }
+    }
+
+    @Override
+    public GitIndexAccess createAccess(List<RefUpdate> updates) throws IOException {
+        updates = List.copyOf(updates);
+        Set<RefId> names = new HashSet<>();
+        for (RefUpdate update : updates) {
+            update.ref().requireFullName();
+            update.expectedOld().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
+            update.newId().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
+            if (!names.add(update.ref())) {
+                throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
+            }
+        }
+        synchronized (this) {
+            for (RefUpdate update : updates) {
+                Optional<ObjectId> actual = Optional.ofNullable(refs.get(update.ref()));
+                if (!actual.equals(update.expectedOld())) {
+                    throw new GitRefConflictException(update, actual);
+                }
+            }
+            Access access = new Access(names);
+            for (RefUpdate update : updates) {
+                access.changedRefs.put(update.ref(), update.newId());
+            }
+            return access;
+        }
     }
 
     private final class Access implements GitIndexAccess {
+        private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
+        private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
+        private Head originalHead;
+        private Head changedHead;
         private boolean closed;
+
+        private Access(Set<RefId> names) {
+            for (RefId ref : names) {
+                originalRefs.put(ref, Optional.ofNullable(refs.get(ref)));
+            }
+        }
 
         @Override
         public void addObject(IndexedObject object) throws IOException {
@@ -166,7 +215,10 @@ public final class InMemoryIndex implements GitIndexApi {
         public RefsSnapshot snapshotRefs() throws IOException {
             synchronized (InMemoryIndex.this) {
                 requireOpen();
-                return new RefsSnapshot(refs, head);
+                Map<RefId, ObjectId> snapshot = new LinkedHashMap<>(refs);
+                overlay(snapshot, originalRefs);
+                overlay(snapshot, changedRefs);
+                return new RefsSnapshot(snapshot, changedHead == null ? head : changedHead);
             }
         }
 
@@ -179,7 +231,10 @@ public final class InMemoryIndex implements GitIndexApi {
             }
             synchronized (InMemoryIndex.this) {
                 requireOpen();
-                head = value;
+                if (changedHead == null) {
+                    originalHead = head;
+                }
+                changedHead = value;
             }
         }
 
@@ -190,6 +245,9 @@ public final class InMemoryIndex implements GitIndexApi {
                 update.ref().requireFullName();
                 update.expectedOld().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
                 update.newId().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
+                if (!originalRefs.containsKey(update.ref())) {
+                    throw new IllegalArgumentException("Ref was not declared when opening access: " + update.ref());
+                }
                 if (!names.add(update.ref())) {
                     throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
                 }
@@ -200,8 +258,10 @@ public final class InMemoryIndex implements GitIndexApi {
                     requireOpen();
                     boolean failed = false;
                     for (RefUpdate update : updates) {
-                        RefUpdateResult.Status status = Objects.equals(refs.get(update.ref()),
-                                update.expectedOld().orElse(null)) ? APPLIED : EXPECTED_OLD_MISMATCH;
+                        Optional<ObjectId> previous = changedRefs.getOrDefault(update.ref(),
+                                originalRefs.get(update.ref()));
+                        RefUpdateResult.Status status = previous.equals(update.expectedOld())
+                                ? APPLIED : EXPECTED_OLD_MISMATCH;
                         results.add(new RefUpdateResult(update, status, Optional.empty()));
                         failed |= status != APPLIED;
                     }
@@ -213,10 +273,12 @@ public final class InMemoryIndex implements GitIndexApi {
                         RefUpdate update = result.update();
                         if (atomic && failed) {
                             results.set(index, new RefUpdateResult(update, ATOMIC_ABORTED, Optional.empty()));
-                        } else if (update.newId().isPresent()) {
-                            refs.put(update.ref(), update.newId().orElseThrow());
                         } else {
-                            refs.remove(update.ref());
+                            if (originalRefs.get(update.ref()).isEmpty() && update.newId().isEmpty()) {
+                                changedRefs.remove(update.ref());
+                            } else {
+                                changedRefs.put(update.ref(), update.newId());
+                            }
                         }
                     }
                 }
@@ -230,6 +292,42 @@ public final class InMemoryIndex implements GitIndexApi {
             }
         }
 
+        @Override
+        public void apply() throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                try {
+                    for (Map.Entry<RefId, Optional<ObjectId>> entry : changedRefs.entrySet()) {
+                        Optional<ObjectId> actual = Optional.ofNullable(refs.get(entry.getKey()));
+                        Optional<ObjectId> expected = originalRefs.get(entry.getKey());
+                        if (!actual.equals(expected)) {
+                            throw new GitRefConflictException(
+                                    new RefUpdate(entry.getKey(), expected, entry.getValue()), actual);
+                        }
+                    }
+                    if (changedHead != null && !head.equals(originalHead)) {
+                        throw new IOException("Concurrent repository HEAD modification");
+                    }
+                    overlay(refs, changedRefs);
+                    if (changedHead != null) {
+                        head = changedHead;
+                    }
+                } finally {
+                    close();
+                }
+            }
+        }
+
+        private void overlay(Map<RefId, ObjectId> target, Map<RefId, Optional<ObjectId>> changes) {
+            for (Map.Entry<RefId, Optional<ObjectId>> entry : changes.entrySet()) {
+                if (entry.getValue().isPresent()) {
+                    target.put(entry.getKey(), entry.getValue().orElseThrow());
+                } else {
+                    target.remove(entry.getKey());
+                }
+            }
+        }
+
         private void requireOpen() throws ClosedChannelException {
             if (closed) {
                 throw new ClosedChannelException();
@@ -240,6 +338,8 @@ public final class InMemoryIndex implements GitIndexApi {
         public void close() {
             synchronized (InMemoryIndex.this) {
                 closed = true;
+                changedRefs.clear();
+                changedHead = null;
             }
         }
     }

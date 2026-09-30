@@ -11,7 +11,8 @@ import java.util.Optional;
  * An empty expectedOld requires the ref to be absent (creation); an empty newId requests deletion.
  * With both IDs present, replace the value only if it matches expectedOld, including for force updates.
  * The ref and both Optional containers must be non-null; both IDs cannot be absent at once.
- * The index checks the expected value under the ref lock. A failed ref update does not undo pack publication.
+ * Opening an access with updates checks expected values immediately. Apply rechecks them under the
+ * index lock before publication. A failed ref update does not undo independent pack publication.
  */
 public record RefUpdate(RefId ref, Optional<ObjectId> expectedOld, Optional<ObjectId> newId) {
     public RefUpdate {

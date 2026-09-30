@@ -117,6 +117,7 @@ class GitWireRefsTest {
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         try (GitIndexAccess access1 = repository.index().createAccess()) {
             access1.updateHead(new Head.Detached(new CommitId(TAG_ID)));
+            access1.apply();
             DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
             LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,

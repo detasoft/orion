@@ -86,6 +86,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         GitIndexApi index = new LocalGitIndex(gitDirectory);
         try (GitIndexAccess access = index.createAccess()) {
             access.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
+            access.apply();
         }
         NativeGitRepository repository = new NativeGitRepository(
                 workTree.getFileName().toString(), storage, index, MAIN_REF);
@@ -337,6 +338,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             }
             currentBranch = branch;
             access.updateHead(new Head.Symbolic(new RefId(refName)));
+            access.apply();
         }
     }
 
