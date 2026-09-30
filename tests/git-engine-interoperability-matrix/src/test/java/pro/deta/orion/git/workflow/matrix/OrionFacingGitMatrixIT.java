@@ -5,7 +5,7 @@ import pro.deta.orion.git.workflow.GitMatrixInvocation;
 
 import java.util.stream.Stream;
 
-class OrionFacingGitMatrixTest extends GitInteroperabilityMatrixRunner {
+class OrionFacingGitMatrixIT extends GitInteroperabilityMatrixRunner {
     @Override
     protected Stream<GitMatrixInvocation> matrixInvocations() {
         return GitMatrixDefinition.requiredCases().stream();

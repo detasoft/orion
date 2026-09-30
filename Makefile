@@ -12,7 +12,7 @@ SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dist test integration-test test-jfr test-jfr-report xml-schema dependency-audit \
+.PHONY: help dist test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test
@@ -51,8 +51,10 @@ dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 # The build cache attaches unsuffixed class directories, so these runs bypass it.
-test: SHELL := /bin/bash
-test: ## Run tests with random classes-[a-z]; MODULE+TEST select tests, LOG sets a log file
+test: ## Run package with unit tests; MODULE+TEST select tests, LOG sets a log file
+test-all: ## Run verify with unit and integration tests, including the Git matrix; supports MODULE+TEST and LOG
+test test-all: SHELL := /bin/bash
+test test-all:
 	@if { [ -n '$(strip $(value MODULE))' ] && [ -z '$(strip $(value TEST))' ]; } \
 		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
 		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
@@ -60,9 +62,12 @@ test: ## Run tests with random classes-[a-z]; MODULE+TEST select tests, LOG sets
 	@letters=abcdefghijklmnopqrstuvwxyz; \
 	slot=$${letters:RANDOM%26:1}; \
 	printf 'Test classes slot: %s\n' "$$slot"; \
-	$(MAVEN) package -Pdev -T 4 -q -Dorion.classes.suffix=-$$slot -Dmaven.build.cache.enabled=false \
-		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am -Dtest='$(value TEST)' \
-		-Dsurefire.failIfNoSpecifiedTests=false) $(if $(strip $(value LOG)),-l '$(value LOG)')
+	$(MAVEN) $(if $(filter test-all,$@),verify,package) -Pdev -T 4 -q \
+		-Dorion.classes.suffix=-$$slot -Dmaven.build.cache.enabled=false \
+		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am \
+		$(if $(filter test-all,$@),-Dit.test='$(value TEST)' -Dfailsafe.failIfNoSpecifiedTests=false,\
+		-Dtest='$(value TEST)' -Dsurefire.failIfNoSpecifiedTests=false)) \
+		$(if $(strip $(value LOG)),-l '$(value LOG)')
 
 dependency-audit: ## Report explicit Maven dependencies that also have transitive paths
 	$(MAVEN) org.apache.maven.plugins:maven-dependency-plugin:3.10.0:tree -Pdev -T 4 -q \
