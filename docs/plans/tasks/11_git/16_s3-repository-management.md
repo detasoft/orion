@@ -2,7 +2,13 @@
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf,
   branch `codex/s3-management-01a0f177`,
-  worktree `.worktrees/s3-management-01a0f177`, started 2026-09-30 13:28 Europe/Amsterdam.
+  worktree `.worktrees/s3-management-01a0f177`, paused 2026-09-30 14:19 Europe/Amsterdam;
+  next: authorize integration of reviewed commit `25dc9a71be01575c558197daca055bf2a8c7486e`,
+  based on `107ebc8956afd405a669650f43dc56d67baf89c6`. Task worktree is clean.
+  Final-candidate full `make test` passed, as did focused backend checks,
+  256 frontend tests, production frontend build, and actual MinIO integration.
+  Browser scenarios passed with mocked API responses; Git data APIs remain stubs.
+  No UI/SSH implementation changes have been transferred to main yet.
 
 ## Required result
 
