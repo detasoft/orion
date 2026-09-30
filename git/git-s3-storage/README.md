@@ -1,8 +1,8 @@
 # S3 Git backend
 
 This module stores repository metadata, refs, pack bytes and object indexes in S3.
-Runtime repositories support push/fetch and file operations. Bootstrap configuration,
-key material and proxy cache repositories must remain file-backed.
+Runtime repositories support push/fetch and file operations. Process-level S3 storage
+also supports bootstrap configuration and key material without persistent local data.
 
 ## Runtime XML connections
 
@@ -160,12 +160,19 @@ reject a change that would silently alter another proxy's shared SSH connection.
 
 ## Bootstrap and resource ownership
 
-Keep bootstrap XML, key-material and proxy cache repositories file-backed.
-Bootstrap still supports `storage.location`, optional `storage.endpoint` alongside
-it, and `storage.auth` for standalone S3 selection. For that
-bootstrap configuration, secret/token values use `env:NAME` or `file:/path`
-references. Entirely S3-backed bootstrap is outside the runtime-repository contract.
-Runtime S3 connections belong in XML.
+Process configuration can select S3 with `storage.location`, optional
+`storage.endpoint`, and `storage.auth`. Bootstrap sources such as `local:orion`
+then use that backend for configuration and key material. Secret/token values in
+`storage.auth` use `env:NAME` or `file:/path` references; the key-material password
+also remains an external bootstrap input. After initial creation, a fresh local
+base directory can reopen the same S3 state with key-material creation and default
+configuration creation disabled. S3 persists the configuration, encrypted secrets,
+server signing identity and SSH host keys; local temporary files are disposable.
+
+Runtime S3 connections belong in XML. XML repository bindings cannot select S3
+for bootstrap or proxy cache repositories: those repositories use the process
+backend selected before XML is loaded. This restriction does not require that
+process backend to be file-backed.
 
 `BootstrapContext` supplies one `S3Transport` singleton through application DI.
 It lazily owns one SDK client, one bounded Apache HTTP pool and one default
@@ -253,6 +260,7 @@ whole-list deadline or bound external credential-provider resolution.
 make test MODULE=git/git-s3-storage TEST='S3*Test,ConfiguredS3StorageTest'
 make test-all MODULE=git/git-s3-storage TEST='S3*IT'
 make test-all MODULE=net/http-core TEST=S3GitTransportIT
+make test-all MODULE=tests/integration-test TEST=S3BootstrapRestartIT
 make test
 ```
 
@@ -266,4 +274,10 @@ Wire tests cover concurrent endpoints, signing regions, tokens, pagination and
 shutdown. Data-plane tests cover pack persistence, reopening, ref conflicts, multipart
 uploads, failed publication and bounded reads. The HTTP test pushes, clones, sends a
 thin delta and clones through a fresh S3 provider.
-Entirely S3-backed server bootstrap is not covered.
+The cold-start test seeds configuration and key material directly in MinIO, then
+starts the real runtime once from an empty local directory with creation disabled.
+It verifies the loaded configuration, signing identity and encrypted secret.
+The restart test starts the real runtime twice against MinIO, using a
+new empty local directory after deleting the first, with creation disabled. It checks
+unchanged configuration and key-material bytes, Git refs, signing identity, SSH
+host keys and decryption of a previously saved configuration secret.
