@@ -167,9 +167,10 @@ public final class LocalGitIndex implements GitIndexApi {
     }
 
     private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates) throws IOException {
-        Access access = new Access(acquireStore(false, Optional.of(hashAlgorithm)));
+        acquireStore(false, Optional.of(hashAlgorithm));
+        Access access = new Access();
         try {
-            Map<String, String> refs = readRefs(access.store);
+            Map<String, String> refs = readRefs(store);
             for (RefId ref : names) {
                 access.originalRefs.put(ref, Optional.ofNullable(refs.get(ref.value())).map(ObjectId::new));
             }
@@ -195,16 +196,11 @@ public final class LocalGitIndex implements GitIndexApi {
     }
 
     private final class Access implements GitIndexAccess {
-        private final MVStore store;
         private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
         private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
         private String originalHead;
         private String changedHead;
         private boolean closed;
-
-        private Access(MVStore store) {
-            this.store = store;
-        }
 
         @Override
         public void addObject(IndexedObject object) throws IOException {
