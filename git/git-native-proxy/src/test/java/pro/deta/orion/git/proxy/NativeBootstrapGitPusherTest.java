@@ -16,7 +16,6 @@ import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
@@ -218,8 +217,7 @@ class NativeBootstrapGitPusherTest {
     private static Optional<PackChecksum> ingest(
             NativeGitRepository repository, FileTestSupport.Prepared update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
-            PackMetadata pack = repository.ingest(input);
-            return Optional.of(repository.publishPack(pack).packChecksum());
+            return Optional.of(repository.ingestAndPublish(input).packChecksum());
         }
     }
 }

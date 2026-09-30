@@ -153,8 +153,7 @@ class NativeBootstrapGitPackReplayTest {
 
     private static Optional<PackChecksum> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            PackMetadata pack = repository.ingest(input);
-            return Optional.of(repository.publishPack(pack).packChecksum());
+            return Optional.of(repository.ingestAndPublish(input).packChecksum());
         }
     }
 

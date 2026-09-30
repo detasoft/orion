@@ -481,7 +481,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
 
     private static PackMetadata ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            return repository.ingest(input);
+            return repository.ingestAndPublish(input);
         }
     }
 

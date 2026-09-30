@@ -73,9 +73,17 @@ public class GitRepositoryContext implements AutoCloseable {
         return indexApi.withAccess(Optional.of(PackId.create()), operation);
     }
 
-    public List<RefUpdateResult> publish(List<RefUpdate> updates, boolean atomic) {
+    public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
+            throws IOException {
         if (indexApi == null) {
             throw new IllegalStateException("Ref publication requires an index factory");
+        }
+        if (pack.isPresent()) {
+            PackMetadata metadata = pack.orElseThrow();
+            if (!storage.exists(metadata.packId())) {
+                throw new IOException("Cannot publish missing pack: " + metadata.packId());
+            }
+            indexApi.withAccess(Optional.of(metadata.packId()), access -> access.publishIndex(metadata));
         }
         return publishRefs(storage, indexApi, updates, atomic);
     }

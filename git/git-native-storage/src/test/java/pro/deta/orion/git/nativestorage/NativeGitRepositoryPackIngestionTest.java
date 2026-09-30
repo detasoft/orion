@@ -2,9 +2,13 @@ package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
+import pro.deta.orion.git.parser.v2.read.GitPackRead;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -17,15 +21,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryPackIngestionTest {
     @Test
-    void missingPackCannotPublishItsIndexThroughRepository() throws Exception {
-        InMemoryStorage storage = new InMemoryStorage();
+    void missingPackCannotPublishItsIndexAndAccessRemainsOpenUntilStorageCheck() throws Exception {
+        InMemoryIndex index = new InMemoryIndex();
+        TrackingStorage storage = new TrackingStorage(index);
+        storage.missing = true;
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, new InMemoryIndex(), "refs/heads/main")) {
+                "project.git", storage, index, "refs/heads/main")) {
             byte[] bytes = preparedPack(repository);
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-                PackMetadata pack = repository.ingest(input);
-                storage.close();
-                assertThatThrownBy(() -> repository.publishPack(pack)).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> repository.ingestAndPublish(input)).isInstanceOf(IOException.class)
+                        .hasMessageContaining("Cannot publish missing pack");
+                assertThat(storage.checked).isTrue();
+                assertThat(index.activeAccesses()).isEmpty();
                 repository.index().withAccess(access1 -> {
                     assertThat(access1.packs()).isEmpty();
                     assertThat(access1.snapshotRefs().refs()).isEmpty();
@@ -36,21 +43,20 @@ class NativeGitRepositoryPackIngestionTest {
     }
 
     @Test
-    void independentIngestionsRemainUnpublishedUntilPersisted() throws Exception {
+    void independentIngestionsPublishDistinctPacksWithTheSameChecksum() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", storage, new InMemoryIndex(), "refs/heads/main")) {
             byte[] bytes = preparedPack(repository);
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
                  BufferedByteInputV2 secondInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-                PackMetadata first = repository.ingest(firstInput);
-                PackMetadata second = repository.ingest(secondInput);
+                PackMetadata first = repository.ingestAndPublish(firstInput);
+                PackMetadata second = repository.ingestAndPublish(secondInput);
                 assertThat(first).isNotSameAs(second);
                 repository.index().withAccess(access2 -> {
-                    assertThat(access2.packs()).isEmpty();
+                    assertThat(access2.packs()).containsExactlyInAnyOrder(first, second);
                     assertThat(first.packId()).isNotEqualTo(second.packId());
-                    repository.publishPack(second);
-                    assertThat(access2.packs()).hasSize(1);
+                    assertThat(first.packChecksum()).isEqualTo(second.packChecksum());
                     return null;
                 });
             }
@@ -63,5 +69,38 @@ class NativeGitRepositoryPackIngestionTest {
             access.writePack(new OutputStreamBufferedByteOutput(output));
             return output.toByteArray();
         });
+    }
+
+    private static final class TrackingStorage implements GitStorageApi {
+        private final InMemoryStorage bytes = new InMemoryStorage();
+        private final InMemoryIndex index;
+        private boolean missing;
+        private boolean checked;
+
+        private TrackingStorage(InMemoryIndex index) {
+            this.index = index;
+        }
+
+        @Override
+        public PackDataStorage newPack(PackId packId) throws IOException {
+            return bytes.newPack(packId);
+        }
+
+        @Override
+        public <R> R readPack(PackId packId, long offset, long length, GitPackRead<R> reader) throws IOException {
+            return bytes.readPack(packId, offset, length, reader);
+        }
+
+        @Override
+        public boolean exists(PackId packId) throws IOException {
+            assertThat(index.activeAccesses()).anySatisfy(access -> assertThat(access.packId()).contains(packId));
+            checked = true;
+            return !missing && bytes.exists(packId);
+        }
+
+        @Override
+        public void close() {
+            bytes.close();
+        }
     }
 }

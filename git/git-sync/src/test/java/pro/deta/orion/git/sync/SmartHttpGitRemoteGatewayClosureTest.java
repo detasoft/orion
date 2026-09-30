@@ -99,7 +99,7 @@ class SmartHttpGitRemoteGatewayClosureTest {
 
     private static void persist(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            repository.publishPack(repository.ingest(input));
+            repository.ingestAndPublish(input);
         }
     }
 

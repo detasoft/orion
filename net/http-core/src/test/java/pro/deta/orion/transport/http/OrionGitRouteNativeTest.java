@@ -17,7 +17,6 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -556,8 +555,7 @@ class OrionGitRouteNativeTest {
         byte[] packBytes = pack(objectId, data);
         PackChecksum packId;
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
-            PackMetadata pack = repository.ingest(input);
-            packId = repository.publishPack(pack).packChecksum();
+            packId = repository.ingestAndPublish(input).packChecksum();
         }
         repository.updateRef(
                 "refs/heads/main",

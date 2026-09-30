@@ -142,7 +142,7 @@ public class NativeGitRepository implements AutoCloseable {
             writer.writeObject(objectType, data.length, content);
             writer.finish();
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
-                publishPack(ingest(input));
+                ingestAndPublish(input);
             }
             return id;
         } catch (IOException failure) {
@@ -162,11 +162,16 @@ public class NativeGitRepository implements AutoCloseable {
         }
     }
 
-    public PackMetadata ingest(BufferedByteInputV2 input) throws IOException {
+    public PackMetadata ingestAndPublish(BufferedByteInputV2 input) throws IOException {
         return index.withAccess(Optional.of(PackId.create()), access -> {
+            PackMetadata pack;
             try (PackIngestor ingestor = new PackIngestor(input, storage(), access)) {
-                return ingestor.ingest();
+                pack = ingestor.ingest();
             }
+            if (!storage().exists(pack.packId())) {
+                throw new IOException("Cannot publish missing pack: " + pack.packId());
+            }
+            return access.publishIndex(pack);
         });
     }
 
@@ -196,7 +201,7 @@ public class NativeGitRepository implements AutoCloseable {
         accessHook.beforeReceive(name());
         accessHook.beforeWrite(name());
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            PackChecksum id = publishPack(ingest(input)).packChecksum();
+            PackChecksum id = ingestAndPublish(input).packChecksum();
             return NativeGitReceivePack.complete(name(), this, updates, atomic, accessHook,
                     valid -> publishReceivedPack(Optional.of(id), valid, atomic));
         } catch (IOException failure) {

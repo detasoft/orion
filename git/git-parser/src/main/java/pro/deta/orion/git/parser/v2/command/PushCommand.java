@@ -41,9 +41,10 @@ public final class PushCommand implements GitCommand {
         }
         boolean unpacked = true;
         List<RefUpdateResult> results;
+        Optional<PackMetadata> received = Optional.empty();
         try {
             if (request.requiresPack()) {
-                receivePack(protocolContext.input());
+                received = Optional.of(receivePack(protocolContext.input()));
             }
         } catch (IOException failure) {
             if (!request.capabilities().has(GitCapability.REPORT_STATUS)
@@ -58,14 +59,14 @@ public final class PushCommand implements GitCommand {
                 results.add(new RefUpdateResult(update, RefUpdateResult.Status.STORAGE_ERROR, Optional.empty()));
             }
         } else {
-            results = repository.publish(request.updates(),
+            results = repository.publish(received, request.updates(),
                     request.capabilities().has(GitCapability.ATOMIC));
         }
         protocolContext.writer().writePushStatus(request.capabilities(), unpacked, results);
     }
 
-    private void receivePack(BufferedByteInputV2 input) throws IOException {
-        repository.withPackAccess(access -> {
+    private PackMetadata receivePack(BufferedByteInputV2 input) throws IOException {
+        return repository.withPackAccess(access -> {
             PackMetadata pack;
             try (PackIngestor ingestor = new PackIngestor(input, storage, access)) {
                 pack = ingestor.ingest();
@@ -74,7 +75,7 @@ public final class PushCommand implements GitCommand {
                 throw new IOException("Cannot publish missing pack: " + pack.packId());
             }
             access.publishIndex(pack);
-            return null;
+            return pack;
         });
     }
 }
