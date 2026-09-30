@@ -224,8 +224,19 @@ public final class GitFileAccess implements Modification {
     public void discard() throws IOException {
         if (!finished) {
             finished = true;
-            try (bytes) {
-                index.discard();
+            Throwable primary = null;
+            try {
+                bytes.close();
+            } catch (IOException | RuntimeException | Error failure) {
+                primary = failure;
+                throw failure;
+            } finally {
+                try {
+                    index.discard();
+                } catch (IOException | RuntimeException | Error cleanup) {
+                    if (primary == null) throw cleanup;
+                    primary.addSuppressed(cleanup);
+                }
             }
         }
     }
