@@ -1,9 +1,8 @@
 # Bootstrap the S3 Git Backend
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf, branch `codex/s3-backend-01a0f177`,
-  worktree `.worktrees/s3-backend-01a0f177`, paused 2026-09-30 11:21 Europe/Amsterdam;
-  next: authorize integration of reviewed commit `57715a8694b1bea05ebe4a729022dc4147a846b7`,
-  then verify the integrated result and complete cleanup.
+  worktree `.worktrees/s3-backend-01a0f177`, resumed 2026-09-30 11:35 Europe/Amsterdam;
+  next: move endpoint to storage.endpoint and reverify the prepared result.
 
 ## Required result
 
@@ -37,6 +36,15 @@ AWS SDK dependencies and S3 location/credential conventions where suitable.
 Support a bucket, prefix, region, endpoint, and test-compatible credentials
 without logging secrets. Make S3 explicitly selectable; validate configuration
 and provide a clear failure for unsupported Git operations.
+
+The S3 endpoint is an optional `storage.endpoint` field alongside
+`storage.location`, not an entry in `storage.auth`. Pass it explicitly to the
+S3 provider and update every module consumer/test/example; do not retain the
+old `auth.endpoint` configuration path. With no endpoint, AWS SDK regional
+endpoint resolution remains in effect. Document an explicit AWS regional
+endpoint, for example `https://s3.eu-west-1.amazonaws.com` with region
+`eu-west-1`, and the equivalent MinIO configuration. Preserve existing
+credential and addressing behavior unless correcting a demonstrated defect.
 
 Persist minimal repository metadata under safe deterministic repository keys.
 Use conditional creation so competing providers cannot overwrite an existing
@@ -74,6 +82,7 @@ continue to work across independent provider instances.
   concurrent creation, reopening through an independent provider, repository
   and prefix isolation, invalid names/configuration, and storage failures.
 - Verify configuration selects S3 and preserves the existing file default.
+- Verify binding and use of `storage.endpoint`, plus omitted endpoint for AWS.
 - Verify stub operations clearly fail and resource closure is safe.
 - Report exact tested boundaries. Do not claim push/fetch or full server
   startup works with the intentionally incomplete APIs.
