@@ -24,7 +24,6 @@ import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 
 import java.net.URI;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,33 +34,28 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapProxyAdoptionTest {
     @Test
-    void adoptsSharedSourcesOnceAndPreservesTheirPrivateRepositoryHandles() throws Exception {
+    void keepsSharedBootstrapSourcesPrivateWithoutCreatingAnAlias() throws Exception {
         try (OrionKeyMaterial material = material()) {
             AtomicReference<OrionDocument> current = new AtomicReference<>(empty());
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
             var provider = provider("external-token");
-            String name = provider.prepareProvisional("material", source("HTTPS://GIT.EXAMPLE:443/repo"));
             String configurationName = provider.prepareProvisional(
                     "configuration", source("https://git.example/repo"));
+            String name = provider.prepareProvisional("material", source("HTTPS://GIT.EXAMPLE:443/repo"));
             assertThat(configurationName).isEqualTo(name);
+            assertThat(name).isEqualTo("bootstrap");
             NativeGitRepository materialRepository = provider.openForRead(name).valueOrFailure("material");
             NativeGitRepository configurationRepository = provider.openForRead(configurationName)
                     .valueOrFailure("configuration");
+            assertThat(configurationRepository).isSameAs(materialRepository);
 
             OrionDocument adopted = provider.adoptProvisional(current.get(), secrets);
 
-            assertThat(current.get().system().proxies()).isEmpty();
-            assertThat(adopted.system().proxies()).hasSize(1);
-            assertThat(adopted.system().proxies().getFirst().alias()).isEqualTo(new RemoteAlias("configuration"));
-            assertThat(adopted.system().secrets()).hasSize(1);
+            assertThat(adopted).isSameAs(current.get());
+            assertThat(adopted.system().proxies()).isEmpty();
+            assertThat(adopted.system().secrets()).isEmpty();
             assertThat(adopted.toString()).doesNotContain("external-token", name);
             current.set(adopted);
-            char[] value = secrets.resolveSystem(adopted.system().proxies().getFirst().secret(adopted.system()).orElseThrow());
-            try {
-                assertThat(value).isEqualTo("external-token".toCharArray());
-            } finally {
-                Arrays.fill(value, '\0');
-            }
             assertThat(provider.adoptProvisional(adopted, secrets)).isSameAs(adopted);
             assertThat(configurationRepository.refs()).isEmpty();
             assertThat(materialRepository.refs()).isEmpty();
@@ -106,9 +100,9 @@ class BootstrapProxyAdoptionTest {
         try (OrionKeyMaterial material = material()) {
             var current = new AtomicReference<>(empty());
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
-            current.set(secrets.createSystem(current.get(), "configuration-credential", "other".toCharArray()));
+            current.set(secrets.createSystem(current.get(), "material-credential", "other".toCharArray()));
             var provider = provider("external-token");
-            provider.prepareProvisional("configuration", source("https://git.example/repo"));
+            provider.prepareProvisional("material", source("https://git.example/repo"));
             assertThatThrownBy(() -> provider.adoptProvisional(current.get(), secrets))
                     .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("secret");
             assertThat(current.get().system().proxies()).isEmpty();
