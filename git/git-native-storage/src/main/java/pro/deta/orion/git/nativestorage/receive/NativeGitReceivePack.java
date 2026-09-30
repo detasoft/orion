@@ -28,7 +28,7 @@ public final class NativeGitReceivePack {
         Objects.requireNonNull(publisher, "publisher");
         List<RefUpdateResult> results = new ArrayList<>(updates.size());
         List<RefUpdate> valid = new ArrayList<>();
-        GitObjectGraph graph = new GitObjectGraph(repository.storage());
+        GitObjectGraph graph = new GitObjectGraph(repository.storage(), repository.index());
         for (RefUpdate update : updates) {
             if (update.newId().isPresent() && !repository.hasCompleteObjectClosure(
                     update.newId().orElseThrow())) {

@@ -1,30 +1,32 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
+import pro.deta.orion.git.parser.v2.capability.GitCapability;
+import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.git.parser.v2.capability.GitCapability;
-import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
-import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 /**
  * Accumulates one negotiation's result independently of bytes and packet encoding.
- * Borrows GitStorageApi from the command; objectExists checks published-object presence through storage.exists.
+ * Borrows GitStorageApi from the command; objectExists combines published index locations with storage.exists.
  * isReady requires each wanted commit to reach an explicitly confirmed common object. It peels tags and
  * traverses commit parents, stopping at client shallow boundaries. Trees and blobs need no history negotiation.
  * This conservative check does not infer additional common ancestors from a have and can require extra rounds.
@@ -57,6 +59,7 @@ import java.util.Set;
 public class NegotiationContext {
     private final FetchRequest request;
     private final GitStorageApi storage;
+    private final GitIndexApi index;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
     private Map<RefId, ObjectId> wantedRefs = Map.of();
@@ -64,9 +67,11 @@ public class NegotiationContext {
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitCapabilities advertisedCapabilities) {
+    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitIndexApi index,
+                              GitCapabilities advertisedCapabilities) {
         this.request = Objects.requireNonNull(request, "request");
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
         this.advertisedCapabilities.addAll(Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities"));
     }
 
@@ -177,7 +182,7 @@ public class NegotiationContext {
     }
 
     public boolean objectExists(ObjectId objectId) throws IOException {
-        return storage.exists(objectId);
+        return GitObjectRead.exists(storage, index, objectId);
     }
 
     public void resolveWantedRefs(RefsSnapshot snapshot) throws IOException {
@@ -222,7 +227,7 @@ public class NegotiationContext {
         if (wants.isEmpty() || commonObjects.isEmpty()) {
             return false;
         }
-        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage,
+        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage, index,
                 (type, size, base, input) -> type == GitObjectType.TREE || type == GitObjectType.BLOB
                         ? new GitObjectLinks(type, List.of()) : GitObjectLinks.read(type, size, base, input));
         for (ObjectId want : wants) {
@@ -246,7 +251,7 @@ public class NegotiationContext {
             if (!visited.add(id)) {
                 continue;
             }
-            GitObjectLinks links = storage.readObject(id, reader)
+            GitObjectLinks links = GitObjectRead.read(storage, index, id, reader)
                     .orElseThrow(() -> new IOException("Missing fetch history object: " + id.toHex()));
             if (visit.commitOnly() && links.type() != GitObjectType.COMMIT) {
                 throw new IOException("Commit parent is not a commit: " + id.toHex());

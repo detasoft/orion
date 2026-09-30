@@ -12,9 +12,11 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -66,12 +68,12 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository")) {
             repository.files().saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
             Map<String, String> refs = repository.refs();
-            Set<PackChecksum> packs = Set.copyOf(repository.storage().packIds());
+            Set<PackMetadata> packs = Set.copyOf(repository.index().packs());
             for (String path : List.of("../config.txt", "./config.txt")) {
                 assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
                         "invalid", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalArgumentException.class);
                 assertThat(repository.refs()).isEqualTo(refs);
-                assertThat(repository.storage().packIds()).containsExactlyInAnyOrderElementsOf(packs);
+                assertThat(repository.index().packs()).containsExactlyInAnyOrderElementsOf(packs);
             }
         }
     }
@@ -83,10 +85,12 @@ class NativeGitFileUpdateTest {
 
         repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
 
-        assertThat(repository.storage().packIds()).hasSize(1);
-        PackChecksum packId = repository.storage().packIds().iterator().next();
-        assertThat(repository.storage().readPack(packId, (size, input) -> input.readBytes(4)))
-                .hasValueSatisfying(header -> assertThat(header).isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII)));
+        assertThat(repository.index().packs()).hasSize(1);
+        PackMetadata metadata = repository.index().packs().getFirst();
+        ByteArrayOutputStream exported = new ByteArrayOutputStream();
+        repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+        assertThat(Arrays.copyOf(exported.toByteArray(), 4))
+                .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
         assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
@@ -115,7 +119,7 @@ class NativeGitFileUpdateTest {
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
         assertThat(repository.files().loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
-        assertThat(repository.storage().packIds()).hasSize(3);
+        assertThat(repository.index().packs()).hasSize(3);
         assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
     }
 
@@ -170,7 +174,7 @@ class NativeGitFileUpdateTest {
                     rejected, update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .isInstanceOf(GitOperationException.class);
             assertThat(repository.refs()).isEmpty();
-            assertThat(repository.storage().packIds()).isEmpty();
+            assertThat(repository.index().packs()).isEmpty();
         }
     }
 

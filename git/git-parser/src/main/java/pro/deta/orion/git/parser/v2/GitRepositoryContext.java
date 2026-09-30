@@ -7,7 +7,8 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 
 import java.io.IOException;
@@ -16,9 +17,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Repository hooks used by Git commands. Fetch access receives already resolved wants and the same
@@ -49,10 +50,14 @@ public class GitRepositoryContext {
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
     }
 
-    public List<RefUpdateResult> publish(Optional<MutableIndexedPack> pack, List<RefUpdate> updates, boolean atomic)
+    public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
         if (pack.isPresent()) {
-            storage.persist(pack.orElseThrow());
+            PackMetadata metadata = pack.orElseThrow();
+            if (!storage.exists(metadata.packId())) {
+                throw new IOException("Cannot publish missing pack: " + metadata.packId());
+            }
+            index.publishIndex(metadata);
         }
         return publishRefs(storage, index, updates, atomic);
     }
@@ -71,7 +76,7 @@ public class GitRepositoryContext {
             List<RefUpdate> ready = new ArrayList<>(updates.size());
             List<RefUpdateResult> results = new ArrayList<>(updates.size());
             for (RefUpdate update : updates) {
-                boolean missing = update.newId().isPresent() && !storage.exists(update.newId().orElseThrow());
+                boolean missing = update.newId().isPresent() && !GitObjectRead.exists(storage, index, update.newId().orElseThrow());
                 results.add(new RefUpdateResult(update, missing ? RefUpdateResult.Status.OBJECT_NOT_FOUND
                         : RefUpdateResult.Status.APPLIED, Optional.empty()));
                 if (!missing) {

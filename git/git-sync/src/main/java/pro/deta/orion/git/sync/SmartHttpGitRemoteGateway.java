@@ -50,7 +50,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         Set<String> wants = new LinkedHashSet<>(heads.heads().values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try (PackIngestionOutput target = new PackIngestionOutput(
-                checked.storage())) {
+                checked.storage(), checked.index())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.copyOf(wants),
                     List.copyOf(haves),
@@ -62,7 +62,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                             connection.options(),
                             request),
                     "fetch");
-            checked.storage().persist(target.complete());
+            checked.publishPack(target.complete());
             for (String root : wants) {
                 if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
                     throw GitRemoteException.local("complete object validation", false, null);

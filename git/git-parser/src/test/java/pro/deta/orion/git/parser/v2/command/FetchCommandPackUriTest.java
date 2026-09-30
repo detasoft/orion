@@ -16,11 +16,10 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackIngestor;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -64,7 +63,7 @@ class FetchCommandPackUriTest {
     @ValueSource(booleans = {false, true})
     void preparationReturnsFinalUrisAndInlineCount(boolean mixed) throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackChecksum externalPack = storage.packIds().getFirst();
+        PackChecksum externalPack = index.packs().getFirst().packChecksum();
         Set<ObjectId> wanted = new LinkedHashSet<>(external);
         Set<ObjectId> inlineIds = mixed ? Set.of(store(new byte[]{3}, new byte[]{4}).getFirst()) : Set.of();
         wanted.addAll(inlineIds);
@@ -80,8 +79,9 @@ class FetchCommandPackUriTest {
             pack.writeTo(writer);
             writer.finish();
         }
-        try (IndexedPack inline = ingest(output.toByteArray())) {
-            assertThat(inline.objectIds()).containsExactlyInAnyOrderElementsOf(inlineIds);
+        try (GitIndexApi inline = ingest(output.toByteArray())) {
+            assertThat(inline.objects(inline.packs().getFirst().packId()))
+                    .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(inlineIds);
         }
         assertThat(pack.packUris()).isEqualTo(expectedUris);
         assertThat(pack.objectCount()).isEqualTo(inlineIds.size());
@@ -90,29 +90,31 @@ class FetchCommandPackUriTest {
     @Test
     void sendsPublishedPackChecksumAndUriAndAnEmptyInlinePack() throws Exception {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
-        PackChecksum packId = storage.packIds().getFirst();
+        PackChecksum packId = index.packs().getFirst().packChecksum();
         byte[] response = fetch(ids, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains("packfile-uris\n", packId.toHex() + " " + repository.packUri(packId).orElseThrow() + "\n");
-        try (IndexedPack inline = inlinePack(response)) {
-            assertThat(inline.objectCount()).isZero();
+        try (GitIndexApi inline = inlinePack(response)) {
+            assertThat(inline.packs().getFirst().objectCount()).isZero();
         }
-        assertThat(storage.packObjectIds(packId)).containsExactlyInAnyOrderElementsOf(ids);
+        assertThat(index.objects(index.packs(packId).getFirst().packId()))
+                .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(ids);
     }
 
     @Test
     void mixesUriPackWithOnlyRequestedEntriesFromAnotherPack() throws Exception {
         List<ObjectId> external = store(new byte[]{1}, new byte[]{2});
-        PackChecksum externalPack = storage.packIds().getFirst();
+        PackChecksum externalPack = index.packs().getFirst().packChecksum();
         List<ObjectId> shared = store(new byte[]{3}, new byte[]{4});
         List<ObjectId> wanted = new ArrayList<>(external);
         wanted.add(shared.getFirst());
         byte[] response = fetch(wanted, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains(externalPack.toHex() + " " + repository.packUri(externalPack).orElseThrow() + "\n");
-        try (IndexedPack inline = inlinePack(response)) {
-            assertThat(inline.entryCount()).isEqualTo(1);
-            assertThat(inline.objectIds()).containsExactly(shared.getFirst());
+        try (GitIndexApi inline = inlinePack(response)) {
+            assertThat(inline.packs().getFirst().objectCount()).isEqualTo(1);
+            assertThat(inline.objects(inline.packs().getFirst().packId()))
+                    .extracting(IndexedObject::objectId).containsExactly(shared.getFirst());
         }
     }
 
@@ -121,8 +123,9 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1});
         byte[] response = fetch(ids, "http");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (IndexedPack inline = inlinePack(response)) {
-            assertThat(inline.objectIds()).containsExactlyElementsOf(ids);
+        try (GitIndexApi inline = inlinePack(response)) {
+            assertThat(inline.objects(inline.packs().getFirst().packId()))
+                    .extracting(IndexedObject::objectId).containsExactlyElementsOf(ids);
         }
     }
 
@@ -131,8 +134,9 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
         byte[] response = fetch(List.of(ids.getFirst()), "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (IndexedPack inline = inlinePack(response)) {
-            assertThat(inline.objectIds()).containsExactly(ids.getFirst());
+        try (GitIndexApi inline = inlinePack(response)) {
+            assertThat(inline.objects(inline.packs().getFirst().packId()))
+                    .extracting(IndexedObject::objectId).containsExactly(ids.getFirst());
         }
     }
 
@@ -146,10 +150,11 @@ class FetchCommandPackUriTest {
             }
             writer.finish();
         }
-        MutableIndexedPack pack = ingest(bytes.toByteArray());
-        List<ObjectId> ids = new ArrayList<>(pack.objectIds());
-        new GitPackObjectResolver(pack, storage).complete();
-        storage.persist(pack);
+        PackMetadata pack = PackTestData.publish(bytes.toByteArray(), storage, index);
+        List<ObjectId> ids = new ArrayList<>();
+        for (IndexedObject object : index.objects(pack.packId())) {
+            ids.add(object.objectId());
+        }
         return ids;
     }
 
@@ -178,7 +183,7 @@ class FetchCommandPackUriTest {
         output.writeBytes(content);
     }
 
-    private static IndexedPack inlinePack(byte[] response) throws IOException {
+    private static GitIndexApi inlinePack(byte[] response) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(response))) {
             boolean pack = false;
@@ -197,11 +202,7 @@ class FetchCommandPackUriTest {
         return ingest(bytes.toByteArray());
     }
 
-    private static MutableIndexedPack ingest(byte[] bytes) throws IOException {
-        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
-             BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
-             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
-            return ingestor.ingest();
-        }
+    private static GitIndexApi ingest(byte[] bytes) throws IOException {
+        return PackTestData.inspect(bytes);
     }
 }

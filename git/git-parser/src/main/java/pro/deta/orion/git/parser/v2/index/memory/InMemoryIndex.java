@@ -123,7 +123,7 @@ public final class InMemoryIndex implements GitIndexApi {
     }
 
     @Override
-    public synchronized PackMetadata publishPack(PackMetadata pack) throws IOException {
+    public synchronized PackMetadata publishIndex(PackMetadata pack) throws IOException {
         requireOpen();
         hashAlgorithm.requireLength(pack.packChecksum().byteLength());
         PackMetadata previous = packs.get(pack.packId());

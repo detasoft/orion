@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -18,9 +19,11 @@ import java.util.Set;
 
 public final class GitObjectGraph {
     private final GitStorageApi storage;
+    private final GitIndexApi index;
 
-    public GitObjectGraph(GitStorageApi storage) {
+    public GitObjectGraph(GitStorageApi storage, GitIndexApi index) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
     }
 
     public Set<ObjectId> reachableObjects(Set<ObjectId> roots, boolean ignoreMissing) throws IOException {
@@ -83,11 +86,11 @@ public final class GitObjectGraph {
     public Optional<ObjectId> peel(ObjectId id) throws IOException {
         Set<ObjectId> visited = new HashSet<>();
         ObjectId current = id;
-        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage,
+        ResolvedGitObjectRead<GitObjectLinks> reader = new ResolvedGitObjectRead<>(storage, index,
                 (type, size, base, input) -> tagTarget(type, size, input));
         while (visited.size() <= 256 && visited.add(current)) {
             ObjectId object = current;
-            GitObjectLinks links = storage.readObject(object, (type, size, base, input) -> switch (type) {
+            GitObjectLinks links = GitObjectRead.read(storage, index, object, (type, size, base, input) -> switch (type) {
                 case TAG, REF_DELTA, OFS_DELTA -> reader.read(type, size, base, input);
                 default -> new GitObjectLinks(type, List.of());
             }).orElse(null);
@@ -122,6 +125,6 @@ public final class GitObjectGraph {
     }
 
     private Optional<GitObjectLinks> links(ObjectId id) throws IOException {
-        return storage.readObject(id, new ResolvedGitObjectRead<>(storage, GitObjectLinks::read));
+        return GitObjectRead.read(storage, index, id, new ResolvedGitObjectRead<>(storage, index, GitObjectLinks::read));
     }
 }

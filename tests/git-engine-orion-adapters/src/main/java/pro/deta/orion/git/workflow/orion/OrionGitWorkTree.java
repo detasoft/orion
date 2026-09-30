@@ -303,7 +303,8 @@ final class OrionGitWorkTree implements GitWorkTree {
         String trackingRef = trackingRef(remote, branch);
         String remoteId = requireRef(trackingRef);
         String localId = repository.refs().get(localRef);
-        if (localId != null && !new GitObjectGraph(repository.storage()).isAncestor(new ObjectId(localId), new ObjectId(remoteId))) {
+        if (localId != null && !new GitObjectGraph(repository.storage(), repository.index())
+                .isAncestor(new ObjectId(localId), new ObjectId(remoteId))) {
             throw new IllegalStateException("Orion pull is not a fast-forward for " + localRef);
         }
         updateRef(localRef, trackingRef);
@@ -359,7 +360,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             haves.add(new ObjectId(objectId));
         }
         try (PackIngestionOutput target = new PackIngestionOutput(
-                repository.storage())) {
+                repository.storage(), repository.index())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.of(wantedId),
                     haves.stream().map(ObjectId::toHex).toList(),
@@ -368,7 +369,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             OrionGitClient.requireSuccess(
                     client.uploadPack().fetch(client.uri(remote), client.options(), request),
                     "upload-pack");
-            repository.storage().persist(target.complete());
+            repository.publishPack(target.complete());
             String localTrackingRef = trackingRef(remoteName, branch);
             String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
             List<RefUpdateResult> results = repository.publishRefs(
@@ -413,7 +414,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
             return true;
         }
-        return new GitObjectGraph(repository.storage()).isAncestor(new ObjectId(oldId), new ObjectId(newId));
+        return new GitObjectGraph(repository.storage(), repository.index()).isAncestor(new ObjectId(oldId), new ObjectId(newId));
     }
 
     private static String requireFilePath(String pathspec) {

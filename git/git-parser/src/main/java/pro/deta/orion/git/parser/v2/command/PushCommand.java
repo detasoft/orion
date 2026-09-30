@@ -7,7 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.push.PushRequest;
@@ -46,7 +46,7 @@ public final class PushCommand implements GitCommand {
         }
         boolean unpacked = true;
         List<RefUpdateResult> results;
-        Optional<MutableIndexedPack> received = Optional.empty();
+        Optional<PackMetadata> received = Optional.empty();
         try {
             if (request.requiresPack()) {
                 received = Optional.of(receivePack(protocolContext.input()));
@@ -70,8 +70,8 @@ public final class PushCommand implements GitCommand {
         protocolContext.writer().writePushStatus(request.capabilities(), unpacked, results);
     }
 
-    private MutableIndexedPack receivePack(BufferedByteInputV2 input) throws IOException {
-        try (PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
+    private PackMetadata receivePack(BufferedByteInputV2 input) throws IOException {
+        try (PackIngestor ingestor = new PackIngestor(input, storage, repository.index())) {
             return ingestor.ingest();
         }
     }

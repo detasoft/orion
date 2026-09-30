@@ -13,11 +13,13 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
+import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -89,7 +91,7 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             NativeGitRepository repository,
             Optional<PackChecksum> received,
             List<RefUpdate> updates,
-            pro.deta.orion.net.io.BufferedByteOutput output) throws IOException {
+            BufferedByteOutput output) throws IOException {
         Set<ObjectId> wants = new LinkedHashSet<>();
         Set<ObjectId> haves = new LinkedHashSet<>();
         for (RefUpdate update : updates) {
@@ -104,22 +106,17 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             return;
         }
         if (received.isPresent()) {
-            GitObjectGraph graph = new GitObjectGraph(repository.storage());
+            GitObjectGraph graph = new GitObjectGraph(repository.storage(), repository.index());
             Set<ObjectId> required = graph.reachableObjects(wants, false);
             required.removeAll(graph.reachableObjects(haves, true));
             PackChecksum id = received.orElseThrow();
-            if (repository.storage().packObjectIds(id).containsAll(required)) {
-                Optional<Boolean> sent = repository.storage().readPack(id, (size, input) -> {
-                    byte[] buffer = new byte[8192];
-                    ByteBuffer source;
-                    while ((source = input.buffer()) != null) {
-                        int count = Math.min(source.remaining(), buffer.length);
-                        source.get(buffer, 0, count);
-                        output.write(buffer, 0, count);
-                    }
-                    return true;
-                });
-                if (sent.isPresent()) {
+            for (PackMetadata pack : repository.index().packs(id)) {
+                Set<ObjectId> covered = new LinkedHashSet<>();
+                for (IndexedObject object : repository.index().objects(pack.packId())) {
+                    covered.add(object.objectId());
+                }
+                if (covered.containsAll(required)) {
+                    repository.writePack(pack, output);
                     output.flush();
                     return;
                 }

@@ -25,6 +25,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -248,7 +249,7 @@ class FetchNegotiatorRequestTest {
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
             GitIndexApi index = new InMemoryIndex();
-            PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
+            PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
             var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
             var plan = negotiate(command, protocol).orElseThrow();
             assertThat(plan.capabilities()).contains(value(GitCapability.WAIT_FOR_DONE));
@@ -265,7 +266,7 @@ class FetchNegotiatorRequestTest {
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
             GitIndexApi index = new InMemoryIndex();
-            PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
+            PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
             var command = new FetchCommand(storage, index, capabilities());
             assertThat(negotiate(command, protocol)).isEmpty();
             assertThat(bytes.toString(StandardCharsets.UTF_8))
@@ -324,7 +325,8 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
-            var checks = new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities()) {
+            var checks = new NegotiationContext(request, FetchTestSupport.storage(directory),
+                    new InMemoryIndex(), capabilities()) {
                 @Override
                 public boolean objectExists(ObjectId objectId) {
                     assertThat(objectId).isEqualTo(common);
@@ -464,7 +466,7 @@ class FetchNegotiatorRequestTest {
                     value("custom-feature", "value"));
             first.wants().clear();
             first.capabilities().add(value(GitCapability.WAIT_FOR_DONE));
-            first.setDepth(java.util.OptionalInt.of(3));
+            first.setDepth(OptionalInt.of(3));
             assertThat(first.wants()).isEmpty();
             assertThat(first.waitForDone()).isTrue();
             assertThat(first.depth().getAsInt()).isEqualTo(3);
@@ -499,7 +501,8 @@ class FetchNegotiatorRequestTest {
     }
 
     private static NegotiationContext checks(FetchRequest request, boolean ready, GitCapability... advertised) {
-        return new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities(advertised)) {
+        return new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), capabilities(advertised)) {
             @Override
             public boolean objectExists(ObjectId objectId) {
                 return objectId.equals(new ObjectId(HAVE));

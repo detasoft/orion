@@ -10,7 +10,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -104,13 +106,14 @@ class FetchProtocolInteroperabilityTest {
             GitRemoteRepository remote = seed(server, source);
             RepositorySnapshot before = server.snapshot(remote);
             String want = "want " + source.head();
-            try (IndexedPack pack = fetch(remote, List.of(want, "done"))) {
+            try (GitIndexApi pack = fetch(remote, List.of(want, "done"))) {
                 RepositorySnapshot.Commit commit = before.commits().get(source.head());
-                assertThat(pack.objectIds()).contains(new ObjectId(source.head()), new ObjectId(commit.tree()),
+                assertThat(pack.objects(pack.packs().getFirst().packId()))
+                        .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()), new ObjectId(commit.tree()),
                         new ObjectId(commit.entries().get("README.md").objectId()));
             }
-            try (IndexedPack pack = fetch(remote, List.of(want, "have " + source.head(), "done"))) {
-                assertThat(pack.entryCount()).isZero();
+            try (GitIndexApi pack = fetch(remote, List.of(want, "have " + source.head(), "done"))) {
+                assertThat(pack.packs().getFirst().objectCount()).isZero();
             }
             assertThat(before.difference(server.snapshot(remote))).isNull();
         }
@@ -128,15 +131,16 @@ class FetchProtocolInteroperabilityTest {
                     List.of("want " + source.head(), "deepen 0", "done"),
                     List.of("want " + "1".repeat(40), "done"))) {
                 assertThatThrownBy(() -> {
-                    try (IndexedPack ignored = fetch(remote, arguments)) {
+                    try (GitIndexApi ignored = fetch(remote, arguments)) {
                         // A completed pack would mean that the invalid request was accepted.
                     }
                 }).isInstanceOf(IOException.class)
                         .isNotInstanceOf(SocketTimeoutException.class)
                         .isNotInstanceOf(HttpTimeoutException.class);
                 assertThat(before.difference(server.snapshot(remote))).isNull();
-                try (IndexedPack pack = fetch(remote, List.of("want " + source.head(), "done"))) {
-                    assertThat(pack.objectIds()).contains(new ObjectId(source.head()));
+                try (GitIndexApi pack = fetch(remote, List.of("want " + source.head(), "done"))) {
+                    assertThat(pack.objects(pack.packs().getFirst().packId()))
+                            .extracting(IndexedObject::objectId).contains(new ObjectId(source.head()));
                 }
             }
         }
@@ -169,7 +173,7 @@ class FetchProtocolInteroperabilityTest {
         return refs;
     }
 
-    private static IndexedPack fetch(GitRemoteRepository remote, List<String> arguments) throws Exception {
+    private static GitIndexApi fetch(GitRemoteRepository remote, List<String> arguments) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         boolean packfile = false;
         for (GitPktLine packet : exchange(remote, "fetch", arguments)) {
@@ -187,10 +191,12 @@ class FetchProtocolInteroperabilityTest {
         if (!packfile) {
             throw new IOException("Fetch ended without a packfile section");
         }
+        GitIndexApi index = new InMemoryIndex();
         try (InMemoryStorage storage = new InMemoryStorage();
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
-            return ingestor.ingest();
+             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+            index.publishIndex(ingestor.ingest());
+            return index;
         }
     }
 

@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 
 import java.io.IOException;
@@ -58,7 +58,7 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     @Override
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
         Set<ObjectId> wants = context.wantedObjects();
-        GitObjectGraph graph = new GitObjectGraph(storage());
+        GitObjectGraph graph = new GitObjectGraph(storage(), index());
         Set<ObjectId> unresolvedLegacyWants = new LinkedHashSet<>();
         if (context.request().mode() != FetchRequest.Mode.PROTOCOL_V2) {
             unresolvedLegacyWants.addAll(wants);
@@ -104,10 +104,10 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     }
 
     @Override
-    public List<RefUpdateResult> publish(Optional<MutableIndexedPack> pack, List<RefUpdate> updates, boolean atomic)
+    public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
         Optional<PackChecksum> received = pack.isPresent()
-                ? Optional.of(storage().persist(pack.orElseThrow())) : Optional.empty();
+                ? Optional.of(repository.publishPack(pack.orElseThrow()).packChecksum()) : Optional.empty();
         return NativeGitReceivePack.complete(name, repository, updates, atomic, accessHook,
                 accepted -> provider.publish(repository, received, accepted, atomic));
     }

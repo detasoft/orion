@@ -9,7 +9,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -22,7 +21,6 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashSet;
@@ -43,15 +41,13 @@ class FetchPackTest {
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory);
              GitIndexApi index = new LocalGitIndex(directory)) {
-            ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
+            ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
             byte[] rootBytes = commit(tree);
-            ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, rootBytes);
+            ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, rootBytes);
             byte[] tipBytes = commit(tree, root);
-            ObjectId tip = PackTestData.store(storage, GitObjectType.COMMIT, tipBytes);
-            PackChecksum rootPack = storage.findPacksByObjectIds(List.of(root)).get(root).getFirst();
-            String hex = rootPack.toHex();
-            Path rootPath = directory.resolve("packs").resolve(hex.substring(0, 2))
-                    .resolve(hex.substring(2) + ".pack");
+            ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, tipBytes);
+            Path rootPath = directory.resolve("packs")
+                    .resolve("pack-" + index.locations(root).getFirst().packId() + ".data");
             FetchPlan commonOnly = plan(Set.of(), Set.of(root), Set.of(), OptionalInt.empty());
             FetchPlan wanted = plan(Set.of(tip), Set.of(root), Set.of(), OptionalInt.empty());
             long commonReads = contentReads(storage, index, commonOnly, rootPath, "common.jfr");
@@ -74,11 +70,11 @@ class FetchPackTest {
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
-            ObjectId tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
-            ObjectId root = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree));
-            ObjectId boundary = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, root));
-            ObjectId common = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, boundary));
-            ObjectId tip = PackTestData.store(storage, GitObjectType.COMMIT, commit(tree, common));
+            ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
+            ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree));
+            ObjectId boundary = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, root));
+            ObjectId common = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, boundary));
+            ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, common));
             FetchPack ordinary = FetchPack.prepare(storage, index,
                     plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.empty()));
             assertThat(ordinary.objectCount()).isEqualTo(1);
@@ -146,19 +142,14 @@ class FetchPackTest {
              GitIndexApi index = new LocalGitIndex(directory)) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
-            ObjectId firstId = PackTestData.store(storage, GitObjectType.BLOB, first);
-            ObjectId secondId = PackTestData.store(storage, GitObjectType.BLOB, second);
+            ObjectId firstId = PackTestData.store(storage, index, GitObjectType.BLOB, first);
+            ObjectId secondId = PackTestData.store(storage, index, GitObjectType.BLOB, second);
             FetchPlan plan = new FetchPlan(new LinkedHashSet<>(List.of(secondId, firstId)), Map.of(),
                     Set.of(), Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
                     new GitCapabilities(), Set.of());
             FetchPack pack = FetchPack.prepare(storage, index, plan);
             assertThat(pack.objectCount()).isEqualTo(2);
-            for (PackChecksum id : storage.packIds()) {
-                String hex = id.toHex();
-                Path indexPath = directory.resolve("packs").resolve(hex.substring(0, 2))
-                        .resolve(hex.substring(2) + ".mv");
-                Files.move(indexPath, indexPath.resolveSibling(indexPath.getFileName() + ".saved"));
-            }
+            index.close();
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
                 pack.writeTo(writer);

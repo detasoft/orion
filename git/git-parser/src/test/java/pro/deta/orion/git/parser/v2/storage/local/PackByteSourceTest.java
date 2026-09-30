@@ -1,9 +1,10 @@
 package pro.deta.orion.git.parser.v2.storage.local;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
 import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
@@ -21,6 +22,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PackByteSourceTest {
+    private final InMemoryStorage memoryStorage = new InMemoryStorage();
+
+    @AfterEach
+    void closeMemory() throws IOException {
+        memoryStorage.close();
+    }
+
     @TempDir
     Path directory;
 
@@ -69,17 +77,6 @@ class PackByteSourceTest {
             return FilePackDataStorage.open(directory.resolve("pack"),
                     StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
         }
-        MutableIndexedPack pack = new InMemoryStorage().newPack();
-        return new PackDataStorage() {
-            private boolean open = true;
-
-            public int read(long offset, ByteBuffer target) throws IOException { return pack.read(offset, target); }
-            public void write(long offset, ByteBuffer source) throws IOException { pack.write(offset, source); }
-            public long size() throws IOException { return pack.size(); }
-            public void truncate(long size) throws IOException { pack.truncate(size); }
-            public void flush() throws IOException { pack.flush(); }
-            public boolean isOpen() { return open; }
-            public void close() throws IOException { open = false; pack.close(); }
-        };
+        return memoryStorage.newPack(PackId.create());
     }
 }

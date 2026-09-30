@@ -2,10 +2,13 @@ package pro.deta.orion.git.parser.v2.pack;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -13,6 +16,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.zip.Deflater;
@@ -77,6 +81,16 @@ public final class PackWriter implements AutoCloseable {
             failed = true;
             throw error;
         }
+    }
+
+    public void writeObjects(GitStorageApi storage, List<IndexedObject> objects) throws IOException {
+        for (IndexedObject object : objects) {
+            GitObjectRead.read(storage, object, this::writeCompressed);
+        }
+    }
+
+    public long size() {
+        return position;
     }
 
     public PackChecksum finish() throws IOException {

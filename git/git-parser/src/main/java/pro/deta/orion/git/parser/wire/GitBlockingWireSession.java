@@ -249,7 +249,7 @@ public final class GitBlockingWireSession {
             refs.add(GitAdvertisedRef.direct(snapshot.refs().get(name).toHex(), name.value()));
         }
         if (service == InitialRequestService.UPLOAD_PACK) {
-            GitObjectGraph graph = new GitObjectGraph(repository.storage());
+            GitObjectGraph graph = new GitObjectGraph(repository.storage(), repository.index());
             for (int index = 0; index < refs.size(); index++) {
                 GitAdvertisedRef ref = refs.get(index);
                 Optional<ObjectId> peeled = graph.peel(new ObjectId(ref.objectId()));

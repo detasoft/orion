@@ -10,22 +10,20 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,49 +45,10 @@ class InMemoryStorageTest {
     private static final RefId SECOND = new RefId("refs/heads/second");
 
     @Test
-    void completesSeveralExternalBasesIdenticallyAndTransfersBetweenBackends() throws Exception {
-        try (GitStorageApi memory = new InMemoryStorage();
-             GitStorageApi disk = new LocalGitStorage(directory)) {
-            List<ObjectId> bases = new ArrayList<>();
-            for (byte value : new byte[]{1, 2, 3}) {
-                bases.add(PackTestData.store(memory, GitObjectType.BLOB, new byte[]{value}));
-                PackTestData.store(disk, GitObjectType.BLOB, new byte[]{value});
-            }
-            bases.sort(Comparator.comparing(ObjectId::toHex).reversed());
-            byte[][] deltas = new byte[bases.size()][];
-            for (int i = 0; i < deltas.length; i++) {
-                deltas[i] = PackTestData.delta(bases.get(i), new byte[]{1, 1, 1, (byte) (10 + i)});
-            }
-            byte[] source = PackTestData.pack(deltas);
-            try (MutableIndexedPack memoryPack = PackTestData.ingest(source, memory.newPack());
-                 MutableIndexedPack diskPack = PackTestData.ingest(source, disk.newPack())) {
-                PackChecksum completed = new GitPackObjectResolver(memoryPack, memory).complete();
-                assertThat(new GitPackObjectResolver(diskPack, disk).complete()).isEqualTo(completed);
-                assertThat(PackTestData.bytes(memoryPack)).isEqualTo(PackTestData.bytes(diskPack));
-                MutableIndexedPack toDisk = PackTestData.ingest(memoryPack, disk.newPack());
-                MutableIndexedPack toMemory = PackTestData.ingest(diskPack, memory.newPack());
-                for (MutableIndexedPack replay : List.of(toDisk, toMemory)) {
-                    assertThat(new GitPackObjectResolver(replay, memory).complete()).isEqualTo(completed);
-                    assertThat(replay.objectIds()).isEqualTo(memoryPack.objectIds());
-                    assertThat(replay.checksumMatches(completed)).isTrue();
-                }
-                disk.persist(toDisk);
-                memory.persist(toMemory);
-                for (GitStorageApi storage : List.of(memory, disk)) {
-                    ObjectId result = PackTestData.objectId(GitObjectType.BLOB, new byte[]{12});
-                    assertThat(storage.readObject(result, new ResolvedGitObjectRead<byte[]>(storage,
-                            (type, size, base, input) -> input.readBytes((int) size))))
-                            .hasValueSatisfying(bytes -> assertThat(bytes).containsExactly(12));
-                }
-            }
-        }
-    }
-
-    @Test
     void preservesRefResultOrderAndAtomicFailurePrecedence() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
-            ObjectId old = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            ObjectId next = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
+            ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
             ObjectId absent = new ObjectId("a".repeat(40));
             assertThat(GitRepositoryContext.publishRefs(
                     storage, index, List.of(update(FIRST, null, old)), true).getFirst().status())
@@ -122,8 +81,8 @@ class InMemoryStorageTest {
     void admitsOnlyOneConcurrentExpectedOldWinner() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            ObjectId old = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            ObjectId next = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
+            ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
             index.updateRefs(List.of(update(FIRST, null, old)), true);
             CyclicBarrier start = new CyclicBarrier(2);
             List<Future<RefUpdateResult.Status>> attempts = new ArrayList<>();
@@ -142,8 +101,8 @@ class InMemoryStorageTest {
     void snapshotsNeverExposePartOfAnAtomicBatch() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            ObjectId first = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            ObjectId second = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{2});
+            ObjectId first = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId second = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
             index.updateRefs(List.of(update(FIRST, null, first), update(SECOND, null, first)), true);
             CountDownLatch start = new CountDownLatch(1);
             Future<?> writer = executor.submit(() -> {
@@ -173,9 +132,9 @@ class InMemoryStorageTest {
     void callbacksReleaseRepositoryLockAndFailuresPreservePublishedPacks() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            PackChecksum published = storage.packIds().getFirst();
-            assertThat(storage.readObject(object, (type, size, base, input) -> {
+            ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            PackMetadata published = index.packs().getFirst();
+            assertThat(GitObjectRead.read(storage, index, object, (type, size, base, input) -> {
                 try {
                     return executor.submit(() -> index.updateRefs(List.of(update(FIRST, null, object)), true))
                             .get(5, TimeUnit.SECONDS).getFirst().status();
@@ -183,11 +142,10 @@ class InMemoryStorageTest {
                     throw new IOException(failure);
                 }
             })).contains(APPLIED);
-            MutableIndexedPack unfinished = storage.newPack();
-            assertThatThrownBy(() -> storage.persist(unfinished)).isInstanceOf(IOException.class);
-            assertThatThrownBy(unfinished::size).isInstanceOf(ClosedChannelException.class);
-            assertThat(storage.packIds()).containsExactly(published);
-            assertThat(storage.exists(object)).isTrue();
+            assertThatThrownBy(() -> PackTestData.ingest(new byte[0], storage, index))
+                    .isInstanceOf(IOException.class);
+            assertThat(index.packs()).containsExactly(published);
+            assertThat(GitObjectRead.exists(storage, index, object)).isTrue();
         }
     }
 
@@ -199,40 +157,39 @@ class InMemoryStorageTest {
              firstIndex;
              GitStorageApi second = new InMemoryStorage();
              GitIndexApi secondIndex = new InMemoryIndex()) {
-            ObjectId object = PackTestData.store(first, GitObjectType.BLOB, new byte[]{1});
+            ObjectId object = PackTestData.store(first, firstIndex, GitObjectType.BLOB, new byte[]{1});
             Head detached = new Head.Detached(new CommitId(object.toBytes()));
             firstIndex.updateHead(detached);
             assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
             assertThat(secondIndex.snapshotRefs().head()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
-            assertThat(second.exists(object)).isFalse();
-            assertThat(second.packIds()).isEmpty();
+            assertThat(GitObjectRead.exists(second, secondIndex, object)).isFalse();
+            assertThat(secondIndex.packs()).isEmpty();
             assertThatThrownBy(() -> firstIndex.updateHead(new Head.Symbolic(new RefId("HEAD"))))
                     .isInstanceOf(IllegalArgumentException.class);
-            MutableIndexedPack attempt = PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
-                    first.newPack());
-            new GitPackObjectResolver(attempt, first).complete();
+            PackMetadata attempt = PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
+                    first, firstIndex);
             first.close();
-            assertThatThrownBy(() -> first.persist(attempt)).isInstanceOf(ClosedChannelException.class);
-            assertThatThrownBy(attempt::size).isInstanceOf(ClosedChannelException.class);
+            assertThatThrownBy(() -> first.exists(attempt.packId())).isInstanceOf(ClosedChannelException.class);
             assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
             firstIndex.close();
             assertThatThrownBy(firstIndex::snapshotRefs).isInstanceOf(ClosedChannelException.class);
-            assertThatThrownBy(first::newPack).isInstanceOf(ClosedChannelException.class);
-            assertThat(second.packIds()).isEmpty();
+            assertThatThrownBy(() -> first.newPack(PackId.create())).isInstanceOf(ClosedChannelException.class);
+            assertThat(secondIndex.packs()).isEmpty();
         }
     }
 
     @Test
     void closingIndexLeavesStoredObjectsReadable() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
-            ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
+            ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
             assertThat(index.updateRefs(List.of(update(FIRST, null, object)), true).getFirst().status())
                     .isEqualTo(APPLIED);
+            IndexedObject location = index.locations(object).getFirst();
             index.close();
             assertThatThrownBy(index::snapshotRefs).isInstanceOf(ClosedChannelException.class);
-            assertThat(storage.exists(object)).isTrue();
-            assertThat(storage.readObject(object, (type, size, base, input) -> type))
-                    .contains(GitObjectType.BLOB);
+            assertThat(storage.exists(location.packId())).isTrue();
+            assertThat(GitObjectRead.<GitObjectType>read(storage, location, (type, size, base, input) -> type))
+                    .isEqualTo(GitObjectType.BLOB);
         }
     }
 

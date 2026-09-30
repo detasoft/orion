@@ -26,6 +26,9 @@ final class FilePackDataStorage implements PackDataStorage {
 
     @Override
     public void write(long offset, ByteBuffer source) throws IOException {
+        if (offset < 0) {
+            throw new IllegalArgumentException("Negative pack offset");
+        }
         while (source.hasRemaining()) {
             int count = channel.write(source, offset);
             if (count <= 0) {

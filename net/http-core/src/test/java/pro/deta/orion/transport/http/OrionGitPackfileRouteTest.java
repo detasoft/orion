@@ -14,15 +14,15 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.util.Result;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -193,8 +193,8 @@ class OrionGitPackfileRouteTest {
         }
         byte[] packBytes = bytes.toByteArray();
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            return new PublishedPackFixture(repository.storage().persist(pack), packBytes);
+            PackMetadata pack = repository.ingest(input);
+            return new PublishedPackFixture(repository.publishPack(pack).packChecksum(), packBytes);
         }
     }
 

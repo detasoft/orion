@@ -2,7 +2,6 @@ package pro.deta.orion.git.nativestorage;
 
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitFileApi;
-import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
@@ -14,13 +13,16 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
@@ -115,7 +117,7 @@ public class NativeGitRepository implements AutoCloseable {
             writer.writeObject(objectType, data.length, content);
             writer.finish();
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
-                storage().persist(ingest(input));
+                publishPack(ingest(input));
             }
             return id;
         } catch (IOException failure) {
@@ -125,7 +127,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     public Optional<LooseObject> readObject(ObjectId id) {
         try {
-            return storage().readObject(id, new ResolvedGitObjectRead<>(storage(),
+            return GitObjectRead.read(storage(), index(), id, new ResolvedGitObjectRead<>(storage(), index(),
                     (type, size, base, input) -> new LooseObject(id, type,
                             input.readBytes(Math.toIntExact(size)))));
         } catch (IOException failure) {
@@ -133,9 +135,25 @@ public class NativeGitRepository implements AutoCloseable {
         }
     }
 
-    public MutableIndexedPack ingest(BufferedByteInputV2 input) throws IOException {
-        try (PackIngestor ingestor = new PackIngestor(input, storage().newPack(), storage())) {
+    public PackMetadata ingest(BufferedByteInputV2 input) throws IOException {
+        try (PackIngestor ingestor = new PackIngestor(input, storage(), index())) {
             return ingestor.ingest();
+        }
+    }
+
+    public PackMetadata publishPack(PackMetadata pack) throws IOException {
+        if (!storage().exists(pack.packId())) {
+            throw new IOException("Cannot publish missing pack: " + pack.packId());
+        }
+        return index().publishIndex(pack);
+    }
+
+    public void writePack(PackMetadata pack, BufferedByteOutput output) throws IOException {
+        try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+            writer.writeObjects(storage(), index().objects(pack.packId()));
+            if (!writer.finish().equals(pack.packChecksum())) {
+                throw new IOException("Exported pack checksum differs from published metadata");
+            }
         }
     }
 
@@ -144,7 +162,7 @@ public class NativeGitRepository implements AutoCloseable {
         accessHook.beforeReceive(name());
         accessHook.beforeWrite(name());
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            PackChecksum id = storage().persist(ingest(input));
+            PackChecksum id = publishPack(ingest(input)).packChecksum();
             return NativeGitReceivePack.complete(name(), this, updates, atomic, accessHook,
                     valid -> publishReceivedPack(Optional.of(id), valid, atomic));
         } catch (IOException failure) {
@@ -198,7 +216,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     public boolean hasCompleteObjectClosure(ObjectId root) {
         try {
-            return new GitObjectGraph(storage()).hasCompleteClosure(root);
+            return new GitObjectGraph(storage(), index()).hasCompleteClosure(root);
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

@@ -18,7 +18,7 @@ import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.client.GitUploadPackResult;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
@@ -109,9 +109,9 @@ class RawPackInteroperabilityTest {
                 .doesNotContain("side-band", "side-band-64k");
         assertThat(result.packBytes()).isEqualTo(bytes.size());
         assertThat(bytes.toByteArray()).startsWith("PACK".getBytes(StandardCharsets.US_ASCII));
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-             MutableIndexedPack pack = copy.ingest(input)) {
-            copy.storage().persist(pack);
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
+                PackMetadata pack = copy.ingest(input);
+            copy.publishPack(pack).packChecksum();
         }
     }
 

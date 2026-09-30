@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -194,11 +195,13 @@ class FetchCapabilitiesTest {
         var advertised = capabilities(FILTER);
         var request = request(true);
         request.setFilter(Optional.of("blob:none"));
-        var context = new NegotiationContext(request, FetchTestSupport.storage(directory), advertised);
+        var context = new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), advertised);
         advertised.clear();
         new FetchNegotiatorIterator(context, HTTP);
 
-        var denied = new NegotiationContext(request, FetchTestSupport.storage(directory), advertised) {
+        var denied = new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), advertised) {
             @Override
             public boolean objectExists(ObjectId id) {
                 throw new AssertionError("Unsupported request must not query storage");
@@ -221,6 +224,7 @@ class FetchCapabilitiesTest {
 
     private static void validate(FetchRequest request, GitCapabilities advertised, GitTransport transport)
             throws IOException {
-        new FetchNegotiatorIterator(new NegotiationContext(request, FetchTestSupport.storage(directory), advertised), transport);
+        new FetchNegotiatorIterator(new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), advertised), transport);
     }
 }

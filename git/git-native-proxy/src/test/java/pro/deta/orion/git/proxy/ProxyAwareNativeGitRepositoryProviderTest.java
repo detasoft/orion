@@ -5,9 +5,9 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientFailure;
 import pro.deta.orion.git.client.GitClientTransportException;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -16,10 +16,12 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitCredentialKind;
@@ -28,13 +30,17 @@ import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -61,7 +67,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var update = repository.files().prepareFileUpdate("refs/heads/main",
                 Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                 "public push", GitCommitAuthor.EMPTY);
-        var authorizedNames = new java.util.ArrayList<String>();
+        var authorizedNames = new ArrayList<String>();
         var statuses = provider.publishPack(endpoint, update.pack(), update.refUpdates(), true,
                 new GitNativeRepositoryAccessHook() {
                     @Override
@@ -128,8 +134,8 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void retriesOnlyTheSelectedAliasAndRetainsFailedBindingsForRecovery() {
-        var visited = new java.util.ArrayList<String>();
-        var unavailable = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var visited = new ArrayList<String>();
+        var unavailable = new AtomicBoolean(true);
         var provider = new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(),
                 new BootstrapSecretResolver(Map.of()), (location, transport, repository) -> {
                     visited.add(location.remoteUri().getPath());
@@ -221,14 +227,16 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
     @Test
     void passesPreparedPackUnchangedToTheUpstreamPusher() throws Exception {
-        java.util.ArrayList<byte[]> forwarded = new java.util.ArrayList<>();
+        ArrayList<byte[]> forwarded = new ArrayList<>();
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
                 new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> {
-                    forwarded.add(repository.storage().readPack(received.orElseThrow(),
-                            (size, input) -> input.newInputStream().readAllBytes()).orElseThrow());
-                    return java.util.Collections.nCopies(updates.size(), true);
+                    ByteArrayOutputStream exported = new ByteArrayOutputStream();
+                    repository.writePack(repository.index().packs(received.orElseThrow()).getFirst(),
+                            new OutputStreamBufferedByteOutput(exported));
+                    forwarded.add(exported.toByteArray());
+                    return Collections.nCopies(updates.size(), true);
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
@@ -440,7 +448,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 "delete configuration", GitCommitAuthor.EMPTY);
         assertThat(pushes).hasValue(2);
         assertThatThrownBy(() -> repository.files().loadFiles("refs/heads/main", List.of("orion.xml")))
-                .isInstanceOf(pro.deta.orion.git.nativestorage.GitOperationException.class);
+                .isInstanceOf(GitOperationException.class);
     }
 
     @Test
@@ -452,7 +460,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         NativeGitRepository repository = provider.openForRead(repositoryName).valueOrFailure("open proxy");
         repository.refs();
         repository.readObject(new ObjectId("0".repeat(40)));
-        repository.storage().exists(new ObjectId("0".repeat(40)));
+        GitObjectRead.exists(repository.storage(), repository.index(), new ObjectId("0".repeat(40)));
 
         assertThat(refreshes).hasValue(2);
     }
@@ -485,7 +493,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 "delete configuration", GitCommitAuthor.EMPTY);
         assertThat(pushes).hasValue(2);
         assertThatThrownBy(() -> repository.files().loadFiles("refs/heads/main", List.of("orion.xml")))
-                .isInstanceOf(pro.deta.orion.git.nativestorage.GitOperationException.class);
+                .isInstanceOf(GitOperationException.class);
     }
 
     @Test
@@ -498,7 +506,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> refreshes.incrementAndGet(),
                 (location, transport, repository, received, updates, atomic) ->
-                        java.util.Collections.nCopies(updates.size(), true));
+                        Collections.nCopies(updates.size(), true));
 
         provider.saveFiles(
                 "local",
@@ -775,7 +783,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 backend, new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) ->
-                        java.util.Collections.nCopies(updates.size(), true));
+                        Collections.nCopies(updates.size(), true));
     }
 
     private static ProxyAwareNativeGitRepositoryProvider provider(
@@ -794,7 +802,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 (location, transport, repository) -> refreshes.incrementAndGet(),
                 (location, transport, repository, received, updates, atomic) -> {
                     pushes.incrementAndGet();
-                    return java.util.Collections.nCopies(updates.size(), true);
+                    return Collections.nCopies(updates.size(), true);
                 });
     }
 

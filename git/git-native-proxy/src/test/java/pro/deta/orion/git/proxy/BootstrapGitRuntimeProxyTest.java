@@ -4,17 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.decision.ConnectionFailureHandler;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequiredException;
-import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.PrincipalAddress;
-import pro.deta.orion.schema.orion.RemoteAlias;
-import pro.deta.orion.util.Result;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -22,12 +16,20 @@ import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -58,10 +60,10 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
                 repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (ignoredLocation, ignoredTransport, ignoredRepository) -> refreshes.incrementAndGet(),
                 (ignoredLocation, ignoredTransport, ignoredRepository, received, updates, atomic) ->
-                        java.util.Collections.nCopies(updates.size(), false));
+                        Collections.nCopies(updates.size(), false));
 
         List<RefUpdateResult> results = proxy.publish(
                 ingest(repository, update),
@@ -97,7 +99,7 @@ class BootstrapGitRuntimeProxyTest {
                     List.of(new DecisionAction("Trust", false, principal -> Result.of(null))));
             DecisionRequiredException required = new DecisionRequiredException(decision, origin);
             BootstrapGitTransportFactory factory = BootstrapGitTransportFactory.persistent(() -> document, secrets,
-                    new pro.deta.orion.decision.ConnectionFailureHandler(registry), null);
+                    new ConnectionFailureHandler(registry), null);
             AtomicInteger publications = new AtomicInteger();
             BootstrapGitRuntimeProxy runtime = new BootstrapGitRuntimeProxy(location, repository, factory,
                     (selected, transport, target) -> { if (failFetch) throw required; },
@@ -130,8 +132,8 @@ class BootstrapGitRuntimeProxyTest {
 
     private static Optional<PackChecksum> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            return Optional.of(repository.storage().persist(pack));
+            PackMetadata pack = repository.ingest(input);
+            return Optional.of(repository.publishPack(pack).packChecksum());
         }
     }
 }

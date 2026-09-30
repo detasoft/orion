@@ -4,128 +4,77 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
-import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.ClosedChannelException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Optional;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class PackCompletionTest {
     @TempDir
     Path directory;
 
     @Test
-    void leavesSelfContainedAndEmptyPacksUnchanged() throws Exception {
-        for (byte[] pack : new byte[][]{pack(), pack(full(new byte[]{1, 2, 3}))}) {
-            try (var attempt = new Attempt(pack)) {
-                PackChecksum received = checksum(Files.readAllBytes(attempt.packPath));
-                assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                        .isEqualTo(received);
-                assertThat(Files.readAllBytes(attempt.packPath)).containsExactly(pack);
-                assertThat(Files.exists(attempt.temporaryPath)).isFalse();
+    void preservesSelfContainedAndEmptyGitExports() throws Exception {
+        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+            for (byte[] bytes : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
+                PackMetadata metadata = ingest(bytes, storage, index);
+                byte[] exported = bytes(metadata, storage, index);
+                assertThat(exported).containsExactly(bytes);
+                Path path = directory.resolve(metadata.packId() + ".pack");
+                Files.write(path, exported);
+                assertGitIndexes(path);
             }
         }
     }
 
     @Test
-    void appendsOneSharedBaseChangesPackIdAndProducesAPackGitCanIndexWithoutExternalObjects() throws Exception {
+    void appendsSharedExternalBaseOnceAndExportsPackThatGitCanIndex() throws Exception {
         byte[] base = new byte[30_000];
-        new java.util.Random(17).nextBytes(base);
-        byte[] result = {1, 2, 4};
-        byte[] otherResult = {1, 2, 5};
-        ObjectId baseId = objectId(base);
-        byte[] delta = delta(baseId, join(size(base.length), new byte[]{3, 3, 1, 2, 4}));
-        byte[] otherDelta = delta(baseId, join(size(base.length), new byte[]{3, 3, 1, 2, 5}));
-        byte[] original = pack(delta, otherDelta);
-        try (var attempt = new Attempt(original)) {
-            PackTestData.store(attempt.storage, GitObjectType.BLOB, base);
-
-            PackChecksum received = checksum(Files.readAllBytes(attempt.packPath));
-            PackChecksum completed = new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
-            assertThat(attempt.pack.find(objectId(result))).isPresent();
-            assertThat(attempt.pack.find(objectId(otherResult))).isPresent();
-            byte[] output = Files.readAllBytes(attempt.packPath);
-            assertThat(completed).isNotEqualTo(received);
-            assertThat(completed).isEqualTo(checksum(output));
+        new Random(17).nextBytes(base);
+        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+            ObjectId baseId = store(storage, index, GitObjectType.BLOB, base);
+            byte[] original = pack(delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 4}),
+                    delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 5}));
+            PackMetadata metadata = ingest(original, storage, index);
+            byte[] output = bytes(metadata, storage, index);
+            assertThat(metadata.objectCount()).isEqualTo(3);
+            assertThat(metadata.packChecksum().toBytes())
+                    .isNotEqualTo(Arrays.copyOfRange(original, original.length - 20, original.length));
             assertThat(ByteBuffer.wrap(output).getInt(8)).isEqualTo(3);
             assertThat(Arrays.copyOfRange(output, 12, original.length - 20))
                     .containsExactly(Arrays.copyOfRange(original, 12, original.length - 20));
-            var appended = attempt.pack.find(baseId).orElseThrow();
-            assertThat(appended.offset()).isEqualTo(original.length - 20);
-            assertThat(appended.type()).isEqualTo(GitObjectType.BLOB);
-            attempt.pack.close();
-            try (var index = LocalIndexedPack.open(attempt.packPath, attempt.indexPath)) {
-                assertThat(index.find(baseId)).contains(appended);
-            }
-            assertGitIndexes(attempt.packPath);
+            assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
+            Path path = directory.resolve("shared.pack");
+            Files.write(path, output);
+            assertGitIndexes(path);
         }
     }
 
     @Test
-    void rejectsRepeatedObjectsThatGitCannotIndex() throws Exception {
-        byte[] object = full(new byte[]{1, 2, 3});
-        try (var attempt = new Attempt(pack(object, object))) {
-            assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                    .isInstanceOf(IOException.class).hasMessageContaining("duplicate");
-        }
-    }
-
-    @Test
-    void restoresAPublishedDeltaBaseAndAppendsItsFullContent() throws Exception {
+    void restoresPublishedDeltaBaseAndExportsOnlyItsFullContent() throws Exception {
         byte[] root = {1, 2, 3};
         byte[] base = {1, 2, 4};
-        ObjectId rootId = objectId(root);
-        ObjectId baseId = objectId(base);
-        try (var attempt = new Attempt(pack(delta(baseId, new byte[]{3, 1, 1, 9})))) {
-            PackTestData.storeDelta(attempt.storage, GitObjectType.BLOB, root,
+        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+            ObjectId baseId = storeDelta(storage, index, GitObjectType.BLOB, root,
                     new byte[]{3, 3, 3, 1, 2, 4}, base);
-
-            new GitPackObjectResolver(attempt.pack, attempt.storage).complete();
-            assertThat(attempt.pack.find(baseId).orElseThrow().type()).isEqualTo(GitObjectType.BLOB);
-            assertThat(attempt.pack.find(rootId)).isEmpty();
-            attempt.pack.close();
-            assertGitIndexes(attempt.packPath);
-        }
-    }
-
-    @Test
-    void missingBaseFailsAndClosesTheUnpublishableAttempt() throws Exception {
-        ObjectId base = objectId(new byte[]{1, 2, 3});
-        try (Attempt attempt = new Attempt(pack(delta(base, new byte[]{3, 1, 1, 9})))) {
-            assertThatThrownBy(() -> new GitPackObjectResolver(attempt.pack, attempt.storage).complete())
-                    .isInstanceOf(IOException.class).hasMessageContaining("unresolved");
-            assertThatThrownBy(attempt.pack::size).isInstanceOf(ClosedChannelException.class);
-            assertThat(Files.exists(attempt.temporaryPath)).isFalse();
-        }
-    }
-
-    @Test
-    void recalculatesChecksumAfterAnAcceptedPackIsChanged() throws Exception {
-        try (Attempt attempt = new Attempt(pack())) {
-            PackChecksum received = attempt.pack.id();
-            attempt.pack.write(attempt.pack.size() - 1, ByteBuffer.wrap(new byte[]{42}));
-            assertThatThrownBy(attempt.pack::id).isInstanceOf(IOException.class);
-            assertThat(new GitPackObjectResolver(attempt.pack, attempt.storage).complete()).isEqualTo(received);
-            assertThat(Files.readAllBytes(attempt.packPath)).containsExactly(pack());
+            PackMetadata metadata = ingest(pack(delta(baseId, new byte[]{3, 1, 1, 9})), storage, index);
+            assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
+            assertThat(index.findObject(metadata.packId(), objectId(GitObjectType.BLOB, root))).isEmpty();
+            Path path = directory.resolve("restored.pack");
+            Files.write(path, bytes(metadata, storage, index));
+            assertGitIndexes(path);
         }
     }
 
@@ -139,9 +88,9 @@ class PackCompletionTest {
     }
 
     private static void runGit(Path directory, String... args) throws Exception {
-        var command = new java.util.ArrayList<String>();
+        var command = new ArrayList<String>();
         command.add("git");
-        command.addAll(java.util.List.of(args));
+        command.addAll(List.of(args));
         var builder = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true);
         builder.environment().keySet().removeIf(name -> name.startsWith("GIT_"));
         Process process = builder.start();
@@ -154,78 +103,4 @@ class PackCompletionTest {
         }
     }
 
-    private static ObjectId objectId(byte[] content) throws Exception {
-        try (var input = new BufferedByteInputV2(new ByteArrayInputStream(compressed(content)))) {
-            return new HashedGitObjectRead().read(GitObjectType.BLOB, content.length, Optional.empty(), input);
-        }
-    }
-
-    private static byte[] full(byte[] content) throws Exception {
-        return join(new byte[]{(byte) (0x30 | content.length)}, compressed(content));
-    }
-
-    private static byte[] size(int value) {
-        var bytes = new ByteArrayOutputStream();
-        do {
-            int part = value & 127;
-            value >>>= 7;
-            bytes.write(part | (value == 0 ? 0 : 128));
-        } while (value != 0);
-        return bytes.toByteArray();
-    }
-
-    private static byte[] delta(ObjectId base, byte[] instructions) throws Exception {
-        return join(new byte[]{(byte) (0x70 | instructions.length)}, base.toBytes(), compressed(instructions));
-    }
-
-    private static byte[] compressed(byte[] content) throws Exception {
-        var output = new ByteArrayOutputStream();
-        try (var zlib = new DeflaterOutputStream(output)) {
-            zlib.write(content);
-        }
-        return output.toByteArray();
-    }
-
-    private static byte[] pack(byte[]... entries) throws Exception {
-        byte[] body = join(ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(entries.length).array(),
-                join(entries));
-        return join(body, MessageDigest.getInstance("SHA-1").digest(body));
-    }
-
-    private static PackChecksum checksum(byte[] pack) throws Exception {
-        byte[] expected = MessageDigest.getInstance("SHA-1").digest(Arrays.copyOf(pack, pack.length - 20));
-        assertThat(Arrays.copyOfRange(pack, pack.length - 20, pack.length)).containsExactly(expected);
-        return new PackChecksum(expected);
-    }
-
-    private static byte[] join(byte[]... parts) {
-        var output = new ByteArrayOutputStream();
-        for (byte[] part : parts) {
-            output.writeBytes(part);
-        }
-        return output.toByteArray();
-    }
-
-    private final class Attempt implements AutoCloseable {
-        private final Path packPath;
-        private final Path indexPath;
-        private final Path temporaryPath;
-        private final GitStorageApi storage;
-        private final MutableIndexedPack pack;
-
-        private Attempt(byte[] bytes) throws IOException {
-            Path parent = Files.createTempDirectory(directory, "attempt-");
-            storage = new LocalGitStorage(parent);
-            Path attempt = parent.resolve("pack");
-            packPath = attempt.resolve("data.pack");
-            indexPath = attempt.resolve("data.mv");
-            temporaryPath = attempt.resolve("data.tmv");
-            pack = PackTestData.ingest(bytes, LocalIndexedPack.create(attempt));
-        }
-
-        @Override
-        public void close() throws IOException {
-            pack.close();
-        }
-    }
 }

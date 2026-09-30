@@ -6,15 +6,19 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -33,46 +37,26 @@ class PackIngestorTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void transfersOwnershipWithoutConsumingProtocolBytes(boolean memory) throws Exception {
+    void completesPrivatePackWithoutConsumingProtocolBytes(boolean memory) throws Exception {
         byte[] wire = pack();
-        ByteBuffer source = ByteBuffer.allocate(wire.length + 1).put(wire).put((byte) 42).flip();
-        MutableIndexedPack target = memory ? new InMemoryStorage().newPack()
-                : LocalIndexedPack.create(directory.resolve("pack"));
-        try (target; BufferedByteInputV2 input = input(source)) {
-            try (PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
-                assertThat(ingestor.ingest()).isSameAs(target);
-                ByteBuffer received = ByteBuffer.allocate(wire.length);
-                assertThat(target.read(0, received)).isEqualTo(wire.length);
-                assertThat(received.array()).containsExactly(wire);
-                PackEntry entry = target.find(12).orElseThrow();
-                assertThat(entry.offset()).isEqualTo(12);
-                assertThat(entry.packOffset()).isEqualTo(13);
-                assertThat(entry.inflatedSize()).isEqualTo(3);
-                assertThat(entry.type()).isEqualTo(GitObjectType.BLOB);
-                MessageDigest hash = MessageDigest.getInstance("SHA-1");
-                hash.update("blob 3\0".getBytes(StandardCharsets.US_ASCII));
-                assertThat(target.find(new ObjectId(hash.digest(new byte[]{1, 2, 3})))).contains(entry);
+        try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
+             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+             BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
+            PackMetadata pack;
+            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                pack = ingestor.ingest();
+                assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
             }
-            assertThat(target.size()).isEqualTo(wire.length);
-            assertThat(input.readUnsignedByte()).isEqualTo(42);
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void checksumFailureDiscardsTheTargetAndLeavesTheInputOpen(boolean memory) throws Exception {
-        byte[] wire = pack();
-        wire[wire.length - 1] ^= 1;
-        ByteBuffer source = ByteBuffer.allocate(wire.length + 1).put(wire).put((byte) 42).flip();
-        MutableIndexedPack target = memory ? new InMemoryStorage().newPack()
-                : LocalIndexedPack.create(directory.resolve("pack"));
-        try (target; BufferedByteInputV2 input = input(source)) {
-            try (PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
-                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
-                        .hasMessage("Pack checksum mismatch");
-            }
-            assertThatThrownBy(target::size).isInstanceOf(java.nio.channels.ClosedChannelException.class);
-            assertThat(Files.exists(directory.resolve("pack"))).isFalse();
+            assertThat(storage.exists(pack.packId())).isTrue();
+            assertThat(index.packs()).isEmpty();
+            ObjectId id = PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
+            assertThat(index.locations(id)).isEmpty();
+            IndexedObject object = index.findObject(pack.packId(), id).orElseThrow();
+            assertThat(object.objectSize()).isEqualTo(3);
+            assertThat(object.packOffset()).isEqualTo(8);
+            assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
+            index.publishIndex(pack);
+            assertThat(index.locations(id)).containsExactly(object);
             assertThat(input.readUnsignedByte()).isEqualTo(42);
         }
     }
@@ -92,91 +76,38 @@ class PackIngestorTest {
             entries.add(PackTestData.entry(types[i], contents.get(i)));
         }
         byte[] wire = PackTestData.pack(entries.toArray(byte[][]::new));
-        try (MutableIndexedPack target = new InMemoryStorage().newPack();
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
              BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize);
-             PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
-            ingestor.ingest();
-            assertThat(PackTestData.bytes(target)).containsExactly(wire);
-            long offset = 12;
+             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+            PackMetadata pack = ingestor.ingest();
+            assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
             for (int i = 0; i < types.length; i++) {
-                PackEntry entry = target.find(offset).orElseThrow();
-                assertThat(entry.type()).isEqualTo(types[i]);
-                assertThat(entry.inflatedSize()).isEqualTo(contents.get(i).length);
-                assertThat(target.find(PackTestData.objectId(types[i], contents.get(i)))).contains(entry);
-                offset += entries.get(i).length;
+                IndexedObject object = index.findObject(pack.packId(),
+                        PackTestData.objectId(types[i], contents.get(i))).orElseThrow();
+                assertThat(object.type()).isEqualTo(types[i]);
+                assertThat(object.objectSize()).isEqualTo(contents.get(i).length);
             }
             assertThat(input.readUnsignedByte()).isEqualTo(42);
-            assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void resolvesOffsetChainAndExposesBaseIdsWithoutRewritingBytes(boolean memory) throws Exception {
-        byte[] first = PackTestData.blob(new byte[]{1});
-        byte[] second = PackTestData.join(new byte[]{0x64, (byte) first.length},
-                PackTestData.compressed(new byte[]{1, 1, 1, 2}));
-        byte[] third = PackTestData.join(new byte[]{0x64, (byte) second.length},
-                PackTestData.compressed(new byte[]{1, 1, 1, 3}));
-        byte[] wire = PackTestData.pack(first, second, third);
-        MutableIndexedPack target = memory ? new InMemoryStorage().newPack()
-                : LocalIndexedPack.create(directory.resolve("pack"));
-        try (target; InMemoryStorage storage = new InMemoryStorage();
-             BufferedByteInputV2 input = input(ByteBuffer.wrap(wire));
-             PackIngestor ingestor = new PackIngestor(input, target, storage)) {
-            ingestor.ingest();
-            assertThat(target.objectCount()).isEqualTo(3);
-            assertThat(target.hasUnresolved()).isFalse();
-            assertThat(target.baseId(12 + first.length))
-                    .contains(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1}));
-            assertThat(target.baseId(12 + first.length + second.length))
-                    .contains(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2}));
-            assertThat(target.objectOffset(PackTestData.objectId(GitObjectType.BLOB, new byte[]{3})))
-                    .isEqualTo(12L + first.length + second.length);
-            assertThat(PackTestData.bytes(target)).containsExactly(wire);
-        }
-    }
-
-    @Test
-    void completesThinPackUsingStorageOnlyAfterVerifyingTrailer() throws Exception {
-        try (InMemoryStorage storage = new InMemoryStorage()) {
-            ObjectId base = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1});
-            byte[] wire = PackTestData.pack(PackTestData.delta(base, new byte[]{1, 1, 1, 2}));
-            try (MutableIndexedPack target = storage.newPack();
-                 BufferedByteInputV2 input = input(ByteBuffer.wrap(wire));
-                 PackIngestor ingestor = new PackIngestor(input, target, storage)) {
-                ingestor.ingest();
-                assertThat(target.objectCount()).isEqualTo(2);
-                assertThat(target.find(base)).isPresent();
-                assertThat(target.find(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2}))).isPresent();
-                assertThat(target.checksumMatches(target.id())).isTrue();
-                assertThat(storage.exists(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2}))).isFalse();
-            }
-            wire[wire.length - 1] ^= 1;
-            try (MutableIndexedPack target = storage.newPack();
-                 BufferedByteInputV2 input = input(ByteBuffer.wrap(wire));
-                 PackIngestor ingestor = new PackIngestor(input, target, storage)) {
-                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
-                        .hasMessage("Pack checksum mismatch");
-                assertThat(target.objectCount()).isZero();
-                assertThat(target.entryCount()).isEqualTo(1);
-            }
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void resolutionFailureDiscardsTheWorkingPack(boolean memory) throws Exception {
-        byte[] wire = PackTestData.pack(PackTestData.delta(new ObjectId(new byte[20]), new byte[]{1, 1, 1, 2}));
-        MutableIndexedPack target = memory ? new InMemoryStorage().newPack()
-                : LocalIndexedPack.create(directory.resolve("pack"));
-        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
-            try (PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
-                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
-                        .hasMessage("Pack contains unresolved objects");
-            }
-            assertThatThrownBy(target::size).isInstanceOf(java.nio.channels.ClosedChannelException.class);
-            assertThat(Files.exists(directory.resolve("pack"))).isFalse();
+    void corruptTrailerDoesNotPublishObjectsOrRefsAndLeavesInputOpen(boolean memory) throws Exception {
+        byte[] wire = pack();
+        wire[wire.length - 1] ^= 1;
+        try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
+             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+             BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})));
+             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+            ObjectId previous = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{9});
+            List<PackMetadata> published = index.packs();
+            assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
+                    .hasMessage("Pack checksum mismatch");
+            assertThat(index.packs()).isEqualTo(published);
+            assertThat(index.locations(previous)).hasSize(1);
+            assertThat(index.locations(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3}))).isEmpty();
+            assertThat(index.snapshotRefs().refs()).isEmpty();
             assertThat(input.readUnsignedByte()).isEqualTo(42);
         }
     }
@@ -185,9 +116,10 @@ class PackIngestorTest {
     void rejectsEveryTruncatedPrefixWithoutAllowingASecondAttempt() throws Exception {
         byte[] wire = PackTestData.pack(PackTestData.delta(new ObjectId(new byte[20]), new byte[]{1, 1, 1, 9}));
         for (int length = 0; length < wire.length; length++) {
-            try (MutableIndexedPack target = new InMemoryStorage().newPack();
+            try (InMemoryStorage storage = new InMemoryStorage();
+                 GitIndexApi index = new InMemoryIndex();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(Arrays.copyOf(wire, length)));
-                 PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
+                 PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
             }
@@ -217,27 +149,29 @@ class PackIngestorTest {
                 sizeOverflow, offsetOverflow, PackTestData.join(new byte[]{0x32}, valid),
                 PackTestData.join(new byte[]{0x34}, valid), PackTestData.join(new byte[]{0x33}, corrupt),
                 PackTestData.join(new byte[]{0x33}, dictionary.toByteArray())}) {
-            try (MutableIndexedPack target = new InMemoryStorage().newPack();
+            try (InMemoryStorage storage = new InMemoryStorage();
+                 GitIndexApi index = new InMemoryIndex();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)));
-                 PackIngestor ingestor = new PackIngestor(input, target, new InMemoryStorage())) {
+                 PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
-                assertThat(target.entryCount()).isZero();
+                assertThat(index.packs()).isEmpty();
             }
         }
     }
 
     @Test
     void acceptsEmptyPacksAndRejectsInvalidHeaders() throws Exception {
-        try (MutableIndexedPack target = PackTestData.ingest(PackTestData.pack(), new InMemoryStorage().newPack())) {
-            assertThat(target.entryCount()).isZero();
-            assertThat(target.checksumMatches(target.id())).isTrue();
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
+            PackMetadata pack = PackTestData.ingest(PackTestData.pack(), storage, index);
+            assertThat(pack.objectCount()).isZero();
+            assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(PackTestData.pack());
         }
         byte[] magic = PackTestData.pack();
         magic[0] = 'X';
         byte[] version = PackTestData.pack(4);
         byte[] unsignedCount = ByteBuffer.allocate(12).putInt(0x5041434b).putInt(2).putInt(-1).array();
         for (byte[] bytes : new byte[][]{magic, version, unsignedCount}) {
-            assertThatThrownBy(() -> PackTestData.ingest(bytes, new InMemoryStorage().newPack()))
+            assertThatThrownBy(() -> PackTestData.inspect(bytes))
                     .isInstanceOf(IOException.class);
         }
     }
@@ -246,7 +180,7 @@ class PackIngestorTest {
     void rejectsCorruptVersionThreeChecksum() throws Exception {
         byte[] corrupt = PackTestData.pack(3, PackTestData.blob(new byte[]{1}));
         corrupt[corrupt.length - 1] ^= 1;
-        assertThatThrownBy(() -> PackTestData.ingest(corrupt, new InMemoryStorage().newPack()))
+        assertThatThrownBy(() -> PackTestData.inspect(corrupt))
                 .isInstanceOf(IOException.class).hasMessage("Pack checksum mismatch");
     }
 

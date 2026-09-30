@@ -8,9 +8,12 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
@@ -23,6 +26,7 @@ import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.stream.Stream;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -166,9 +170,12 @@ class FileNativeGitRepositoryProviderTest {
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
-            assertThat(reopened.storage().readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
-                    .hasValueSatisfying(content -> assertThat(content).isEqualTo(bytes));
-            assertThat(reopened.storage().packObjectIds(id))
+            ByteArrayOutputStream exported = new ByteArrayOutputStream();
+            reopened.writePack(reopened.index().packs(id).getFirst(),
+                    new OutputStreamBufferedByteOutput(exported));
+            assertThat(exported.toByteArray()).isEqualTo(bytes);
+            assertThat(reopened.index().objects(reopened.index().packs(id).getFirst().packId()))
+                    .extracting(IndexedObject::objectId)
                     .contains(new ObjectId(blobId(first)), new ObjectId(blobId(second)));
             assertPublishedObject(reopened, blobId(first), first);
             assertPublishedObject(reopened, blobId(second), second);
@@ -191,11 +198,12 @@ class FileNativeGitRepositoryProviderTest {
         repository.close();
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
                 .find("packed").valueOrFailure("repository")) {
-            assertThat(reopened.storage().packObjectIds(id))
+            assertThat(reopened.index().objects(reopened.index().packs(id).getFirst().packId()))
+                    .extracting(IndexedObject::objectId)
                     .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
             assertPublishedObject(reopened, blobId(target), target);
-            assertThat(reopened.storage().readObject(new ObjectId(blobId(target)),
-                    new ResolvedGitObjectRead<>(reopened.storage(), (type, size, baseId, input) -> {
+            assertThat(GitObjectRead.read(reopened.storage(), reopened.index(), new ObjectId(blobId(target)),
+                    new ResolvedGitObjectRead<>(reopened.storage(), reopened.index(), (type, size, baseId, input) -> {
                         assertThat(type).isEqualTo(GitObjectType.BLOB);
                         assertThat(size).isEqualTo(target.length);
                         return input.readBytes(7);
@@ -213,15 +221,15 @@ class FileNativeGitRepositoryProviderTest {
             byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
             if (corrupt) {
                 persist(repository, pack(base));
-                Path path = singlePathWithSuffix(root, ".pack");
+                Path path = singlePathWithSuffix(root, ".data");
                 byte[] bytes = Files.readAllBytes(path);
                 bytes[bytes.length - 1] ^= 1;
                 Files.write(path, bytes);
             }
-            List<PackChecksum> before = repository.storage().packIds();
+            List<PackMetadata> before = repository.index().packs();
             assertThatThrownBy(() -> persist(repository, packWithReferenceDelta(blobId(base), base, target)))
                     .isInstanceOf(IOException.class);
-            assertThat(repository.storage().packIds()).containsExactlyElementsOf(before);
+            assertThat(repository.index().packs()).containsExactlyElementsOf(before);
             assertThat(repository.refs()).isEmpty();
         }
     }
@@ -233,16 +241,15 @@ class FileNativeGitRepositoryProviderTest {
             byte[] bytes = pack("broken".getBytes(StandardCharsets.UTF_8));
             bytes[bytes.length - 1] ^= 1;
             assertThatThrownBy(() -> persist(repository, bytes)).isInstanceOf(IOException.class);
-            assertThat(repository.storage().packIds()).isEmpty();
+            assertThat(repository.index().packs()).isEmpty();
             assertThat(repository.refs()).isEmpty();
-            assertThat(pathsWithSuffix(root, ".pack")).isEmpty();
         }
     }
 
     private static PackChecksum persist(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            return repository.storage().persist(pack);
+            PackMetadata pack = repository.ingest(input);
+            return repository.publishPack(pack).packChecksum();
         }
     }
 
@@ -425,7 +432,7 @@ class FileNativeGitRepositoryProviderTest {
     private static List<Path> pathsWithSuffix(
             Path rootDirectory,
             String suffix) throws IOException {
-        try (java.util.stream.Stream<Path> paths = Files.walk(rootDirectory)) {
+        try (Stream<Path> paths = Files.walk(rootDirectory)) {
             return paths.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(suffix))
                     .toList();

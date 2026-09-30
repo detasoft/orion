@@ -18,9 +18,10 @@ import java.util.Optional;
  * addObject accepts verified objects only, including fully resolved DELTAs; identical rows are idempotent.
  * objects and findObject expose pending entries explicitly scoped to a pack ID; objects are ordered by offset.
  * All other queries return only published packs and their objects, as immutable snapshots.
- * Publication atomically exposes a completed pack after checking object count and base membership,
+ * publishIndex atomically exposes a completed pack after checking object count and base membership,
  * and seals its rows. Identical publication is idempotent; several packs may share a checksum.
  * The repository hash algorithm is fixed at creation, defaults to SHA-1 and applies to all stored IDs.
+ * addObject may buffer hidden entries; publishIndex durably finalizes them before returning.
  * The caller finalizes storage and verifies the pack checksum before publication; the index never reads bytes.
  * Callers verify that new ref targets and detached HEAD targets exist in storage before updating the index.
  * The index validates ref names and expected old values and applies atomic ref updates.
@@ -42,7 +43,7 @@ public interface GitIndexApi extends AutoCloseable {
 
     List<PackMetadata> packs() throws IOException;
 
-    PackMetadata publishPack(PackMetadata pack) throws IOException;
+    PackMetadata publishIndex(PackMetadata pack) throws IOException;
 
     RefsSnapshot snapshotRefs() throws IOException;
 

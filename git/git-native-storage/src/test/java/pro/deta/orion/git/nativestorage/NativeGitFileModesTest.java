@@ -2,10 +2,10 @@ package pro.deta.orion.git.nativestorage;
 
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
-import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.ObjectChecker;
+import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.NullProgressMonitor;
+import org.eclipse.jgit.lib.ObjectChecker;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.TreeFormatter;
@@ -20,9 +20,11 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -203,9 +205,10 @@ class NativeGitFileModesTest {
 
     private static void copyPacks(NativeGitRepository source, InMemoryRepository destination) throws Exception {
         try (ObjectInserter inserter = destination.newObjectInserter()) {
-            for (PackChecksum packId : source.storage().packIds()) {
-                byte[] pack = source.storage().readPack(packId,
-                        (size, input) -> input.readBytes(Math.toIntExact(size))).orElseThrow();
+            for (PackMetadata metadata : source.index().packs()) {
+                ByteArrayOutputStream exported = new ByteArrayOutputStream();
+                source.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+                byte[] pack = exported.toByteArray();
                 inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);
             }
             inserter.flush();

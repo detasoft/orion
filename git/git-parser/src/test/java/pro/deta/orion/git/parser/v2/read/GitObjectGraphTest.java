@@ -4,10 +4,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -25,13 +28,15 @@ class GitObjectGraphTest {
     }
 
     private final GitStorageApi objects = new InMemoryStorage();
-    private final GitObjectGraph graph = new GitObjectGraph(objects);
+    private final GitIndexApi index =
+            new InMemoryIndex();
+    private final GitObjectGraph graph = new GitObjectGraph(objects, index);
 
     @Test
     void traversesCommitTreeAndBlob() throws Exception {
-        ObjectId blob = store(objects, GitObjectType.BLOB, "hello\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tree = store(objects, GitObjectType.TREE, treeEntry("100644", "hello.txt", blob));
-        ObjectId commit = store(objects,
+        ObjectId blob = store(objects, index, GitObjectType.BLOB, "hello\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId tree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "hello.txt", blob));
+        ObjectId commit = store(objects, index,
                 GitObjectType.COMMIT,
                 ("tree " + tree + "\n"
                         + "author Test <test@example.com> 0 +0000\n"
@@ -47,12 +52,12 @@ class GitObjectGraphTest {
 
     @Test
     void excludesObjectsReachableFromHaves() throws Exception {
-        ObjectId baseBlob = store(objects, GitObjectType.BLOB, "base\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId baseTree = store(objects, GitObjectType.TREE, treeEntry("100644", "file.txt", baseBlob));
+        ObjectId baseBlob = store(objects, index, GitObjectType.BLOB, "base\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId baseTree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "file.txt", baseBlob));
         ObjectId baseCommit = writeCommit(baseTree, null, "base");
 
-        ObjectId tipBlob = store(objects, GitObjectType.BLOB, "tip\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tipTree = store(objects, GitObjectType.TREE, treeEntry("100644", "file.txt", tipBlob));
+        ObjectId tipBlob = store(objects, index, GitObjectType.BLOB, "tip\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId tipTree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "file.txt", tipBlob));
         ObjectId tipCommit = writeCommit(tipTree, baseCommit, "tip");
 
         Set<ObjectId> result =
@@ -65,10 +70,10 @@ class GitObjectGraphTest {
 
     @Test
     void followsAnnotatedTagTargets() throws Exception {
-        ObjectId blob = store(objects,
+        ObjectId blob = store(objects, index,
                 GitObjectType.BLOB,
                 "tagged\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tree = store(objects,
+        ObjectId tree = store(objects, index,
                 GitObjectType.TREE,
                 treeEntry("100644", "tagged.txt", blob));
         ObjectId commit = writeCommit(tree, null, "tagged");
@@ -83,7 +88,7 @@ class GitObjectGraphTest {
 
     @Test
     void ignoresUnknownHaveRoots() throws Exception {
-        ObjectId wanted = store(objects,
+        ObjectId wanted = store(objects, index,
                 GitObjectType.BLOB,
                 "wanted\n".getBytes(StandardCharsets.UTF_8));
         ObjectId unknownHave = new ObjectId("f".repeat(40));
@@ -120,9 +125,9 @@ class GitObjectGraphTest {
         ObjectId incomplete = writeCommit(missing, null, "incomplete");
         assertThat(graph.hasCompleteClosure(incomplete)).isFalse();
         assertThatThrownBy(() -> graph.reachableObjects(Set.of(incomplete), false))
-                .isInstanceOf(java.io.FileNotFoundException.class);
+                .isInstanceOf(FileNotFoundException.class);
 
-        ObjectId tree = store(objects, GitObjectType.TREE, treeEntry("160000", "submodule", missing));
+        ObjectId tree = store(objects, index, GitObjectType.TREE, treeEntry("160000", "submodule", missing));
         ObjectId complete = writeCommit(tree, null, "submodule");
         assertThat(graph.hasCompleteClosure(complete)).isTrue();
         assertThat(graph.reachableObjects(Set.of(complete), false)).containsExactly(complete, tree);
@@ -143,7 +148,7 @@ class GitObjectGraphTest {
 
     @Test
     void malformedGraphDataIsAnErrorInsteadOfAnAbsentObject() throws Exception {
-        ObjectId malformed = store(objects, GitObjectType.COMMIT,
+        ObjectId malformed = store(objects, index, GitObjectType.COMMIT,
                 "not a commit\n\n".getBytes(StandardCharsets.US_ASCII));
         assertThatThrownBy(() -> graph.hasCompleteClosure(malformed)).isInstanceOf(IOException.class);
     }
@@ -172,20 +177,20 @@ class GitObjectGraphTest {
                 .append('\n')
                 .append(message)
                 .append('\n');
-        return store(objects, GitObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
+        return store(objects, index, GitObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private ObjectId writeBlobTree(String name, String content) throws IOException {
-        ObjectId blob = store(objects,
+        ObjectId blob = store(objects, index,
                 GitObjectType.BLOB,
                 (content + "\n").getBytes(StandardCharsets.UTF_8));
-        return store(objects,
+        return store(objects, index,
                 GitObjectType.TREE,
                 treeEntry("100644", name, blob));
     }
 
     private ObjectId writeTag(ObjectId target, String name) throws IOException {
-        return store(objects,
+        return store(objects, index,
                 GitObjectType.TAG,
                 ("object " + target + "\n"
                         + "type commit\n"

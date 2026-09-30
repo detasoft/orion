@@ -3,11 +3,11 @@ package pro.deta.orion.transport.git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -23,15 +23,16 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.FetchNegotiatorIterator;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
+import pro.deta.orion.git.parser.v2.fetch.FetchRequest;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
-import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.CommitId;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
@@ -136,14 +137,14 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         RefUpdate feature = prepared.refUpdates().getFirst();
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        MutableIndexedPack pack = ingest(repository, prepared.pack());
+        PackMetadata pack = ingest(repository, prepared.pack());
         results = context.publish(Optional.of(pack), List.of(
                 RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
         assertThat(results).extracting(RefUpdateResult::status)
                 .containsExactly(EXPECTED_OLD_MISMATCH, atomic ? ATOMIC_ABORTED : APPLIED);
         assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
         assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
-        assertThat(repository.storage().exists(feature.newId().orElseThrow())).isTrue();
+        assertThat(GitObjectRead.exists(repository.storage(), repository.index(), feature.newId().orElseThrow())).isTrue();
     }
 
     @Test
@@ -158,14 +159,15 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        MutableIndexedPack pack = ingest(repository, update.pack());
+        PackMetadata pack = ingest(repository, update.pack());
         results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
                 "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
                 .valueOrFailure("repository");
         assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
-        assertThat(reopened.storage().exists(update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
+        assertThat(GitObjectRead.exists(reopened.storage(), reopened.index(),
+                update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
     }
 
     @Test
@@ -177,7 +179,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 "update", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
         List<RefUpdateResult> results;
-        MutableIndexedPack pack = ingest(repository, update.pack());
+        PackMetadata pack = ingest(repository, update.pack());
         results = context.publish(Optional.of(pack), update.refUpdates(), true);
         assertThat(publishCalls).isEqualTo(1);
         assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
@@ -219,7 +221,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
                 "next", GitCommitAuthor.EMPTY);
         GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        MutableIndexedPack pack = ingest(repository, next.pack());
+        PackMetadata pack = ingest(repository, next.pack());
         assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
                 .extracting(RefUpdateResult::status).containsExactly(APPLIED);
         assertThat(calls).contains("update demo refs/heads/main false");
@@ -410,7 +412,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         return new FetchCommand(context, capabilities).prepareNegotiation(request, GitTransport.HTTP);
     }
 
-    private static MutableIndexedPack ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
+    private static PackMetadata ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
             return repository.ingest(input);
         }

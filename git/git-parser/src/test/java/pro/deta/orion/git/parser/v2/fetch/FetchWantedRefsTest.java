@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -106,6 +107,7 @@ class FetchWantedRefsTest {
         var request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().addAll(List.of(refs));
-        return new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities(GitCapability.REF_IN_WANT));
+        return new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), capabilities(GitCapability.REF_IN_WANT));
     }
 }

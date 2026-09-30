@@ -24,7 +24,7 @@ import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 class PackReaderTest {
     @ParameterizedTest
     @ValueSource(ints = {1, 7, 8192, 262144})
-    void emitsExactBytesAndFinalIdsWithReusedInputBuffers(int chunkSize) throws Exception {
+    void emitsCompressedBytesAndEntryBoundariesWithReusedInputBuffers(int chunkSize) throws Exception {
         byte[] content = new byte[100_000];
         new Random(17).nextBytes(content);
         byte[] repeated = new byte[1_000_000];
@@ -34,28 +34,29 @@ class PackReaderTest {
         ReusedSource source = new ReusedSource(join(wire, new byte[]{42}), chunkSize);
         try (BufferedByteInputV2 input = new BufferedByteInputV2(source); PackReader reader = new PackReader(input)) {
             ByteArrayOutputStream copied = new ByteArrayOutputStream();
-            List<ObjectId> ids = new ArrayList<>();
+            List<PackEntry> metadata = new ArrayList<>();
             long offset = PackHeader.SIZE;
             boolean ended = false;
             while (!ended) {
                 switch (reader.next()) {
                     case PackReadStep.Bytes bytes -> copy(bytes, copied);
+                    case PackReadStep.Entry entry -> assertThat(entry.metadata().offset()).isEqualTo(offset);
                     case PackReadStep.EntryEnd end -> {
                         assertThat(end.metadata().offset()).isEqualTo(offset);
-                        offset += entries[ids.size()].length;
-                        assertThat(copied.size()).isEqualTo(offset);
-                        ids.add(end.objectId().orElseThrow());
+                        offset += entries[metadata.size()].length;
+                        assertThat(end.compressedSize()).isPositive();
+                        metadata.add(end.metadata());
                     }
                     case PackReadStep.End end -> {
-                        assertThat(end.id()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, wire.length - 20,
+                        assertThat(end.checksum()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, wire.length - 20,
                                 wire.length)));
                         ended = true;
                     }
                 }
             }
-            assertThat(copied.toByteArray()).containsExactly(wire);
-            assertThat(ids).containsExactly(objectId(GitObjectType.BLOB, content),
-                    objectId(GitObjectType.BLOB, repeated), objectId(GitObjectType.BLOB, new byte[0]));
+            assertThat(copied.toByteArray()).containsExactly(join(compressed(content),
+                    compressed(repeated), compressed(new byte[0])));
+            assertThat(metadata).extracting(PackEntry::inflatedSize).containsExactly(100_000L, 1_000_000L, 0L);
             assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
             assertThat(source.closed).isFalse();
             assertThat(input.readUnsignedByte()).isEqualTo(42);
@@ -64,7 +65,7 @@ class PackReaderTest {
     }
 
     @Test
-    void deltasHavePhysicalBasesButNoFinalId() throws Exception {
+    void deltasExposePhysicalBaseMetadata() throws Exception {
         byte[] base = blob(new byte[]{1, 2, 3});
         ObjectId baseId = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
         byte[] instructions = {3, 3, (byte) 0x90, 3};
@@ -80,23 +81,21 @@ class PackReaderTest {
                     copy(bytes, copied);
                 } else if (step instanceof PackReadStep.EntryEnd end) {
                     entries.add(end);
-                } else {
+                } else if (step instanceof PackReadStep.End) {
                     break;
                 }
             }
             assertThat(entries).hasSize(3);
-            assertThat(entries.get(0).objectId()).contains(baseId);
-            assertThat(entries.get(1).objectId()).isEmpty();
             assertThat(entries.get(1).metadata().baseOffset()).hasValue(12);
-            assertThat(entries.get(2).objectId()).isEmpty();
             assertThat(entries.get(2).metadata().baseId()).contains(baseId);
-            assertThat(copied.toByteArray()).containsExactly(wire);
+            assertThat(copied.toByteArray()).containsExactly(join(compressed(new byte[]{1, 2, 3}),
+                    compressed(instructions), compressed(instructions)));
         }
     }
 
     @ParameterizedTest
     @ValueSource(ints = {1, 7, 8192})
-    void preservesUnsortedTreeBytesAndObjectIds(int chunkSize) throws Exception {
+    void preservesUnsortedTreePayloads(int chunkSize) throws Exception {
         byte[] content = "file content".getBytes(StandardCharsets.UTF_8);
         ObjectId blobId = objectId(GitObjectType.BLOB, content);
         byte[] tree = join("100644 \uD800\uDC00\0".getBytes(StandardCharsets.UTF_8), blobId.toBytes(),
@@ -105,18 +104,18 @@ class PackReaderTest {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ReusedSource(wire, chunkSize));
              PackReader reader = new PackReader(input)) {
             ByteArrayOutputStream copied = new ByteArrayOutputStream();
-            List<ObjectId> ids = new ArrayList<>();
+            List<PackEntry> metadata = new ArrayList<>();
             PackReadStep step;
             while (!((step = reader.next()) instanceof PackReadStep.End)) {
                 if (step instanceof PackReadStep.Bytes bytes) {
                     copy(bytes, copied);
                 } else if (step instanceof PackReadStep.EntryEnd end) {
-                    ids.add(end.objectId().orElseThrow());
+                    metadata.add(end.metadata());
                 }
             }
 
-            assertThat(copied.toByteArray()).containsExactly(wire);
-            assertThat(ids).containsExactly(blobId, objectId(GitObjectType.TREE, tree));
+            assertThat(copied.toByteArray()).containsExactly(join(compressed(content), compressed(tree)));
+            assertThat(metadata).extracting(PackEntry::type).containsExactly(GitObjectType.BLOB, GitObjectType.TREE);
         }
     }
 
@@ -130,8 +129,7 @@ class PackReaderTest {
             do {
                 step = reader.next();
             } while (!(step instanceof PackReadStep.EntryEnd));
-            assertThat(((PackReadStep.EntryEnd) step).objectId()).contains(objectId(GitObjectType.BLOB,
-                    new byte[]{1}));
+            assertThat(((PackReadStep.EntryEnd) step).metadata().inflatedSize()).isEqualTo(1);
             assertThatThrownBy(reader::next).isInstanceOf(IOException.class).hasMessage("Pack checksum mismatch");
             assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
             assertThat(input.readUnsignedByte()).isEqualTo(42);
@@ -140,19 +138,12 @@ class PackReaderTest {
 
     @ParameterizedTest
     @ValueSource(ints = {2, 3})
-    void emptyPackEmitsOnlyBytesThenEnd(int version) throws Exception {
+    void emptyPackEmitsEnd(int version) throws Exception {
         byte[] wire = pack(version);
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ReusedSource(join(wire, new byte[]{42}), 1));
              PackReader reader = new PackReader(input)) {
-            ByteArrayOutputStream copied = new ByteArrayOutputStream();
-            PackReadStep step;
-            while (!((step = reader.next()) instanceof PackReadStep.End)) {
-                assertThat(step).isInstanceOf(PackReadStep.Bytes.class);
-                copy((PackReadStep.Bytes) step, copied);
-            }
-            assertThat(copied.toByteArray()).containsExactly(wire);
-            PackReadStep.End end = (PackReadStep.End) step;
-            assertThat(end.id()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, PackHeader.SIZE, wire.length)));
+            PackReadStep.End end = (PackReadStep.End) reader.next();
+            assertThat(end.checksum()).isEqualTo(new PackChecksum(Arrays.copyOfRange(wire, PackHeader.SIZE, wire.length)));
             assertThatThrownBy(reader::next).isInstanceOf(IllegalStateException.class);
             assertThat(input.readUnsignedByte()).isEqualTo(42);
         }

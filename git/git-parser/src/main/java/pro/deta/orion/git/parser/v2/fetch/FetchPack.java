@@ -9,16 +9,19 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.PackObjectLocation;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -38,7 +41,7 @@ public final class FetchPack {
     private final Set<ObjectId> shallow = new LinkedHashSet<>();
     private final Set<ObjectId> unshallow = new LinkedHashSet<>();
     private final boolean thin;
-    private List<PackObjectLocation> entries = List.of();
+    private List<IndexedObject> entries = List.of();
     private Map<PackChecksum, URI> packUris = Map.of();
 
     private FetchPack(GitStorageApi storage, GitIndexApi index, boolean thin) {
@@ -82,7 +85,14 @@ public final class FetchPack {
             pack.includeTags();
         }
         pack.packUris = Collections.unmodifiableMap(pack.selectPackUris(repository, plan.packfileUriProtocols()));
-        pack.entries = storage.locateObjects(pack.objects);
+        List<IndexedObject> entries = new ArrayList<>();
+        for (ObjectId id : pack.objects) {
+            List<IndexedObject> locations = pack.index.locations(id);
+            if (!locations.isEmpty()) {
+                entries.add(locations.getFirst());
+            }
+        }
+        pack.entries = List.copyOf(entries);
         if (pack.entries.size() != pack.objects.size()) {
             throw new IOException("Missing fetch objects while preparing pack entries");
         }
@@ -202,7 +212,7 @@ public final class FetchPack {
     }
 
     private long commitTime(ObjectId id) throws IOException {
-        return storage.readObject(id, new ResolvedGitObjectRead<>(storage,
+        return GitObjectRead.read(storage, index, id, new ResolvedGitObjectRead<>(storage, index,
                 (type, size, base, input) -> readCommitTime(type, size, input)))
                 .orElseThrow(() -> missing(id));
     }
@@ -254,12 +264,16 @@ public final class FetchPack {
         if (protocols.isEmpty() || objects.isEmpty()) {
             return selected;
         }
-        for (PackChecksum id : storage.packIds()) {
+        for (PackMetadata metadata : index.packs()) {
+            PackChecksum id = metadata.packChecksum();
             Optional<URI> uri = repository.packUri(id);
             if (uri.isEmpty() || !protocols.contains(uri.orElseThrow().getScheme())) {
                 continue;
             }
-            Set<ObjectId> covered = storage.packObjectIds(id);
+            Set<ObjectId> covered = new HashSet<>();
+            for (IndexedObject object : index.objects(metadata.packId())) {
+                covered.add(object.objectId());
+            }
             if (!covered.isEmpty() && objects.containsAll(covered)) {
                 selected.put(id, uri.orElseThrow());
                 objects.removeAll(covered);
@@ -281,13 +295,13 @@ public final class FetchPack {
     }
 
     public void writeTo(PackWriter writer) throws IOException {
-        for (PackObjectLocation entry : entries) {
-            storage.readObject(entry, (type, size, base, input) -> {
+        for (IndexedObject entry : entries) {
+            GitObjectRead.read(storage, entry, (type, size, base, input) -> {
                 if (base.isEmpty() || objects.contains(base.orElseThrow())
                         || thin && common.contains(base.orElseThrow())) {
                     return writer.writeCompressed(type, size, base, input);
                 }
-                ResolvedGitObjectRead<Long> reader = new ResolvedGitObjectRead<>(storage,
+                ResolvedGitObjectRead<Long> reader = new ResolvedGitObjectRead<>(storage, index,
                         (resolvedType, length, unused, content) -> writer.writeObject(resolvedType, length, content));
                 return reader.read(type, size, base, input);
             });
@@ -295,12 +309,12 @@ public final class FetchPack {
     }
 
     private GitObjectLinks readLinks(ObjectId id) throws IOException {
-        return storage.readObject(id, (type, size, base, input) -> {
+        return GitObjectRead.read(storage, index, id, (type, size, base, input) -> {
             if (type == GitObjectType.BLOB) {
                 return new GitObjectLinks(type, List.of());
             }
             ResolvedGitObjectRead<GitObjectLinks> reader =
-                    new ResolvedGitObjectRead<>(storage, GitObjectLinks::read);
+                    new ResolvedGitObjectRead<>(storage, index, GitObjectLinks::read);
             return reader.read(type, size, base, input);
         }).orElseThrow(() -> missing(id));
     }

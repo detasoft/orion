@@ -17,7 +17,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -38,6 +37,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +52,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void listsRefsWithSymbolicHeadAndFiltersByAnyRequestedPrefix() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         GitIndexApi index = new LocalGitIndex(repository);
-        ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+        ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
         addRef(index, "refs/heads/main", commit);
         addRef(index, "refs/heads/ветка", commit);
         addRef(index, "refs/tags/lightweight", commit);
@@ -69,7 +69,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         GitIndexApi index = new LocalGitIndex(repository);
-        ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+        ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
         List<RefUpdate> updates = new ArrayList<>();
         List<String> expected = new ArrayList<>();
         for (int number = 0; number < 2_000; number++) {
@@ -109,7 +109,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         assertThat(execute(storage, index, "unborn", "symrefs"))
                 .containsExactly("unborn HEAD symref-target:refs/heads/main");
         assertThat(execute(storage, index, "unborn", "symrefs", "ref-prefix refs/")).isEmpty();
-        ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+        ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
         index.updateHead(new Head.Detached(new CommitId(commit.toBytes())));
         assertThat(execute(storage, index, "symrefs", "unborn")).containsExactly(commit + " HEAD");
     }
@@ -118,9 +118,9 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void peelsNestedTagsIncludingRefsOutsideTheTagsNamespace() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         GitIndexApi index = new LocalGitIndex(repository);
-        ObjectId blob = publish(storage, GitObjectType.BLOB, "content");
-        ObjectId inner = publish(storage, GitObjectType.TAG, tag(blob, "blob", "inner"));
-        ObjectId outer = publish(storage, GitObjectType.TAG, tag(inner, "tag", "outer"));
+        ObjectId blob = publish(storage, index, GitObjectType.BLOB, "content");
+        ObjectId inner = publish(storage, index, GitObjectType.TAG, tag(blob, "blob", "inner"));
+        ObjectId outer = publish(storage, index, GitObjectType.TAG, tag(inner, "tag", "outer"));
         addRef(index, "refs/tags/nested", outer);
         addRef(index, "refs/tags/lightweight", blob);
         addRef(index, "refs/custom/tag", inner);
@@ -198,7 +198,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         GitStorageApi storage = new LocalGitStorage(repository);
         GitIndexApi index = new LocalGitIndex(repository);
         ObjectId missing = new ObjectId("f".repeat(40));
-        ObjectId tag = publish(storage, GitObjectType.TAG, tag(missing, "blob", "broken"));
+        ObjectId tag = publish(storage, index, GitObjectType.TAG, tag(missing, "blob", "broken"));
         addRef(index, "refs/tags/broken", tag);
         assertThat(execute(storage, index)).containsExactly(tag + " refs/tags/broken");
         assertThat(execute(storage, index, "peel")).containsExactly(tag + " refs/tags/broken");
@@ -264,10 +264,10 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
                 .containsExactly(RefUpdateResult.Status.APPLIED);
     }
 
-    private ObjectId publish(GitStorageApi storage, GitObjectType type, String text) throws Exception {
+    private ObjectId publish(GitStorageApi storage, GitIndexApi index, GitObjectType type, String text) throws Exception {
         byte[] content = text.getBytes(StandardCharsets.UTF_8);
         MessageDigest digest = GitHashAlgorithm.SHA1.newDigest();
-        digest.update((type.name().toLowerCase(java.util.Locale.ROOT) + " " + content.length + "\0")
+        digest.update((type.name().toLowerCase(Locale.ROOT) + " " + content.length + "\0")
                 .getBytes(StandardCharsets.US_ASCII));
         ObjectId id = new ObjectId(digest.digest(content));
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
@@ -278,9 +278,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             writer.finish();
         }
         try (BufferedByteInputV2 input = input(bytes.toByteArray());
-             PackIngestor ingestor = new PackIngestor(input, storage.newPack(), storage)) {
-            MutableIndexedPack pack = ingestor.ingest();
-            storage.persist(pack);
+             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+            index.publishIndex(ingestor.ingest());
         }
         return id;
     }

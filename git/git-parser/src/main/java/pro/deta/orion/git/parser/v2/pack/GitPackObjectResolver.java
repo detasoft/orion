@@ -3,274 +3,161 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.DeltaByteSource;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.zip.Deflater;
 
-/**
- * Completes the object index and makes a received pack self-contained before publication.
- * {@link PackIngestor} first verifies the checksum of the received bytes against the trailer and
- * assigns their {@link PackChecksum}, before resolving any deltas, whether their bases are present or missing.
- * At that point every entry boundary and the trailer are stored, so local content reads use indexed
- * compressed bounds and decompress only in the content reader.
- * Resolving OFS/REF deltas against bases in the same pack adds object IDs, logical types and sizes
- * to the index; the stored delta instructions and pack bytes remain unchanged, so the PackChecksum is retained.
- * Adding external bases changes the pack bytes and object count, invalidating the cached PackChecksum.
- * Completion then calculates and writes a new checksum only if the pack bytes changed.
- * The caller must complete resolution before persisting the pack: a verified PackChecksum alone does not
- * establish that the object index is complete or that all delta bases are present.
- */
-public final class GitPackObjectResolver {
-    private final MutableIndexedPack pack;
+/** Resolves pending deltas after checksum validation and adds required external bases to the same pack. */
+final class GitPackObjectResolver {
+    private final PackId packId;
+    private final PackDataStorage bytes;
     private final GitStorageApi storage;
+    private final GitIndexApi index;
 
-    public GitPackObjectResolver(MutableIndexedPack pack, GitStorageApi storage) {
-        this.pack = Objects.requireNonNull(pack, "pack");
-        this.storage = Objects.requireNonNull(storage, "storage");
+    GitPackObjectResolver(PackId packId, PackDataStorage bytes, GitStorageApi storage, GitIndexApi index) {
+        this.packId = packId;
+        this.bytes = bytes;
+        this.storage = storage;
+        this.index = index;
     }
 
-    public PackChecksum complete() throws IOException {
-        pack.requireMutable();
-        try {
-            resolve();
-            return complete(pack, storage);
-        } catch (IOException | RuntimeException | Error failure) {
-            closeFailed(pack, failure);
-            throw failure;
-        }
-    }
-
-    private void resolve() throws IOException {
-        Iterator<Long> offsets = pack.offsets();
-        while (offsets.hasNext()) {
-            IndexedPack.Record record = pack.record(offsets.next());
-            if (record.objectId() == null) {
-                record = resolve(record.entry());
-            }
-            if (record != null) {
-                resolveWaiting(record);
-            }
-        }
-    }
-
-    private void resolveWaiting(IndexedPack.Record available) throws IOException {
-        Deque<IndexedPack.Record> pending = new ArrayDeque<>();
-        pending.push(available);
-        while (!pending.isEmpty()) {
-            IndexedPack.Record base = pending.peek();
-            Optional<PackEntry> waiting = pack.waitingFor(base.objectId(), base.entry().offset());
-            if (waiting.isEmpty()) {
-                pending.pop();
+    void resolve(List<PackIngestor.Pending> pending, Map<Long, ObjectId> offsets) throws IOException {
+        Map<ObjectId, List<PackIngestor.Pending>> byId = new HashMap<>();
+        Map<Long, List<PackIngestor.Pending>> byOffset = new HashMap<>();
+        ArrayDeque<PackIngestor.Pending> ready = new ArrayDeque<>();
+        for (PackIngestor.Pending object : pending) {
+            PackEntry entry = object.entry();
+            if (entry.baseOffset().isPresent()) {
+                long baseOffset = entry.baseOffset().orElseThrow();
+                if (offsets.containsKey(baseOffset)) {
+                    ready.add(object);
+                } else {
+                    byOffset.computeIfAbsent(baseOffset, ignored -> new ArrayList<>()).add(object);
+                }
             } else {
-                IndexedPack.Record resolved = resolve(waiting.orElseThrow());
-                if (resolved == null) {
-                    throw new IOException("Indexed delta base is unavailable");
+                ObjectId baseId = entry.baseId().orElseThrow();
+                if (index.findObject(packId, baseId).isPresent() || !index.locations(baseId).isEmpty()) {
+                    ready.add(object);
+                } else {
+                    byId.computeIfAbsent(baseId, ignored -> new ArrayList<>()).add(object);
                 }
-                pending.push(resolved);
             }
         }
-    }
-
-    private IndexedPack.Record resolve(PackEntry entry) throws IOException {
-        IndexedPack.Record base = baseRecord(entry);
-        IndexedPack.Record resolved;
-        if (base != null && base.objectId() != null) {
-            resolved = resolve(entry, base.type(), readContent(base.entry()));
-        } else if (entry.baseId().isPresent()) {
-            resolved = storage.readObject(entry.baseId().orElseThrow(), new ResolvedGitObjectRead<>(storage,
-                    (type, size, unused, content) -> resolve(entry, type, readBytes(content, size))))
-                    .orElse(null);
-        } else {
-            return null;
-        }
-        if (resolved != null) {
-            pack.addObject(entry.offset(), resolved.objectId(), resolved.type(), resolved.size());
-        }
-        return resolved;
-    }
-
-    private IndexedPack.Record baseRecord(PackEntry entry) throws IOException {
-        if (entry.baseOffset().isPresent()) {
-            return pack.record(entry.baseOffset().getAsLong());
-        }
-        Long offset = entry.baseId().map(pack::objectOffset).orElse(null);
-        return offset == null ? null : pack.record(offset);
-    }
-
-    private byte[] readContent(PackEntry entry) throws IOException {
-        Deque<PackEntry> deltas = new ArrayDeque<>();
-        byte[] content;
-        while (true) {
-            if (entry.baseId().isEmpty() && entry.baseOffset().isEmpty()) {
-                content = pack.readObject(entry, pack.dataEnd(entry.offset()), entry.baseId(),
-                        new ContentGitObjectRead<>((type, size, unused, input) -> readBytes(input, size)));
-                break;
-            }
-            if (deltas.size() >= pack.entryCount()) {
-                throw new IOException("Cyclic delta bases in pack");
-            }
-            deltas.push(entry);
-            IndexedPack.Record base = baseRecord(entry);
-            if (base == null) {
-                ObjectId id = entry.baseId().orElseThrow(() -> new IOException("Missing offset delta base"));
-                content = storage.readObject(id, new ResolvedGitObjectRead<>(storage,
-                        (type, size, unused, input) -> readBytes(input, size)))
-                        .orElseThrow(() -> new IOException("Missing delta base: " + id));
-                break;
-            }
-            entry = base.entry();
-        }
-        while (!deltas.isEmpty()) {
-            byte[] base = content;
-            PackEntry deltaEntry = deltas.pop();
-            content = pack.readObject(deltaEntry, pack.dataEnd(deltaEntry.offset()), deltaEntry.baseId(),
-                    new ContentGitObjectRead<>((type, size, unused, input) -> {
-                        DeltaByteSource delta = new DeltaByteSource(input, base);
+        int remaining = pending.size();
+        while (!ready.isEmpty()) {
+            PackIngestor.Pending object = ready.removeFirst();
+            PackEntry entry = object.entry();
+            ObjectId baseId = entry.baseId().orElseGet(() -> offsets.get(entry.baseOffset().orElseThrow()));
+            Optional<IndexedObject> local = index.findObject(packId, baseId);
+            ResolvedGitObjectRead<Base> reader = new ResolvedGitObjectRead<>(storage, index,
+                    Optional.of(packId), GitPackObjectResolver::readBase);
+            Base base = local.isPresent() ? GitObjectRead.read(storage, local.orElseThrow(), reader)
+                    : GitObjectRead.read(storage, index, baseId, reader)
+                            .orElseThrow(() -> new IOException("Missing delta base: " + baseId));
+            IndexedObject resolved = storage.readPack(packId, object.storedOffset(), object.compressedSize(),
+                    (length, input) -> new ContentGitObjectRead<>((type, size, unused, instructions) -> {
+                        DeltaByteSource delta = new DeltaByteSource(instructions, base.content());
                         try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
-                            byte[] result = readBytes(restored, delta.size());
-                            if (restored.buffer() != null) {
-                                throw new IOException("Delta content exceeds its declared size");
+                            MessageDigest hash = objectHash(base.type(), delta.size());
+                            ByteBuffer buffer;
+                            while ((buffer = restored.buffer()) != null) {
+                                hash.update(buffer);
                             }
-                            return result;
+                            return new IndexedObject(packId, new ObjectId(hash.digest()), base.type(),
+                                    delta.size(), object.storedOffset(), object.compressedSize(),
+                                    Optional.of(new IndexedObject.Delta(baseId, entry.inflatedSize())));
                         }
-                    }));
+                    }).read(GitObjectType.REF_DELTA, entry.inflatedSize(), Optional.of(baseId), input));
+            index.addObject(resolved);
+            offsets.put(entry.offset(), resolved.objectId());
+            remaining--;
+            wake(byId, resolved.objectId(), ready);
+            wake(byOffset, entry.offset(), ready);
         }
-        return content;
-    }
-
-    private IndexedPack.Record resolve(PackEntry entry, GitObjectType type, byte[] base)
-            throws IOException {
-        return pack.readObject(entry, pack.dataEnd(entry.offset()), entry.baseId(),
-                new ContentGitObjectRead<>((physicalType, size, unused, input) -> {
-                    DeltaByteSource delta = new DeltaByteSource(input, base);
-                    try (BufferedByteInputV2 restored = new BufferedByteInputV2(delta)) {
-                        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
-                        hash.update((type.name().toLowerCase(Locale.ROOT) + " " + delta.size() + "\0")
-                                .getBytes(StandardCharsets.US_ASCII));
-                        ByteBuffer buffer;
-                        while ((buffer = restored.buffer()) != null) {
-                            hash.update(buffer);
-                        }
-                        return new IndexedPack.Record(entry, new ObjectId(hash.digest()), type, delta.size());
-                    }
-                }));
-    }
-
-    private static byte[] readBytes(BufferedByteInputV2 input, long size) throws IOException {
-        if (size > Integer.MAX_VALUE - 8) {
-            throw new IOException("Delta base is too large for in-memory resolution");
+        if (remaining != 0) {
+            throw new IOException("Pack contains unresolved delta bases or a cycle");
         }
-        return input.readBytes((int) size);
-    }
-
-    private static PackChecksum complete(MutableIndexedPack bytes, GitStorageApi storage) throws IOException {
-        if (bytes.hasUnresolved()) {
-            throw new IOException("Pack contains unresolved objects");
-        }
-        long size = bytes.size();
-        if (size < PackHeader.SIZE + 20) {
-            throw new IOException("Truncated received pack");
-        }
-        long objectCount = PackHeader.read(readExactly(bytes, 0, PackHeader.SIZE));
-        if (objectCount != bytes.entryCount()) {
-            throw new IOException("Pack object count does not match its index");
-        }
-        if (objectCount != bytes.objectCount()) {
-            throw new IOException("Pack contains duplicate objects");
-        }
-        Optional<ObjectId> missing = bytes.nextExternalBase();
-        long dataEnd = size - 20;
-        if (missing.isPresent()) {
-            bytes.truncate(size - 20);
-            while (missing.isPresent()) {
-                if (objectCount == 0xffff_ffffL) {
-                    throw new IOException("Completed pack exceeds the object count limit");
-                }
-                ObjectId base = missing.orElseThrow();
-                PackEntry entry = storage.readObject(base, new ResolvedGitObjectRead<>(storage,
-                        (type, length, unused, content) -> appendBase(bytes, base, type, length, content)))
-                        .orElseThrow(() -> new IOException("Missing external base: " + base));
-                bytes.addEntry(entry);
-                bytes.addObject(entry.offset(), base, entry.type(), entry.inflatedSize());
-                objectCount++;
-                missing = bytes.nextExternalBase();
+        for (IndexedObject object : index.objects(packId)) {
+            if (object.delta().isEmpty()) {
+                continue;
             }
-            ByteBuffer count = ByteBuffer.allocate(4).putInt((int) objectCount).flip();
-            bytes.write(8, count);
-            dataEnd = bytes.size();
+            ObjectId baseId = object.delta().orElseThrow().baseId();
+            if (index.findObject(packId, baseId).isEmpty()) {
+                Base base = GitObjectRead.read(storage, index, baseId,
+                        new ResolvedGitObjectRead<>(storage, index, GitPackObjectResolver::readBase))
+                        .orElseThrow(() -> new IOException("Missing external base: " + baseId));
+                appendBase(baseId, base);
+            }
         }
-        return bytes.finish(dataEnd);
     }
 
-    private static PackEntry appendBase(MutableIndexedPack bytes, ObjectId expected,
-            GitObjectType type, long size, BufferedByteInputV2 content) throws IOException {
-        String name = switch (type) {
-            case COMMIT -> "commit";
-            case TREE -> "tree";
-            case BLOB -> "blob";
-            case TAG -> "tag";
-            case OFS_DELTA, REF_DELTA -> throw new IOException("Pack completion requires restored base content");
-        };
-        if (size < 0) {
-            throw new IOException("Negative base object size");
+    private static <K> void wake(Map<K, List<PackIngestor.Pending>> waiting, K key,
+                                  ArrayDeque<PackIngestor.Pending> ready) {
+        List<PackIngestor.Pending> found = waiting.remove(key);
+        if (found != null) {
+            ready.addAll(found);
+        }
+    }
+
+    private void appendBase(ObjectId expected, Base base) throws IOException {
+        if (!MessageDigest.isEqual(objectHash(base.type(), base.content().length).digest(base.content()),
+                expected.toBytes())) {
+            throw new IOException("External base ObjectId does not match its content");
         }
         long offset = bytes.size();
-        long packOffset;
-        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
-        hash.update((name + " " + size + "\0").getBytes(StandardCharsets.US_ASCII));
-        byte[] compressed = new byte[8192];
         Deflater deflater = new Deflater();
         try {
-            PackEntryWriter entry = (buffer, start, length) -> bytes.append(ByteBuffer.wrap(buffer, start, length));
-            packOffset = offset + entry.writeObject(type, size, content, deflater, compressed, hash::update);
-            if (!MessageDigest.isEqual(hash.digest(), expected.toBytes())) {
-                throw new IOException("External base ObjectId does not match its content");
+            deflater.setInput(base.content());
+            deflater.finish();
+            byte[] compressed = new byte[8192];
+            while (!deflater.finished()) {
+                int count = deflater.deflate(compressed);
+                if (count == 0) {
+                    throw new IOException("Base compression made no progress");
+                }
+                bytes.write(bytes.size(), ByteBuffer.wrap(compressed, 0, count));
             }
         } finally {
             deflater.end();
         }
-        return new PackEntry(offset, packOffset, size, type, OptionalLong.empty(), Optional.empty());
+        index.addObject(new IndexedObject(packId, expected, base.type(), base.content().length,
+                offset, bytes.size() - offset, Optional.empty()));
     }
 
-    private static byte[] readExactly(IndexedPack bytes, long offset, int length) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(length);
-        while (buffer.hasRemaining()) {
-            int count = bytes.read(offset, buffer);
-            if (count < 0) {
-                throw new EOFException("Truncated pack file");
-            }
-            if (count == 0) {
-                throw new IOException("Pack file read made no progress");
-            }
-            offset += count;
-        }
-        return buffer.array();
+    private static MessageDigest objectHash(GitObjectType type, long size) {
+        MessageDigest hash = GitHashAlgorithm.SHA1.newDigest();
+        hash.update((type.name().toLowerCase(Locale.ROOT) + " " + size + "\0")
+                .getBytes(StandardCharsets.US_ASCII));
+        return hash;
     }
 
-    private static void closeFailed(AutoCloseable resource, Throwable failure) {
-        try {
-            resource.close();
-        } catch (Throwable cleanup) {
-            if (cleanup != failure) {
-                failure.addSuppressed(cleanup);
-            }
+    private static Base readBase(GitObjectType type, long size, Optional<ObjectId> unused,
+                                  BufferedByteInputV2 input) throws IOException {
+        if (size > Integer.MAX_VALUE - 8) {
+            throw new IOException("Delta base is too large for in-memory resolution");
         }
+        return new Base(type, input.readBytes((int) size));
     }
+
+    private record Base(GitObjectType type, byte[] content) {}
 }

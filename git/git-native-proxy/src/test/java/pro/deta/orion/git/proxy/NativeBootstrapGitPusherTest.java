@@ -18,7 +18,7 @@ import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
@@ -58,7 +58,7 @@ class NativeBootstrapGitPusherTest {
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
                 repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 fetcher,
                 new NativeBootstrapGitPusher());
 
@@ -115,7 +115,7 @@ class NativeBootstrapGitPusherTest {
 
         assertThat(accepted).containsExactly(false);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
         assertThat(proxy.publish(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
@@ -132,7 +132,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitFileUpdate update = repository.files().prepareFileUpdate(location.refName(),
                 Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
-                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> java.util.List.of()),
+                new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { },
                 (selected, transport, target, received, updates, atomic) -> new NativeBootstrapGitPusher().push(
                         selected, (service, uri, options) -> {
@@ -217,8 +217,8 @@ class NativeBootstrapGitPusherTest {
 
     private static Optional<PackChecksum> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            return Optional.of(repository.storage().persist(pack));
+            PackMetadata pack = repository.ingest(input);
+            return Optional.of(repository.publishPack(pack).packChecksum());
         }
     }
 }

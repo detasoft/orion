@@ -17,7 +17,7 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -34,6 +34,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -555,8 +556,8 @@ class OrionGitRouteNativeTest {
         byte[] packBytes = pack(objectId, data);
         PackChecksum packId;
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(packBytes))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            packId = repository.storage().persist(pack);
+            PackMetadata pack = repository.ingest(input);
+            packId = repository.publishPack(pack).packChecksum();
         }
         repository.updateRef(
                 "refs/heads/main",
@@ -570,7 +571,7 @@ class OrionGitRouteNativeTest {
     private static ObjectId blobId(byte[] data) {
         java.security.MessageDigest digest = GitHashAlgorithm.SHA1.newDigest();
         digest.update(("blob " + data.length + "\0").getBytes(StandardCharsets.US_ASCII));
-        return new ObjectId(java.util.HexFormat.of().formatHex(digest.digest(data)));
+        return new ObjectId(HexFormat.of().formatHex(digest.digest(data)));
     }
 
     private static byte[] pack(ObjectId objectId, byte[] data) throws IOException {

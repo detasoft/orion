@@ -2,12 +2,9 @@ package pro.deta.orion.git.parser.v2.storage.local;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.shared.GitLock;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -22,17 +19,16 @@ class GitLockTest {
     void interruptingAWaiterDoesNotReleaseTheOwnerOrCancelItsSignal() throws Exception {
         var lock = new GitLock(directory);
         var other = new GitLock(directory);
-        var id = new PackChecksum(new byte[20]);
         var started = new CountDownLatch(1);
         var interrupted = new CountDownLatch(1);
         var acquired = new CountDownLatch(1);
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var owner = lock.lockPack(id);
+            var owner = lock.lock();
             try {
                 var waiter = executor.submit(() -> {
                     started.countDown();
-                    try (var ignored = other.lockPack(id)) {
-                        throw new AssertionError("Owner has not released the pack");
+                    try (var ignored = other.lock()) {
+                        throw new AssertionError("Owner has not released the index");
                     } catch (InterruptedException expected) {
                         interrupted.countDown();
                     }
@@ -41,7 +37,7 @@ class GitLockTest {
                 waiter.cancel(true);
                 assertThat(interrupted.await(5, TimeUnit.SECONDS)).isTrue();
                 var successor = executor.submit(() -> {
-                    try (var ignored = other.lockPack(id)) {
+                    try (var ignored = other.lock()) {
                         acquired.countDown();
                     }
                     return null;
@@ -57,15 +53,12 @@ class GitLockTest {
     }
 
     @Test
-    void namespacesAndRepositoriesDoNotBlockEachOther() throws Exception {
+    void differentRepositoriesDoNotBlockEachOther() throws Exception {
         var first = new GitLock(directory);
         var second = new GitLock(directory.resolve("another"));
-        byte[] bytes = new byte[20];
-        try (GitLock.Lease pack = first.lockPack(new PackChecksum(bytes));
-             GitLock.Lease refs = first.lockRefs(List.of(new RefId("refs/heads/main")));
-             GitLock.Lease otherRepository = second.lockPack(new PackChecksum(bytes))) {
+        try (GitLock.Lease pack = first.lock();
+             GitLock.Lease otherRepository = second.lock()) {
             assertThat(pack).isNotNull();
-            assertThat(refs).isNotNull();
             assertThat(otherRepository).isNotNull();
         }
     }

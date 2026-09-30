@@ -1,6 +1,5 @@
 package pro.deta.orion.git.sync;
 
-import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.junit.jupiter.api.Test;
@@ -14,6 +13,7 @@ import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -98,9 +98,9 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static void persist(NativeGitRepository repository, byte[] bytes) throws IOException {
-        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage())) {
+        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), repository.index())) {
             output.write(bytes);
-            repository.storage().persist(output.complete());
+            repository.publishPack(output.complete()).packChecksum();
         }
     }
 

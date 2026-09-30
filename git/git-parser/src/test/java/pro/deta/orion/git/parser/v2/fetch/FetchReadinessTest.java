@@ -10,8 +10,8 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -32,12 +32,14 @@ class FetchReadinessTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
+    private final GitIndexApi index =
+            new InMemoryIndex();
     private ObjectId tree;
 
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
-        tree = PackTestData.store(storage, GitObjectType.TREE, new byte[0]);
+        tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
     }
 
     @Test
@@ -148,7 +150,7 @@ class FetchReadinessTest {
                 .getBytes(StandardCharsets.US_ASCII);
         byte[] instructions = PackTestData.join(
                 new byte[]{(byte) base.length, (byte) content.length, (byte) content.length}, content);
-        ObjectId tip = PackTestData.storeDelta(storage, GitObjectType.COMMIT, base, instructions, content);
+        ObjectId tip = PackTestData.storeDelta(storage, index, GitObjectType.COMMIT, base, instructions, content);
         NegotiationContext context = context(tip);
         context.addCommon(root);
         assertThat(context.isReady()).isTrue();
@@ -164,11 +166,7 @@ class FetchReadinessTest {
             entries.add(PackTestData.entry(GitObjectType.COMMIT, bytes));
             tip = PackTestData.objectId(GitObjectType.COMMIT, bytes);
         }
-        try (MutableIndexedPack pack = PackTestData.ingest(PackTestData.pack(entries.toArray(byte[][]::new)),
-                storage.newPack())) {
-            new GitPackObjectResolver(pack, storage).complete();
-            storage.persist(pack);
-        }
+        PackTestData.publish(PackTestData.pack(entries.toArray(byte[][]::new)), storage, index);
         NegotiationContext context = context(tip);
         context.addCommon(root);
         assertThat(context.isReady()).isTrue();
@@ -195,7 +193,7 @@ class FetchReadinessTest {
         FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wants().addAll(List.of(wants));
-        return new NegotiationContext(request, storage,
+        return new NegotiationContext(request, storage, index,
                 capabilities(GitCapability.SHALLOW, GitCapability.WAIT_FOR_DONE));
     }
 
@@ -212,6 +210,6 @@ class FetchReadinessTest {
     }
 
     private ObjectId put(GitObjectType type, String content) throws Exception {
-        return PackTestData.store(storage, type, content.getBytes(StandardCharsets.US_ASCII));
+        return PackTestData.store(storage, index, type, content.getBytes(StandardCharsets.US_ASCII));
     }
 }

@@ -12,15 +12,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -84,9 +85,12 @@ class NativeBootstrapGitPackReplayTest {
             }
             byte[] original = bytes.toByteArray();
             Optional<PackChecksum> received = ingest(repository, original);
-            byte[] completed = repository.storage().readPack(received.orElseThrow(),
-                    (size, input) -> input.newInputStream().readAllBytes()).orElseThrow();
-            assertThat(repository.storage().packObjectIds(received.orElseThrow()))
+            ByteArrayOutputStream exported = new ByteArrayOutputStream();
+            PackMetadata metadata = repository.index().packs(received.orElseThrow()).getFirst();
+            repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+            byte[] completed = exported.toByteArray();
+            assertThat(repository.index().objects(metadata.packId()))
+                    .extracting(IndexedObject::objectId)
                     .contains(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()));
 
             try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
@@ -141,8 +145,8 @@ class NativeBootstrapGitPackReplayTest {
 
     private static Optional<PackChecksum> ingest(NativeGitRepository repository, byte[] bytes) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            MutableIndexedPack pack = repository.ingest(input);
-            return Optional.of(repository.storage().persist(pack));
+            PackMetadata pack = repository.ingest(input);
+            return Optional.of(repository.publishPack(pack).packChecksum());
         }
     }
 

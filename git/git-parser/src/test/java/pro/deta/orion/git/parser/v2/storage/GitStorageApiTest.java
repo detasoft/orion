@@ -6,21 +6,28 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.pack.GitPackObjectResolver;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
-import pro.deta.orion.git.parser.v2.pack.MutableIndexedPack;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,130 +36,97 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitStorageApiTest {
     @TempDir
     Path directory;
-    private static final ObjectId ID = new ObjectId("1".repeat(40));
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void locatesOrderedUniqueObjectsAcrossPacksAndReadsExactCompressedRanges(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
+    void readsExactCompressedRangesFromRepositoryLocations(boolean disk) throws Exception {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+             GitIndexApi index = disk ? new LocalGitIndex(directory) : new InMemoryIndex()) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
-            byte[] third = {6};
-            ObjectId firstId = PackTestData.objectId(GitObjectType.BLOB, first);
-            ObjectId secondId = PackTestData.objectId(GitObjectType.BLOB, second);
-            MutableIndexedPack target = PackTestData.ingest(
-                    PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage.newPack());
-            new GitPackObjectResolver(target, storage).complete();
-            PackChecksum pair = storage.persist(target);
-            ObjectId thirdId = PackTestData.store(storage, GitObjectType.BLOB, third);
-            List<PackObjectLocation> locations = storage.locateObjects(List.of(thirdId, secondId, firstId, thirdId, ID));
-            assertThat(locations).extracting(PackObjectLocation::objectId)
-                    .containsExactly(thirdId, secondId, firstId);
-            assertThat(locations.getFirst().packId()).isNotEqualTo(pair);
-            assertThat(locations.get(1).packId()).isEqualTo(pair);
-            assertThat(locations.get(2).packId()).isEqualTo(pair);
-            assertThat(locations.get(2).end()).isEqualTo(locations.get(1).entry().offset());
-            assertThat(storage.packObjectIds(pair)).containsExactlyInAnyOrder(firstId, secondId);
-            byte[][] contents = {third, second, first};
-            for (int index = 0; index < locations.size(); index++) {
-                PackObjectLocation location = locations.get(index);
-                byte[] expected = contents[index];
-                byte[] compressed = storage.readObject(location, (type, size, base, input) -> {
+            PackMetadata pair = PackTestData.publish(
+                    PackTestData.pack(PackTestData.blob(first), PackTestData.blob(second)), storage, index);
+            List<IndexedObject> locations = index.objects(pair.packId());
+            assertThat(locations).hasSize(2);
+            assertThat(locations.getFirst().packOffset() + locations.getFirst().compressedSize())
+                    .isEqualTo(locations.getLast().packOffset());
+            byte[][] contents = {first, second};
+            for (int i = 0; i < contents.length; i++) {
+                byte[] expected = contents[i];
+                byte[] compressed = GitObjectRead.read(storage, locations.get(i), (type, size, base, input) -> {
                     assertThat(type).isEqualTo(GitObjectType.BLOB);
                     assertThat(size).isEqualTo(expected.length);
                     assertThat(base).isEmpty();
                     return input.newInputStream().readAllBytes();
                 });
                 assertThat(compressed).isEqualTo(PackTestData.compressed(expected));
-            }
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void readsWholePackWithIndependentInputsAndClosesBorrowedInput(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
-            byte[] content = new byte[40000];
-            new Random(81).nextBytes(content);
-            ObjectId object = PackTestData.store(storage, GitObjectType.BLOB, content);
-            PackChecksum id = storage.packIds().getFirst();
-            byte[] expected = PackTestData.pack(PackTestData.blob(content));
-            AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
-            byte[] actual = storage.readPack(id, (size, input) -> {
-                borrowed.set(input);
-                assertThat(size).isEqualTo(expected.length);
-                assertThat(storage.packObjectIds(id)).containsExactly(object);
-                assertThat(storage.readPack(id, (nestedSize, nested) -> nested.readBytes(4)))
-                        .hasValueSatisfying(header -> assertThat(header).containsExactly(80, 65, 67, 75));
-                return input.newInputStream().readAllBytes();
-            }).orElseThrow();
-            assertThat(actual).isEqualTo(expected);
-            assertThatThrownBy(() -> borrowed.get().readUnsignedByte()).isInstanceOf(IOException.class);
-            assertThat(storage.exists(object)).isTrue();
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void readerFailureClosesInputAndLeavesPublishedPackReadable(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
-            PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
-            PackChecksum id = storage.packIds().getFirst();
-            AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
-            IOException failure = new IOException("consumer failed");
-            assertThatThrownBy(() -> storage.readPack(id, (size, input) -> {
-                borrowed.set(input);
-                input.readUnsignedByte();
-                throw failure;
-            })).isSameAs(failure);
-            assertThatThrownBy(() -> borrowed.get().readUnsignedByte()).isInstanceOf(IOException.class);
-            byte[] expected = PackTestData.pack(PackTestData.blob(new byte[]{42}));
-            assertThat(storage.readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
-                    .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(expected));
-            assertThat(storage.readPack(new PackChecksum("f".repeat(40)), (size, input) -> {
-                throw new AssertionError("An absent pack must not invoke the reader");
-            })).isEmpty();
-        }
-    }
-
-    @Test
-    void rawPackReadDoesNotOpenAnAlreadyOpenDiskIndex() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory)) {
-            PackTestData.store(storage, GitObjectType.BLOB, new byte[]{42});
-            PackChecksum id = storage.packIds().getFirst();
-            String hex = id.toHex();
-            Path shard = directory.resolve("packs").resolve(hex.substring(0, 2));
-            try (IndexedPack index = LocalIndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),
-                    shard.resolve(hex.substring(2) + ".mv"))) {
-                byte[] expected = PackTestData.bytes(index);
-                assertThat(storage.readPack(id, (size, input) -> input.newInputStream().readAllBytes()))
+                assertThat(GitObjectRead.read(storage, index, locations.get(i).objectId(),
+                        new ContentGitObjectRead<>((type, size, base, input) -> input.readBytes((int) size))))
                         .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(expected));
             }
         }
     }
 
-    @Test
-    void absentObjectsDoNotInvokeTheReader() throws Exception {
-        var storage = new LocalGitStorage(directory);
-        assertThat(storage.exists(ID)).isFalse();
-        assertThat(storage.readObject(ID, (type, size, baseId, input) -> {
-            throw new AssertionError("An absent object must not invoke the reader");
-        })).isEmpty();
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void borrowsIndependentInputsAndReleasesLocksBeforeCallbacks(boolean disk) throws Exception {
+        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            byte[] expected = new byte[40_000];
+            new Random(81).nextBytes(expected);
+            PackId id = PackId.create();
+            try (PackDataStorage writer = storage.newPack(id)) {
+                writer.write(0, ByteBuffer.wrap(expected));
+                writer.flush();
+            }
+            AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
+            byte[] actual = storage.readPack(id, 0, expected.length, (size, input) -> {
+                borrowed.set(input);
+                assertThat(size).isEqualTo(expected.length);
+                try {
+                    byte[] nested = executor.submit(() -> storage.readPack(id, 0, 4,
+                            (length, source) -> source.readBytes(4))).get(5, TimeUnit.SECONDS);
+                    assertThat(nested).containsExactly(Arrays.copyOf(expected, 4));
+                } catch (Exception failure) {
+                    throw new IOException(failure);
+                }
+                return input.newInputStream().readAllBytes();
+            });
+            assertThat(actual).isEqualTo(expected);
+            assertThatThrownBy(() -> borrowed.get().readUnsignedByte()).isInstanceOf(IOException.class);
+            IOException failure = new IOException("reader failed");
+            assertThatThrownBy(() -> storage.readPack(id, 0, 1, (size, input) -> {
+                borrowed.set(input);
+                throw failure;
+            })).isSameAs(failure);
+            assertThatThrownBy(() -> borrowed.get().readUnsignedByte()).isInstanceOf(IOException.class);
+            assertThat(storage.<byte[]>readPack(id, 0, expected.length,
+                    (size, input) -> input.newInputStream().readAllBytes())).isEqualTo(expected);
+            assertThatThrownBy(() -> storage.readPack(id, 1, expected.length, (size, input) -> 1))
+                    .isInstanceOf(IOException.class);
+            assertThat(storage.exists(PackId.create())).isFalse();
+            assertThatThrownBy(() -> storage.readPack(PackId.create(), 0, 1, (size, input) -> {
+                throw new AssertionError("Missing bytes must not invoke a reader");
+            })).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> storage.newPack(id)).isInstanceOf(IOException.class);
+        }
     }
 
     @Test
-    void readsRealContentThroughTheSameFacadeUsedForPresenceChecks() throws Exception {
-        var storage = new LocalGitStorage(directory);
-        ObjectId id = PackTestData.store(storage,
-                GitObjectType.COMMIT, new byte[]{10, 20, 30});
-        assertThat(storage.exists(id)).isTrue();
-        var reader = new ContentGitObjectRead<>((type, size, baseId, input) -> {
-            assertThat(type).isEqualTo(GitObjectType.COMMIT);
-            assertThat(size).isEqualTo(3);
-            assertThat(baseId).isEmpty();
-            return input.readBytes((int) size);
-        });
-        assertThat(storage.readObject(id, reader)).hasValueSatisfying(
-                bytes -> assertThat(bytes).containsExactly(10, 20, 30));
+    void rawReadRemainsAvailableAfterIndexClosesAndMissingObjectsDoNotInvokeReader() throws Exception {
+        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+            ObjectId absent = new ObjectId("1".repeat(40));
+            assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
+            assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {
+                throw new AssertionError("Missing object must not invoke a reader");
+            })).isEmpty();
+            ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+            IndexedObject location = index.locations(object).getFirst();
+            index.close();
+            assertThat(storage.exists(location.packId())).isTrue();
+            assertThat(GitObjectRead.<Integer>read(storage, location,
+                    new ContentGitObjectRead<>((type, size, base, input) -> input.readUnsignedByte())))
+                    .isEqualTo(42);
+        }
     }
 }

@@ -22,6 +22,7 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -87,7 +88,7 @@ public class FetchCommand implements GitCommand {
 
     public FetchNegotiatorIterator prepareNegotiation(FetchRequest request, GitTransport transport)
             throws IOException {
-        NegotiationContext context = new NegotiationContext(request, storage, advertisedCapabilities);
+        NegotiationContext context = new NegotiationContext(request, storage, repository.index(), advertisedCapabilities);
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, transport);
         RefsSnapshot snapshot = repository.index().snapshotRefs();
         if (!request.wantRefs().isEmpty()) {
@@ -95,7 +96,7 @@ public class FetchCommand implements GitCommand {
         }
         repository.checkFetchAccess(context, snapshot);
         for (ObjectId objectId : context.wantedObjects()) {
-            if (!storage.exists(objectId)) {
+            if (!GitObjectRead.exists(storage, repository.index(), objectId)) {
                 throw new IOException("Wanted object does not exist: " + objectId.toHex());
             }
         }

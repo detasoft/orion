@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.v2.pack;
 
-import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -9,9 +9,7 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -20,19 +18,18 @@ import java.util.zip.Inflater;
 
 /**
  * Pull reader for one pack, independent of storage. A single inflater validates entry boundaries and
- * sizes and hashes full objects. Raw bytes, including headers and trailer, are returned unchanged.
+ * sizes. Only compressed content is returned; headers and trailer participate in the input checksum.
  * Returned buffers are borrowed until the next operation. The caller owns the input, which remains
  * positioned immediately after the trailer. End, failure or close terminates the reader.
  */
 public final class PackReader implements AutoCloseable {
-    private enum State { HEADER, ENTRY_HEADER, CONTENT, TRAILER, END, CLOSED }
+    private enum State { HEADER, ENTRY_HEADER, CONTENT, TRAILER, CLOSED }
 
     private final BufferedByteInputV2 input;
     private final Inflater inflater = new Inflater();
     private final ByteBuffer header = ByteBuffer.allocate(64);
     private final byte[] inflated = new byte[8192];
     private final MessageDigest checksum = GitHashAlgorithm.SHA1.newDigest();
-    private final MessageDigest objectHash = GitHashAlgorithm.SHA1.newDigest();
     private State state = State.HEADER;
     private long position;
     private long remainingEntries;
@@ -55,24 +52,24 @@ public final class PackReader implements AutoCloseable {
                     header.clear();
                     remainingEntries = PackHeader.read(readBytes(PackHeader.SIZE));
                     state = remainingEntries == 0 ? State.TRAILER : State.ENTRY_HEADER;
-                    yield hashBytes(header.flip());
+                    checksum.update(header.flip());
+                    yield next();
                 }
                 case ENTRY_HEADER -> {
                     header.clear();
                     readEntry();
                     state = State.CONTENT;
-                    yield hashBytes(header.flip());
+                    checksum.update(header.flip());
+                    yield new PackReadStep.Entry(entry);
                 }
                 case CONTENT -> {
                     ByteBuffer bytes = readContent();
                     if (bytes != null) {
                         yield hashBytes(bytes);
                     }
-                    Optional<ObjectId> objectId = fullEntry() ? Optional.of(new ObjectId(objectHash.digest()))
-                            : Optional.empty();
                     remainingEntries--;
                     state = remainingEntries == 0 ? State.TRAILER : State.ENTRY_HEADER;
-                    yield new PackReadStep.EntryEnd(entry, objectId);
+                    yield new PackReadStep.EntryEnd(entry, position - entry.packOffset());
                 }
                 case TRAILER -> {
                     header.clear();
@@ -82,10 +79,6 @@ public final class PackReader implements AutoCloseable {
                         throw new IOException("Pack checksum mismatch");
                     }
                     id = new PackChecksum(received);
-                    state = State.END;
-                    yield new PackReadStep.Bytes(header.flip().asReadOnlyBuffer());
-                }
-                case END -> {
                     close();
                     yield new PackReadStep.End(id);
                 }
@@ -136,20 +129,10 @@ public final class PackReader implements AutoCloseable {
             baseId = Optional.of(new ObjectId(readBytes(checksum.getDigestLength())));
         }
         long packOffset = position;
-        boolean full = type != GitObjectType.OFS_DELTA && type != GitObjectType.REF_DELTA;
-        if (full) {
-            objectHash.reset();
-            String header = type.name().toLowerCase(Locale.ROOT) + " " + size + "\0";
-            objectHash.update(header.getBytes(StandardCharsets.US_ASCII));
-        }
         inflater.reset();
         inflatedSize = 0;
         compressed = null;
         entry = new PackEntry(offset, packOffset, size, type, baseOffset, baseId);
-    }
-
-    private boolean fullEntry() {
-        return entry.type() != GitObjectType.OFS_DELTA && entry.type() != GitObjectType.REF_DELTA;
     }
 
     private ByteBuffer readContent() throws IOException {
@@ -173,12 +156,6 @@ public final class PackReader implements AutoCloseable {
                 throw new IOException("Inflated size exceeds declared object size");
             }
             inflatedSize += count;
-            if (entry.type() == GitObjectType.TREE && count > 0) {
-                verifyTree(inflated, count);
-            }
-            if (fullEntry()) {
-                objectHash.update(inflated, 0, count);
-            }
             if (inflater.needsDictionary()) {
                 throw new IOException("Pack zlib stream requires a dictionary");
             }
@@ -197,12 +174,6 @@ public final class PackReader implements AutoCloseable {
             }
         }
         return null;
-    }
-
-    private void verifyTree(byte[] data, int length) throws IOException {
-        // @todo Verify tree entry ordering across inflated chunks without rewriting bytes or object IDs.
-        // This is a placeholder: tree ordering is not currently checked. Delta trees need resolved content
-        // before verification; PackReader only sees their delta instructions.
     }
 
     private byte[] readBytes(int length) throws IOException {

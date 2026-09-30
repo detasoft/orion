@@ -29,7 +29,7 @@ public final class RefsCommand implements GitCommand {
 
     public RefsCommand(GitStorageApi storage, GitIndexApi index, GitCapabilities advertisedCapabilities) {
         this.index = Objects.requireNonNull(index, "index");
-        graph = new GitObjectGraph(storage);
+        graph = new GitObjectGraph(storage, index);
         Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities");
         unbornAllowed = List.of(advertisedCapabilities.value(GitCapability.LS_REFS).orElse("").split(" "))
                 .contains(LsRefsArgument.UNBORN.wireName());

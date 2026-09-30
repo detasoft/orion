@@ -19,8 +19,10 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -70,9 +72,10 @@ class GitBlockingWireSessionTest {
             public List<RefUpdateResult> publish(NativeGitRepository selected, Optional<PackChecksum> received,
                     List<RefUpdate> updates, boolean atomic) {
                 try {
-                    assertThat(selected.storage().readPack(received.orElseThrow(),
-                            (size, input) -> input.newInputStream().readAllBytes()))
-                            .hasValueSatisfying(bytes -> assertThat(bytes).isEqualTo(original));
+                    ByteArrayOutputStream exported = new ByteArrayOutputStream();
+                    selected.writePack(selected.index().packs(received.orElseThrow()).getFirst(),
+                            new OutputStreamBufferedByteOutput(exported));
+                    assertThat(exported.toByteArray()).isEqualTo(original);
                 } catch (IOException failure) {
                     throw new UncheckedIOException(failure);
                 }

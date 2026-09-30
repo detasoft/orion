@@ -13,12 +13,10 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -140,9 +138,8 @@ class GitBlockingWireSessionTest {
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.UPLOAD_PACK));
         byte[] received = response.toByteArray();
         assertThat(new String(received, 0, 8, StandardCharsets.US_ASCII)).isEqualTo("0008NAK\n");
-        try (IndexedPack pack = PackTestData.ingest(Arrays.copyOfRange(received, 8, received.length),
-                new InMemoryStorage().newPack())) {
-            assertThat(pack.find(id)).isPresent();
+        try (GitIndexApi pack = PackTestData.inspect(Arrays.copyOfRange(received, 8, received.length))) {
+            assertThat(pack.locations(id)).isNotEmpty();
         }
     }
 
@@ -162,9 +159,9 @@ class GitBlockingWireSessionTest {
     @Test
     void legacyAdvertisementsPeelAnnotatedTagsOnlyForUploadPack() throws Exception {
         ObjectId target = publish();
-        ObjectId inner = PackTestData.store(storage, GitObjectType.TAG,
+        ObjectId inner = PackTestData.store(storage, index, GitObjectType.TAG,
                 ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
-        ObjectId outer = PackTestData.store(storage, GitObjectType.TAG,
+        ObjectId outer = PackTestData.store(storage, index, GitObjectType.TAG,
                 ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
         index.updateRefs(List.of(
                 new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
@@ -244,7 +241,7 @@ class GitBlockingWireSessionTest {
     }
 
     private ObjectId publish() throws Exception {
-        ObjectId id = PackTestData.store(storage, GitObjectType.BLOB, new byte[]{1, 2, 3});
+        ObjectId id = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
         index.updateRefs(List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);
         return id;
     }
@@ -310,9 +307,9 @@ class GitBlockingWireSessionTest {
             assertThat(data.content()[0]).isEqualTo((byte) 1);
             bytes.write(data.content(), 1, data.content().length - 1);
         }
-        try (IndexedPack pack = PackTestData.ingest(bytes.toByteArray(), new InMemoryStorage().newPack())) {
-            assertThat(pack.objectCount()).isEqualTo(1);
-            assertThat(pack.find(id)).isPresent();
+        try (GitIndexApi pack = PackTestData.inspect(bytes.toByteArray())) {
+            assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
+            assertThat(pack.locations(id)).isNotEmpty();
         }
     }
 }

@@ -2,8 +2,10 @@ package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.PackObjectLocation;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -11,7 +13,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -19,9 +20,18 @@ import java.util.Set;
 public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
     private final GitStorageApi storage;
     private final GitObjectRead<R> consumer;
+    private final GitIndexApi index;
+    private final Optional<PackId> pendingPack;
 
-    public ResolvedGitObjectRead(GitStorageApi storage, GitObjectRead<R> consumer) {
+    public ResolvedGitObjectRead(GitStorageApi storage, GitIndexApi index, GitObjectRead<R> consumer) {
+        this(storage, index, Optional.empty(), consumer);
+    }
+
+    public ResolvedGitObjectRead(GitStorageApi storage, GitIndexApi index, Optional<PackId> pendingPack,
+                                  GitObjectRead<R> consumer) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.index = Objects.requireNonNull(index, "index");
+        this.pendingPack = Objects.requireNonNull(pendingPack, "pendingPack");
         this.consumer = Objects.requireNonNull(consumer, "consumer");
     }
 
@@ -40,31 +50,48 @@ public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
 
     private Base readBase(ObjectId id) throws IOException {
         Set<ObjectId> path = new HashSet<>();
-        Deque<PackObjectLocation> deltas = new ArrayDeque<>();
-        PackObjectLocation location;
+        Deque<IndexedObject> deltas = new ArrayDeque<>();
+        IndexedObject location;
         while (true) {
             if (!path.add(id)) {
                 throw new IOException("Cyclic delta base: " + id.toHex());
             }
-            List<PackObjectLocation> found = storage.locateObjects(List.of(id));
-            if (found.isEmpty()) {
-                throw new IOException("Missing delta base: " + id.toHex());
-            }
-            location = found.getFirst();
-            GitObjectType type = location.entry().type();
-            if (type != GitObjectType.REF_DELTA && type != GitObjectType.OFS_DELTA) {
+            location = findBase(id);
+            if (location.delta().isEmpty()) {
                 break;
             }
             deltas.push(location);
-            id = location.baseId().orElseThrow(() -> new IOException("Delta has no base ObjectId"));
+            id = location.delta().orElseThrow().baseId();
         }
-        Base base = storage.readObject(location, new ContentGitObjectRead<>(ResolvedGitObjectRead::readBytes));
+        Base base = GitObjectRead.read(storage, location, new ContentGitObjectRead<>(ResolvedGitObjectRead::readBytes));
         while (!deltas.isEmpty()) {
             Base previous = base;
-            base = storage.readObject(deltas.pop(), new ContentGitObjectRead<>((type, size, unused, input) ->
+            base = GitObjectRead.read(storage, deltas.pop(), new ContentGitObjectRead<>((type, size, unused, input) ->
                     readDelta(input, previous, ResolvedGitObjectRead::readBytes)));
         }
         return base;
+    }
+
+    private IndexedObject findBase(ObjectId id) throws IOException {
+        IndexedObject candidate = null;
+        if (pendingPack.isPresent()) {
+            candidate = index.findObject(pendingPack.orElseThrow(), id).orElse(null);
+            if (candidate != null && candidate.delta().isEmpty()) {
+                return candidate;
+            }
+        }
+        for (IndexedObject object : index.locations(id)) {
+            if (object.delta().isEmpty()) {
+                return object;
+            }
+            if (candidate == null) {
+                candidate = object;
+            }
+        }
+        if (candidate == null) {
+            throw new IOException("Missing delta base: " + id.toHex());
+        }
+        return candidate;
     }
 
     private static Base readBytes(GitObjectType type, long size, Optional<ObjectId> unused,

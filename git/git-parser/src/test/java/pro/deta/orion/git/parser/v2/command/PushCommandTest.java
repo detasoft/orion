@@ -12,19 +12,17 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.pack.IndexedPack;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.push.PushRequest;
+import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
-import pro.deta.orion.git.parser.v2.storage.local.LocalIndexedPack;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -35,6 +33,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,13 +49,13 @@ class PushCommandTest {
     @Test
     void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
         try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
-            ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1});
+            ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
             byte[] response = execute(storage, index, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
                     ZERO + " " + result + " " + REF + "\0report-status"));
             assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
             assertThat(index.snapshotRefs().refs()).containsEntry(REF, result);
-            assertThat(storage.readObject(result, new ResolvedGitObjectRead<>(storage,
+            assertThat(GitObjectRead.read(storage, index, result, new ResolvedGitObjectRead<>(storage, index,
                     (type, size, unused, input) -> input.readBytes((int) size))))
                     .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
         }
@@ -66,7 +65,7 @@ class PushCommandTest {
     void publishesAThinPackWithItsExternalBaseAndLeavesTheInputOpen() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId base = store(storage, GitObjectType.BLOB, new byte[]{1, 2, 3});
+        ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
         byte[] source = pack(delta(base, new byte[]{3, 4, (byte) 0x90, 3, 1, 4}));
         ObjectId result = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3, 4});
         byte[] request = request(source, ZERO + " " + result + " " + REF + "\0report-status\n");
@@ -80,22 +79,18 @@ class PushCommandTest {
         GitStorageApi reopened = new LocalGitStorage(directory);
         GitIndexApi reopenedIndex = new LocalGitIndex(directory);
         assertThat(reopenedIndex.snapshotRefs().refs()).containsEntry(REF, result);
-        assertThat(reopened.readObject(result, new ResolvedGitObjectRead<>(reopened,
+        assertThat(GitObjectRead.read(reopened, reopenedIndex, result, new ResolvedGitObjectRead<>(reopened, reopenedIndex,
                 (type, size, unused, input) -> input.readBytes((int) size))))
                 .hasValueSatisfying(content -> assertThat(content).containsExactly(1, 2, 3, 4));
-        PackChecksum id = reopened.findPacksByObjectIds(List.of(result)).get(result).getFirst();
-        String hex = id.toHex();
-        Path shard = directory.resolve("packs").resolve(hex.substring(0, 2));
-        try (IndexedPack published = LocalIndexedPack.open(shard.resolve(hex.substring(2) + ".pack"),
-                shard.resolve(hex.substring(2) + ".mv"))) {
-            assertThat(published.objectCount()).isEqualTo(2);
-            assertThat(published.find(base).orElseThrow().type()).isEqualTo(GitObjectType.BLOB);
-        }
-        assertThat(directory.resolve("incoming")).isEmptyDirectory();
+        var location = reopenedIndex.locations(result).getFirst();
+        assertThat(reopenedIndex.objects(location.packId())).hasSize(2);
+        assertThat(reopenedIndex.findObject(location.packId(), base).orElseThrow().type())
+                .isEqualTo(GitObjectType.BLOB);
+
     }
 
     @Test
-    void removesStagingAfterMissingBasesMalformedDeltasAndCorruptInput() throws Exception {
+    void keepsFailuresPrivateAfterMissingBasesMalformedDeltasAndCorruptInput() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
         ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
@@ -110,8 +105,8 @@ class PushCommandTest {
                         .action(context(input, new ByteArrayOutputStream())))
                         .isInstanceOf(IOException.class);
             }
-            assertThat(directory.resolve("incoming")).isEmptyDirectory();
-            assertThat(directory.resolve("packs")).isEmptyDirectory();
+
+            assertThat(index.packs()).isEmpty();
             assertThat(index.snapshotRefs().refs()).isEmpty();
         }
     }
@@ -143,7 +138,7 @@ class PushCommandTest {
     void consumesEmptyPackWhenCreatingARefToAnExistingObject() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{1});
+        ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
         byte[] request = request(pack(), ZERO + " " + id + " " + REF + "\0report-status");
         try (BufferedByteInputV2 input = new BufferedByteInputV2(
                 new ByteArrayInputStream(join(request, new byte[]{42})))) {
@@ -158,7 +153,7 @@ class PushCommandTest {
     void preservesExpectedOldAndAtomicSemantics(boolean atomic) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId first = store(storage, GitObjectType.BLOB, new byte[]{1});
+        ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
         ObjectId stale = objectId(GitObjectType.BLOB, new byte[]{2});
         ObjectId next = objectId(GitObjectType.BLOB, new byte[]{3});
         index.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(first))), false);
@@ -174,7 +169,7 @@ class PushCommandTest {
         } else {
             assertThat(index.snapshotRefs().refs()).containsEntry(other, next);
         }
-        assertThat(storage.exists(next)).isTrue();
+        assertThat(GitObjectRead.exists(storage, index, next)).isTrue();
     }
 
     @Test
@@ -192,7 +187,7 @@ class PushCommandTest {
     void reportsUnpackFailureAndDoesNotApplyEvenADeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId first = store(storage, GitObjectType.BLOB, new byte[]{1});
+        ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
         index.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(first))), false);
         ObjectId next = objectId(GitObjectType.BLOB, new byte[]{2});
         byte[] corrupt = pack(blob(new byte[]{2}));
@@ -203,15 +198,15 @@ class PushCommandTest {
         assertThat(status(response, "side-band-64k")).isEqualTo(report("unpack unpacker error\n",
                 "ng " + REF + " unpacker error\n", "ng refs/tags/other unpacker error\n"));
         assertThat(index.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, first);
-        assertThat(storage.exists(next)).isFalse();
-        assertThat(directory.resolve("incoming")).isEmptyDirectory();
+        assertThat(GitObjectRead.exists(storage, index, next)).isFalse();
+
     }
 
     @Test
     void sendsOnlyTheNegotiatedResponseAndAcceptsCancellation() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId id = store(storage, GitObjectType.BLOB, new byte[]{1});
+        ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
         assertThat(execute(storage, index, request(pack(), ZERO + " " + id + " " + REF))).isEmpty();
         assertThat(execute(storage, index, request(new byte[0], id + " " + ZERO + " " + REF + "\0side-band-64k")))
                 .isEqualTo("0000".getBytes(StandardCharsets.US_ASCII));
@@ -223,7 +218,7 @@ class PushCommandTest {
     void rejectsMalformedRequestsWithoutChangingExistingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId existing = store(storage, GitObjectType.BLOB, new byte[]{2});
+        ObjectId existing = store(storage, index, GitObjectType.BLOB, new byte[]{2});
         index.updateRefs(List.of(new RefUpdate(REF, Optional.empty(), Optional.of(existing))), false);
         String id = objectId(GitObjectType.BLOB, new byte[]{1}).toHex();
         String create = ZERO + " " + id + " " + REF;
@@ -256,10 +251,10 @@ class PushCommandTest {
                         .isInstanceOf(IOException.class);
             }
             assertThat(index.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, existing);
-            assertThat(storage.exists(new ObjectId(id))).isFalse();
+            assertThat(GitObjectRead.exists(storage, index, new ObjectId(id))).isFalse();
         }
-        assertThat(directory.resolve("incoming")).isEmptyDirectory();
-        assertThat(storage.exists(existing)).isTrue();
+
+        assertThat(GitObjectRead.exists(storage, index, existing)).isTrue();
     }
 
     @Test
@@ -288,7 +283,7 @@ class PushCommandTest {
     void parsesUnicodeRefsAndValuedCapabilitiesAndLeavesThePackUnread() throws Exception {
         String hex = "abcdef1234".repeat(4);
         String name = "refs/heads/ветка";
-        byte[] request = request(new byte[]{42}, ZERO + " " + hex.toUpperCase(java.util.Locale.ROOT)
+        byte[] request = request(new byte[]{42}, ZERO + " " + hex.toUpperCase(Locale.ROOT)
                 + " " + name + "\0report-status object-format=sha1 agent=git/test session-id=123 quiet ofs-delta\n");
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(request))) {
             PushRequest parsed = PushRequest.parse(context(input, new ByteArrayOutputStream()).reader(), advertised());

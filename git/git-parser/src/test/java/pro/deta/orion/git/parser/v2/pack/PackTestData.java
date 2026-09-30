@@ -3,8 +3,13 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -64,74 +69,46 @@ public final class PackTestData {
         return new ObjectId(hash.digest(content));
     }
 
-    public static MutableIndexedPack ingest(byte[] bytes, MutableIndexedPack target) throws IOException {
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
-            return ingest(input, target);
+    public static GitIndexApi inspect(byte[] bytes) throws IOException {
+        GitIndexApi index = new InMemoryIndex();
+        try (GitStorageApi storage = new InMemoryStorage()) {
+            publish(bytes, storage, index);
+        }
+        return index;
+    }
+
+    public static PackMetadata ingest(byte[] bytes, GitStorageApi storage, GitIndexApi index) throws IOException {
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
+             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+            return ingestor.ingest();
         }
     }
 
-    public static MutableIndexedPack ingest(IndexedPack source, MutableIndexedPack target) throws IOException {
-        try (BufferedByteInputV2 input = source.input()) {
-            return ingest(input, target);
-        }
+    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexApi index) throws IOException {
+        return index.publishIndex(ingest(bytes, storage, index));
     }
 
-    private static MutableIndexedPack ingest(BufferedByteInputV2 input, MutableIndexedPack target)
-            throws IOException {
-        try (PackReader reader = new PackReader(input)) {
-            while (true) {
-                switch (reader.next()) {
-                    case PackReadStep.Bytes bytes -> target.append(bytes.data());
-                    case PackReadStep.EntryEnd end -> {
-                        PackEntry entry = end.metadata();
-                        target.addEntry(entry);
-                        if (end.objectId().isPresent()) {
-                            target.addObject(entry.offset(), end.objectId().orElseThrow(), entry.type(),
-                                    entry.inflatedSize());
-                        }
-                    }
-                    case PackReadStep.End end -> {
-                        target.setId(end.id());
-                        return target;
-                    }
-                }
-            }
-        } catch (IOException | RuntimeException | Error failure) {
-            try {
-                target.discard();
-            } catch (Throwable cleanup) {
-                failure.addSuppressed(cleanup);
-            }
-            throw failure;
-        }
-    }
-
-    public static ObjectId store(GitStorageApi storage,
+    public static ObjectId store(GitStorageApi storage, GitIndexApi index,
                                  GitObjectType type, byte[] content) throws IOException {
-        MutableIndexedPack target = ingest(pack(entry(type, content)), storage.newPack());
-        new GitPackObjectResolver(target, storage).complete();
-        storage.persist(target);
+        publish(pack(entry(type, content)), storage, index);
         return objectId(type, content);
     }
 
-    public static ObjectId storeDelta(GitStorageApi storage,
+    public static ObjectId storeDelta(GitStorageApi storage, GitIndexApi index,
                                       GitObjectType type, byte[] base, byte[] instructions, byte[] result)
             throws IOException {
-        byte[] full = entry(type, base);
-        ObjectId id = objectId(type, result);
-        MutableIndexedPack target = ingest(pack(full, delta(objectId(type, base), instructions)), storage.newPack());
-        new GitPackObjectResolver(target, storage).complete();
-        storage.persist(target);
-        return id;
+        publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, index);
+        return objectId(type, result);
     }
 
-    public static byte[] bytes(IndexedPack pack) throws IOException {
-        ByteBuffer bytes = ByteBuffer.allocate(Math.toIntExact(pack.size()));
-        while (bytes.hasRemaining()) {
-            if (pack.read(bytes.position(), bytes) <= 0) {
-                throw new IOException("Truncated test pack");
+    public static byte[] bytes(PackMetadata pack, GitStorageApi storage, GitIndexApi index) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
+            writer.writeObjects(storage, index.objects(pack.packId()));
+            if (!writer.finish().equals(pack.packChecksum())) {
+                throw new IOException("Export checksum differs from metadata");
             }
         }
-        return bytes.array();
+        return output.toByteArray();
     }
 }

@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -298,7 +299,8 @@ class FetchNegotiatorIteratorTest {
         }
 
         private TestContext(FetchRequest request, Set<ObjectId> existing) {
-            super(request, FetchTestSupport.storage(directory), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
+            super(request, FetchTestSupport.storage(directory),
+                    new InMemoryIndex(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
                     GitCapability.MULTI_ACK_DETAILED, GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE));
             this.existing = existing;
         }

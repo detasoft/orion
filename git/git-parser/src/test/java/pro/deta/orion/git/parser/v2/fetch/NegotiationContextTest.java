@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -23,7 +24,8 @@ class NegotiationContextTest {
     void clientClaimsDoNotBecomeCommonWithoutConfirmation() {
         FetchRequest request = request(List.of(new NegotiationMessage.Have(FIRST),
                 NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND));
-        NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities());
+        NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), capabilities());
         assertThat(context.commonObjects()).isEmpty();
         assertThat(context.lastCommon()).isEmpty();
         assertThat(context.doneReceived()).isFalse();
@@ -37,7 +39,8 @@ class NegotiationContextTest {
     @Test
     void accumulatesConfirmedObjectsAcrossRoundsWithoutLeakingMutableState() {
         FetchRequest request = request(List.of());
-        NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities());
+        NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), capabilities());
         context.addCommon(FIRST);
         Set<ObjectId> firstRound = context.commonObjects();
         context.addCommon(SECOND);
@@ -49,7 +52,8 @@ class NegotiationContextTest {
         assertThatThrownBy(() -> firstRound.add(SECOND)).isInstanceOf(UnsupportedOperationException.class);
         assertThat(context.ready()).isTrue();
         assertThat(context.doneReceived()).isFalse();
-        assertThat(new NegotiationContext(request, FetchTestSupport.storage(directory), capabilities()).commonObjects()).isEmpty();
+        assertThat(new NegotiationContext(request, FetchTestSupport.storage(directory),
+                new InMemoryIndex(), capabilities()).commonObjects()).isEmpty();
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {

@@ -79,14 +79,14 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             NativeGitRepository repository,
             String oldId,
             String newId) {
-        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage())) {
+        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), repository.index())) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.of(newId),
                     NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
                     output,
                     ignored -> { });
             success(client.fetch(location.remoteUri(), OPTIONS, request), "pack transfer");
-            repository.storage().persist(output.complete());
+            repository.publishPack(output.complete());
         } catch (IOException failure) {
             throw new BootstrapGitProxyException("pack validation");
         }
