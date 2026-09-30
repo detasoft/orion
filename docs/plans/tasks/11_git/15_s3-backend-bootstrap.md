@@ -1,8 +1,10 @@
 # Bootstrap the S3 Git Backend
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf, branch `codex/s3-backend-01a0f177`,
-  worktree `.worktrees/s3-backend-01a0f177`, resumed 2026-09-30 11:35 Europe/Amsterdam;
-  next: move endpoint to storage.endpoint and reverify the prepared result.
+  worktree `.worktrees/s3-backend-01a0f177`, paused 2026-09-30 11:46 Europe/Amsterdam;
+  next: integration remains declined; reviewed endpoint correction is prepared as
+  `11492fd87233b62f54ae117370b0e26d73fb53f7`. XML configuration and shared-client
+  ownership are under separate design discussion, not implemented by this task.
 
 ## Required result
 
