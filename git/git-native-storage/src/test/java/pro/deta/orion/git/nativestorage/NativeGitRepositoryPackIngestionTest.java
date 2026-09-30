@@ -3,6 +3,7 @@ package pro.deta.orion.git.nativestorage;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
@@ -22,6 +23,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryPackIngestionTest {
+    @Test
+    void retryPublicationRegistersItsPackBeforeCheckingStoredBytes() throws Exception {
+        InMemoryIndex index = new InMemoryIndex();
+        TrackingStorage storage = new TrackingStorage(index);
+        storage.missing = true;
+        PackId id = PackId.create();
+        PackMetadata pack = new PackMetadata(id, new PackChecksum("a".repeat(40)), id.toString(), 1, 36);
+        try (NativeGitRepository repository = new NativeGitRepository(
+                "project.git", storage, index, "refs/heads/main")) {
+            assertThatThrownBy(() -> repository.publishPack(pack)).isInstanceOf(IOException.class)
+                    .hasMessageContaining("Cannot publish missing pack");
+            assertThat(storage.checked).isTrue();
+            assertThat(index.activeAccesses()).isEmpty();
+        }
+    }
+
     @Test
     void missingPackCannotPublishItsIndexAndAccessRemainsOpenUntilStorageCheck() throws Exception {
         InMemoryIndex index = new InMemoryIndex();

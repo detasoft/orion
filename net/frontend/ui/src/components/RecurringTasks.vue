@@ -5,6 +5,7 @@ import { createOrionClient } from '../lib/orion-api.js'
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['authorization-error'])
 const renewal = ref(null)
+const cleanup = ref(null)
 const error = ref('')
 const busy = ref(false)
 let revision = 0
@@ -25,14 +26,34 @@ const result = computed(() => {
 async function refresh() {
   const current = ++revision
   renewal.value = null
+  cleanup.value = null
   error.value = ''
   busy.value = !!props.token
   if (!props.token) return
   try {
-    const response = await createOrionClient({ token: props.token }).acmeConfiguration()
+    const client = createOrionClient({ token: props.token })
+    const [acmeResult, tasksResult] = await Promise.allSettled([
+      client.acmeConfiguration(), client.recurringTasks(),
+    ])
     if (current === revision) {
-      renewal.value = response.renewal
-      if (!response.renewal) error.value = 'Task status is unavailable.'
+      const denied = [acmeResult, tasksResult].find(response => response.status === 'rejected' &&
+        [401, 403].includes(response.reason.status))
+      if (denied) {
+        error.value = denied.reason.message || 'Authorization failed.'
+        emit('authorization-error')
+        return
+      }
+      if (acmeResult.status === 'fulfilled') {
+        renewal.value = acmeResult.value.renewal
+        if (!renewal.value) error.value = 'Task status is unavailable.'
+      } else {
+        error.value = acmeResult.reason.message || 'Could not load certificate renewal.'
+      }
+      if (tasksResult.status === 'fulfilled') {
+        cleanup.value = tasksResult.value.gitPackCleanup
+      } else {
+        error.value ||= tasksResult.reason.message || 'Could not load Git cleanup status.'
+      }
     }
   } catch (failure) {
     if (current !== revision) return
@@ -81,6 +102,29 @@ onBeforeUnmount(() => { revision++ })
       <p v-if="renewal.activationError" role="alert">{{ renewal.activationError }}</p>
       <p v-if="renewal.state === 'awaiting_certificate'">Issue the first certificate from Key material.</p>
       <p class="task-note">Attempt history covers this server session. Saved logs remain available after restart.</p>
+    </article>
+    <article v-if="cleanup" aria-label="Git pack cleanup">
+      <div class="task-toolbar">
+        <div>
+          <h4>Git pack cleanup</h4>
+          <code>git-pack-cleanup</code>
+        </div>
+        <a class="secondary-button" href="#/logs?task=git-pack-cleanup">View logs</a>
+      </div>
+      <dl>
+        <div><dt>Status</dt><dd>{{ states[cleanup.state] || cleanup.state }}</dd></div>
+        <div><dt>Last attempt</dt><dd>
+          <time v-if="cleanup.lastAttempt" :datetime="cleanup.lastAttempt">{{ cleanup.lastAttempt }}</time>
+          <span v-else>Not recorded</span>
+        </dd></div>
+        <div><dt>Next attempt</dt><dd>
+          <time v-if="cleanup.nextAttempt" :datetime="cleanup.nextAttempt">{{ cleanup.nextAttempt }}</time>
+          <span v-else>Not scheduled</span>
+        </dd></div>
+        <div><dt>Last run</dt><dd>{{ cleanup.deleted }} deleted, {{ cleanup.observed }} observed,
+          {{ cleanup.skipped }} skipped</dd></div>
+      </dl>
+      <p v-if="cleanup.message" role="alert">{{ cleanup.message }}</p>
     </article>
   </section>
 </template>

@@ -160,7 +160,8 @@ class TransportLifecycleStateMachineTest {
                 List.of()), Optional.of("test-revision"));
         return new JettyHTTPServerStateMachine(() -> new JettyHTTPServer(
                 disabled, desiredState, TlsCapability.unavailable(), null, null, null),
-                () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); });
+                () -> { throw new AssertionError("Disabled HTTP must not start ACME maintenance"); },
+                () -> { throw new AssertionError("Disabled HTTP must not start Git cleanup"); });
     }
 
     private static Throwable rootCause(Throwable error) {

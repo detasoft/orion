@@ -12,6 +12,12 @@ import pro.deta.orion.util.LogInitializer;
 public class OrionHttpModule {
     @Provides
     @IntoSet
+    static OrionHttpRoute tasksRoute(OrionAdminTasksRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute acmeConfigurationRoute(OrionAdminAcmeConfigurationRoute route) {
         return route;
     }

@@ -40,6 +40,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -48,6 +49,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
@@ -108,6 +110,28 @@ public class NativeGitRepository implements AutoCloseable {
                 return Set.copyOf(candidates);
             }
         });
+    }
+
+    /** Local-only cleanup. An empty result means another index access was active and the run was skipped. */
+    public OptionalInt deleteExpiredLocalPacks(Instant cutoff) throws IOException {
+        Objects.requireNonNull(cutoff, "cutoff");
+        if (!(storage instanceof LocalGitStorage local) || !(index instanceof LocalGitIndex localIndex)) {
+            return OptionalInt.of(0);
+        }
+        Optional<Integer> deleted = localIndex.whenIdle(access -> {
+            try (GitStorageAccess bytes = storage.createAccess()) {
+                Set<PackId> candidates = new HashSet<>(bytes.packIds());
+                for (PackMetadata published : access.packs()) {
+                    candidates.remove(published.packId());
+                }
+                int count = 0;
+                for (PackId id : candidates) {
+                    if (local.deleteExpiredPack(id, cutoff)) count++;
+                }
+                return count;
+            }
+        });
+        return deleted.isPresent() ? OptionalInt.of(deleted.get()) : OptionalInt.empty();
     }
 
     public GitHashAlgorithm hashAlgorithm() {
@@ -198,12 +222,12 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public PackMetadata publishPack(PackMetadata pack) throws IOException {
-        try (GitStorageAccess bytes = storage().createAccess()) {
-            if (!bytes.exists(pack.packId())) {
-                throw new IOException("Cannot publish missing pack: " + pack.packId());
-            }
-        }
         return index.withAccess(Optional.of(pack.packId()), access -> {
+            try (GitStorageAccess bytes = storage().createAccess()) {
+                if (!bytes.exists(pack.packId())) {
+                    throw new IOException("Cannot publish missing pack: " + pack.packId());
+                }
+            }
             return access.publishIndex(pack);
         });
     }

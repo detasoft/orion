@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -130,6 +131,17 @@ public final class LocalGitStorage implements GitStorageApi {
 
     private Path path(PackId id) {
         return directory.resolve("pack-" + Objects.requireNonNull(id, "packId") + ".data");
+    }
+
+    /** Deletes an expired pack only when its index owner has excluded publication and active writers. */
+    public synchronized boolean deleteExpiredPack(PackId id, Instant cutoff) throws IOException {
+        if (closed) throw new ClosedChannelException();
+        Path pack = path(id);
+        if (!Files.isRegularFile(pack, LinkOption.NOFOLLOW_LINKS)
+                || !Files.getLastModifiedTime(pack, LinkOption.NOFOLLOW_LINKS).toInstant().isBefore(cutoff)) {
+            return false;
+        }
+        return Files.deleteIfExists(pack);
     }
 
     @Override

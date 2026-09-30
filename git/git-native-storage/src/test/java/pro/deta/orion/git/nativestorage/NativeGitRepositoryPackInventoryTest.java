@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -17,6 +18,8 @@ import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,5 +61,41 @@ class NativeGitRepositoryPackInventoryTest {
             }
             assertThat(repository.packCleanupCandidates()).containsExactlyInAnyOrder(orphan, pending);
         }
+    }
+
+    @Test
+    void deletesOnlyExpiredUnpublishedLocalPacksWhenIndexIsIdle() throws Exception {
+        try (NativeGitRepository repository = new NativeGitRepository("project.git",
+                new LocalGitStorage(directory), new LocalGitIndex(directory), "refs/heads/main")) {
+            repository.writeObject(GitObjectType.BLOB, new byte[]{1});
+            PackId published = repository.index().withAccess(access -> access.packs().getFirst().packId());
+            PackId expired = PackId.create();
+            PackId recent = PackId.create();
+            try (GitStorageAccess bytes = repository.storage().createAccess()) {
+                try (PackHandle handle = bytes.newPack(expired)) { handle.flush(); }
+                try (PackHandle handle = bytes.newPack(recent)) { handle.flush(); }
+            }
+            Instant now = Instant.now();
+            Files.setLastModifiedTime(packPath(expired), FileTime.from(now.minusSeconds(25 * 60 * 60)));
+            Files.setLastModifiedTime(packPath(published), FileTime.from(now.minusSeconds(25 * 60 * 60)));
+            GitIndexAccess active = repository.index().createAccess(Optional.of(recent));
+            try {
+                assertThat(repository.deleteExpiredLocalPacks(now.minusSeconds(24 * 60 * 60))).isEmpty();
+                assertThat(Files.exists(packPath(expired))).isTrue();
+            } finally {
+                active.discard();
+            }
+            assertThat(repository.deleteExpiredLocalPacks(now.minusSeconds(24 * 60 * 60)))
+                    .hasValue(1);
+            assertThat(Files.exists(packPath(expired))).isFalse();
+            assertThat(Files.exists(packPath(recent))).isTrue();
+            assertThat(Files.exists(packPath(published))).isTrue();
+            assertThat(repository.deleteExpiredLocalPacks(now.minusSeconds(24 * 60 * 60)))
+                    .hasValue(0);
+        }
+    }
+
+    private Path packPath(PackId id) {
+        return directory.resolve("packs/pack-" + id + ".data");
     }
 }

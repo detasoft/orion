@@ -213,6 +213,13 @@ public final class LocalGitIndex implements GitIndexApi {
         return Set.copyOf(accesses);
     }
 
+    /** Runs maintenance only while no other access exists, blocking new accesses until it finishes. */
+    public synchronized <T, E extends Exception> Optional<T> whenIdle(GitIndexApi.Operation<T, E> operation)
+            throws IOException, E {
+        if (!accesses.isEmpty()) return Optional.empty();
+        return Optional.of(withAccess(operation));
+    }
+
     private final class Access implements GitIndexAccess {
         private final Optional<PackId> packId;
         private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();

@@ -202,6 +202,9 @@ export function createOrionClient(options = {}) {
     acmeConfiguration() {
       return request('/api/admin/acme/configuration')
     },
+    recurringTasks() {
+      return request('/api/admin/tasks')
+    },
     saveAcmeConfiguration(settings) {
       return request('/api/admin/acme/configuration', { method: 'POST', body: JSON.stringify(settings) })
     },

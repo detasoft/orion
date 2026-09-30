@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -464,7 +465,9 @@ class AcmeCertificateServiceTest {
                     checked.countDown();
                 }
             };
-            JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(() -> server, () -> service);
+            GitPackCleanupTask cleanup = new GitPackCleanupTask(new InMemoryNativeGitRepositoryProvider());
+            JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
+                    () -> server, () -> service, () -> cleanup);
             try {
                 assertThat(machine.start().failed()).isFalse();
                 assertThat(checked.await(5, TimeUnit.SECONDS)).isTrue();
@@ -474,9 +477,11 @@ class AcmeCertificateServiceTest {
             }
             assertThat(server.isRunning()).isFalse();
             assertThat(service.renewalStatus().state()).isEqualTo("stopped");
+            assertThat(cleanup.status().state()).isEqualTo("stopped");
             bootstrap.getTransport().getHttp().setEnabled(false);
             JettyHTTPServerStateMachine disabled = new JettyHTTPServerStateMachine(() -> server,
-                    () -> { throw new AssertionError("Disabled HTTP must not resolve ACME maintenance"); });
+                    () -> { throw new AssertionError("Disabled HTTP must not resolve ACME maintenance"); },
+                    () -> { throw new AssertionError("Disabled HTTP must not resolve Git cleanup"); });
             assertThat(disabled.start().failed()).isFalse();
             assertThat(server.isRunning()).isFalse();
             assertThat(disabled.stop().failed()).isFalse();
