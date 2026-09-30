@@ -68,18 +68,23 @@ organization secret resolution, including optional session tokens, rather than
 introducing a second secret store or plaintext XML path. Keep SDK default
 credentials available when explicit credentials are omitted.
 
-Runtime ownership is per scoped named connection/configuration, not per
-repository and not deduplicated by endpoint. Reuse an S3 client across that
-connection's bucket/prefix bindings. All runtime S3 clients share one HTTP
-client and connection pool owned by the configured provider. Pass that HTTP
-client explicitly to SDK service clients; replacing or closing an individual
-S3 client must not close the shared pool. Shutdown closes service clients before
-the shared HTTP client. Do not introduce a global static pool or registry.
-Repository closure must not close the
-shared client. Configuration/secret changes must use updated credentials
-without closing a client underneath active operations; shutdown releases owned
-resources through existing application lifecycle mechanisms. Avoid a generic
-transport framework or speculative SSH connection pool.
+The runtime owns one S3 SDK client and one HTTP connection pool, shared across
+all configured S3 connections, repositories, buckets, and prefixes. Bind
+credentials and endpoint resolution to each request through SDK request
+overrides. Resolve endpoint, signing region, and bucket addressing from the
+selected scoped connection via the standard S3 endpoint provider; do not mutate
+shared client defaults, construct a custom signer, or use thread-local state.
+All metadata requests, including paginator follow-up requests, carry their own
+configuration. Capture one immutable configuration snapshot per operation.
+
+Remove per-connection client maps and client replacement/reconciliation state.
+Configuration or secret changes affect subsequent operations without replacing
+the shared client or altering in-flight requests. Reuse one owned default
+credentials provider for the default chain; explicit credentials resolve from
+existing encrypted secrets for the selected snapshot. Repository closure does
+not close shared resources. Application shutdown waits for operations and
+releases the SDK client, HTTP pool, and owned default credentials provider.
+Avoid a global static pool, generic transport framework, or SSH connection pool.
 
 Split existing SSH proxy configuration into the canonical connection plus a
 proxy binding containing alias, ref, and SSH repository path with explicit
@@ -154,8 +159,11 @@ continue to work across independent provider instances.
 - Verify XML round trips, scoped duplicate names, unknown/wrong-type/cross-org
   references, encrypted secret resolution, and preservation during document edits.
 - Verify two repository bindings on one connection, independent connections at
-  the same endpoint, prefix/bucket isolation, configuration/credential changes,
-  safe active-operation ownership, shared HTTP pool lifetime, and application shutdown.
+  the same and different endpoints, prefix/bucket isolation, and concurrent
+  request credentials/signing-region/session-token isolation on one SDK client.
+- Verify configuration/credential changes affect the next operation, paginator
+  requests preserve overrides, active operations keep their captured settings,
+  and the shared client/pool close safely on application shutdown.
 - Verify existing HTTP/file/SSH proxy behavior, bootstrap adoption, and SSH
   trusted-host-key decisions through the canonical connection representation.
 - Verify stub operations clearly fail and resource closure is safe.
