@@ -2,10 +2,14 @@
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf,
   branch `codex/s3-management-01a0f177`,
-  worktree `.worktrees/s3-management-01a0f177`, resumed 2026-09-30 14:30 Europe/Amsterdam;
-  next: replace USE with CONNECTION_USE throughout the prepared result, verify,
-  and return an updated reviewed commit. No UI/SSH implementation changes have
-  been transferred to main yet.
+  worktree `.worktrees/s3-management-01a0f177`, paused 2026-09-30 14:35 Europe/Amsterdam;
+  next: wait for the parallel owner to restore accidental cross-worktree edits,
+  then verify CONNECTION_USE correction and return an updated reviewed commit.
+  Rebased onto `fa760bd0fe9652e082283a0be3017353a9ec6d57`; correction remains unstaged.
+  Focused verification is blocked by external DecisionRetryTest calls to absent
+  DecisionRegistry.proxies(). External edits continue arriving; do not discard them.
+  Own seven-file correction is preserved at `/tmp/s3-management-connection-use-own.patch`.
+  No UI/SSH implementation changes have been transferred to main yet.
 
 ## Required result
 
