@@ -6,15 +6,16 @@
   A future standalone exporter must not assume that copying internal object bytes produces a compatible
   repository. Java String ordering and unsigned UTF-8 ordering differ for names U+E000 and U+10000.
   An imported pack may also contain a tree whose entries are already out of order.
-- **Sources and owner.** The current [file saver comparator](../git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/NativeRepositoryFileSaver.java#L113)
+- **Sources and owner.** The current [file saver comparator](../git-native-storage/src/main/java/pro/deta/orion/git/fileapi/NativeRepositoryFileSaver.java#L88)
   keeps newly generated trees ordered for existing Git clients, and
   [Unicode tests with a JGit observer](../git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/NativeGitFileModesTest.java)
   check new saves and imported-tree updates. This does not rewrite arbitrary received packs.
   [Pack ingestion](../git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/pack/PackIngestionOutput.java#L56)
   and [receive publication](../git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/receive/NativeGitReceivePack.java#L21)
-  check pack ingestion and object closure, without checking tree ordering. The
-  [PackReader verifyTree placeholder](../git-parser/src/main/java/pro/deta/orion/git/parser/v2/pack/PackReader.java)
-  reserves future verification and currently changes no behavior; resolved delta trees require resolved content.
+  check pack ingestion and object closure, without checking tree ordering. The earlier empty
+  `PackReader.verifyTree` placeholder is no longer present; the current
+  [pack ingestor](../git-parser/src/main/java/pro/deta/orion/git/parser/v2/pack/PackIngestor.java#L83)
+  resolves deltas and checks their references without enforcing tree order.
   [Reader regression coverage](../git-parser/src/test/java/pro/deta/orion/git/parser/v2/pack/PackReaderTest.java)
   preserves the original bytes and IDs of an unsorted tree.
   This empty module reserves the standalone exporter boundary; it contains no exporter implementation yet.
