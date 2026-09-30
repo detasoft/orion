@@ -104,9 +104,9 @@ public final class LocalGitIndex implements GitIndexApi {
                     validateFormat(opened);
                     requireAlgorithm(requested, readHashAlgorithm(opened));
                 }
-                opened.commit();
-                opened.sync();
                 if (missing) {
+                    opened.commit();
+                    opened.sync();
                     try (FileChannel directory = FileChannel.open(path.getParent(), StandardOpenOption.READ)) {
                         directory.force(true);
                     }
@@ -128,7 +128,7 @@ public final class LocalGitIndex implements GitIndexApi {
         MVStore released = store;
         store = null;
         try {
-            if (!released.isClosed()) {
+            if (!released.isClosed() && released.hasUnsavedChanges()) {
                 released.commit();
                 released.sync();
             }

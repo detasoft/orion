@@ -60,6 +60,29 @@ class GitIndexApiTest {
     }
 
     @Test
+    void readingAndReopeningLeavesTheStoredIndexUnchanged() throws Exception {
+        PackId id = PackId.create();
+        IndexedObject object = object(id, "a", 12);
+        try (LocalGitIndex factory = new LocalGitIndex(directory)) {
+            factory.withAccess(access -> {
+                access.addObject(object);
+                return null;
+            });
+        }
+        byte[] saved = Files.readAllBytes(directory.resolve("refs.mv"));
+        try (LocalGitIndex factory = new LocalGitIndex(directory)) {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                factory.withAccess(access -> {
+                    assertThat(access.findObject(id, object.objectId())).contains(object);
+                    assertThat(access.locations(object.objectId())).isEmpty();
+                    return null;
+                });
+                assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isEqualTo(saved);
+            }
+        }
+    }
+
+    @Test
     void buffersHiddenRowsAcrossHandlesAndFlushesOnPublicationAndLastClose() throws Exception {
         PackId id = PackId.create();
         PackMetadata metadata = pack(id, "b", 100);
