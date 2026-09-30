@@ -9,7 +9,7 @@ function setup(client = {}) {
     saveStorageConnection: vi.fn().mockResolvedValue({ revision: 'v2', connections: [connection] }), ...client }
   return { api, wrapper: mount(RepositoryStorage, { props: { client: api, organization: 'acme', admin: false } }) }
 }
-it('selects authorized S3 storage and explains the unsupported data plane', async () => {
+it('selects authorized S3 storage', async () => {
   const { wrapper, api } = setup()
   await wrapper.get('[name=storage]').setValue('s3')
   await flushPromises()
@@ -18,7 +18,6 @@ it('selects authorized S3 storage and explains the unsupported data plane', asyn
   await wrapper.get('[name=location]').setValue('s3://bucket/prefix')
   expect(wrapper.emitted('change').at(-1)[0]).toEqual({ connectionScope: 'organization', connection: 'archive',
     location: 's3://bucket/prefix' })
-  expect(wrapper.text()).toContain('Git data operations are not implemented yet')
 })
 it('clears write-only credentials after save and editor closure', async () => {
   const { wrapper, api } = setup()

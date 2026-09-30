@@ -26,7 +26,7 @@ import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -60,7 +60,8 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll, boolean disk) throws Exception {
-        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+        GitStorageAccess storage =
+                (disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess());
         {
             GitIndexApi owner = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
             GitIndexAccess index = owner.createAccess();
@@ -94,7 +95,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void excludesCommonHistoryButIncludesNewTreeAndBlob() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId oldBlob = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -125,7 +126,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void waitForDoneKeepsTheResponseAtAcknowledgments() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{42});
@@ -145,7 +146,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void readyWithoutDoneSendsAnEmptyPackWhenEverythingIsCommon() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{42});
@@ -165,7 +166,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void commonShallowCommitDoesNotImplyThatTheClientHasItsParents() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -216,7 +217,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @ValueSource(strings = {"", "side-band", "side-band-64k"})
     void legacySendsNakThenRawOrBoundedSidebandPack(String capability) throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         {
             LocalGitIndex owner = new LocalGitIndex(directory);
             GitIndexAccess index = owner.createAccess();
@@ -252,7 +253,8 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void reusesDeltaOnlyWithAnAvailableBaseAndOtherwiseWritesAFullObject(String mode, boolean disk) throws Exception {
         boolean thin = mode.equals("thin");
         boolean includeBase = mode.equals("base-in-pack");
-        GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+        GitStorageAccess storage =
+                (disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess());
         {
             GitIndexApi owner = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
             GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
@@ -300,7 +302,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void sendsLegacyShallowBoundariesBeforeNegotiationAndPack() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -331,7 +333,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void deepensOneGenerationFromClientBoundary(boolean sidebandAll) throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -363,7 +365,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex factory = new LocalGitIndex(directory);
         GitIndexApi owner = factory;
         factory.withAccess(index -> {
@@ -407,7 +409,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
 
     @Test
     void blobFilterOmitsTreeBlobsAndRetainsExplicitlyWantedBlob() throws Exception {
-        GitStorageApi storage = new LocalGitStorage(directory);
+        GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         LocalGitIndex owner = new LocalGitIndex(directory);
         owner.withAccess(index -> {
             ObjectId blob = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -439,7 +441,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         });
     }
 
-    private ObjectId store(GitStorageApi storage, GitIndexApi owner, GitObjectType type, byte[] content) throws Exception {
+    private ObjectId store(GitStorageAccess storage, GitIndexApi owner, GitObjectType type, byte[] content) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
@@ -459,7 +461,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
             throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(index -> {
                     ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -500,7 +502,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
         InMemoryIndex indexApi = new InMemoryIndex();
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 GitIndexApi owner = indexApi;
                 indexApi.withAccess(index -> {
                     ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -535,7 +537,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         }
     }
 
-    private byte[] execute(GitStorageApi storage, GitIndexAccess index, GitProtocolVersion version,
+    private byte[] execute(GitStorageAccess storage, GitIndexAccess index, GitProtocolVersion version,
                            GitCapabilities advertised, String... lines) throws IOException {
         ByteArrayOutputStream request = new ByteArrayOutputStream();
         OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);

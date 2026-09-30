@@ -24,11 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * S3 owns repository metadata; each lookup reads it afresh. Standalone providers own their connection;
  * shared providers borrow their connection and closing them does not close it. Repository handles own no S3
- * resources. Git data is unsupported.
+ * resources. Pack bytes, index manifests and refs are persisted independently in S3.
  */
 public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryProvider {
-    private static final String METADATA_FILE = "orion-native-repository.properties";
-
     private final S3NativeGitRepositoryFactory factory;
     private final S3Transport owner;
     private final boolean ownsConnection;
@@ -43,7 +41,7 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
             AwsRequestOverrideConfiguration overrides, boolean ownsConnection) {
         this.owner = Objects.requireNonNull(owner, "client owner");
         this.ownsConnection = ownsConnection;
-        factory = new S3NativeGitRepositoryFactory(location.bucket(), location.prefix(), owner.client(), overrides);
+        factory = new S3NativeGitRepositoryFactory(location.bucket(), location.prefix(), owner, overrides);
     }
 
     public S3NativeGitRepositoryProvider(String location, String endpoint, Map<String, String> auth,
@@ -90,7 +88,7 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
             }
         }
         String prefix = configuredPrefix.isEmpty() ? "" : configuredPrefix + "/";
-        if ((prefix + "0".repeat(64) + "/" + METADATA_FILE).getBytes(StandardCharsets.UTF_8).length > 1024) {
+        if ((prefix + "0".repeat(64) + "/indexes/" + "0".repeat(36) + ".index").getBytes(StandardCharsets.UTF_8).length > 1024) {
             throw new IllegalArgumentException("S3 repository prefix is too long");
         }
         return new Location(host, prefix);

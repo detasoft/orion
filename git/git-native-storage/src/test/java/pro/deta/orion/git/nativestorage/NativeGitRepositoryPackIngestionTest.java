@@ -7,8 +7,9 @@ import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -82,20 +83,23 @@ class NativeGitRepositoryPackIngestionTest {
         }
 
         @Override
-        public PackDataStorage newPack(PackId packId) throws IOException {
-            return bytes.newPack(packId);
-        }
-
-        @Override
-        public <R> R readPack(PackId packId, long offset, long length, GitPackRead<R> reader) throws IOException {
-            return bytes.readPack(packId, offset, length, reader);
-        }
-
-        @Override
-        public boolean exists(PackId packId) throws IOException {
-            assertThat(index.activeAccesses()).anySatisfy(access -> assertThat(access.packId()).contains(packId));
-            checked = true;
-            return !missing && bytes.exists(packId);
+        public GitStorageAccess createAccess() throws IOException {
+            GitStorageAccess access = bytes.createAccess();
+            return new GitStorageAccess() {
+                public PackHandle newPack(PackId packId) throws IOException {
+                    return access.newPack(packId);
+                }
+                public <R> R readPack(PackId packId, long offset, long length, GitPackRead<R> reader)
+                        throws IOException {
+                    return access.readPack(packId, offset, length, reader);
+                }
+                public boolean exists(PackId packId) throws IOException {
+                    assertThat(index.activeAccesses()).anySatisfy(active -> assertThat(active.packId()).contains(packId));
+                    checked = true;
+                    return !missing && access.exists(packId);
+                }
+                public void close() throws IOException { access.close(); }
+            };
         }
 
         @Override

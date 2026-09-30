@@ -23,7 +23,7 @@ import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -33,11 +33,11 @@ import java.util.Optional;
 import java.util.Set;
 
 public class FetchCommand implements GitCommand {
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
 
-    public FetchCommand(GitStorageApi storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
+    public FetchCommand(GitStorageAccess storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
         this(new GitRepositoryContext(storage, index), advertisedCapabilities);
     }
 

@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.io.IOException;
@@ -32,14 +32,14 @@ import static pro.deta.orion.git.parser.v2.fetch.FetchTestSupport.capabilities;
 class FetchReadinessTest {
     @TempDir
     Path directory;
-    private GitStorageApi storage;
+    private GitStorageAccess storage;
     private final InMemoryIndex owner = new InMemoryIndex();
     private final GitIndexAccess index = owner.createAccess();
     private ObjectId tree;
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new LocalGitStorage(directory);
+        storage = new LocalGitStorage(directory).createAccess();
         tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
     }
 

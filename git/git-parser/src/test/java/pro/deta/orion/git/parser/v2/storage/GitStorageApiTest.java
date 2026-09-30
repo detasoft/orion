@@ -17,7 +17,7 @@ import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -40,9 +40,30 @@ class GitStorageApiTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void accessesOwnHandlesAndOutliveTheirClosedOwner(boolean disk) throws Exception {
+        try (GitStorageApi owner = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
+            GitStorageAccess first = owner.createAccess();
+            GitStorageAccess second = owner.createAccess();
+            PackId id = PackId.create();
+            PackHandle writer = first.newPack(id);
+            writer.write(0, ByteBuffer.wrap(new byte[]{1, 2}));
+            owner.close();
+            assertThatThrownBy(owner::createAccess).isInstanceOf(IOException.class);
+            first.close();
+            first.close();
+            assertThat(writer.isOpen()).isFalse();
+            assertThatThrownBy(() -> first.exists(id)).isInstanceOf(IOException.class);
+            assertThat(second.<byte[]>readPack(id, 0, 2, (length, input) -> input.readBytes(2)))
+                    .containsExactly(1, 2);
+            second.close();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void readsExactCompressedRangesFromRepositoryLocations(boolean disk) throws Exception {
         {
-            try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
+            try (GitStorageAccess storage = disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess()) {
                 GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()))
                         : new InMemoryIndex().createAccess(Optional.of(PackId.create()));
                 try {
@@ -78,12 +99,13 @@ class GitStorageApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void borrowsIndependentInputsAndReleasesLocksBeforeCallbacks(boolean disk) throws Exception {
-        try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
+        try (GitStorageAccess storage =
+                (disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess());
              var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             byte[] expected = new byte[40_000];
             new Random(81).nextBytes(expected);
             PackId id = PackId.create();
-            try (PackDataStorage writer = storage.newPack(id)) {
+            try (PackHandle writer = storage.newPack(id)) {
                 writer.write(0, ByteBuffer.wrap(expected));
                 writer.flush();
             }
@@ -123,7 +145,7 @@ class GitStorageApiTest {
     @Test
     void rawReadRemainsAvailableAfterIndexClosesAndMissingObjectsDoNotInvokeReader() throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 new LocalGitIndex(directory).withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId absent = new ObjectId("1".repeat(40));
                     assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();

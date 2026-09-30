@@ -18,7 +18,8 @@ import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -56,7 +57,8 @@ public final class GitFileAccess implements Modification {
     private final NativeGitRepository repository;
     private final GitIndexAccess index;
     private final PackId packId;
-    private final PackDataStorage bytes;
+    private final PackHandle bytes;
+    private final GitStorageAccess storage;
     private final RefId ref;
     private final Optional<ObjectId> parent;
     private final boolean initializeDefaultHead;
@@ -88,12 +90,13 @@ public final class GitFileAccess implements Modification {
         if (parent.isPresent()) {
             readTreeEntries(rootTreeId(parent.get(), readObject(parent.get())), "", entries);
         }
-        bytes = repository.storage().newPack(packId);
+        storage = repository.storage().createAccess();
         try {
+            bytes = storage.newPack(packId);
             bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
         } catch (IOException | RuntimeException | Error failure) {
             try {
-                bytes.close();
+                storage.close();
             } catch (Exception cleanup) {
                 failure.addSuppressed(cleanup);
             }
@@ -156,7 +159,7 @@ public final class GitFileAccess implements Modification {
             List<IndexedObject> indexed = index.objects(packId);
             try (PackWriter writer = new PackWriter(
                     new OutputStreamBufferedByteOutput(OutputStream.nullOutputStream()), indexed.size())) {
-                writer.writeObjects(repository.storage(), indexed);
+                writer.writeObjects(storage, indexed);
                 pack = new PackMetadata(packId, writer.finish(), packId.toString(), indexed.size(), writer.size());
             }
             return pack;
@@ -178,7 +181,7 @@ public final class GitFileAccess implements Modification {
     public void writePack(BufferedByteOutput output) throws IOException {
         PackMetadata metadata = pack();
         try (PackWriter writer = new PackWriter(output, metadata.objectCount())) {
-            writer.writeObjects(repository.storage(), index.objects(packId));
+            writer.writeObjects(storage, index.objects(packId));
             if (!writer.finish().equals(metadata.packChecksum())) {
                 throw new IOException("File pack checksum changed during export");
             }
@@ -226,8 +229,7 @@ public final class GitFileAccess implements Modification {
         if (!finished) {
             finished = true;
             Throwable primary = null;
-            try {
-                bytes.close();
+            try (storage; bytes) {
             } catch (IOException | RuntimeException | Error failure) {
                 primary = failure;
                 throw failure;

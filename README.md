@@ -885,11 +885,11 @@ SSH credential resolution, and packaged deployment are administered separately.
 `storage.location` defaults to local filesystem storage with `file:` locations.
 `bootstrap.accessControl.location` can point to a local ACL directory with
 `file:` or to a repository in Orion's configured storage with
-`local:<repository>`. The [S3 backend bootstrap](git/git-s3-storage/README.md)
-supports repository metadata with `s3://bucket/prefix` locations. Runtime repositories
+`local:<repository>`. The [S3 Git backend](git/git-s3-storage/README.md)
+supports repository metadata, refs and pack storage with `s3://bucket/prefix` locations. Runtime repositories
 reference scoped S3 connections in `config.xml`; one injected `S3Transport` shares
-its client and HTTP pool across connections. Git refs, objects, push/fetch, and
-full server startup with S3 are not implemented yet.
+its client and HTTP pool across connections. Runtime repositories support Git data operations;
+bootstrap configuration, key material and proxy caches must remain file-backed.
 
 ## ACL Startup Model
 

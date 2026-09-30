@@ -12,7 +12,7 @@ import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -27,7 +27,7 @@ public final class RefsCommand implements GitCommand {
     private final GitObjectGraph graph;
     private final boolean unbornAllowed;
 
-    public RefsCommand(GitStorageApi storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
+    public RefsCommand(GitStorageAccess storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
         this.index = Objects.requireNonNull(index, "index");
         graph = new GitObjectGraph(storage, index);
         Objects.requireNonNull(advertisedCapabilities, "advertisedCapabilities");

@@ -30,7 +30,7 @@ class PackCompletionTest {
     @Test
     void preservesSelfContainedAndEmptyGitExports() throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 for (byte[] wire : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
                     owner.withAccess(Optional.of(PackId.create()), index -> {
@@ -52,7 +52,7 @@ class PackCompletionTest {
         byte[] base = new byte[30_000];
         new Random(17).nextBytes(base);
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId baseId = store(storage, owner, GitObjectType.BLOB, base);
@@ -81,7 +81,7 @@ class PackCompletionTest {
         byte[] root = {1, 2, 3};
         byte[] base = {1, 2, 4};
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId baseId = storeDelta(storage, owner, GitObjectType.BLOB, root,

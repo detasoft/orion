@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
@@ -215,8 +216,9 @@ class FetchProtocolInteroperabilityTest {
         }
         GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
         try (InMemoryStorage storage = new InMemoryStorage();
+             GitStorageAccess access = storage.createAccess();
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
-             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+             PackIngestor ingestor = new PackIngestor(input, access, index)) {
             index.publishIndex(ingestor.ingest());
             return index;
         }

@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -41,12 +41,12 @@ class PackIndexStorageTest {
         bytes[bytes.length - 1] ^= 1;
         AtomicReference<PackId> packId = new AtomicReference<>();
         {
-            try (GitStorageApi backend = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+            try (GitStorageAccess backend = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
                 GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
                 GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
                 try {
-                        GitStorageApi recording = new GitStorageApi() {
-                            public PackDataStorage newPack(PackId id) throws IOException {
+                        GitStorageAccess recording = new GitStorageAccess() {
+                            public PackHandle newPack(PackId id) throws IOException {
                                 packId.set(id);
                                 return backend.newPack(id);
                         }

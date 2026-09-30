@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage.local;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -7,7 +8,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.git.parser.v2.storage.shared.PackByteSource;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.EOFException;
@@ -22,7 +23,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PackByteSourceTest {
-    private final InMemoryStorage memoryStorage = new InMemoryStorage();
+    PackByteSourceTest() throws java.io.IOException {}
+
+    private final GitStorageAccess memoryStorage = new InMemoryStorage().createAccess();
 
     @AfterEach
     void closeMemory() throws IOException {
@@ -37,7 +40,7 @@ class PackByteSourceTest {
     void readsOnlyTheRequestedRangeAndBorrowsStorage(boolean memory) throws Exception {
         byte[] content = new byte[30_000];
         new Random(42).nextBytes(content);
-        try (PackDataStorage storage = storage(memory)) {
+        try (PackHandle storage = storage(memory)) {
             storage.write(0, ByteBuffer.wrap(content));
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new PackByteSource(storage, 7, 29_999))) {
                 assertThat(input.buffer().isReadOnly()).isTrue();
@@ -55,7 +58,7 @@ class PackByteSourceTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void reportsTruncationWhenRefillingAndRejectsInvalidRanges(boolean memory) throws Exception {
-        try (PackDataStorage storage = storage(memory)) {
+        try (PackHandle storage = storage(memory)) {
             storage.write(0, ByteBuffer.allocate(20_000));
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new PackByteSource(storage, 0, 20_000))) {
                 input.buffer().position(input.buffer().limit());
@@ -72,9 +75,9 @@ class PackByteSourceTest {
         }
     }
 
-    private PackDataStorage storage(boolean memory) throws Exception {
+    private PackHandle storage(boolean memory) throws Exception {
         if (!memory) {
-            return FilePackDataStorage.open(directory.resolve("pack"),
+            return FilePackHandle.open(directory.resolve("pack"),
                     StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
         }
         return memoryStorage.newPack(PackId.create());

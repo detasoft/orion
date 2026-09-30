@@ -1,5 +1,6 @@
 package pro.deta.orion.git.workflow.orion;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.NullProgressMonitor;
@@ -118,12 +119,14 @@ final class OrionGitWorkTree implements GitWorkTree {
                 OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         repository.index().withAccess(access -> {
-            FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
-            try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), pack.objectCount())) {
-                pack.writeTo(writer);
-                writer.finish();
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                FetchPack pack = FetchPack.prepare(storageAccess, access, plan);
+                try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), pack.objectCount())) {
+                    pack.writeTo(writer);
+                    writer.finish();
+                }
+                return null;
             }
-            return null;
         });
         try (InMemoryRepository observer = new InMemoryRepository(new DfsRepositoryDescription());
              ObjectInserter inserter = observer.newObjectInserter()) {
@@ -248,18 +251,20 @@ final class OrionGitWorkTree implements GitWorkTree {
                 output -> {
                     if (wants.isEmpty()) {
                         return;
-            }
+                    }
                     FetchPlan plan = new FetchPlan(wants, Map.of(), Set.of(), Set.of(), OptionalInt.empty(),
                             OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
                     repository.index().withAccess(access -> {
-                        FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
-                        try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
-                            pack.writeTo(writer);
-                            writer.finish();
-                }
-                        return null;
-            });
-        });
+                        try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                            FetchPack pack = FetchPack.prepare(storageAccess, access, plan);
+                            try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                                pack.writeTo(writer);
+                                writer.finish();
+                            }
+                            return null;
+                        }
+                    });
+                });
         OrionGitClient.requireAccepted(OrionGitClient.requireSuccess(
                 client.receivePack().push(client.uri(remote), client.options(), request),
                 "receive-pack"));
@@ -314,17 +319,19 @@ final class OrionGitWorkTree implements GitWorkTree {
     @Override
     public void pull(String remote, String branch) throws Exception {
         repository.index().withAccess(access -> {
-            fetchBranch(remote, branch);
-            String localRef = "refs/heads/" + branch;
-            String trackingRef = trackingRef(remote, branch);
-            String remoteId = requireRef(trackingRef);
-            String localId = repository.refs().get(localRef);
-            if (localId != null && !new GitObjectGraph(repository.storage(), access)
-                    .isAncestor(new ObjectId(localId), new ObjectId(remoteId))) {
-                throw new IllegalStateException("Orion pull is not a fast-forward for " + localRef);
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                fetchBranch(remote, branch);
+                String localRef = "refs/heads/" + branch;
+                String trackingRef = trackingRef(remote, branch);
+                String remoteId = requireRef(trackingRef);
+                String localId = repository.refs().get(localRef);
+                if (localId != null && !new GitObjectGraph(storageAccess, access)
+                        .isAncestor(new ObjectId(localId), new ObjectId(remoteId))) {
+                    throw new IllegalStateException("Orion pull is not a fast-forward for " + localRef);
+                }
+                updateRef(localRef, trackingRef);
+                return null;
             }
-            updateRef(localRef, trackingRef);
-            return null;
         });
     }
 
@@ -382,27 +389,29 @@ final class OrionGitWorkTree implements GitWorkTree {
             haves.add(new ObjectId(objectId));
         }
         repository.index().withAccess(Optional.of(PackId.create()), access -> {
-            GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
-                    List.of(wantedId),
-                    haves.stream().map(ObjectId::toHex).toList(),
-                    input -> {
-                        try (PackIngestor ingestor = new PackIngestor(input, repository.storage(), access)) {
-                            return ingestor.ingest();
-                        }
-                    },
-                    ignored -> { });
-            PackMetadata pack = OrionGitClient.requireSuccess(
-                    client.uploadPack().fetch(client.uri(remote), client.options(), request),
-                    "upload-pack").pack();
-            repository.publishPack(pack);
-            String localTrackingRef = trackingRef(remoteName, branch);
-            String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
-            List<RefUpdateResult> results = repository.publishRefs(
-                    List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
-            if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
-                throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                        List.of(wantedId),
+                        haves.stream().map(ObjectId::toHex).toList(),
+                        input -> {
+                            try (PackIngestor ingestor = new PackIngestor(input, storageAccess, access)) {
+                                return ingestor.ingest();
+                            }
+                        },
+                        ignored -> { });
+                PackMetadata pack = OrionGitClient.requireSuccess(
+                        client.uploadPack().fetch(client.uri(remote), client.options(), request),
+                        "upload-pack").pack();
+                repository.publishPack(pack);
+                String localTrackingRef = trackingRef(remoteName, branch);
+                String oldId = repository.refs().getOrDefault(localTrackingRef, NULL_ID);
+                List<RefUpdateResult> results = repository.publishRefs(
+                        List.of(RefUpdate.fromWire(localTrackingRef, oldId, wantedId)), true);
+                if (results.getFirst().status() != RefUpdateResult.Status.APPLIED) {
+                    throw new IllegalStateException("Orion fetch ref update was stale: " + localTrackingRef);
+                }
+                return null;
             }
-            return null;
         });
         return true;
     }
@@ -438,10 +447,12 @@ final class OrionGitWorkTree implements GitWorkTree {
 
     private boolean isFastForward(String refName, String oldId, String newId) throws IOException {
         return repository.index().withAccess(access -> {
-            if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
-                return true;
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
+                    return true;
+                }
+                return new GitObjectGraph(storageAccess, access).isAncestor(new ObjectId(oldId), new ObjectId(newId));
             }
-            return new GitObjectGraph(repository.storage(), access).isAncestor(new ObjectId(oldId), new ObjectId(newId));
         });
     }
 

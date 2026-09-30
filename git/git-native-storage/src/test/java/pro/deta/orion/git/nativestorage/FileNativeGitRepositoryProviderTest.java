@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -219,13 +220,13 @@ class FileNativeGitRepositoryProviderTest {
                 .find("packed").valueOrFailure("repository")) {
             {
                 GitIndexAccess access2 = reopened.index().createAccess();
-                try {
+                try (GitStorageAccess storageAccess = reopened.storage().createAccess()) {
                     assertThat(access2.objects(access2.packs(id).getFirst().packId()))
                             .extracting(IndexedObject::objectId)
                             .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
                     assertPublishedObject(reopened, blobId(target), target);
-                    assertThat(GitObjectRead.read(reopened.storage(), access2, new ObjectId(blobId(target)),
-                            new ResolvedGitObjectRead<>(reopened.storage(), access2, (type, size, baseId, input) -> {
+                    assertThat(GitObjectRead.read(storageAccess, access2, new ObjectId(blobId(target)),
+                            new ResolvedGitObjectRead<>(storageAccess, access2, (type, size, baseId, input) -> {
                                 assertThat(type).isEqualTo(GitObjectType.BLOB);
                                 assertThat(size).isEqualTo(target.length);
                                 return input.readBytes(7);

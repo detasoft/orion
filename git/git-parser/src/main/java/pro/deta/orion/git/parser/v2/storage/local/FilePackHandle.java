@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage.local;
 
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -8,14 +8,14 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
-final class FilePackDataStorage implements PackDataStorage {
-    static PackDataStorage open(Path path, StandardOpenOption... options) throws IOException {
-        return new FilePackDataStorage(FileChannel.open(path, options));
+final class FilePackHandle implements PackHandle {
+    static PackHandle open(Path path, StandardOpenOption... options) throws IOException {
+        return new FilePackHandle(FileChannel.open(path, options));
     }
 
     private final FileChannel channel;
 
-    private FilePackDataStorage(FileChannel channel) {
+    private FilePackHandle(FileChannel channel) {
         this.channel = channel;
     }
 

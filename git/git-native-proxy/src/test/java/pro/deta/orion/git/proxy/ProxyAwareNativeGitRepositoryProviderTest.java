@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -530,10 +531,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         repository.refs();
         repository.readObject(new ObjectId("0".repeat(40)));
         repository.index().withAccess(access2 -> {
-            GitObjectRead.exists(repository.storage(), access2, new ObjectId("0".repeat(40)));
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                GitObjectRead.exists(storageAccess, access2, new ObjectId("0".repeat(40)));
 
-            assertThat(refreshes).hasValue(2);
-            return null;
+                assertThat(refreshes).hasValue(2);
+                return null;
+            }
         });
     }
 

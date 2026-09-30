@@ -14,7 +14,7 @@ import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -40,7 +40,7 @@ class FetchPackTest {
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(index -> {
                     ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -75,7 +75,7 @@ class FetchPackTest {
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(index -> {
                     ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -104,7 +104,7 @@ class FetchPackTest {
         }
     }
 
-    private long contentReads(GitStorageApi storage, GitIndexAccess index, FetchPlan plan, Path pack, String recordingName)
+    private long contentReads(GitStorageAccess storage, GitIndexAccess index, FetchPlan plan, Path pack, String recordingName)
             throws Exception {
         Path recordingPath = directory.resolve(recordingName);
         try (Recording recording = new Recording()) {
@@ -150,7 +150,7 @@ class FetchPackTest {
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(index -> {
                     byte[] first = {1, 2, 3};

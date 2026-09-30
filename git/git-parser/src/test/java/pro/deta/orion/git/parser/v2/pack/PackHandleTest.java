@@ -5,10 +5,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.nio.ByteBuffer;
 import java.nio.file.DirectoryStream;
@@ -19,15 +19,15 @@ import java.util.Random;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class PackDataStorageTest {
+class PackHandleTest {
     @TempDir
     Path directory;
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsAndRewritesAcrossStorageBlocksAndTruncates(boolean memory) throws Exception {
-        try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             PackDataStorage pack = storage.newPack(PackId.create())) {
+        try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess();
+             PackHandle pack = storage.newPack(PackId.create())) {
             byte[] expected = new byte[20000];
             new Random(42).nextBytes(expected);
             ByteBuffer source = ByteBuffer.allocateDirect(expected.length).put(expected).flip();
@@ -54,8 +54,8 @@ class PackDataStorageTest {
 
     @Test
     void memoryStorageUsesLongOffsetsAndDoesNotRetainTruncatedBytes() throws Exception {
-        try (InMemoryStorage storage = new InMemoryStorage();
-             PackDataStorage pack = storage.newPack(PackId.create())) {
+        try (GitStorageAccess storage = new InMemoryStorage().createAccess();
+             PackHandle pack = storage.newPack(PackId.create())) {
             long offset = (long) Integer.MAX_VALUE + 100;
             pack.write(offset, ByteBuffer.wrap(new byte[]{1, 2, 3}));
             assertThat(pack.size()).isEqualTo(offset + 3);

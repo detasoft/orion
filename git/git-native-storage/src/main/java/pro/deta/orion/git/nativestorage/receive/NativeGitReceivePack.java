@@ -4,6 +4,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -21,7 +22,7 @@ public final class NativeGitReceivePack {
     public static List<RefUpdateResult> complete(String repositoryName, NativeGitRepository repository,
             List<RefUpdate> updates, boolean atomic, GitNativeRepositoryAccessHook accessHook,
             Function<List<RefUpdate>, List<RefUpdateResult>> publisher) {
-        try {
+        try (GitStorageAccess bytes = repository.storage().createAccess()) {
             return repository.index().withAccess(access -> {
                 Objects.requireNonNull(repositoryName, "repositoryName");
                 Objects.requireNonNull(repository, "repository");
@@ -30,7 +31,7 @@ public final class NativeGitReceivePack {
                 Objects.requireNonNull(publisher, "publisher");
                 List<RefUpdateResult> results = new ArrayList<>(requested.size());
                 List<RefUpdate> valid = new ArrayList<>();
-                GitObjectGraph graph = new GitObjectGraph(repository.storage(), access);
+                GitObjectGraph graph = new GitObjectGraph(bytes, access);
                 for (RefUpdate update : requested) {
                     if (update.newId().isPresent() && !graph.hasCompleteClosure(
                             update.newId().orElseThrow())) {

@@ -8,8 +8,8 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -35,12 +35,12 @@ import java.util.Set;
  */
 public final class PackIngestor implements AutoCloseable {
     private final BufferedByteInputV2 input;
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitIndexAccess index;
     private final PackId packId;
     private boolean started;
 
-    public PackIngestor(BufferedByteInputV2 input, GitStorageApi storage, GitIndexAccess index) {
+    public PackIngestor(BufferedByteInputV2 input, GitStorageAccess storage, GitIndexAccess index) {
         this.input = Objects.requireNonNull(input, "input");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
@@ -54,7 +54,7 @@ public final class PackIngestor implements AutoCloseable {
         started = true;
         Map<Long, ObjectId> offsets = new HashMap<>();
         List<Pending> pending = new ArrayList<>();
-        try (PackDataStorage bytes = storage.newPack(packId); PackReader reader = new PackReader(input)) {
+        try (PackHandle bytes = storage.newPack(packId); PackReader reader = new PackReader(input)) {
             bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
             boolean ended = false;
             long start = 8;

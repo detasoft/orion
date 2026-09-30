@@ -8,12 +8,12 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 
 public final class PackByteSource implements BufferedByteInputV2.Source {
-    private final PackDataStorage storage;
+    private final PackHandle storage;
     private final ByteBuffer buffer = ByteBuffer.allocate(8192);
     private final long end;
     private long position;
 
-    public PackByteSource(PackDataStorage storage, long position, long end) {
+    public PackByteSource(PackHandle storage, long position, long end) {
         this.storage = Objects.requireNonNull(storage, "storage");
         if (position < 0 || end < position) {
             throw new IllegalArgumentException("Invalid pack byte range");

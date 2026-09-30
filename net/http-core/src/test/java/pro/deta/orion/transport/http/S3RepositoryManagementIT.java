@@ -64,7 +64,7 @@ class S3RepositoryManagementIT {
             NativeGitRepository repository = reopened.find("acme/team/archive").valueOrFailure("reopen");
             assertThat(repository.name()).isEqualTo("acme/team/archive");
             assertThat(repository.defaultHead()).isEqualTo("refs/heads/main");
-            assertThatThrownBy(repository::refs).hasMessageContaining("not implemented");
+            assertThat(repository.refs()).isEmpty();
             assertThat(management.createRepository(actor, "acme/team/archive", Optional.of(binding)))
                     .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));
         }

@@ -111,7 +111,6 @@ onBeforeUnmount(() => { generation++; closeEditor() })
       <select v-model="storage" name="storage"><option value="local">Local</option><option value="s3">S3</option></select>
     </label>
     <template v-if="storage === 's3'">
-      <p>Git data operations are not implemented yet. S3 repositories currently store metadata only.</p>
       <label v-if="admin">Connection scope
         <select v-model="scope" name="connection-scope">
           <option value="organization">Repository organization</option><option value="system">System</option>

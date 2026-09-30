@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage.memory;
 
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -9,7 +9,7 @@ import java.util.Arrays;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-final class MemoryPackDataStorage implements PackDataStorage {
+final class MemoryPackHandle implements PackHandle {
     private static final int BLOCK_SIZE = 8192;
     private static final byte[] ZERO_BLOCK = new byte[BLOCK_SIZE];
     private final NavigableMap<Long, byte[]> blocks = new TreeMap<>();

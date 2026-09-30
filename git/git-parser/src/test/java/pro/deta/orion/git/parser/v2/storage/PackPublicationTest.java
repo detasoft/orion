@@ -40,7 +40,7 @@ class PackPublicationTest {
         PackMetadata metadata;
         ObjectId id = objectId(GitObjectType.BLOB, new byte[]{1});
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 GitIndexAccess index = new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
                     metadata = ingest(pack(blob(new byte[]{1})), storage, index);
@@ -50,7 +50,7 @@ class PackPublicationTest {
             }
         }
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 new LocalGitIndex(directory).withAccess(Optional.of(metadata.packId()), index -> {
                     assertThat(storage.exists(metadata.packId())).isTrue();
                     assertThat(index.findObject(metadata.packId(), id)).isPresent();
@@ -62,7 +62,7 @@ class PackPublicationTest {
             }
         }
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 new LocalGitIndex(directory).withAccess(index -> {
                     assertThat(index.packs(metadata.packChecksum())).containsExactly(metadata);
                     assertThat(read(storage, index, id)).containsExactly(1);
@@ -76,7 +76,8 @@ class PackPublicationTest {
     @ValueSource(booleans = {false, true})
     void concurrentIdenticalLoadsPublishIndependentPacks(boolean memory) throws Exception {
         {
-            try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage =
+                    (memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess())) {
                 GitIndexApi factory = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
                 GitIndexAccess index = factory.createAccess();
                 try {
@@ -93,7 +94,7 @@ class PackPublicationTest {
                                 return publish(input, storage, factory);
                             }
                             {
-                                try (GitStorageApi otherStorage = new LocalGitStorage(directory)) {
+                                try (GitStorageAccess otherStorage = new LocalGitStorage(directory).createAccess()) {
                                     return publish(input, otherStorage, factory);
                                 }
                             }
@@ -115,7 +116,7 @@ class PackPublicationTest {
     @Test
     void missingPhysicalPackIsNotAnExistingRefTargetAndReadReportsFailure() throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(index -> {
                     ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -134,7 +135,7 @@ class PackPublicationTest {
     @ValueSource(booleans = {false, true})
     void resolvesTwoExternalBasesAndReadsDeepPublishedChains(boolean memory) throws Exception {
         {
-            try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
                 GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
                 GitIndexAccess index = owner.createAccess();
                 try {
@@ -144,7 +145,7 @@ class PackPublicationTest {
                             delta(second, new byte[]{1, 1, 1, 4})), storage, owner);
                     assertThat(thin.objectCount()).isEqualTo(4);
                     {
-                        try (GitStorageApi receiver = new InMemoryStorage()) {
+                        try (GitStorageAccess receiver = new InMemoryStorage().createAccess()) {
                             new InMemoryIndex().withAccess(Optional.of(PackId.create()), received -> {
                                 PackMetadata replay = publish(bytes(thin, storage, index), receiver, received);
                                 assertThat(replay.packChecksum()).isEqualTo(thin.packChecksum());
@@ -172,7 +173,7 @@ class PackPublicationTest {
         }
     }
 
-    private static byte[] read(GitStorageApi storage, GitIndexAccess index, ObjectId id) throws IOException {
+    private static byte[] read(GitStorageAccess storage, GitIndexAccess index, ObjectId id) throws IOException {
         return GitObjectRead.read(storage, index, id, new ResolvedGitObjectRead<>(storage, index,
                 (type, size, base, input) -> input.readBytes((int) size))).orElseThrow();
     }

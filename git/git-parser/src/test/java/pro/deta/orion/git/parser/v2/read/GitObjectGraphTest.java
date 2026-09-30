@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
 import java.io.ByteArrayOutputStream;
@@ -22,12 +22,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.pack.PackTestData.store;
 
 class GitObjectGraphTest {
+    GitObjectGraphTest() throws java.io.IOException {}
+
     @AfterEach
     void closeStorage() throws Exception {
         objects.close();
     }
 
-    private final GitStorageApi objects = new InMemoryStorage();
+    private final GitStorageAccess objects = new InMemoryStorage().createAccess();
     private final InMemoryIndex owner = new InMemoryIndex();
     private final GitIndexAccess index = owner.createAccess();
     private final GitObjectGraph graph = new GitObjectGraph(objects, index);

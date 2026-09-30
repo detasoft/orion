@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -74,54 +74,54 @@ public final class PackTestData {
 
     public static GitIndexAccess inspect(byte[] bytes) throws IOException {
         GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
-        try (GitStorageApi storage = new InMemoryStorage()) {
+        try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
             publish(bytes, storage, index);
         }
         return index;
     }
 
-    public static PackMetadata ingest(byte[] bytes, GitStorageApi storage, GitIndexAccess index) throws IOException {
+    public static PackMetadata ingest(byte[] bytes, GitStorageAccess storage, GitIndexAccess index) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, storage, index)) {
             return ingestor.ingest();
         }
     }
 
-    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexAccess index) throws IOException {
+    public static PackMetadata publish(byte[] bytes, GitStorageAccess storage, GitIndexAccess index) throws IOException {
         return index.publishIndex(ingest(bytes, storage, index));
     }
 
-    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexApi owner) throws IOException {
+    public static PackMetadata publish(byte[] bytes, GitStorageAccess storage, GitIndexApi owner) throws IOException {
         return owner.withAccess(Optional.of(PackId.create()), access -> publish(bytes, storage, access));
     }
 
-    public static ObjectId store(GitStorageApi storage, GitIndexAccess index,
+    public static ObjectId store(GitStorageAccess storage, GitIndexAccess index,
                                  GitObjectType type, byte[] content) throws IOException {
         publish(pack(entry(type, content)), storage, index);
         return objectId(type, content);
     }
 
-    public static ObjectId store(GitStorageApi storage, GitIndexApi owner,
+    public static ObjectId store(GitStorageAccess storage, GitIndexApi owner,
                                  GitObjectType type, byte[] content) throws IOException {
         publish(pack(entry(type, content)), storage, owner);
         return objectId(type, content);
     }
 
-    public static ObjectId storeDelta(GitStorageApi storage, GitIndexAccess index,
+    public static ObjectId storeDelta(GitStorageAccess storage, GitIndexAccess index,
                                       GitObjectType type, byte[] base, byte[] instructions, byte[] result)
             throws IOException {
         publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, index);
         return objectId(type, result);
     }
 
-    public static ObjectId storeDelta(GitStorageApi storage, GitIndexApi owner,
+    public static ObjectId storeDelta(GitStorageAccess storage, GitIndexApi owner,
                                       GitObjectType type, byte[] base, byte[] instructions, byte[] result)
             throws IOException {
         publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, owner);
         return objectId(type, result);
     }
 
-    public static byte[] bytes(PackMetadata pack, GitStorageApi storage, GitIndexAccess index) throws IOException {
+    public static byte[] bytes(PackMetadata pack, GitStorageAccess storage, GitIndexAccess index) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
             writer.writeObjects(storage, index.objects(pack.packId()));

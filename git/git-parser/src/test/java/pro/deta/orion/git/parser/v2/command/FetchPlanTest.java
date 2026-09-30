@@ -13,7 +13,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 
 import java.nio.file.Path;
@@ -36,14 +36,14 @@ class FetchPlanTest {
     private static final ObjectId WANT = PackTestData.objectId(GitObjectType.BLOB, new byte[]{42});
     private static final ObjectId UNKNOWN = new ObjectId("2".repeat(40));
     private static final RefId MAIN = new RefId("refs/heads/main");
-    private GitStorageApi storage;
+    private GitStorageAccess storage;
     private LocalGitIndex factory;
     private GitIndexAccess index;
     private FetchCommand command;
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new LocalGitStorage(directory);
+        storage = new LocalGitStorage(directory).createAccess();
         factory = new LocalGitIndex(directory);
         index = factory.createAccess();
         PackTestData.store(storage, factory, GitObjectType.BLOB, new byte[]{42});

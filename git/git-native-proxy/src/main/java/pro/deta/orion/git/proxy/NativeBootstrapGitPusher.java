@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -93,45 +94,47 @@ final class NativeBootstrapGitPusher implements BootstrapGitPusher {
             List<RefUpdate> updates,
             BufferedByteOutput output) throws IOException {
         repository.index().withAccess(access -> {
-            Set<ObjectId> wants = new LinkedHashSet<>();
-            Set<ObjectId> haves = new LinkedHashSet<>();
-            for (RefUpdate update : updates) {
-                if (update.newId().isPresent()) {
-                    wants.add(update.newId().orElseThrow());
+            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                Set<ObjectId> wants = new LinkedHashSet<>();
+                Set<ObjectId> haves = new LinkedHashSet<>();
+                for (RefUpdate update : updates) {
+                    if (update.newId().isPresent()) {
+                        wants.add(update.newId().orElseThrow());
+                    }
+                    if (update.expectedOld().isPresent()) {
+                        haves.add(update.expectedOld().orElseThrow());
+                    }
                 }
-                if (update.expectedOld().isPresent()) {
-                    haves.add(update.expectedOld().orElseThrow());
+                if (wants.isEmpty()) {
+                    return null;
                 }
-            }
-            if (wants.isEmpty()) {
+                if (received.isPresent()) {
+                    GitObjectGraph graph = new GitObjectGraph(storageAccess, access);
+                    Set<ObjectId> required = graph.reachableObjects(wants, false);
+                    required.removeAll(graph.reachableObjects(haves, true));
+                    PackChecksum id = received.orElseThrow();
+                    for (PackMetadata pack : access.packs(id)) {
+                        Set<ObjectId> covered = new LinkedHashSet<>();
+                        for (IndexedObject object : access.objects(pack.packId())) {
+                            covered.add(object.objectId());
+                        }
+                        if (covered.containsAll(required)) {
+                            repository.writePack(pack, output);
+                            output.flush();
+                            return null;
+                        }
+                    }
+                }
+                FetchPlan plan = new FetchPlan(wants, Map.of(), haves, Set.of(), OptionalInt.empty(),
+                        OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
+                FetchPack pack = FetchPack.prepare(storageAccess, access, plan);
+                try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                    pack.writeTo(writer);
+                    writer.finish();
+                }
+                output.flush();
                 return null;
             }
-            if (received.isPresent()) {
-                GitObjectGraph graph = new GitObjectGraph(repository.storage(), access);
-                Set<ObjectId> required = graph.reachableObjects(wants, false);
-                required.removeAll(graph.reachableObjects(haves, true));
-                PackChecksum id = received.orElseThrow();
-                for (PackMetadata pack : access.packs(id)) {
-                    Set<ObjectId> covered = new LinkedHashSet<>();
-                    for (IndexedObject object : access.objects(pack.packId())) {
-                        covered.add(object.objectId());
-                    }
-                    if (covered.containsAll(required)) {
-                        repository.writePack(pack, output);
-                        output.flush();
-                        return null;
-                    }
-                }
-            }
-            FetchPlan plan = new FetchPlan(wants, Map.of(), haves, Set.of(), OptionalInt.empty(),
-                    OptionalLong.empty(), Set.of(), Optional.empty(), new GitCapabilities(), Set.of());
-            FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
-            try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
-                pack.writeTo(writer);
-                writer.finish();
-            }
-            output.flush();
-            return null;
         });
     }
 }

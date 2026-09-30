@@ -4,7 +4,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -16,14 +16,14 @@ public interface GitObjectRead<R> {
     R read(GitObjectType type, long inflatedSize, Optional<ObjectId> baseId,
             BufferedByteInputV2 source) throws IOException;
 
-    static <R> Optional<R> read(GitStorageApi storage, GitIndexAccess index, ObjectId id,
+    static <R> Optional<R> read(GitStorageAccess storage, GitIndexAccess index, ObjectId id,
                                 GitObjectRead<R> reader) throws IOException {
         List<IndexedObject> locations = index.locations(id);
         return locations.isEmpty() ? Optional.empty()
                 : Optional.of(read(storage, locations.getFirst(), reader));
     }
 
-    static <R> R read(GitStorageApi storage, IndexedObject object, GitObjectRead<R> reader) throws IOException {
+    static <R> R read(GitStorageAccess storage, IndexedObject object, GitObjectRead<R> reader) throws IOException {
         GitObjectType type = object.delta().isPresent() ? GitObjectType.REF_DELTA : object.type();
         long size = object.delta().map(IndexedObject.Delta::instructionSize).orElse(object.objectSize());
         Optional<ObjectId> base = object.delta().map(IndexedObject.Delta::baseId);
@@ -31,7 +31,7 @@ public interface GitObjectRead<R> {
                 (length, source) -> reader.read(type, size, base, source));
     }
 
-    static boolean exists(GitStorageApi storage, GitIndexAccess index, ObjectId id) throws IOException {
+    static boolean exists(GitStorageAccess storage, GitIndexAccess index, ObjectId id) throws IOException {
         for (IndexedObject object : index.locations(id)) {
             if (storage.exists(object.packId())) {
                 return true;

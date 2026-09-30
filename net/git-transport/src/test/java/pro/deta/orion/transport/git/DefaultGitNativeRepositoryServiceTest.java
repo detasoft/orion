@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -96,11 +97,13 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void opensForReadOnceAfterAuthorization() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
+        ObjectId object = repository.writeObject(GitObjectType.BLOB, new byte[]{1});
         try (GitRepositoryContext context = service.open(request("demo"), this)) {
-            assertThat(context.storage()).isSameAs(repository.storage());
+            assertThat(GitObjectRead.exists(context.storage(), context.index(), object)).isTrue();
             assertThat(lookups).isEqualTo(1);
             assertThat(calls).containsExactly("read demo");
         }
+        assertThat(repository.readObject(object).orElseThrow().data()).containsExactly((byte) 1);
     }
 
     @Test
@@ -121,7 +124,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void opensExistingReceiveRepositoryAfterReceiveAndWriteHooks() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
-        assertThat(service.open(receiveRequest("demo"), this).storage()).isSameAs(repository.storage());
+        ObjectId object = repository.writeObject(GitObjectType.BLOB, new byte[]{2});
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            assertThat(GitObjectRead.exists(context.storage(), context.index(), object)).isTrue();
+        }
+        assertThat(repository.readObject(object).orElseThrow().data()).containsExactly((byte) 2);
         assertThat(calls).containsExactly("receive demo", "write demo");
     }
 
@@ -154,8 +161,10 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
             assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
             repository.index().withAccess(access1 -> {
-                assertThat(GitObjectRead.exists(repository.storage(), access1, feature.newId().orElseThrow())).isTrue();
-                return null;
+                try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                    assertThat(GitObjectRead.exists(storageAccess, access1, feature.newId().orElseThrow())).isTrue();
+                    return null;
+                }
             });
         }
     }
@@ -188,9 +197,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
-                assertThat(GitObjectRead.exists(reopened.storage(), access2,
-                        update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
-                return null;
+                try (GitStorageAccess storageAccess = reopened.storage().createAccess()) {
+                    assertThat(GitObjectRead.exists(storageAccess, access2,
+                            update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
+                    return null;
+                }
             });
         }
     }

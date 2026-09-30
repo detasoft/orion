@@ -24,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Timeout(120)
 class S3NativeGitRepositoryProviderIT {
     @Test
-    void persistsMetadataAcrossProvidersWithoutInitializingTheGitDataPlane() throws Exception {
+    void persistsMetadataAcrossProvidersAndOpensEmptyRepositories() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
              S3NativeGitRepositoryProvider first = provider(server, "repos");
              S3NativeGitRepositoryProvider second = provider(server, "repos");
@@ -35,7 +35,7 @@ class S3NativeGitRepositoryProviderIT {
             NativeGitRepository created = first.create("team%2Frepo").valueOrFailure("create");
             assertThat(created.name()).isEqualTo("team/repo");
             assertThat(created.defaultHead()).isEqualTo("refs/heads/main");
-            assertThatThrownBy(created::refs).hasMessageContaining("not implemented");
+            assertThat(created.refs()).isEmpty();
             created.close();
             assertFailure(second.create("team/repo"), Result.FailureCode.FILE_ALREADY_EXISTS);
             assertThat(second.exists("team/repo")).isTrue();

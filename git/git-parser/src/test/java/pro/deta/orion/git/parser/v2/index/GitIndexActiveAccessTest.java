@@ -12,8 +12,8 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -112,8 +112,8 @@ class GitIndexActiveAccessTest {
         try (GitIndexApi owner = index(local)) {
             PackId pack = PackId.create();
             owner.withAccess(Optional.of(pack), access -> {
-                GitStorageApi storage = new GitStorageApi() {
-                    public PackDataStorage newPack(PackId id) throws IOException {
+                GitStorageAccess storage = new GitStorageAccess() {
+                    public PackHandle newPack(PackId id) throws IOException {
                         assertThat(owner.activeAccesses()).contains(access);
                         assertThat(access.packId()).contains(id);
                         throw failure;

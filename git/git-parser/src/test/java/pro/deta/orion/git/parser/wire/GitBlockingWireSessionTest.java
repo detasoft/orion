@@ -17,6 +17,7 @@ import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
@@ -43,7 +44,8 @@ class GitBlockingWireSessionTest {
     private static final String ZERO = "0".repeat(40);
     @TempDir
     Path directory;
-    private GitStorageApi storage;
+    private GitStorageApi storageApi;
+    private GitStorageAccess storage;
     private LocalGitIndex factory;
     private GitIndexAccess index;
     private int opens;
@@ -51,7 +53,8 @@ class GitBlockingWireSessionTest {
 
     @BeforeEach
     void openStorage() throws Exception {
-        storage = new LocalGitStorage(directory);
+        storageApi = new LocalGitStorage(directory);
+        storage = storageApi.createAccess();
         factory = new LocalGitIndex(directory);
         index = factory.createAccess();
     }
@@ -59,7 +62,7 @@ class GitBlockingWireSessionTest {
     @AfterEach
     void closeStorage() throws Exception {
         {
-            try (GitStorageApi ownedStorage = storage) {
+            try (GitStorageApi ownedApi = storageApi; GitStorageAccess ownedStorage = storage) {
                 GitIndexAccess ownedIndex = index;
                 try {
 
@@ -291,7 +294,7 @@ class GitBlockingWireSessionTest {
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
-            GitRepositoryContext repository = new GitRepositoryContext(storage, factory);
+            GitRepositoryContext repository = new GitRepositoryContext(storageApi, factory);
             servedAccess = repository.index();
             return repository;
         }, configuration, wire);

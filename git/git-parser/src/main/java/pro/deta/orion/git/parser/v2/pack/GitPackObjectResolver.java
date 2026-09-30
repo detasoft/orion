@@ -10,8 +10,8 @@ import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
 import pro.deta.orion.git.parser.v2.read.DeltaByteSource;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -39,11 +39,11 @@ final class GitPackObjectResolver {
     private final LinkedHashMap<ObjectId, Base> bases = new LinkedHashMap<>(16, 0.75f, true);
     private int cachedBytes;
     private final PackId packId;
-    private final PackDataStorage bytes;
-    private final GitStorageApi storage;
+    private final PackHandle bytes;
+    private final GitStorageAccess storage;
     private final GitIndexAccess index;
 
-    GitPackObjectResolver(PackId packId, PackDataStorage bytes, GitStorageApi storage, GitIndexAccess index) {
+    GitPackObjectResolver(PackId packId, PackHandle bytes, GitStorageAccess storage, GitIndexAccess index) {
         this.packId = packId;
         this.bytes = bytes;
         this.storage = storage;

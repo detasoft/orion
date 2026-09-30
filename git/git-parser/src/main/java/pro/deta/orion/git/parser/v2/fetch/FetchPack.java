@@ -15,7 +15,7 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -34,7 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class FetchPack {
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitIndexAccess index;
     private final Set<ObjectId> objects = new LinkedHashSet<>();
     private final Set<ObjectId> common = new HashSet<>();
@@ -44,18 +44,18 @@ public final class FetchPack {
     private List<IndexedObject> entries = List.of();
     private Map<PackChecksum, URI> packUris = Map.of();
 
-    private FetchPack(GitStorageApi storage, GitIndexAccess index, boolean thin) {
+    private FetchPack(GitStorageAccess storage, GitIndexAccess index, boolean thin) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
         this.thin = thin;
     }
 
-    public static FetchPack prepare(GitStorageApi storage, GitIndexAccess index, FetchPlan plan) throws IOException {
+    public static FetchPack prepare(GitStorageAccess storage, GitIndexAccess index, FetchPlan plan) throws IOException {
         return prepare(new GitRepositoryContext(storage, index), plan);
     }
 
     public static FetchPack prepare(GitRepositoryContext repository, FetchPlan plan) throws IOException {
-        GitStorageApi storage = Objects.requireNonNull(repository, "repository").storage();
+        GitStorageAccess storage = Objects.requireNonNull(repository, "repository").storage();
         Objects.requireNonNull(plan, "plan");
         if (plan.filter().isPresent() && !plan.filter().orElseThrow().equals("blob:none")) {
             throw new IOException("Unsupported object filter: " + plan.filter().orElseThrow());

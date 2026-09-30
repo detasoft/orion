@@ -13,6 +13,7 @@ import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.net.URI;
@@ -30,23 +31,28 @@ import java.util.Set;
  * the authorized object IDs remain the targets used to prepare the fetch response.
  */
 public class GitRepositoryContext implements AutoCloseable {
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitIndexAccess index;
     private final GitIndexApi indexApi;
 
-    public GitRepositoryContext(GitStorageApi storage, GitIndexAccess index) {
+    public GitRepositoryContext(GitStorageAccess storage, GitIndexAccess index) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
         this.indexApi = null;
     }
 
     public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) throws IOException {
-        this.storage = Objects.requireNonNull(storage, "storage");
         this.indexApi = Objects.requireNonNull(index, "index");
-        this.index = index.createAccess();
+        this.storage = Objects.requireNonNull(storage, "storage").createAccess();
+        try {
+            this.index = index.createAccess();
+        } catch (IOException | RuntimeException | Error failure) {
+            try { this.storage.close(); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
-    public final GitStorageApi storage() {
+    public final GitStorageAccess storage() {
         return storage;
     }
 
@@ -56,7 +62,20 @@ public class GitRepositoryContext implements AutoCloseable {
 
     @Override
     public void close() throws IOException {
-        index.discard();
+        Throwable primary = null;
+        try {
+            storage.close();
+        } catch (IOException | RuntimeException | Error failure) {
+            primary = failure;
+            throw failure;
+        } finally {
+            try {
+                index.discard();
+            } catch (IOException | RuntimeException | Error cleanup) {
+                if (primary == null) throw cleanup;
+                primary.addSuppressed(cleanup);
+            }
+        }
     }
 
     public Optional<URI> packUri(PackChecksum id) {
@@ -88,7 +107,7 @@ public class GitRepositoryContext implements AutoCloseable {
         return publishRefs(storage, indexApi, updates, atomic);
     }
 
-    public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexApi index,
+    public static List<RefUpdateResult> publishRefs(GitStorageAccess storage, GitIndexApi index,
                                                     List<RefUpdate> updates, boolean atomic) {
         List<RefUpdate> requested = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();

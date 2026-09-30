@@ -11,7 +11,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -31,13 +31,13 @@ class ResolvedGitObjectReadTest {
     private static final ObjectId DELTA = new ObjectId("2222222222222222222222222222222222222222");
     @TempDir
     Path directory;
-    private GitStorageApi storage;
+    private GitStorageAccess storage;
     private final InMemoryIndex owner = new InMemoryIndex();
     private final GitIndexAccess index = owner.createAccess();
 
     @BeforeEach
     void setup() throws Exception {
-        storage = new LocalGitStorage(directory);
+        storage = new LocalGitStorage(directory).createAccess();
     }
 
     @AfterEach
@@ -76,7 +76,8 @@ class ResolvedGitObjectReadTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void resolvesMixedOffsetAndReferenceBasesFromPublishedIndex(boolean memory) throws Exception {
-        try (GitStorageApi api = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+        try (GitStorageAccess api =
+                (memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess())) {
             byte[] full = PackTestData.blob(new byte[]{10});
             byte[] offsetDelta = PackTestData.join(new byte[]{0x64, (byte) full.length},
                     PackTestData.compressed(new byte[]{1, 1, 1, 20}));

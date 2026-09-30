@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.push.PushRequest;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -20,7 +20,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class PushCommand implements GitCommand {
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities;
 

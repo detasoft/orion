@@ -59,7 +59,7 @@ class S3NativeGitRepositoryFactoryTest {
                     "http://127.0.0.1:" + server.getAddress().getPort(), "us-east-1", true,
                     Optional.of(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))));
             NativeGitRepositoryFactory factory = new S3NativeGitRepositoryFactory("bucket", "prefix/",
-                    transport.client(), overrides);
+                    transport, overrides);
             RepositoryName name = RepositoryName.parse("team/repo");
             Result<NativeGitRepository> missing = factory.open(name);
             assertThat(missing).isInstanceOf(Result.Failure.class);

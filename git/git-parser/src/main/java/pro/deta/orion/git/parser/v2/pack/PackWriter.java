@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -83,7 +83,7 @@ public final class PackWriter implements AutoCloseable {
         }
     }
 
-    public void writeObjects(GitStorageApi storage, List<IndexedObject> objects) throws IOException {
+    public void writeObjects(GitStorageAccess storage, List<IndexedObject> objects) throws IOException {
         for (IndexedObject object : objects) {
             GitObjectRead.read(storage, object, this::writeCompressed);
         }

@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitReceivePackResult;
@@ -53,29 +54,31 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try {
             return checked.index().<GitHeads, GitRemoteException>withAccess(Optional.of(PackId.create()), access -> {
-                GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
-                        List.copyOf(wants),
-                        List.copyOf(haves),
-                        input -> {
-                            try (PackIngestor ingestor = new PackIngestor(input, checked.storage(), access)) {
-                                return ingestor.ingest();
-                            }
-                        },
-                        ignored -> { });
-                PackMetadata pack = requireSuccess(
-                        connection.uploadPack().fetch(
-                                connection.uri(),
-                                connection.options(),
-                                request),
-                        "fetch").pack();
-                checked.publishPack(pack);
-                for (String root : wants) {
-                    if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
-                        throw GitRemoteException.local("complete object validation", false, null);
+                try (GitStorageAccess storageAccess = checked.storage().createAccess()) {
+                    GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                            List.copyOf(wants),
+                            List.copyOf(haves),
+                            input -> {
+                                try (PackIngestor ingestor = new PackIngestor(input, storageAccess, access)) {
+                                    return ingestor.ingest();
+                                }
+                            },
+                            ignored -> { });
+                    PackMetadata pack = requireSuccess(
+                            connection.uploadPack().fetch(
+                                    connection.uri(),
+                                    connection.options(),
+                                    request),
+                            "fetch").pack();
+                    checked.publishPack(pack);
+                    for (String root : wants) {
+                        if (!checked.hasCompleteObjectClosure(new ObjectId(root))) {
+                            throw GitRemoteException.local("complete object validation", false, null);
+                        }
                     }
+                    publishTrackingRefs(checked, heads);
+                    return heads;
                 }
-                publishTrackingRefs(checked, heads);
-                return heads;
             });
         } catch (IOException | RuntimeException error) {
             throw GitRemoteException.local("fetch publication", true, error);
@@ -160,12 +163,14 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
                 List.of(command),
                 output -> {
                     repository.index().withAccess(access -> {
-                        FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
-                        try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
-                            pack.writeTo(writer);
-                            writer.finish();
+                        try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                            FetchPack pack = FetchPack.prepare(storageAccess, access, plan);
+                            try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                                pack.writeTo(writer);
+                                writer.finish();
+                            }
+                            return null;
                         }
-                        return null;
                     });
                 });
     }

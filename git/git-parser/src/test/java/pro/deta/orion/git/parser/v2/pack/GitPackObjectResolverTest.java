@@ -16,10 +16,10 @@ import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class GitPackObjectResolverTest {
+    GitPackObjectResolverTest() throws java.io.IOException {}
+
     @TempDir
     Path directory;
 
@@ -45,7 +47,7 @@ class GitPackObjectResolverTest {
     void resolvesForwardReferencesBranchesAndOffsetDeltasWithoutChangingCompressedBytes(boolean memory, int version)
             throws Exception {
         {
-            try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
                 GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create())) : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
                     ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
@@ -69,7 +71,7 @@ class GitPackObjectResolverTest {
                                 .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
                     }
                     {
-                        try (GitStorageApi replay = new InMemoryStorage()) {
+                        try (GitStorageAccess replay = new InMemoryStorage().createAccess()) {
                             new InMemoryIndex().withAccess(Optional.of(PackId.create()), replayIndex -> {
                                 PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
                                 assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
@@ -89,7 +91,7 @@ class GitPackObjectResolverTest {
     @ValueSource(ints = {2, 3})
     void completesThinPackWithExternalBaseAndPersistsIt(int version) throws Exception {
         {
-            try (GitStorageApi storage = new LocalGitStorage(directory)) {
+            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
                 LocalGitIndex owner = new LocalGitIndex(directory);
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -97,7 +99,7 @@ class GitPackObjectResolverTest {
                     PackMetadata completed = publish(source, storage, index);
                     assertThat(completed.objectCount()).isEqualTo(2);
                     {
-                        try (GitStorageApi copy = new InMemoryStorage()) {
+                        try (GitStorageAccess copy = new InMemoryStorage().createAccess()) {
                             GitIndexAccess copyIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
                             try {
                                 publish(bytes(completed, storage, index), copy, copyIndex);
@@ -119,7 +121,7 @@ class GitPackObjectResolverTest {
     @Test
     void rejectsSelfReferencingDeltaEvenWhenItsContentCanBeResolvedExternally() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -136,7 +138,7 @@ class GitPackObjectResolverTest {
     @Test
     void doesNotAppendAPublishedBaseThatLaterResolvesInsideThePack() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{2});
@@ -155,7 +157,7 @@ class GitPackObjectResolverTest {
     @Test
     void resolvesADeepForwardChainWithoutRecursiveCalls() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
                     List<byte[]> entries = new ArrayList<>();
                     for (int value = 1100; value > 0; value--) {
@@ -179,7 +181,7 @@ class GitPackObjectResolverTest {
     void readsDeepForwardChainInLinearWork(boolean memory) throws Exception {
         {
             try (CountingStorage storage = new CountingStorage(
-                            memory ? new InMemoryStorage() : new LocalGitStorage(directory))) {
+                            memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess())) {
                 GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create())) : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
                     int depth = 1100;
@@ -207,7 +209,7 @@ class GitPackObjectResolverTest {
     @Test
     void reusesTheResolvedBaseAcrossManyBranches() throws Exception {
         {
-            try (CountingStorage storage = new CountingStorage(new InMemoryStorage())) {
+            try (CountingStorage storage = new CountingStorage(new InMemoryStorage().createAccess())) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     List<byte[]> entries = new ArrayList<>();
@@ -235,7 +237,7 @@ class GitPackObjectResolverTest {
     @ValueSource(ints = {3 * 1024 * 1024, 9 * 1024 * 1024})
     void rereadsEvictedOrOversizedExternalBasesAndProducesSelfContainedPack(int size) throws Exception {
         {
-            try (CountingStorage storage = new CountingStorage(new InMemoryStorage())) {
+            try (CountingStorage storage = new CountingStorage(new InMemoryStorage().createAccess())) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     List<ObjectId> bases = new ArrayList<>();
@@ -262,7 +264,7 @@ class GitPackObjectResolverTest {
                     assertThat(storage.readsByPack.get(firstPack)).isGreaterThanOrEqualTo(2);
                     assertThat(completed.objectCount()).isEqualTo(9);
                     {
-                        try (GitStorageApi replay = new InMemoryStorage()) {
+                        try (GitStorageAccess replay = new InMemoryStorage().createAccess()) {
                             GitIndexAccess replayIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
                             try {
                                 PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
@@ -285,17 +287,17 @@ class GitPackObjectResolverTest {
         }
     }
 
-    private static final class CountingStorage implements GitStorageApi {
-        private final GitStorageApi backend;
+    private static final class CountingStorage implements GitStorageAccess {
+        private final GitStorageAccess backend;
         private int reads;
         private final Map<PackId, Integer> readsByPack = new HashMap<>();
 
-        private CountingStorage(GitStorageApi backend) {
+        private CountingStorage(GitStorageAccess backend) {
             this.backend = backend;
         }
 
         @Override
-        public PackDataStorage newPack(PackId id) throws IOException {
+        public PackHandle newPack(PackId id) throws IOException {
             return backend.newPack(id);
         }
 
@@ -320,7 +322,7 @@ class GitPackObjectResolverTest {
     @Test
     void rejectsInvalidDeltaInstructionsBeforePublication() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(index -> {
                     byte[][] invalid = {{2, 0}, {1, 1, 0}, {1, 1, 1}, {1, 1, (byte) 0x91, 1, 1},
@@ -343,7 +345,7 @@ class GitPackObjectResolverTest {
     @Test
     void rejectsMissingBasesCyclesAndDuplicateObjects() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 InMemoryIndex owner = new InMemoryIndex();
                 owner.withAccess(index -> {
                     ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});

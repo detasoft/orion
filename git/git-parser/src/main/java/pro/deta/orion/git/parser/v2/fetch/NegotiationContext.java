@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -26,7 +26,7 @@ import java.util.Set;
 
 /**
  * Accumulates one negotiation's result independently of bytes and packet encoding.
- * Borrows GitStorageApi from the command; objectExists combines published index locations with storage.exists.
+ * Borrows GitStorageAccess from the command; objectExists combines published index locations with storage.exists.
  * isReady requires each wanted commit to reach an explicitly confirmed common object. It peels tags and
  * traverses commit parents, stopping at client shallow boundaries. Trees and blobs need no history negotiation.
  * This conservative check does not infer additional common ancestors from a have and can require extra rounds.
@@ -58,7 +58,7 @@ import java.util.Set;
  */
 public class NegotiationContext {
     private final FetchRequest request;
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitIndexAccess index;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
@@ -67,7 +67,7 @@ public class NegotiationContext {
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitIndexAccess index,
+    public NegotiationContext(FetchRequest request, GitStorageAccess storage, GitIndexAccess index,
                               GitCapabilities advertisedCapabilities) {
         this.request = Objects.requireNonNull(request, "request");
         this.storage = Objects.requireNonNull(storage, "storage");

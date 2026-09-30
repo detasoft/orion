@@ -8,7 +8,6 @@ import pro.deta.orion.util.Result;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.S3Object;
@@ -24,7 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 
-/** Opens metadata-only repositories; the caller owns and guards the borrowed S3 connection. */
+/** Opens repositories borrowing the shared S3 transport; factory metadata calls are guarded by its caller. */
 final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
     private static final String METADATA_FILE = "orion-native-repository.properties";
     private static final String DEFAULT_HEAD = "refs/heads/main";
@@ -32,21 +31,21 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
 
     private final String bucket;
     private final String prefix;
-    private final S3Client client;
+    private final S3Transport transport;
     private final AwsRequestOverrideConfiguration overrides;
 
-    S3NativeGitRepositoryFactory(String bucket, String prefix, S3Client client,
+    S3NativeGitRepositoryFactory(String bucket, String prefix, S3Transport transport,
             AwsRequestOverrideConfiguration overrides) {
         this.bucket = Objects.requireNonNull(bucket, "bucket");
         this.prefix = Objects.requireNonNull(prefix, "prefix");
-        this.client = Objects.requireNonNull(client, "client");
+        this.transport = Objects.requireNonNull(transport, "transport");
         this.overrides = Objects.requireNonNull(overrides, "request configuration");
     }
 
     List<String> repositoryNames() {
         List<String> names = new ArrayList<>();
         try {
-            for (ListObjectsV2Response page : client.listObjectsV2Paginator(
+            for (ListObjectsV2Response page : transport.client().listObjectsV2Paginator(
                     request -> request.overrideConfiguration(overrides).bucket(bucket).prefix(prefix))) {
                 for (S3Object object : page.contents()) {
                     String key = object.key();
@@ -107,7 +106,7 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
             if (content.length > MAX_METADATA_BYTES) {
                 throw new IllegalArgumentException("S3 repository metadata is too large");
             }
-            client.putObject(request -> request.overrideConfiguration(overrides).bucket(bucket).key(key(name))
+            transport.client().putObject(request -> request.overrideConfiguration(overrides).bucket(bucket).key(key(name))
                     .ifNoneMatch("*").contentType("text/plain; charset=utf-8"), RequestBody.fromBytes(content));
             return new Result.Success<>(repository(name));
         } catch (S3Exception failure) {
@@ -126,7 +125,7 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
 
     private String readName(String key) throws IOException {
         try {
-            byte[] content = client.getObject(request -> request.overrideConfiguration(overrides).bucket(bucket)
+            byte[] content = transport.client().getObject(request -> request.overrideConfiguration(overrides).bucket(bucket)
                     .key(key), (response, input) -> {
                 byte[] bytes = input.readNBytes(MAX_METADATA_BYTES + 1);
                 if (bytes.length > MAX_METADATA_BYTES) {
@@ -153,8 +152,11 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
         }
     }
 
-    private static NativeGitRepository repository(String name) {
-        return new NativeGitRepository(name, new S3GitStorage(), new S3GitIndex(), DEFAULT_HEAD);
+    private NativeGitRepository repository(String name) {
+        String metadataKey = key(name);
+        S3RepositoryObjects objects = new S3RepositoryObjects(transport, overrides, bucket,
+                metadataKey.substring(0, metadataKey.length() - METADATA_FILE.length()));
+        return new NativeGitRepository(name, new S3GitStorageApi(objects), new S3GitIndexApi(objects), DEFAULT_HEAD);
     }
 
     private String key(String name) {

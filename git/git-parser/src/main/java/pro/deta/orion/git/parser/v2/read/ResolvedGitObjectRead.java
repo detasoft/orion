@@ -5,7 +5,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.IOException;
@@ -18,16 +18,16 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class ResolvedGitObjectRead<R> extends CompressedGitObjectRead<R> {
-    private final GitStorageApi storage;
+    private final GitStorageAccess storage;
     private final GitObjectRead<R> consumer;
     private final GitIndexAccess index;
     private final Optional<PackId> pendingPack;
 
-    public ResolvedGitObjectRead(GitStorageApi storage, GitIndexAccess index, GitObjectRead<R> consumer) {
+    public ResolvedGitObjectRead(GitStorageAccess storage, GitIndexAccess index, GitObjectRead<R> consumer) {
         this(storage, index, Optional.empty(), consumer);
     }
 
-    public ResolvedGitObjectRead(GitStorageApi storage, GitIndexAccess index, Optional<PackId> pendingPack,
+    public ResolvedGitObjectRead(GitStorageAccess storage, GitIndexAccess index, Optional<PackId> pendingPack,
                                   GitObjectRead<R> consumer) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");

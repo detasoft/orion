@@ -17,7 +17,7 @@ import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
@@ -48,7 +48,7 @@ class InMemoryStorageTest {
     @Test
     void preservesRefResultOrderAndAtomicFailurePrecedence() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 indexApi.withAccess(index -> {
                     ObjectId old = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
                     ObjectId next = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{2});
@@ -86,7 +86,7 @@ class InMemoryStorageTest {
     @Test
     void admitsOnlyOneConcurrentExpectedOldWinner() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -115,7 +115,7 @@ class InMemoryStorageTest {
     @Test
     void snapshotsNeverExposePartOfAnAtomicBatch() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -157,7 +157,7 @@ class InMemoryStorageTest {
     @Test
     void callbacksReleaseRepositoryLockAndFailuresPreservePublishedPacks() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -186,13 +186,13 @@ class InMemoryStorageTest {
 
     @Test
     void isolatesRepositoriesAndConsumesPublicationAfterClose() throws Exception {
-        InMemoryStorage first = new InMemoryStorage();
+        GitStorageAccess first = new InMemoryStorage().createAccess();
         InMemoryIndex firstOwner = new InMemoryIndex();
         firstOwner.withAccess(firstIndex -> {
             {
                 try (first) {
                     try {
-                        try (GitStorageApi second = new InMemoryStorage()) {
+                        try (GitStorageAccess second = new InMemoryStorage().createAccess()) {
                             GitIndexAccess secondIndex = new InMemoryIndex().createAccess();
                             try {
                                 ObjectId object = PackTestData.store(first, firstOwner, GitObjectType.BLOB,
@@ -232,7 +232,7 @@ class InMemoryStorageTest {
     @Test
     void closingIndexLeavesStoredObjectsReadable() throws Exception {
         {
-            try (GitStorageApi storage = new InMemoryStorage()) {
+            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
                 indexApi.withAccess(index -> {
                     ObjectId object = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
                     assertThat(publishRefs(

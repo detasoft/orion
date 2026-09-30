@@ -1,11 +1,8 @@
-# S3 Git backend bootstrap
+# S3 Git backend
 
-This module implements repository metadata creation, discovery, existence checks,
-and listing through `NativeGitRepositoryProvider`. Git refs, object indexing,
-pack reads/writes, push/fetch, and file operations are deliberately unsupported.
-The index and storage implementations throw descriptive `IOException`s; they
-never pretend to contain empty Git data. Full server startup with S3 is not yet
-supported because bootstrap configuration/key material need those Git APIs.
+This module stores repository metadata, refs, pack bytes and object indexes in S3.
+Runtime repositories support push/fetch and file operations. Bootstrap configuration,
+key material and proxy cache repositories must remain file-backed.
 
 ## Runtime XML connections
 
@@ -74,8 +71,7 @@ The binding is committed
 to configuration before S3 metadata creation. A storage failure retains the binding
 and returns retry guidance: repeat the identical request to finish. A different
 binding or an existing local repository is rejected. Metadata is never overwritten,
-and an S3 failure never falls back to local storage. Git data operations remain
-unsupported, as stated in the creation dialog.
+and an S3 failure never falls back to local storage.
 
 Connection grants require the `CONNECTION` selector. CREATE permits creation,
 READ_WRITE permits modification, READ permits inspection, and CONNECTION_USE permits binding
@@ -166,10 +162,10 @@ reject a change that would silently alter another proxy's shared SSH connection.
 
 Keep bootstrap XML, key-material and proxy cache repositories file-backed.
 Bootstrap still supports `storage.location`, optional `storage.endpoint` alongside
-it, and `storage.auth` for standalone S3 metadata selection. For that limited
+it, and `storage.auth` for standalone S3 selection. For that
 bootstrap configuration, secret/token values use `env:NAME` or `file:/path`
-references. Entirely S3-backed bootstrap remains unsupported because it needs
-the deferred Git data APIs. Runtime S3 connections belong in XML.
+references. Entirely S3-backed bootstrap is outside the runtime-repository contract.
+Runtime S3 connections belong in XML.
 
 `BootstrapContext` supplies one `S3Transport` singleton through application DI.
 It lazily owns one SDK client, one bounded Apache HTTP pool and one default
@@ -205,7 +201,32 @@ Creation uses S3 `If-None-Match: *`; the server must support conditional writes.
 A duplicate reports `FILE_ALREADY_EXISTS` without replacing any metadata. Other
 service failures, including a missing bucket or denied access, remain failures;
 only `NoSuchKey` means an absent repository. Independent instances reread S3
-without a local authoritative cache. No refs or locks are initialized.
+without a local authoritative cache. Empty repositories use an unborn `refs/heads/main` HEAD.
+
+Under the same repository prefix, `packs/<PackId>.data` holds internal compressed
+pack bytes and `indexes/<PackId>.index` holds one immutable, versioned manifest.
+`refs` contains HEAD and all refs; conditional ETag writes apply a multi-ref update
+atomically across servers while merging unrelated ref changes. Conflicting changed
+refs or HEAD fail without publishing any part of that update.
+
+`GitStorageApi` opens operation-scoped `GitStorageAccess` instances. `PackHandle`
+is the single-pack random-access handle. S3 stages writable packs in temporary files;
+`flush` uploads durable bytes, and closing a dirty handle uploads before removing
+the temporary file. Reads before flush use staging; remote reads use bounded ranges.
+Large packs use multipart upload. Repository handles borrow the shared transport.
+
+Byte durability, index publication and ref application are independent. Failed index
+publication leaves durable but undiscoverable pack bytes. Failed ref application
+leaves published packs discoverable. No failure automatically deletes orphan bytes.
+Incomplete index entries are shared across accesses of one index owner but are lost
+when that owner is reopened; interrupted pushes can be retried. Published bytes and
+manifests require no local state after restart.
+
+Each index access caches immutable manifests and their derived object locations.
+Published lookups refresh the paginated manifest list so other servers' publications
+are visible. This first implementation trades one LIST per lookup and index memory
+proportional to the repository's published objects for a simple publication model;
+it does not write a repository-wide index or a remote object record per added object.
 
 SDK transport limits are 5 seconds for connection/acquisition, 10 seconds for
 socket I/O, 15 seconds per attempt and 30 seconds per API call (including retries).
@@ -215,11 +236,9 @@ whole-list deadline or bound external credential-provider resolution.
 ## Verification
 
 ```sh
-make test MODULE=git/git-s3-storage TEST='S3NativeGitRepositoryProviderTest,S3GitStubsTest,S3TransportTest,ConfiguredS3StorageTest'
-mvn verify -Pdev -T 4 -pl git/git-s3-storage -am \
-  -Dtest=S3NativeGitRepositoryProviderTest,S3GitStubsTest \
-  -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dit.test=S3NativeGitRepositoryProviderIT -Dfailsafe.failIfNoSpecifiedTests=false
+make test MODULE=git/git-s3-storage TEST='S3*Test,ConfiguredS3StorageTest'
+make test-all MODULE=git/git-s3-storage TEST='S3*IT'
+make test-all MODULE=net/http-core TEST=S3GitTransportIT
 make test
 ```
 
@@ -230,4 +249,7 @@ isolation, pagination, corruption, missing buckets, denied access, and safe
 closure. It also verifies encrypted XML credentials, multiple buckets/prefixes
 through one configured transport, credential replacement and authoritative routing.
 Wire tests cover concurrent endpoints, signing regions, tokens, pagination and
-shutdown. Tests do not claim S3 Git data-plane or server-startup support.
+shutdown. Data-plane tests cover pack persistence, reopening, ref conflicts, multipart
+uploads, failed publication and bounded reads. The HTTP test pushes, clones, sends a
+thin delta and clones through a fresh S3 provider.
+Entirely S3-backed server bootstrap is not covered.

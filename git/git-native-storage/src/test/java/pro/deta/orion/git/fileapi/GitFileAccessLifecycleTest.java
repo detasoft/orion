@@ -7,8 +7,9 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
-import pro.deta.orion.git.parser.v2.storage.shared.PackDataStorage;
+import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -42,17 +43,22 @@ class GitFileAccessLifecycleTest {
             });
             GitStorageApi observed = proxy(GitStorageApi.class, (ignored, method, args) -> {
                 Object result = invoke(storage, method, args);
-                if (!method.getName().equals("newPack")) return result;
-                PackDataStorage pack = (PackDataStorage) result;
-                return proxy(PackDataStorage.class, (unused, operation, arguments) -> {
-                    if (operation.getName().equals("close")) {
-                        calls.add("pack");
-                        assertThat(delegate.snapshotRefs().refs()).isEmpty();
-                        pack.close();
-                        if (failPack) throw packFailure;
-                        return null;
-                    }
-                    return invoke(pack, operation, arguments);
+                if (!method.getName().equals("createAccess")) return result;
+                GitStorageAccess delegateStorage = (GitStorageAccess) result;
+                return proxy(GitStorageAccess.class, (accessProxy, accessMethod, accessArgs) -> {
+                    Object packResult = invoke(delegateStorage, accessMethod, accessArgs);
+                    if (!accessMethod.getName().equals("newPack")) return packResult;
+                    PackHandle pack = (PackHandle) packResult;
+                    return proxy(PackHandle.class, (unused, operation, arguments) -> {
+                        if (operation.getName().equals("close")) {
+                            calls.add("pack");
+                            assertThat(delegate.snapshotRefs().refs()).isEmpty();
+                            pack.close();
+                            if (failPack) throw packFailure;
+                            return null;
+                        }
+                        return invoke(pack, operation, arguments);
+                    });
                 });
             });
             NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, "refs/heads/main");

@@ -15,7 +15,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -66,7 +66,7 @@ class FetchCommandTest {
     void rejectsUnadvertisedCapabilitiesDuringPreparation() throws Exception {
         var request = new FetchRequest();
         request.capabilities().add(value(GitCapability.THIN_PACK));
-        GitStorageApi storage = FetchTestSupport.storage(directory);
+        GitStorageAccess storage = FetchTestSupport.storage(directory);
         new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
@@ -80,7 +80,7 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("refs/heads/main");
-        GitStorageApi storage = FetchTestSupport.storage(directory);
+        GitStorageAccess storage = FetchTestSupport.storage(directory);
         new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP))
@@ -91,7 +91,7 @@ class FetchCommandTest {
 
     @Test
     void separateRequestsGetIndependentNegotiationState() throws Exception {
-        GitStorageApi storage = FetchTestSupport.storage(directory);
+        GitStorageAccess storage = FetchTestSupport.storage(directory);
         new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             var first = command.prepareNegotiation(new FetchRequest(), SSH);
@@ -162,7 +162,7 @@ class FetchCommandTest {
         request.wants().add(SECOND);
         InMemoryIndex indexApi = new InMemoryIndex();
         indexApi.withAccess(Optional.of(PackId.create()), index -> {
-            GitStorageApi storage = storage(Set.of(FIRST), index);
+            GitStorageAccess storage = storage(Set.of(FIRST), index);
             publishRefs(
                     storage, indexApi,
                     List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(FIRST))), true);
@@ -183,8 +183,8 @@ class FetchCommandTest {
         });
     }
 
-    private static GitStorageApi storage(Set<ObjectId> ids, GitIndexAccess index) throws Exception {
-        GitStorageApi storage = FetchTestSupport.storage(directory);
+    private static GitStorageAccess storage(Set<ObjectId> ids, GitIndexAccess index) throws Exception {
+        GitStorageAccess storage = FetchTestSupport.storage(directory);
         for (ObjectId id : ids) {
             PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{(byte) (id.equals(FIRST) ? 1 : 2)});
         }
