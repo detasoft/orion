@@ -70,7 +70,12 @@ credentials available when explicit credentials are omitted.
 
 Runtime ownership is per scoped named connection/configuration, not per
 repository and not deduplicated by endpoint. Reuse an S3 client across that
-connection's bucket/prefix bindings. Repository closure must not close the
+connection's bucket/prefix bindings. All runtime S3 clients share one HTTP
+client and connection pool owned by the configured provider. Pass that HTTP
+client explicitly to SDK service clients; replacing or closing an individual
+S3 client must not close the shared pool. Shutdown closes service clients before
+the shared HTTP client. Do not introduce a global static pool or registry.
+Repository closure must not close the
 shared client. Configuration/secret changes must use updated credentials
 without closing a client underneath active operations; shutdown releases owned
 resources through existing application lifecycle mechanisms. Avoid a generic
@@ -150,7 +155,7 @@ continue to work across independent provider instances.
   references, encrypted secret resolution, and preservation during document edits.
 - Verify two repository bindings on one connection, independent connections at
   the same endpoint, prefix/bucket isolation, configuration/credential changes,
-  safe active-operation ownership, and application shutdown.
+  safe active-operation ownership, shared HTTP pool lifetime, and application shutdown.
 - Verify existing HTTP/file/SSH proxy behavior, bootstrap adoption, and SSH
   trusted-host-key decisions through the canonical connection representation.
 - Verify stub operations clearly fail and resource closure is safe.
