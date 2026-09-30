@@ -181,8 +181,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
                     "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
             assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
-            NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
-                    .valueOrFailure("repository");
+        } finally {
+            backend.close();
+        }
+        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+            NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
                 assertThat(GitObjectRead.exists(reopened.storage(), access2,
