@@ -549,14 +549,14 @@ class BootstrapContextTest {
     @Test
     void closesOwnedS3BackendWhenBootstrapFails() {
         OrionConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setPaths(List.of());
+        configuration.getBootstrap().getAccessControl().setPath("");
         S3NativeGitRepositoryProvider backend =
                 new S3NativeGitRepositoryProvider("s3://bucket/repositories", null,
                         Map.of("accessKeyId", "test", "secretAccessKey", "env:S3_SECRET"),
                         Map.of("S3_SECRET", "test"));
         assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, backend))
                 .isInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("At least one ACL path must be configured");
+                .hasRootCauseMessage("Bootstrap source path must not be blank");
         assertThatThrownBy(backend::repositoryNames).hasMessageContaining("closed");
         backend.close();
     }
@@ -696,9 +696,9 @@ class BootstrapContextTest {
                         "initial ACL", UserEmail.EMPTY);
                 AccessControlSnapshot first = storage.load().valueOrFailure("initial ACL");
                 firstRevision = first.version().orElseThrow();
-                storage.save(new AccessControlSnapshot(Map.of("orion.xml", xml(),
-                                "roles.xml", xml()), first.version()),
-                        "add roles", UserEmail.EMPTY);
+                byte[] updated = bytes(new String(xml(), StandardCharsets.UTF_8) + "\n<!-- updated -->");
+                storage.save(new AccessControlSnapshot(Map.of("orion.xml", updated), first.version()),
+                        "update configuration", UserEmail.EMPTY);
                 assertThat(storage.load().valueOrFailure("updated ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
                 assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
                                 Map.of("orion.xml", bytes("stale replacement")), first.version()),
@@ -757,17 +757,16 @@ class BootstrapContextTest {
             var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
 
             assertThat(source.repositoryName()).isPresent();
-            assertThat(source.paths()).containsExactly("orion.xml");
+            assertThat(source.path()).isEqualTo("orion.xml");
         }
     }
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({
-            "false,false,false", "false,true,false", "true,false,false", "true,true,false",
-            "false,false,true", "false,true,true", "true,false,true", "true,true,true"})
+            "false,false", "false,true", "true,false", "true,true"})
     @org.junit.jupiter.api.condition.EnabledOnOs({
             org.junit.jupiter.api.condition.OS.LINUX, org.junit.jupiter.api.condition.OS.MAC})
-    void rejectsDirectConfigurationSymlinks(boolean directoryLink, boolean dangling, boolean missingPrimary)
+    void rejectsDirectConfigurationSymlinks(boolean directoryLink, boolean dangling)
             throws Exception {
         OrionConfiguration configuration = configuration();
         Path root = Files.createDirectory(tempDir.resolve("configuration"));
@@ -784,9 +783,6 @@ class BootstrapContextTest {
         }
         configuration.getBootstrap().getAccessControl().setLocation(root.toString());
         configuration.getBootstrap().getAccessControl().setPath("config/orion.xml");
-        if (missingPrimary) {
-            configuration.getBootstrap().getAccessControl().setPaths(List.of("missing.xml", "config/orion.xml"));
-        }
         configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(
                 configuration, Map.of("material.p12", materialBytes(configuration)));
@@ -939,12 +935,12 @@ class BootstrapContextTest {
     @ValueSource(strings = {"material", "primary", "secondary", "added", "removed"})
     void rechecksConfigurationWhenTheRepositoryAdvancesBeforeAdoptionSave(String changedFile) throws Exception {
         OrionConfiguration configuration = configuration();
-        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         Upstream upstream = upstream("revision-before-save", Map.of("orion.xml", xml()));
         configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)));
+        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         AdoptionStorage storage = new AdoptionStorage(xml());
         OrionDesiredState.Snapshot approved = approved(storage);
         AccessControl changedAcl = new AccessControl(List.of(new AccessControl.User(
@@ -1021,12 +1017,12 @@ class BootstrapContextTest {
 
     private void exerciseAdoptionSave(AdoptionStorage.Mode mode, boolean success) throws Exception {
         OrionConfiguration configuration = configuration();
-        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
-        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         Upstream upstream = upstream("transaction", Map.of("orion.xml", xml()));
         configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
         var backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)));
+        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         AdoptionStorage storage = new AdoptionStorage(xml());
         storage.mode = mode;
         try (var ignored = upstream.git(); var ignoredMaterial = materialUpstream.git();

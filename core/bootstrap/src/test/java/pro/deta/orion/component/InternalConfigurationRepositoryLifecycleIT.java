@@ -466,17 +466,16 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     @Test
-    void movesRecoveredRootToPrimaryWithoutDuplicatingSecondaryEntries() throws Exception {
+    void recoversRootInTheConfiguredFileAndPreservesOtherFiles() throws Exception {
         String secondaryPath = "config/root.xml";
         OrionConfiguration configuration = configuration();
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_PATH, secondaryPath));
         byte[] primaryAcl = aclBytes("alice", "alice-password");
         byte[] secondaryAcl = defaultAclBytes("old-root-password");
         OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
                 .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
-        repository.files().withAccess(CONFIGURATION_REF, "seed split ACL", GitCommitAuthor.EMPTY,
+        repository.files().withAccess(CONFIGURATION_REF, "seed configuration and unrelated XML", GitCommitAuthor.EMPTY,
                 fileAccess -> {
             fileAccess.write(ACL_PATH, primaryAcl);
             fileAccess.write(secondaryPath, secondaryAcl);
@@ -502,15 +501,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl primary = OrionXml.read(
                     new ByteArrayInputStream(snapshot.get(ACL_PATH)))
                             .system().accessControl();
-            AccessControl secondary = OrionXml.read(
-                    new ByteArrayInputStream(snapshot.get(secondaryPath)))
-                            .system().accessControl();
             assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
-            assertThat(secondary.getUsers()).isEmpty();
-            assertThat(usersAcross(snapshot, ACL_PATH, secondaryPath))
-                    .extracting(AccessControl.User::getId)
-                    .containsExactlyInAnyOrder("alice", "root");
+            assertThat(snapshot.get(secondaryPath)).containsExactly(secondaryAcl);
         } finally {
             assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
         }
@@ -860,7 +853,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         configuration.getStorage().setLocation(tempDir.resolve("repositories").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:" + REPOSITORY_NAME);
         configuration.getBootstrap().getAccessControl().setRef(CONFIGURATION_REF);
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_PATH));
+        configuration.getBootstrap().getAccessControl().setPath(ACL_PATH);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttp().setEnabled(false);
@@ -1028,19 +1021,6 @@ class InternalConfigurationRepositoryLifecycleIT {
         return accessControlBytes(ACLUtil.generateDefaultAccessControl(
                 hash,
                 AccessControl.CredentialType.SHA1));
-    }
-
-    private static List<AccessControl.User> usersAcross(
-            Map<String, byte[]> snapshot,
-            String... paths) throws Exception {
-        List<AccessControl.User> users = new java.util.ArrayList<>();
-
-        for (String path : paths) {
-            AccessControl acl = OrionXml.read(new ByteArrayInputStream(snapshot.get(path)))
-                    .system().accessControl();
-            users.addAll(acl.getUsers());
-        }
-        return List.copyOf(users);
     }
 
     private static byte[] accessControlBytes(AccessControl accessControl) throws Exception {

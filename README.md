@@ -445,8 +445,7 @@ bootstrap:
   accessControl:
     location: local:orion
     ref: refs/heads/main
-    paths:
-      - orion.xml
+    path: orion.xml
     createDefaultIfMissing: true
   keyMaterial:
     location: local:orion

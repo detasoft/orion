@@ -8,18 +8,13 @@ import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.CheckedFunction;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,7 +24,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     private final NativeGitRepositoryProvider repositoryProvider;
     private final String repositoryName;
     private final String configurationRef;
-    private final List<String> paths;
+    private final String path;
     private final boolean createIfMissing;
 
     NativeGitAccessControlStorage(
@@ -39,7 +34,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
         repositoryName = source.repositoryName().orElseThrow();
         configurationRef = source.refName();
-        paths = source.paths();
+        path = source.path();
         createIfMissing = source.createIfMissing();
     }
 
@@ -57,17 +52,11 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             if (revision == null) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
-            Map<String, byte[]> files = new LinkedHashMap<>();
-            for (String path : paths) {
-                files.put(path, repository.files().readFile(new ObjectId(revision), path,
-                        (type, size, base, input) -> input.readBytes(Math.toIntExact(size))));
-            }
-            return new Result.Success<>(new AccessControlSnapshot(files, Optional.of(revision)));
+            byte[] content = repository.files().readFile(new ObjectId(revision), path,
+                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
+            return new Result.Success<>(new AccessControlSnapshot(Map.of(path, content), Optional.of(revision)));
         } catch (GitRepositoryFileNotFoundException error) {
-            if (primaryPathIsMissing(repository)) {
-                return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
-            }
-            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | RuntimeException error) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
@@ -76,6 +65,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     @Override
     public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
         Objects.requireNonNull(snapshot, "snapshot");
+        byte[] content = Objects.requireNonNull(snapshot.files().get(path), "configuration content");
         message = Objects.requireNonNullElse(message, "");
         author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
         try {
@@ -83,24 +73,18 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
             CheckedFunction<GitFileAccess, Void> update = access -> {
-                for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                    byte[] content = entry.getValue();
-                    if (snapshot.version().isPresent()) {
-                        byte[] previous;
-                        try {
-                            previous = repository.files().readFile(
-                                    new ObjectId(snapshot.version().orElseThrow()), entry.getKey(),
-                                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
-                        } catch (GitRepositoryFileNotFoundException missing) {
-                            previous = null;
-                        }
-                        if (Arrays.equals(content, previous)) {
-                            continue;
-                        }
+                byte[] previous = null;
+                if (snapshot.version().isPresent()) {
+                    try {
+                        previous = repository.files().readFile(
+                                new ObjectId(snapshot.version().orElseThrow()), path,
+                                (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
+                    } catch (GitRepositoryFileNotFoundException missing) {
+                        // The configuration file has not been created at this revision yet.
                     }
-                    try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
-                        access.write(entry.getKey(), FileMode.REGULAR_FILE, content.length, input);
-                    }
+                }
+                if (!Arrays.equals(content, previous)) {
+                    access.write(path, content);
                 }
                 access.apply();
                 return null;
@@ -118,28 +102,9 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         }
     }
 
-    private boolean primaryPathIsMissing(NativeGitRepository repository) {
-        if (paths.size() == 1) {
-            return true;
-        }
-        try {
-            String revision = repository.refs().get(configurationRef);
-            if (revision == null) {
-                return true;
-            }
-            repository.files().readFile(new ObjectId(revision), paths.getFirst(),
-                    (type, size, base, input) -> Boolean.TRUE);
-            return false;
-        } catch (GitRepositoryFileNotFoundException missing) {
-            return true;
-        } catch (IOException | GitOperationException failure) {
-            return false;
-        }
-    }
-
     @Override
     public String primaryPath() {
-        return paths.getFirst();
+        return path;
     }
 
     @Override

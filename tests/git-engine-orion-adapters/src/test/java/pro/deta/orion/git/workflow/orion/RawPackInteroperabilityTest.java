@@ -102,11 +102,10 @@ class RawPackInteroperabilityTest {
             List<String> haves, NativeGitRepository copy) throws Exception {
         GitUploadPackResult<PackMetadata> result = OrionGitClient.requireSuccess(client.fetch(URI.create(remote.uri()),
                 GitClientOptions.defaults(), new GitUploadPackRequest<>(List.of(want), haves,
-                        copy::ingest, ignored -> { })), "raw fetch");
+                        copy::ingestAndPublish, ignored -> { })), "raw fetch");
         assertThat(result.advertisement().capabilities()).contains("multi_ack_detailed")
                 .doesNotContain("side-band", "side-band-64k");
         assertThat(result.packBytes()).isPositive();
-        copy.publishPack(result.pack());
     }
 
     private static GitClientTransport withoutSideBand(GitClientTransport transport) {

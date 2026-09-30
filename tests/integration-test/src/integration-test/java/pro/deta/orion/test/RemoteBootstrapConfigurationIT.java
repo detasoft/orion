@@ -324,7 +324,7 @@ class RemoteBootstrapConfigurationIT {
                 "bootstrap", Map.of(
                         "baseDir", bootstrap.getBaseDir(),
                         "accessControl", Map.of(
-                                "location", acl.getLocation(), "ref", acl.getRef(), "paths", acl.selectedPaths(),
+                                "location", acl.getLocation(), "ref", acl.getRef(), "path", acl.getPath(),
                                 "auth", acl.getAuth(), "createDefaultIfMissing", false),
                         "keyMaterial", Map.of(
                                 "location", material.getLocation(), "ref", material.getRef(),

@@ -184,11 +184,8 @@ class OrionGitHttpInteroperabilityTest {
             try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy")) {
                 GitClientResult<GitUploadPackResult<PackMetadata>> result = client.fetch(
                         remote, GitClientOptions.defaults(),
-                        GitUploadPackRequest.of(commit, received::ingest));
+                        GitUploadPackRequest.of(commit, received::ingestAndPublish));
                 assertThat(result).isInstanceOf(GitClientResult.Success.class);
-                PackMetadata pack = ((GitClientResult.Success<GitUploadPackResult<PackMetadata>>)
-                        result).value().pack();
-                received.publishPack(pack).packChecksum();
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
                 assertThat(new String(received.files().readBytes("main", "README.md"),
                         StandardCharsets.UTF_8)).isEqualTo(content);

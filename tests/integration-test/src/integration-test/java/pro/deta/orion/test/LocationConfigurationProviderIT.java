@@ -49,8 +49,7 @@ class LocationConfigurationProviderIT {
                 bootstrap:
                   baseDir: %s
                   accessControl:
-                    paths:
-                      - %s
+                    path: %s
                 transport:
                   http:
                     port: %d
@@ -63,7 +62,7 @@ class LocationConfigurationProviderIT {
             String accessControlPath,
             int httpPort) {
         assertThat(configuration.getBootstrap().getBaseDir()).isEqualTo(baseDir);
-        assertThat(configuration.getBootstrap().getAccessControl().primaryPath()).isEqualTo(accessControlPath);
+        assertThat(configuration.getBootstrap().getAccessControl().getPath()).isEqualTo(accessControlPath);
         assertThat(configuration.getTransport().getHttp().getPort()).isEqualTo(httpPort);
     }
 

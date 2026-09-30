@@ -13,7 +13,6 @@ import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
@@ -47,9 +46,9 @@ import java.util.function.Supplier;
 public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     @Override
     public synchronized void close() {
+        try {
             for (ProxyNativeGitRepository repository : provisionalBindings.values()) repository.revoke();
             for (ProxyNativeGitRepository repository : activeBindings.values()) repository.revoke();
-        try {
             backend.close();
         } finally {
             provisionalBindings.clear();
@@ -121,7 +120,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         String id = requireSourceId(sourceId);
         Objects.requireNonNull(source, "source");
         String location = Objects.requireNonNull(source.getLocation(), "location");
-        List<String> paths = repositoryPaths(source);
+        String path = repositoryPath(source.getPath());
         if (BootstrapRepositorySources.CONFIGURATION.equals(id)) {
             ResourceLocation parsed = ResourceLocation.parse(location, "ACL repository");
             if (parsed.scheme() instanceof ResourceScheme.File || parsed.scheme() instanceof ResourceScheme.Empty) {
@@ -150,7 +149,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                     location,
                     Optional.empty(),
                     refName(source.selectedRef()),
-                    paths,
+                    path,
                     Optional.empty(),
                     allowMissing);
         }
@@ -167,7 +166,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                     .valueOrFailure("Cannot open bootstrap repository");
             if (!repository.refs().containsKey(refName)) {
                 if (allowMissing) {
-                    return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
+                    return resolved(id, repositoryName, refName, path, Optional.empty(), allowMissing);
                 }
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
@@ -176,14 +175,12 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 if (revision == null) {
                     throw new GitRepositoryFileNotFoundException("Branch not found: " + refName);
                 }
-                for (String path : paths) {
-                    repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
-                            (type, size, base, input) -> Boolean.TRUE);
-                }
-                return resolved(id, repositoryName, refName, paths, Optional.of(revision), allowMissing);
+                repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
+                        (type, size, base, input) -> Boolean.TRUE);
+                return resolved(id, repositoryName, refName, path, Optional.of(revision), allowMissing);
             } catch (GitRepositoryFileNotFoundException error) {
-                if (allowMissing && primaryPathIsMissing(repository, refName, paths)) {
-                    return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
+                if (allowMissing) {
+                    return resolved(id, repositoryName, refName, path, Optional.empty(), allowMissing);
                 }
                 throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
             } catch (IOException | GitOperationException error) {
@@ -293,11 +290,11 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 runtime = ProxyNativeGitRepositoryFactory.create(location.proxyName(), location,
                         backend,
                         persistent, fetcher, pusher);
-        ProxyNativeGitRepository bootstrap = previousBindings.get("bootstrap");
-        if (bootstrap != null) candidate.put("bootstrap", bootstrap);
             }
             addActiveBinding(candidate, binding, runtime);
         }
+        ProxyNativeGitRepository bootstrap = previousBindings.get("bootstrap");
+        if (bootstrap != null) candidate.put("bootstrap", bootstrap);
         retainDeferredInternalSources(previousBindings, candidate);
         installBindings(candidate);
         ProxyNativeGitRepository runtime = candidate.get(selected.publicRepositoryName());
@@ -335,10 +332,10 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             for (GitProxyBinding binding : document.system().proxies()) {
                 ProxyNativeGitRepository runtime = bootstrapOverrides.get(binding.alias());
                 if (runtime != null) overrides.put(binding.alias(), runtime);
-            if (bootstrap != null) adopted.add("bootstrap");
             }
         } else {
             Set<String> adopted = new HashSet<>();
+            if (bootstrap != null) adopted.add("bootstrap");
             for (GitProxyBinding binding : document.system().proxies()) {
                 adopted.add(BootstrapGitLocation.persistent(binding, document.system()).proxyName());
             }
@@ -580,7 +577,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             String sourceId,
             String repositoryName,
             String refName,
-            List<String> paths,
+            String path,
             Optional<String> revision,
             boolean createIfMissing) {
         return new ResolvedBootstrapSource(
@@ -588,7 +585,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 "local:" + repositoryName,
                 Optional.of(repositoryName),
                 refName,
-                paths,
+                path,
                 revision,
                 createIfMissing);
     }
@@ -700,39 +697,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             throw new IllegalArgumentException("Bootstrap source path must stay inside the repository");
         }
         return path.toString().replace('\\', '/');
-    }
-
-    private static List<String> repositoryPaths(BootstrapSourceConfig source) {
-        List<String> configured = source instanceof BootstrapConfigurationSourceConfig configuration
-                ? configuration.selectedPaths()
-                : List.of(source.getPath());
-        java.util.ArrayList<String> normalized = new java.util.ArrayList<>();
-        for (String path : configured) {
-            normalized.add(repositoryPath(path));
-        }
-        return List.copyOf(normalized);
-    }
-
-    private static boolean primaryPathIsMissing(
-            NativeGitRepository repository,
-            String refName,
-            List<String> paths) {
-        if (paths.size() == 1) {
-            return true;
-        }
-        try {
-            String revision = repository.refs().get(refName);
-            if (revision == null) {
-                return true;
-            }
-            repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), paths.getFirst(),
-                    (type, size, base, input) -> Boolean.TRUE);
-            return false;
-        } catch (GitRepositoryFileNotFoundException missing) {
-            return true;
-        } catch (IOException | GitOperationException failure) {
-            return false;
-        }
     }
 
     private static String refName(String value) {

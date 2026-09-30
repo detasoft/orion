@@ -4,8 +4,8 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import java.io.ByteArrayOutputStream;
 import java.util.Optional;
-import java.util.Map;
-import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -32,13 +32,13 @@ class NativeSshCredentialPersistenceTest {
     Path root;
 
     @Test
-    void activatesAndReloadsANewKeyWithoutChangingTheSecondaryDocument() throws Exception {
+    void activatesAndReloadsANewKeyWithoutChangingOtherFiles() throws Exception {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(root);
-        provider.create("acl").valueOrFailure("create repository");
+        NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",
-                List.of("users.xml", "roles.xml"), Optional.empty(), false);
+                "users.xml", Optional.empty(), false);
         AccessControlStorage storage = new NativeGitAccessControlStorage(source, provider);
         AccessControlDraft primary = new AccessControlDraft();
         AccessControlDraft.User alice = new AccessControlDraft.User();
@@ -50,9 +50,12 @@ class NativeSshCredentialPersistenceTest {
         ByteArrayOutputStream roles = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(new AccessControlDraft().toAccessControl()), roles);
         byte[] unchanged = roles.toByteArray();
-        storage.save(new AccessControlSnapshot(Map.of("users.xml", users.toByteArray(),
-                        "roles.xml", unchanged), Optional.empty()),
-                "seed", UserEmail.EMPTY);
+        repository.files().withAccess("refs/heads/main", "seed", GitCommitAuthor.EMPTY, access -> {
+            access.write("users.xml", users.toByteArray());
+            access.write("roles.xml", unchanged);
+            access.apply();
+            return null;
+        });
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
@@ -75,7 +78,7 @@ class NativeSshCredentialPersistenceTest {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
-            assertThat(storage.load().valueOrFailure("reloaded ACL").files().get("roles.xml"))
+            assertThat(repository.files().readBytes("refs/heads/main", "roles.xml"))
                     .containsExactly(unchanged);
         } finally {
             reopened.onStop();

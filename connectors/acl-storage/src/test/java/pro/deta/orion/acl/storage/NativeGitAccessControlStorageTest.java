@@ -57,7 +57,7 @@ class NativeGitAccessControlStorageTest {
                 "git+https://sensitive.example/private.git",
                 Optional.of("bootstrap/proxy-alias"),
                 "refs/heads/main",
-                List.of(ACL_PATH, secondaryPath),
+                ACL_PATH,
                 Optional.of(repository.refs().get("refs/heads/main")),
                 false);
 
@@ -69,8 +69,14 @@ class NativeGitAccessControlStorageTest {
         assertThat(storage.primaryPath()).isEqualTo(ACL_PATH);
         assertThat(storage.createIfMissing()).isFalse();
         assertThat(storage.load().valueOrFailure("resolved ACL").files())
-                .containsEntry(ACL_PATH, bytes("resolved acl"))
-                .containsEntry(secondaryPath, bytes("resolved roles"));
+                .containsOnlyKeys(ACL_PATH)
+                .containsEntry(ACL_PATH, bytes("resolved acl"));
+        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("updated ACL")),
+                Optional.of(repository.refs().get("refs/heads/main"))), "update", UserEmail.EMPTY);
+        assertThat(repository.files().readBytes("refs/heads/main", secondaryPath))
+                .isEqualTo(bytes("resolved roles"));
+        assertThat(repository.files().readBytes("refs/heads/main", ACL_PATH))
+                .isEqualTo(bytes("updated ACL"));
     }
 
     @Test
@@ -112,7 +118,7 @@ class NativeGitAccessControlStorageTest {
     void storageDoesNotCreateRepositoryDuringAclStartup() {
         NativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
 
-        resolvedStorage(provider, List.of(ACL_PATH));
+        resolvedStorage(provider, ACL_PATH);
 
         assertThat(provider.repositoryNames()).isEmpty();
     }
@@ -181,7 +187,7 @@ class NativeGitAccessControlStorageTest {
     }
 
     @Test
-    void existingRefWithoutSecondaryAclIsInvalid(@TempDir Path rootDirectory) throws Exception {
+    void loadsOnlyTheConfiguredFile(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
@@ -191,12 +197,13 @@ class NativeGitAccessControlStorageTest {
             fileAccess.apply();
             return null;
         });
-        AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH, "config/roles.xml"));
+        AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
 
         Result<AccessControlSnapshot> result = storage.load();
 
-        assertThat(result).isInstanceOf(Result.Failure.class);
-        assertThat(((Result.Failure<?>) result).code()).isEqualTo(Result.FailureCode.GENERAL);
+        assertThat(result.valueOrFailure("configured ACL").files())
+                .containsOnlyKeys(ACL_PATH)
+                .containsEntry(ACL_PATH, bytes("primary ACL"));
     }
 
     @Test
@@ -267,7 +274,7 @@ class NativeGitAccessControlStorageTest {
             fileAccess.apply();
             return null;
         });
-        AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH));
+        AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
@@ -325,17 +332,17 @@ class NativeGitAccessControlStorageTest {
         if (!provider.exists("internal/configuration")) {
             provider.create("internal/configuration").valueOrFailure("repository");
         }
-        return resolvedStorage(provider, List.of(ACL_PATH));
+        return resolvedStorage(provider, ACL_PATH);
     }
 
     private static AccessControlStorage resolvedStorage(
-            NativeGitRepositoryProvider provider, List<String> paths) {
+            NativeGitRepositoryProvider provider, String path) {
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 BootstrapRepositorySources.CONFIGURATION,
                 "local:internal/configuration",
                 Optional.of("internal/configuration"),
                 "refs/heads/configuration",
-                paths,
+                path,
                 Optional.empty(),
                 true);
         return new AccessControlStorageResolver(new BootstrapRepositorySources(List.of(source)), provider)

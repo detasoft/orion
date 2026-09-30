@@ -383,7 +383,7 @@ public final class BootstrapContext implements AutoCloseable {
         BootstrapConfigurationSourceConfig source = new BootstrapConfigurationSourceConfig();
         source.setLocation(directory.toUri().toString());
         source.setRef(configured.selectedRef());
-        source.setPaths(configured.selectedPaths());
+        source.setPath(configured.getPath());
         source.setAuth(configured.getAuth());
         source.setCreateDefaultIfMissing(configured.isCreateDefaultIfMissing());
         return source;

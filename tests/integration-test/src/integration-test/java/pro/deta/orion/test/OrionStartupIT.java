@@ -143,7 +143,7 @@ class OrionStartupIT {
         seedRemoteAclRepository(remoteAclRepository, accessControlWithUsers("root", "remote-user"));
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
 
         OrionDocument loadedDocument;
 
@@ -213,7 +213,7 @@ class OrionStartupIT {
         Files.write(legacyAclFile, legacyAcl);
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation(legacyAclDirectory.toUri().toString());
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             assertThat(orion.accessControlService().userExists("legacy-user")).isTrue();
@@ -311,7 +311,7 @@ class OrionStartupIT {
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl()
                 .setLocation("git+" + missingRemoteAclRepository.toUri());
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
 
