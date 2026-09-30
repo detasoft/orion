@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.Constants;
@@ -205,13 +206,15 @@ class NativeGitFileModesTest {
 
     private static void copyPacks(NativeGitRepository source, InMemoryRepository destination) throws Exception {
         try (ObjectInserter inserter = destination.newObjectInserter()) {
-            for (PackMetadata metadata : source.index().packs()) {
-                ByteArrayOutputStream exported = new ByteArrayOutputStream();
-                source.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
-                byte[] pack = exported.toByteArray();
-                inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);
+            try (GitIndexAccess access1 = source.index().createAccess()) {
+                for (PackMetadata metadata : access1.packs()) {
+                    ByteArrayOutputStream exported = new ByteArrayOutputStream();
+                    source.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+                    byte[] pack = exported.toByteArray();
+                    inserter.newPackParser(new ByteArrayInputStream(pack)).parse(NullProgressMonitor.INSTANCE);
+                }
+                inserter.flush();
             }
-            inserter.flush();
         }
     }
 

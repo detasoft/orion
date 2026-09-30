@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -36,17 +36,20 @@ class PackPublicationTest {
     void keepsPendingObjectsPrivateAcrossReopenThenPublishesAllOfThem() throws Exception {
         PackMetadata metadata;
         ObjectId id = objectId(GitObjectType.BLOB, new byte[]{1});
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             metadata = ingest(pack(blob(new byte[]{1})), storage, index);
         }
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             assertThat(storage.exists(metadata.packId())).isTrue();
             assertThat(index.findObject(metadata.packId(), id)).isPresent();
             assertThat(index.locations(id)).isEmpty();
             assertThat(index.packs()).isEmpty();
             index.publishIndex(metadata);
         }
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             assertThat(index.packs(metadata.packChecksum())).containsExactly(metadata);
             assertThat(read(storage, index, id)).containsExactly(1);
         }
@@ -56,7 +59,7 @@ class PackPublicationTest {
     @ValueSource(booleans = {false, true})
     void concurrentIdenticalLoadsPublishIndependentPacks(boolean memory) throws Exception {
         try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
              var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             byte[] input = pack(blob(new byte[]{1}));
             CyclicBarrier start = new CyclicBarrier(2);
@@ -70,7 +73,7 @@ class PackPublicationTest {
                     return publish(input, storage, index);
                 }
                 try (GitStorageApi otherStorage = new LocalGitStorage(directory);
-                     GitIndexApi otherIndex = new LocalGitIndex(directory)) {
+                     GitIndexAccess otherIndex = new LocalGitIndex(directory).createAccess()) {
                     return publish(input, otherStorage, otherIndex);
                 }
             });
@@ -81,11 +84,12 @@ class PackPublicationTest {
             assertThat(index.packs(a.packChecksum())).containsExactlyInAnyOrder(a, b);
             assertThat(index.locations(objectId(GitObjectType.BLOB, new byte[]{1}))).hasSize(2);
         }
-    }
+        }
 
     @Test
     void missingPhysicalPackIsNotAnExistingRefTargetAndReadReportsFailure() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             PackMetadata metadata = index.packs().getFirst();
             Files.delete(directory.resolve("packs").resolve("pack-" + metadata.packId() + ".data"));
@@ -99,13 +103,13 @@ class PackPublicationTest {
     @ValueSource(booleans = {false, true})
     void resolvesTwoExternalBasesAndReadsDeepPublishedChains(boolean memory) throws Exception {
         try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory)) {
+             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess()) {
             ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
             ObjectId second = store(storage, index, GitObjectType.BLOB, new byte[]{2});
             PackMetadata thin = publish(pack(delta(first, new byte[]{1, 1, 1, 3}),
                     delta(second, new byte[]{1, 1, 1, 4})), storage, index);
             assertThat(thin.objectCount()).isEqualTo(4);
-            try (GitStorageApi receiver = new InMemoryStorage(); GitIndexApi received = new InMemoryIndex()) {
+            try (GitStorageApi receiver = new InMemoryStorage(); GitIndexAccess received = new InMemoryIndex().createAccess()) {
                 PackMetadata replay = publish(bytes(thin, storage, index), receiver, received);
                 assertThat(replay.packChecksum()).isEqualTo(thin.packChecksum());
                 assertThat(read(receiver, received, objectId(GitObjectType.BLOB, new byte[]{4})))
@@ -125,7 +129,7 @@ class PackPublicationTest {
         }
     }
 
-    private static byte[] read(GitStorageApi storage, GitIndexApi index, ObjectId id) throws IOException {
+    private static byte[] read(GitStorageApi storage, GitIndexAccess index, ObjectId id) throws IOException {
         return GitObjectRead.read(storage, index, id, new ResolvedGitObjectRead<>(storage, index,
                 (type, size, base, input) -> input.readBytes((int) size))).orElseThrow();
     }

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -28,8 +28,8 @@ class GitObjectGraphTest {
     }
 
     private final GitStorageApi objects = new InMemoryStorage();
-    private final GitIndexApi index =
-            new InMemoryIndex();
+    private final GitIndexAccess index =
+            new InMemoryIndex().createAccess();
     private final GitObjectGraph graph = new GitObjectGraph(objects, index);
 
     @Test

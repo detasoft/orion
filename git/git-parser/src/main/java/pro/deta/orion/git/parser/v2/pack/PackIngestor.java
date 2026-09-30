@@ -4,7 +4,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.HashedGitObjectRead;
@@ -36,10 +36,10 @@ import java.util.Set;
 public final class PackIngestor implements AutoCloseable {
     private final BufferedByteInputV2 input;
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
     private boolean started;
 
-    public PackIngestor(BufferedByteInputV2 input, GitStorageApi storage, GitIndexApi index) {
+    public PackIngestor(BufferedByteInputV2 input, GitStorageApi storage, GitIndexAccess index) {
         this.input = Objects.requireNonNull(input, "input");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");

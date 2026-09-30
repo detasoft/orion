@@ -9,7 +9,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -199,16 +199,17 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                GitIndexApi index = new InMemoryIndex();
-                var command = new FetchCommand(storage, index, capabilities());
-                assertThatThrownBy(() -> command.action(protocol))
-                        .isInstanceOf(IOException.class).hasMessageContaining("not advertised");
-                assertThat(bytes.size()).isZero();
-                if (v2) {
-                    assertThat(input.readUnsignedByte()).isEqualTo('N');
-                } else {
-                    assertThat(FetchCommand.readNegotiationMessage(reader))
-                            .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                    var command = new FetchCommand(storage, index, capabilities());
+                    assertThatThrownBy(() -> command.action(protocol))
+                            .isInstanceOf(IOException.class).hasMessageContaining("not advertised");
+                    assertThat(bytes.size()).isZero();
+                    if (v2) {
+                        assertThat(input.readUnsignedByte()).isEqualTo('N');
+                    } else {
+                        assertThat(FetchCommand.readNegotiationMessage(reader))
+                                .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                    }
                 }
             }
         }
@@ -225,18 +226,19 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 var storage = FetchTestSupport.storage(directory);
-                GitIndexApi index = new InMemoryIndex();
-                var command = new FetchCommand(storage, index, capabilities());
+                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                    var command = new FetchCommand(storage, index, capabilities());
 
-                assertThatThrownBy(() -> command.action(protocol))
-                        .isInstanceOf(IOException.class).hasMessageContaining(WANT);
+                    assertThatThrownBy(() -> command.action(protocol))
+                            .isInstanceOf(IOException.class).hasMessageContaining(WANT);
 
-                assertThat(bytes.size()).isZero();
-                if (v2) {
-                    assertThat(input.readUnsignedByte()).isEqualTo('N');
-                } else {
-                    assertThat(FetchCommand.readNegotiationMessage(reader))
-                            .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                    assertThat(bytes.size()).isZero();
+                    if (v2) {
+                        assertThat(input.readUnsignedByte()).isEqualTo('N');
+                    } else {
+                        assertThat(FetchCommand.readNegotiationMessage(reader))
+                                .isEqualTo(new NegotiationMessage.Have(new ObjectId(HAVE)));
+                    }
                 }
             }
         }
@@ -248,14 +250,15 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
-            var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
-            var plan = negotiate(command, protocol).orElseThrow();
-            assertThat(plan.capabilities()).contains(value(GitCapability.WAIT_FOR_DONE));
-            assertThat(plan.wantedObjects()).containsExactly(new ObjectId(WANT));
-            assertThat(plan.commonObjects()).isEmpty();
-            assertThat(bytes.size()).isZero();
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+                var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
+                var plan = negotiate(command, protocol).orElseThrow();
+                assertThat(plan.capabilities()).contains(value(GitCapability.WAIT_FOR_DONE));
+                assertThat(plan.wantedObjects()).containsExactly(new ObjectId(WANT));
+                assertThat(plan.commonObjects()).isEmpty();
+                assertThat(bytes.size()).isZero();
+            }
         }
     }
 
@@ -265,13 +268,14 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
-            var command = new FetchCommand(storage, index, capabilities());
-            assertThat(negotiate(command, protocol)).isEmpty();
-            assertThat(bytes.toString(StandardCharsets.UTF_8))
-                    .isEqualTo(packet("acknowledgments\n") + packet("NAK\n") + "0000");
-            assertThat(input.readUnsignedByte()).isEqualTo('N');
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+                var command = new FetchCommand(storage, index, capabilities());
+                assertThat(negotiate(command, protocol)).isEmpty();
+                assertThat(bytes.toString(StandardCharsets.UTF_8))
+                        .isEqualTo(packet("acknowledgments\n") + packet("NAK\n") + "0000");
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+            }
         }
     }
 
@@ -309,10 +313,11 @@ class FetchNegotiatorRequestTest {
                 var bytes = new ByteArrayOutputStream();
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                GitIndexApi index = new InMemoryIndex();
-                assertThat(negotiate(new FetchCommand(storage, index, capabilities()), protocol)).isEmpty();
-                assertThat(input.readUnsignedByte()).isEqualTo('N');
-                assertThat(bytes.size()).isZero();
+                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                    assertThat(negotiate(new FetchCommand(storage, index, capabilities()), protocol)).isEmpty();
+                    assertThat(input.readUnsignedByte()).isEqualTo('N');
+                    assertThat(bytes.size()).isZero();
+                }
             }
         }
     }
@@ -326,7 +331,7 @@ class FetchNegotiatorRequestTest {
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                    new InMemoryIndex(), capabilities()) {
+                    new InMemoryIndex().createAccess(), capabilities()) {
                 @Override
                 public boolean objectExists(ObjectId objectId) {
                     assertThat(objectId).isEqualTo(common);
@@ -339,16 +344,17 @@ class FetchNegotiatorRequestTest {
                 }
             };
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
-                    new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
-            assertThat(context).isSameAs(checks);
-            assertThat(context.request().wants()).containsExactly(new ObjectId(WANT));
-            assertThat(context.commonObjects()).containsExactly(common);
-            assertThat(context.doneReceived()).isTrue();
-            assertThat(context.ready()).isFalse();
-            assertThat(input.readUnsignedByte()).isEqualTo('N');
-            assertThat(bytes.size()).isZero();
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
+                        new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
+                assertThat(context).isSameAs(checks);
+                assertThat(context.request().wants()).containsExactly(new ObjectId(WANT));
+                assertThat(context.commonObjects()).containsExactly(common);
+                assertThat(context.doneReceived()).isTrue();
+                assertThat(context.ready()).isFalse();
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+                assertThat(bytes.size()).isZero();
+            }
         }
     }
 
@@ -382,15 +388,16 @@ class FetchNegotiatorRequestTest {
                 FetchRequest request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
                 var checks = checks(request, false, GitCapability.MULTI_ACK_DETAILED, GitCapability.SIDE_BAND_64K);
                 GitStorageApi storage = FetchTestSupport.storage(directory);
-                GitIndexApi index = new InMemoryIndex();
-                NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
-                        new FetchNegotiatorIterator(checks, SSH), protocol.reader(), protocol.writer());
-                assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
-                assertThat(context.doneReceived()).isTrue();
-                assertThat(input.readUnsignedByte()).isEqualTo('N');
-                assertThat(bytes.flushes).isEqualTo(3);
-                assertThat(bytes.toString(StandardCharsets.US_ASCII))
-                        .isEqualTo("0038ACK " + HAVE + " common\n0008NAK\n0031ACK " + HAVE + "\n");
+                try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                    NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
+                            new FetchNegotiatorIterator(checks, SSH), protocol.reader(), protocol.writer());
+                    assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
+                    assertThat(context.doneReceived()).isTrue();
+                    assertThat(input.readUnsignedByte()).isEqualTo('N');
+                    assertThat(bytes.flushes).isEqualTo(3);
+                    assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                            .isEqualTo("0038ACK " + HAVE + " common\n0008NAK\n0031ACK " + HAVE + "\n");
+                }
             }
         }
     }
@@ -404,14 +411,15 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.SIDEBAND_ALL);
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
-                    new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
-            assertThat(context.ready()).isTrue();
-            assertThat(context.doneReceived()).isFalse();
-            assertThat(input.readUnsignedByte()).isEqualTo('N');
-            assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
-                    "0015\u0001acknowledgments\n0032\u0001ACK " + HAVE + "\n000b\u0001ready\n0001");
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
+                        new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
+                assertThat(context.ready()).isTrue();
+                assertThat(context.doneReceived()).isFalse();
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+                assertThat(bytes.toString(StandardCharsets.US_ASCII)).isEqualTo(
+                        "0015\u0001acknowledgments\n0032\u0001ACK " + HAVE + "\n000b\u0001ready\n0001");
+            }
         }
     }
 
@@ -424,14 +432,15 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.WAIT_FOR_DONE);
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
-                    new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
-            assertThat(context.ready()).isFalse();
-            assertThat(context.doneReceived()).isFalse();
-            assertThat(input.readUnsignedByte()).isEqualTo('N');
-            assertThat(bytes.toString(StandardCharsets.US_ASCII))
-                    .isEqualTo("0014acknowledgments\n0031ACK " + HAVE + "\n0000");
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
+                        new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
+                assertThat(context.ready()).isFalse();
+                assertThat(context.doneReceived()).isFalse();
+                assertThat(input.readUnsignedByte()).isEqualTo('N');
+                assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                        .isEqualTo("0014acknowledgments\n0031ACK " + HAVE + "\n0000");
+            }
         }
     }
 
@@ -486,10 +495,11 @@ class FetchNegotiatorRequestTest {
         try (var input = input(packet("want " + WANT + " object-format=sha256") + "0000")) {
             var request = FetchRequest.parseLegacy(reader(input));
             GitStorageApi storage = FetchTestSupport.storage(directory);
-            GitIndexApi index = new InMemoryIndex();
-            var command = new FetchCommand(storage, index, capabilities(GitCapability.OBJECT_FORMAT));
-            assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
-                    .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
+            try (GitIndexAccess index = new InMemoryIndex().createAccess()) {
+                var command = new FetchCommand(storage, index, capabilities(GitCapability.OBJECT_FORMAT));
+                assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
+                        .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
+            }
         }
     }
 
@@ -502,7 +512,7 @@ class FetchNegotiatorRequestTest {
 
     private static NegotiationContext checks(FetchRequest request, boolean ready, GitCapability... advertised) {
         return new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex(), capabilities(advertised)) {
+                new InMemoryIndex().createAccess(), capabilities(advertised)) {
             @Override
             public boolean objectExists(ObjectId objectId) {
                 return objectId.equals(new ObjectId(HAVE));

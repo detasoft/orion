@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -114,13 +115,15 @@ class GitWireRefsTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        repository.index().updateHead(new Head.Detached(new CommitId(TAG_ID)));
-        DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+        try (GitIndexAccess access1 = repository.index().createAccess()) {
+            access1.updateHead(new Head.Detached(new CommitId(TAG_ID)));
+            DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
-                List.of("HEAD")));
+            LsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false,
+                    List.of("HEAD")));
 
-        assertThat(response.refs()).containsExactly(direct(TAG_ID, "HEAD"));
+            assertThat(response.refs()).containsExactly(direct(TAG_ID, "HEAD"));
+        }
     }
 
     @Test

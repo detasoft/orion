@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -31,9 +32,11 @@ class NativeGitRepositoryShallowFetchTest {
             for (FetchPlan plan : List.of(
                     plan(tip, OptionalInt.of(1), OptionalLong.empty(), Set.of()),
                     plan(tip, OptionalInt.empty(), OptionalLong.of(200), Set.of()))) {
-                FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
-                assertThat(pack.shallowCommits()).containsExactly(tip);
-                assertThat(pack.objectCount()).isEqualTo(2);
+                try (GitIndexAccess access1 = repository.index().createAccess()) {
+                    FetchPack pack = FetchPack.prepare(repository.storage(), access1, plan);
+                    assertThat(pack.shallowCommits()).containsExactly(tip);
+                    assertThat(pack.objectCount()).isEqualTo(2);
+                }
             }
         }
     }
@@ -46,10 +49,12 @@ class NativeGitRepositoryShallowFetchTest {
             ObjectId tip = commit(repository, tree, base, 300);
             repository.updateRef("refs/heads/main", "0".repeat(40), base.toHex());
             for (String ref : List.of("refs/heads/main", "main", "HEAD")) {
-                FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(),
-                        plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of(ref)));
-                assertThat(pack.shallowCommits()).containsExactly(tip);
-                assertThat(pack.objectCount()).isEqualTo(2);
+                try (GitIndexAccess access2 = repository.index().createAccess()) {
+                    FetchPack pack = FetchPack.prepare(repository.storage(), access2,
+                            plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of(ref)));
+                    assertThat(pack.shallowCommits()).containsExactly(tip);
+                    assertThat(pack.objectCount()).isEqualTo(2);
+                }
             }
         }
     }
@@ -59,9 +64,11 @@ class NativeGitRepositoryShallowFetchTest {
         try (NativeGitRepository repository = repository()) {
             ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
             ObjectId tip = commit(repository, tree, null, 100);
-            assertThatThrownBy(() -> FetchPack.prepare(repository.storage(), repository.index(),
-                    plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of("refs/heads/missing"))))
-                    .isInstanceOf(IOException.class).hasMessageContaining("Unknown deepen-not ref");
+            try (GitIndexAccess access3 = repository.index().createAccess()) {
+                assertThatThrownBy(() -> FetchPack.prepare(repository.storage(), access3,
+                        plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of("refs/heads/missing"))))
+                        .isInstanceOf(IOException.class).hasMessageContaining("Unknown deepen-not ref");
+            }
         }
     }
 

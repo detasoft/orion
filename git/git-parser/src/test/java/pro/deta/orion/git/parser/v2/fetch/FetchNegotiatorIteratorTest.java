@@ -300,7 +300,7 @@ class FetchNegotiatorIteratorTest {
 
         private TestContext(FetchRequest request, Set<ObjectId> existing) {
             super(request, FetchTestSupport.storage(directory),
-                    new InMemoryIndex(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
+                    new InMemoryIndex().createAccess(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
                     GitCapability.MULTI_ACK_DETAILED, GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE));
             this.existing = existing;
         }

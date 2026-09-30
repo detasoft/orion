@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.read;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -7,7 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -31,12 +32,17 @@ class ResolvedGitObjectReadTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
-    private final GitIndexApi index =
-            new InMemoryIndex();
+    private final GitIndexAccess index =
+            new InMemoryIndex().createAccess();
 
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
+    }
+
+    @AfterEach
+    void closeIndex() throws Exception {
+        index.close();
     }
 
     @Test

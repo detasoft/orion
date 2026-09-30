@@ -7,7 +7,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
@@ -41,7 +41,7 @@ class GitStorageApiTest {
     @ValueSource(booleans = {false, true})
     void readsExactCompressedRangesFromRepositoryLocations(boolean disk) throws Exception {
         try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
-             GitIndexApi index = disk ? new LocalGitIndex(directory) : new InMemoryIndex()) {
+             GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess()) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             PackMetadata pair = PackTestData.publish(
@@ -114,7 +114,8 @@ class GitStorageApiTest {
 
     @Test
     void rawReadRemainsAvailableAfterIndexClosesAndMissingObjectsDoNotInvokeReader() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             ObjectId absent = new ObjectId("1".repeat(40));
             assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
             assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {

@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -90,10 +91,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void opensForReadOnceAfterAuthorization() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
-        GitRepositoryContext context = service.open(request("demo"), this);
-        assertThat(context.storage()).isSameAs(repository.storage());
-        assertThat(lookups).isEqualTo(1);
-        assertThat(calls).containsExactly("read demo");
+        try (GitRepositoryContext context = service.open(request("demo"), this)) {
+            assertThat(context.storage()).isSameAs(repository.storage());
+            assertThat(lookups).isEqualTo(1);
+            assertThat(calls).containsExactly("read demo");
+        }
     }
 
     @Test
@@ -135,16 +137,19 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         RefUpdate feature = prepared.refUpdates().getFirst();
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        List<RefUpdateResult> results;
-        PackMetadata pack = ingest(repository, prepared.pack());
-        results = context.publish(Optional.of(pack), List.of(
-                RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
-        assertThat(results).extracting(RefUpdateResult::status)
-                .containsExactly(EXPECTED_OLD_MISMATCH, atomic ? ATOMIC_ABORTED : APPLIED);
-        assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
-        assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
-        assertThat(GitObjectRead.exists(repository.storage(), repository.index(), feature.newId().orElseThrow())).isTrue();
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            List<RefUpdateResult> results;
+            PackMetadata pack = ingest(repository, prepared.pack());
+            results = context.publish(Optional.of(pack), List.of(
+                    RefUpdate.fromWire("refs/heads/main", TAG_ID, NULL_ID), feature), atomic);
+            assertThat(results).extracting(RefUpdateResult::status)
+                    .containsExactly(EXPECTED_OLD_MISMATCH, atomic ? ATOMIC_ABORTED : APPLIED);
+            assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
+            assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
+            try (GitIndexAccess access1 = repository.index().createAccess()) {
+                assertThat(GitObjectRead.exists(repository.storage(), access1, feature.newId().orElseThrow())).isTrue();
+            }
+        }
     }
 
     @Test
@@ -157,17 +162,20 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        List<RefUpdateResult> results;
-        PackMetadata pack = ingest(repository, update.pack());
-        results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
-                "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
-        assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
-        NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
-                .valueOrFailure("repository");
-        assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
-        assertThat(GitObjectRead.exists(reopened.storage(), reopened.index(),
-                update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            List<RefUpdateResult> results;
+            PackMetadata pack = ingest(repository, update.pack());
+            results = context.publish(Optional.of(pack), List.of(RefUpdate.fromWire(
+                    "refs/heads/main", TAG_ID, update.refUpdates().getFirst().newId().orElseThrow().toHex())), true);
+            assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
+            NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory).find("demo")
+                    .valueOrFailure("repository");
+            assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
+            try (GitIndexAccess access2 = reopened.index().createAccess()) {
+                assertThat(GitObjectRead.exists(reopened.storage(), access2,
+                        update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
+            }
+        }
     }
 
     @Test
@@ -177,13 +185,14 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        List<RefUpdateResult> results;
-        PackMetadata pack = ingest(repository, update.pack());
-        results = context.publish(Optional.of(pack), update.refUpdates(), true);
-        assertThat(publishCalls).isEqualTo(1);
-        assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
-        assertThat(repository.refs()).isEmpty();
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            List<RefUpdateResult> results;
+            PackMetadata pack = ingest(repository, update.pack());
+            results = context.publish(Optional.of(pack), update.refUpdates(), true);
+            assertThat(publishCalls).isEqualTo(1);
+            assertThat(results).extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
+            assertThat(repository.refs()).isEmpty();
+        }
     }
 
     @Test
@@ -191,24 +200,26 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitRepository original = createRepository(backend, "demo");
         replacement = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository other = createRepository(replacement, "demo");
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        List<RefUpdateResult> results = context.publish(Optional.empty(),
-                List.of(RefUpdate.fromWire("refs/heads/main", NULL_ID, MAIN_ID)), true);
-        assertThat(results).extracting(RefUpdateResult::status).containsExactly(APPLIED);
-        assertThat(original.refs()).containsEntry("refs/heads/main", MAIN_ID);
-        assertThat(other.refs()).isEmpty();
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            List<RefUpdateResult> results = context.publish(Optional.empty(),
+                    List.of(RefUpdate.fromWire("refs/heads/main", NULL_ID, MAIN_ID)), true);
+            assertThat(results).extracting(RefUpdateResult::status).containsExactly(APPLIED);
+            assertThat(original.refs()).containsEntry("refs/heads/main", MAIN_ID);
+            assertThat(other.refs()).isEmpty();
+        }
     }
 
     @Test
     void deniesUnauthorizedRefWithoutPublishingIt() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectUpdates = true;
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        List<RefUpdateResult> results = context.publish(Optional.empty(),
-                List.of(RefUpdate.fromWire("refs/heads/feature", NULL_ID, MAIN_ID)), false);
-        assertThat(results).extracting(RefUpdateResult::status).containsExactly(REJECTED);
-        assertThat(repository.refs()).isEmpty();
-        assertThat(calls).contains("update demo refs/heads/feature false");
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            List<RefUpdateResult> results = context.publish(Optional.empty(),
+                    List.of(RefUpdate.fromWire("refs/heads/feature", NULL_ID, MAIN_ID)), false);
+            assertThat(results).extracting(RefUpdateResult::status).containsExactly(REJECTED);
+            assertThat(repository.refs()).isEmpty();
+            assertThat(calls).contains("update demo refs/heads/feature false");
+        }
     }
 
     @Test
@@ -220,16 +231,17 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         NativeGitFileUpdate next = repository.files().prepareFileUpdate("main",
                 Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
                 "next", GitCommitAuthor.EMPTY);
-        GitRepositoryContext context = service.open(receiveRequest("demo"), this);
-        PackMetadata pack = ingest(repository, next.pack());
-        assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
-                .extracting(RefUpdateResult::status).containsExactly(APPLIED);
-        assertThat(calls).contains("update demo refs/heads/main false");
-        calls.clear();
-        assertThat(context.publish(Optional.empty(), List.of(RefUpdate.fromWire("refs/heads/main",
-                next.refUpdates().getFirst().newId().orElseThrow().toHex(), first)), true))
-                .extracting(RefUpdateResult::status).containsExactly(APPLIED);
-        assertThat(calls).containsExactly("update demo refs/heads/main true");
+        try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
+            PackMetadata pack = ingest(repository, next.pack());
+            assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
+                    .extracting(RefUpdateResult::status).containsExactly(APPLIED);
+            assertThat(calls).contains("update demo refs/heads/main false");
+            calls.clear();
+            assertThat(context.publish(Optional.empty(), List.of(RefUpdate.fromWire("refs/heads/main",
+                    next.refUpdates().getFirst().newId().orElseThrow().toHex(), first)), true))
+                    .extracting(RefUpdateResult::status).containsExactly(APPLIED);
+            assertThat(calls).containsExactly("update demo refs/heads/main true");
+        }
     }
 
     @Test
@@ -266,14 +278,15 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         FetchRequest request = new FetchRequest();
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("HEAD");
-        GitRepositoryContext context = service.open(request("demo"), this);
-        prepareFetch(context, request);
-        assertThat(calls).contains("fetch demo [main]");
-        request.wantRefs().clear();
-        request.wants().add(new ObjectId("f".repeat(40)));
-        rejectUnresolvedFetch = true;
-        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
-        assertThat(calls).contains("fetch demo []");
+        try (GitRepositoryContext context = service.open(request("demo"), this)) {
+            prepareFetch(context, request);
+            assertThat(calls).contains("fetch demo [main]");
+            request.wantRefs().clear();
+            request.wants().add(new ObjectId("f".repeat(40)));
+            rejectUnresolvedFetch = true;
+            assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
+            assertThat(calls).contains("fetch demo []");
+        }
     }
 
     @ParameterizedTest
@@ -290,7 +303,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         if (!wantedRef.equals("HEAD")) {
             assertThat(repository.updateRef(wantedRef, NULL_ID, allowed.toHex()).status()).isEqualTo(APPLIED);
         } else if (detached) {
-            repository.index().updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
+            try (GitIndexAccess access3 = repository.index().createAccess()) {
+                access3.updateHead(new Head.Detached(new CommitId(allowed.toBytes())));
+            }
         }
         List<List<String>> checkedBranches = new ArrayList<>();
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -303,31 +318,36 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
                 if (wantedRef.equals("HEAD")) {
                     Head next = detached ? new Head.Detached(new CommitId(denied.toBytes()))
                             : new Head.Symbolic(new RefId("refs/heads/secret"));
-                    assertThatCode(() -> repository.index().updateHead(next)).doesNotThrowAnyException();
+                    assertThatCode(() -> {
+                        try (GitIndexAccess access = repository.index().createAccess()) {
+                            access.updateHead(next);
+                        }
+                    }).doesNotThrowAnyException();
                 } else {
                     assertThat(repository.updateRef(wantedRef, allowed.toHex(), denied.toHex()).status())
                             .isEqualTo(APPLIED);
                 }
             }
         };
-        GitRepositoryContext context = service.open(request("demo"), hook);
-        GitCapabilities capabilities = new GitCapabilities(List.of(
-                GitCapabilityValue.value(GitCapability.REF_IN_WANT)));
-        FetchCommand command = new FetchCommand(context, capabilities);
-        FetchRequest request = new FetchRequest();
-        request.setMode(FetchRequest.Mode.PROTOCOL_V2);
-        request.wantRefs().add(wantedRef);
+        try (GitRepositoryContext context = service.open(request("demo"), hook)) {
+            GitCapabilities capabilities = new GitCapabilities(List.of(
+                    GitCapabilityValue.value(GitCapability.REF_IN_WANT)));
+            FetchCommand command = new FetchCommand(context, capabilities);
+            FetchRequest request = new FetchRequest();
+            request.setMode(FetchRequest.Mode.PROTOCOL_V2);
+            request.wantRefs().add(wantedRef);
 
-        FetchNegotiatorIterator iterator = command.prepareNegotiation(request, GitTransport.HTTP);
-        iterator.next(NegotiationMessage.Control.DONE);
-        FetchPlan plan = command.prepareResponse(iterator.getContext()).orElseThrow();
+            FetchNegotiatorIterator iterator = command.prepareNegotiation(request, GitTransport.HTTP);
+            iterator.next(NegotiationMessage.Control.DONE);
+            FetchPlan plan = command.prepareResponse(iterator.getContext()).orElseThrow();
 
-        assertThat(checkedBranches).containsExactly(List.of("main"));
-        assertThat(plan.wantedObjects()).containsExactly(allowed);
-        assertThat(plan.wantedRefs()).containsExactly(Map.entry(new RefId(wantedRef), allowed));
-        assertThatThrownBy(() -> command.prepareNegotiation(request, GitTransport.HTTP))
-                .isInstanceOf(AccessDeniedException.class).hasMessageContaining("denied branch");
-        assertThat(checkedBranches).containsExactly(List.of("main"), List.of("secret"));
+            assertThat(checkedBranches).containsExactly(List.of("main"));
+            assertThat(plan.wantedObjects()).containsExactly(allowed);
+            assertThat(plan.wantedRefs()).containsExactly(Map.entry(new RefId(wantedRef), allowed));
+            assertThatThrownBy(() -> command.prepareNegotiation(request, GitTransport.HTTP))
+                    .isInstanceOf(AccessDeniedException.class).hasMessageContaining("denied branch");
+            assertThat(checkedBranches).containsExactly(List.of("main"), List.of("secret"));
+        }
     }
 
     @ParameterizedTest
@@ -347,32 +367,34 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         repository.updateRef("refs/tags/nested", NULL_ID, outer.toHex());
         FetchRequest request = new FetchRequest();
         request.setMode(v2 ? FetchRequest.Mode.PROTOCOL_V2 : FetchRequest.Mode.SINGLE_ACK);
-        GitRepositoryContext context = service.open(request("demo"), this);
-        for (ObjectId tag : List.of(inner, outer)) {
-            request.wants().clear();
-            request.wants().add(tag);
+        try (GitRepositoryContext context = service.open(request("demo"), this)) {
+            for (ObjectId tag : List.of(inner, outer)) {
+                request.wants().clear();
+                request.wants().add(tag);
+                calls.clear();
+                prepareFetch(context, request);
+                assertThat(calls).containsExactly("fetch demo [main]");
+                rejectFetch = true;
+                assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
+                rejectFetch = false;
+            }
+            repository.updateRef("refs/heads/main", target, NULL_ID);
+            rejectUnresolvedFetch = true;
             calls.clear();
-            prepareFetch(context, request);
-            assertThat(calls).containsExactly("fetch demo [main]");
-            rejectFetch = true;
             assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
-            rejectFetch = false;
+            assertThat(calls).containsExactly("fetch demo []");
         }
-        repository.updateRef("refs/heads/main", target, NULL_ID);
-        rejectUnresolvedFetch = true;
-        calls.clear();
-        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
-        assertThat(calls).containsExactly("fetch demo []");
     }
 
     @Test
     void rejectsUnadvertisedLegacyWant() throws Exception {
         createRepository(backend, "demo");
-        GitRepositoryContext context = service.open(request("demo"), this);
-        FetchRequest request = new FetchRequest();
-        request.wants().add(new ObjectId(MAIN_ID));
-        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(IOException.class)
-                .hasMessageContaining("not an advertised object");
+        try (GitRepositoryContext context = service.open(request("demo"), this)) {
+            FetchRequest request = new FetchRequest();
+            request.wants().add(new ObjectId(MAIN_ID));
+            assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(IOException.class)
+                    .hasMessageContaining("not an advertised object");
+        }
     }
 
     @ParameterizedTest
@@ -386,7 +408,9 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             if (ref.equals("tag")) {
                 repository.updateRef("refs/tags/release", NULL_ID, tip);
             } else {
-                repository.index().updateHead(new Head.Detached(new CommitId(tip)));
+                try (GitIndexAccess access5 = repository.index().createAccess()) {
+                    access5.updateHead(new Head.Detached(new CommitId(tip)));
+                }
             }
             repository.updateRef("refs/heads/main", tip, NULL_ID);
         }
@@ -394,15 +418,16 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         FetchRequest request = new FetchRequest();
         request.setMode(v2 ? FetchRequest.Mode.PROTOCOL_V2 : FetchRequest.Mode.SINGLE_ACK);
         request.wants().add(blob);
-        GitRepositoryContext context = service.open(request("demo"), this);
-        String expected = ref.equals("main") ? "fetch demo [main]" : "fetch demo []";
-        calls.clear();
-        prepareFetch(context, request);
-        assertThat(calls).containsExactly(expected);
-        rejectFetch = true;
-        calls.clear();
-        assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
-        assertThat(calls).containsExactly(expected);
+        try (GitRepositoryContext context = service.open(request("demo"), this)) {
+            String expected = ref.equals("main") ? "fetch demo [main]" : "fetch demo []";
+            calls.clear();
+            prepareFetch(context, request);
+            assertThat(calls).containsExactly(expected);
+            rejectFetch = true;
+            calls.clear();
+            assertThatThrownBy(() -> prepareFetch(context, request)).isInstanceOf(AccessDeniedException.class);
+            assertThat(calls).containsExactly(expected);
+        }
     }
 
     private static FetchNegotiatorIterator prepareFetch(GitRepositoryContext context, FetchRequest request)

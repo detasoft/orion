@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -11,7 +12,7 @@ import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -42,13 +43,23 @@ class GitBlockingWireSessionTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
-    private GitIndexApi index;
+    private GitIndexAccess index;
     private int opens;
+    private GitIndexAccess servedAccess;
 
     @BeforeEach
     void openStorage() throws Exception {
         storage = new LocalGitStorage(directory);
-        index = new LocalGitIndex(directory);
+        index = new LocalGitIndex(directory).createAccess();
+    }
+
+    @AfterEach
+    void closeStorage() throws Exception {
+        try (GitStorageApi ownedStorage = storage; GitIndexAccess ownedIndex = index) {
+        }
+        if (servedAccess != null) {
+            assertThatThrownBy(servedAccess::snapshotRefs).isInstanceOf(IOException.class);
+        }
     }
 
     @Test
@@ -138,7 +149,7 @@ class GitBlockingWireSessionTest {
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.UPLOAD_PACK));
         byte[] received = response.toByteArray();
         assertThat(new String(received, 0, 8, StandardCharsets.US_ASCII)).isEqualTo("0008NAK\n");
-        try (GitIndexApi pack = PackTestData.inspect(Arrays.copyOfRange(received, 8, received.length))) {
+        try (GitIndexAccess pack = PackTestData.inspect(Arrays.copyOfRange(received, 8, received.length))) {
             assertThat(pack.locations(id)).isNotEmpty();
         }
     }
@@ -257,7 +268,8 @@ class GitBlockingWireSessionTest {
         return new GitBlockingWireSession(initial -> {
             assertThat(initial.repositoryPath()).isEqualTo("repo");
             opens++;
-            return new GitRepositoryContext(storage, index);
+            servedAccess = new LocalGitIndex(directory).createAccess();
+            return new GitRepositoryContext(storage, servedAccess);
         }, configuration, wire);
     }
 
@@ -307,7 +319,7 @@ class GitBlockingWireSessionTest {
             assertThat(data.content()[0]).isEqualTo((byte) 1);
             bytes.write(data.content(), 1, data.content().length - 1);
         }
-        try (GitIndexApi pack = PackTestData.inspect(bytes.toByteArray())) {
+        try (GitIndexAccess pack = PackTestData.inspect(bytes.toByteArray())) {
             assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
             assertThat(pack.locations(id)).isNotEmpty();
         }

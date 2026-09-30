@@ -9,7 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
@@ -40,7 +40,7 @@ class FetchPackTest {
     @Test
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexApi index = new LocalGitIndex(directory)) {
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
             byte[] rootBytes = commit(tree);
             ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, rootBytes);
@@ -69,7 +69,7 @@ class FetchPackTest {
 
     @Test
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
             ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree));
             ObjectId boundary = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, root));
@@ -93,7 +93,7 @@ class FetchPackTest {
         }
     }
 
-    private long contentReads(GitStorageApi storage, GitIndexApi index, FetchPlan plan, Path pack, String recordingName)
+    private long contentReads(GitStorageApi storage, GitIndexAccess index, FetchPlan plan, Path pack, String recordingName)
             throws Exception {
         Path recordingPath = directory.resolve(recordingName);
         try (Recording recording = new Recording()) {
@@ -139,7 +139,7 @@ class FetchPackTest {
     @Test
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(directory);
-             GitIndexApi index = new LocalGitIndex(directory)) {
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             byte[] first = {1, 2, 3};
             byte[] second = {4, 5};
             ObjectId firstId = PackTestData.store(storage, index, GitObjectType.BLOB, first);

@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 
@@ -37,7 +38,6 @@ public final class InMemoryIndex implements GitIndexApi {
     private final Map<PackChecksum, List<PackMetadata>> checksums = new LinkedHashMap<>();
     private final Map<RefId, ObjectId> refs = new LinkedHashMap<>();
     private Head head = new Head.Symbolic(new RefId("refs/heads/main"));
-    private boolean closed;
 
     public InMemoryIndex() {
         this(GitHashAlgorithm.SHA1);
@@ -53,170 +53,194 @@ public final class InMemoryIndex implements GitIndexApi {
     }
 
     @Override
-    public synchronized void addObject(IndexedObject object) throws IOException {
-        requireOpen();
-        hashAlgorithm.requireLength(object.objectId().byteLength());
-        object.delta().ifPresent(delta -> hashAlgorithm.requireLength(delta.baseId().byteLength()));
-        NavigableMap<Long, IndexedObject> entries = objects.get(object.packId());
-        IndexedObject previous = entries == null ? null : entries.get(object.packOffset());
-        if (object.equals(previous)) {
-            return;
-        }
-        if (previous != null || packs.containsKey(object.packId())) {
-            throw new IOException("Cannot change an indexed position or add entries to a published pack");
-        }
-        objects.computeIfAbsent(object.packId(), ignored -> new TreeMap<>()).put(object.packOffset(), object);
-        locations.computeIfAbsent(object.objectId(), ignored -> new ArrayList<>()).add(object);
+    public GitIndexAccess createAccess() {
+        return new Access();
     }
 
-    @Override
-    public synchronized List<IndexedObject> objects(PackId packId) throws IOException {
-        requireOpen();
-        NavigableMap<Long, IndexedObject> entries = objects.get(Objects.requireNonNull(packId, "packId"));
-        return entries == null ? List.of() : List.copyOf(entries.values());
-    }
+    private final class Access implements GitIndexAccess {
+        private boolean closed;
 
-    @Override
-    public synchronized Optional<IndexedObject> findObject(PackId packId, ObjectId objectId)
-            throws IOException {
-        requireOpen();
-        Objects.requireNonNull(packId, "packId");
-        Objects.requireNonNull(objectId, "objectId");
-        IndexedObject first = null;
-        for (IndexedObject entry : locations.getOrDefault(objectId, List.of())) {
-            if (packId.equals(entry.packId()) && (first == null || entry.packOffset() < first.packOffset())) {
-                first = entry;
-            }
-        }
-        return Optional.ofNullable(first);
-    }
-
-    @Override
-    public synchronized List<IndexedObject> locations(ObjectId objectId) throws IOException {
-        requireOpen();
-        Objects.requireNonNull(objectId, "objectId");
-        List<IndexedObject> result = new ArrayList<>();
-        for (IndexedObject object : locations.getOrDefault(objectId, List.of())) {
-            if (packs.containsKey(object.packId())) {
-                result.add(object);
-            }
-        }
-        return List.copyOf(result);
-    }
-
-    @Override
-    public synchronized Optional<PackMetadata> findPack(PackId packId) throws IOException {
-        requireOpen();
-        return Optional.ofNullable(packs.get(Objects.requireNonNull(packId, "packId")));
-    }
-
-    @Override
-    public synchronized List<PackMetadata> packs(PackChecksum checksum) throws IOException {
-        requireOpen();
-        return List.copyOf(checksums.getOrDefault(Objects.requireNonNull(checksum, "checksum"), List.of()));
-    }
-
-    @Override
-    public synchronized List<PackMetadata> packs() throws IOException {
-        requireOpen();
-        return List.copyOf(packs.values());
-    }
-
-    @Override
-    public synchronized PackMetadata publishIndex(PackMetadata pack) throws IOException {
-        requireOpen();
-        hashAlgorithm.requireLength(pack.packChecksum().byteLength());
-        PackMetadata previous = packs.get(pack.packId());
-        if (previous != null) {
-            if (!previous.equals(pack)) {
-                throw new IOException("Cannot change published pack metadata");
-            }
-            return previous;
-        }
-        pack.validateObjects(objects(pack.packId()));
-        packs.put(pack.packId(), pack);
-        checksums.computeIfAbsent(pack.packChecksum(), ignored -> new ArrayList<>()).add(pack);
-        return pack;
-    }
-
-    public synchronized RefsSnapshot snapshotRefs() throws IOException {
-        requireOpen();
-        return new RefsSnapshot(refs, head);
-    }
-
-    public void updateHead(Head value) throws IOException {
-        Objects.requireNonNull(value, "head");
-        if (value instanceof Head.Symbolic symbolic) {
-            symbolic.target().requireFullName();
-        } else if (value instanceof Head.Detached detached) {
-            hashAlgorithm.requireLength(detached.target().byteLength());
-        }
-        synchronized (this) {
-            requireOpen();
-            head = value;
-        }
-    }
-
-    public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
-        updates = List.copyOf(updates);
-        Set<RefId> names = new HashSet<>();
-        for (RefUpdate update : updates) {
-            update.ref().requireFullName();
-            update.expectedOld().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
-            update.newId().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
-            if (!names.add(update.ref())) {
-                throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
-            }
-        }
-        try {
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
-            synchronized (this) {
+        @Override
+        public void addObject(IndexedObject object) throws IOException {
+            synchronized (InMemoryIndex.this) {
                 requireOpen();
-                boolean failed = false;
-                for (RefUpdate update : updates) {
-                    RefUpdateResult.Status status = Objects.equals(refs.get(update.ref()),
-                            update.expectedOld().orElse(null)) ? APPLIED : EXPECTED_OLD_MISMATCH;
-                    results.add(new RefUpdateResult(update, status, Optional.empty()));
-                    failed |= status != APPLIED;
+                hashAlgorithm.requireLength(object.objectId().byteLength());
+                object.delta().ifPresent(delta -> hashAlgorithm.requireLength(delta.baseId().byteLength()));
+                NavigableMap<Long, IndexedObject> entries = objects.get(object.packId());
+                IndexedObject previous = entries == null ? null : entries.get(object.packOffset());
+                if (object.equals(previous)) {
+                    return;
                 }
-                for (int index = 0; index < results.size(); index++) {
-                    RefUpdateResult result = results.get(index);
-                    if (result.status() != APPLIED) {
-                        continue;
-                    }
-                    RefUpdate update = result.update();
-                    if (atomic && failed) {
-                        results.set(index, new RefUpdateResult(update, ATOMIC_ABORTED, Optional.empty()));
-                    } else if (update.newId().isPresent()) {
-                        refs.put(update.ref(), update.newId().orElseThrow());
-                    } else {
-                        refs.remove(update.ref());
-                    }
+                if (previous != null || packs.containsKey(object.packId())) {
+                    throw new IOException("Cannot change an indexed position or add entries to a published pack");
                 }
+                objects.computeIfAbsent(object.packId(), ignored -> new TreeMap<>()).put(object.packOffset(), object);
+                locations.computeIfAbsent(object.objectId(), ignored -> new ArrayList<>()).add(object);
             }
-            return List.copyOf(results);
-        } catch (IOException error) {
-            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        }
+
+        @Override
+        public List<IndexedObject> objects(PackId packId) throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                NavigableMap<Long, IndexedObject> entries = objects.get(Objects.requireNonNull(packId, "packId"));
+                return entries == null ? List.of() : List.copyOf(entries.values());
+            }
+        }
+
+        @Override
+        public Optional<IndexedObject> findObject(PackId packId, ObjectId objectId)
+                throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                Objects.requireNonNull(packId, "packId");
+                Objects.requireNonNull(objectId, "objectId");
+                IndexedObject first = null;
+                for (IndexedObject entry : locations.getOrDefault(objectId, List.of())) {
+                    if (packId.equals(entry.packId()) && (first == null || entry.packOffset() < first.packOffset())) {
+                        first = entry;
+                    }
+                }
+                return Optional.ofNullable(first);
+            }
+        }
+
+        @Override
+        public List<IndexedObject> locations(ObjectId objectId) throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                Objects.requireNonNull(objectId, "objectId");
+                List<IndexedObject> result = new ArrayList<>();
+                for (IndexedObject object : locations.getOrDefault(objectId, List.of())) {
+                    if (packs.containsKey(object.packId())) {
+                        result.add(object);
+                    }
+                }
+                return List.copyOf(result);
+            }
+        }
+
+        @Override
+        public Optional<PackMetadata> findPack(PackId packId) throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                return Optional.ofNullable(packs.get(Objects.requireNonNull(packId, "packId")));
+            }
+        }
+
+        @Override
+        public List<PackMetadata> packs(PackChecksum checksum) throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                return List.copyOf(checksums.getOrDefault(Objects.requireNonNull(checksum, "checksum"), List.of()));
+            }
+        }
+
+        @Override
+        public List<PackMetadata> packs() throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                return List.copyOf(packs.values());
+            }
+        }
+
+        @Override
+        public PackMetadata publishIndex(PackMetadata pack) throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                hashAlgorithm.requireLength(pack.packChecksum().byteLength());
+                PackMetadata previous = packs.get(pack.packId());
+                if (previous != null) {
+                    if (!previous.equals(pack)) {
+                        throw new IOException("Cannot change published pack metadata");
+                    }
+                    return previous;
+                }
+                pack.validateObjects(objects(pack.packId()));
+                packs.put(pack.packId(), pack);
+                checksums.computeIfAbsent(pack.packChecksum(), ignored -> new ArrayList<>()).add(pack);
+                return pack;
+            }
+        }
+
+        public RefsSnapshot snapshotRefs() throws IOException {
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                return new RefsSnapshot(refs, head);
+            }
+        }
+
+        public void updateHead(Head value) throws IOException {
+            Objects.requireNonNull(value, "head");
+            if (value instanceof Head.Symbolic symbolic) {
+                symbolic.target().requireFullName();
+            } else if (value instanceof Head.Detached detached) {
+                hashAlgorithm.requireLength(detached.target().byteLength());
+            }
+            synchronized (InMemoryIndex.this) {
+                requireOpen();
+                head = value;
+            }
+        }
+
+        public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
+            updates = List.copyOf(updates);
+            Set<RefId> names = new HashSet<>();
             for (RefUpdate update : updates) {
-                results.add(new RefUpdateResult(update, STORAGE_ERROR, Optional.ofNullable(error.getMessage())));
+                update.ref().requireFullName();
+                update.expectedOld().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
+                update.newId().ifPresent(id -> hashAlgorithm.requireLength(id.byteLength()));
+                if (!names.add(update.ref())) {
+                    throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
+                }
             }
-            return List.copyOf(results);
+            try {
+                List<RefUpdateResult> results = new ArrayList<>(updates.size());
+                synchronized (InMemoryIndex.this) {
+                    requireOpen();
+                    boolean failed = false;
+                    for (RefUpdate update : updates) {
+                        RefUpdateResult.Status status = Objects.equals(refs.get(update.ref()),
+                                update.expectedOld().orElse(null)) ? APPLIED : EXPECTED_OLD_MISMATCH;
+                        results.add(new RefUpdateResult(update, status, Optional.empty()));
+                        failed |= status != APPLIED;
+                    }
+                    for (int index = 0; index < results.size(); index++) {
+                        RefUpdateResult result = results.get(index);
+                        if (result.status() != APPLIED) {
+                            continue;
+                        }
+                        RefUpdate update = result.update();
+                        if (atomic && failed) {
+                            results.set(index, new RefUpdateResult(update, ATOMIC_ABORTED, Optional.empty()));
+                        } else if (update.newId().isPresent()) {
+                            refs.put(update.ref(), update.newId().orElseThrow());
+                        } else {
+                            refs.remove(update.ref());
+                        }
+                    }
+                }
+                return List.copyOf(results);
+            } catch (IOException error) {
+                List<RefUpdateResult> results = new ArrayList<>(updates.size());
+                for (RefUpdate update : updates) {
+                    results.add(new RefUpdateResult(update, STORAGE_ERROR, Optional.ofNullable(error.getMessage())));
+                }
+                return List.copyOf(results);
+            }
         }
-    }
 
-    private void requireOpen() throws ClosedChannelException {
-        if (closed) {
-            throw new ClosedChannelException();
+        private void requireOpen() throws ClosedChannelException {
+            if (closed) {
+                throw new ClosedChannelException();
+            }
         }
-    }
 
-    @Override
-    public synchronized void close() {
-        closed = true;
-        refs.clear();
-        objects.clear();
-        locations.clear();
-        packs.clear();
-        checksums.clear();
+        @Override
+        public void close() {
+            synchronized (InMemoryIndex.this) {
+                closed = true;
+            }
+        }
     }
 }

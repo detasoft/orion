@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -26,11 +26,11 @@ import java.util.Set;
  * refs snapshot used to resolve them. Checks must not mutate negotiation state or resolve names again;
  * the authorized object IDs remain the targets used to prepare the fetch response.
  */
-public class GitRepositoryContext {
+public class GitRepositoryContext implements AutoCloseable {
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
 
-    public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) {
+    public GitRepositoryContext(GitStorageApi storage, GitIndexAccess index) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
     }
@@ -39,8 +39,13 @@ public class GitRepositoryContext {
         return storage;
     }
 
-    public final GitIndexApi index() {
+    public final GitIndexAccess index() {
         return index;
+    }
+
+    @Override
+    public void close() throws IOException {
+        index.close();
     }
 
     public Optional<URI> packUri(PackChecksum id) {
@@ -62,7 +67,7 @@ public class GitRepositoryContext {
         return publishRefs(storage, index, updates, atomic);
     }
 
-    public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexApi index,
+    public static List<RefUpdateResult> publishRefs(GitStorageApi storage, GitIndexAccess index,
                                                     List<RefUpdate> updates, boolean atomic) {
         updates = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();

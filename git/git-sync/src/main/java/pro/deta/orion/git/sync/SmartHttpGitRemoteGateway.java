@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitReceivePackResult;
@@ -49,8 +50,9 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         }
         Set<String> wants = new LinkedHashSet<>(heads.heads().values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
-        try (PackIngestionOutput target = new PackIngestionOutput(
-                checked.storage(), checked.index())) {
+        try (GitIndexAccess access = checked.index().createAccess();
+             PackIngestionOutput target = new PackIngestionOutput(
+                checked.storage(), access)) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.copyOf(wants),
                     List.copyOf(haves),
@@ -152,10 +154,12 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         return new GitReceivePackRequest(
                 List.of(command),
                 output -> {
-                    FetchPack pack = FetchPack.prepare(repository.storage(), repository.index(), plan);
-                    try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
-                        pack.writeTo(writer);
-                        writer.finish();
+                    try (GitIndexAccess access = repository.index().createAccess()) {
+                        FetchPack pack = FetchPack.prepare(repository.storage(), access, plan);
+                        try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                            pack.writeTo(writer);
+                            writer.finish();
+                        }
                     }
                 });
     }

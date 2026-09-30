@@ -50,17 +50,22 @@ public final class GitBlockingWireSession {
     }
 
     public void advertise(InitialRequestData request) throws IOException {
-        advertise(request, repositories.open(request));
+        try (GitRepositoryContext repository = repositories.open(request)) {
+            advertise(request, repository);
+        }
     }
 
     public void serveCommand(InitialRequestData request) throws IOException {
-        GitRepositoryContext repository = repositories.open(request);
-        advertise(request, repository);
-        serveRequest(request, repository, GitTransport.SSH);
+        try (GitRepositoryContext repository = repositories.open(request)) {
+            advertise(request, repository);
+            serveRequest(request, repository, GitTransport.SSH);
+        }
     }
 
     public void serveSmartHttpPost(InitialRequestData request) throws IOException {
-        serveRequest(request, repositories.open(request), GitTransport.HTTP);
+        try (GitRepositoryContext repository = repositories.open(request)) {
+            serveRequest(request, repository, GitTransport.HTTP);
+        }
     }
 
     private void advertise(InitialRequestData request, GitRepositoryContext repository) throws IOException {

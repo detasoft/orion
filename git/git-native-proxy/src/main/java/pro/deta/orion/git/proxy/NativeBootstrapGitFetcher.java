@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -79,7 +80,8 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             NativeGitRepository repository,
             String oldId,
             String newId) {
-        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), repository.index())) {
+        try (GitIndexAccess access = repository.index().createAccess();
+             PackIngestionOutput output = new PackIngestionOutput(repository.storage(), access)) {
             GitUploadPackRequest request = new GitUploadPackRequest(
                     List.of(newId),
                     NULL_ID.equals(oldId) ? List.of() : List.of(oldId),

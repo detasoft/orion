@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
@@ -73,9 +74,11 @@ class GitBlockingWireSessionTest {
                     List<RefUpdate> updates, boolean atomic) {
                 try {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
-                    selected.writePack(selected.index().packs(received.orElseThrow()).getFirst(),
-                            new OutputStreamBufferedByteOutput(exported));
-                    assertThat(exported.toByteArray()).isEqualTo(original);
+                    try (GitIndexAccess access1 = selected.index().createAccess()) {
+                        selected.writePack(access1.packs(received.orElseThrow()).getFirst(),
+                                new OutputStreamBufferedByteOutput(exported));
+                        assertThat(exported.toByteArray()).isEqualTo(original);
+                    }
                 } catch (IOException failure) {
                     throw new UncheckedIOException(failure);
                 }

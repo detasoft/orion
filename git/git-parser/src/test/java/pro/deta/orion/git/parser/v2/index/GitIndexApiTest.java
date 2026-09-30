@@ -36,13 +36,30 @@ class GitIndexApiTest {
     @TempDir
     Path directory;
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closingOneConnectionPreservesOthersAndAllowsReopening(boolean local) throws Exception {
+        GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        IndexedObject object = object(PackId.create(), "a", 12);
+        try (GitIndexAccess first = factory.createAccess(); GitIndexAccess second = factory.createAccess()) {
+            first.addObject(object);
+            first.close();
+            assertThatThrownBy(first::snapshotRefs).isInstanceOf(IOException.class);
+            assertThat(second.objects(object.packId())).containsExactly(object);
+            second.publishIndex(pack(object.packId(), "b", 1));
+        }
+        try (GitIndexAccess reopened = factory.createAccess()) {
+            assertThat(reopened.locations(object.objectId())).containsExactly(object);
+        }
+    }
+
     @Test
     void buffersHiddenRowsAcrossHandlesAndFlushesOnPublicationAndLastClose() throws Exception {
         PackId id = PackId.create();
         PackMetadata metadata = pack(id, "b", 100);
         IndexedObject abandoned = object(PackId.create(), "c", 12);
-        try (GitIndexApi first = new LocalGitIndex(directory);
-             GitIndexApi second = new LocalGitIndex(directory)) {
+        try (GitIndexAccess first = new LocalGitIndex(directory).createAccess();
+             GitIndexAccess second = new LocalGitIndex(directory).createAccess()) {
             byte[] before = Files.readAllBytes(directory.resolve("refs.mv"));
             for (int i = 0; i < 100; i++) {
                 first.addObject(object(id, "a", 12 + i * 10));
@@ -56,7 +73,7 @@ class GitIndexApiTest {
             assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isNotEqualTo(before);
             second.addObject(abandoned);
         }
-        try (GitIndexApi reopened = new LocalGitIndex(directory)) {
+        try (GitIndexAccess reopened = new LocalGitIndex(directory).createAccess()) {
             assertThat(reopened.findPack(id)).contains(metadata);
             assertThat(reopened.objects(id)).hasSize(100);
             assertThat(reopened.findObject(abandoned.packId(), abandoned.objectId())).contains(abandoned);
@@ -67,7 +84,7 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void verifiedObjectsRemainPrivateUntilPublication(boolean local) throws Exception {
-        try (GitIndexApi index = index(local)) {
+        try (GitIndexAccess index = index(local)) {
             PackId id = PackId.create();
             IndexedObject base = object(id, "a", 12);
             IndexedObject delta = new IndexedObject(id, new ObjectId("b".repeat(40)), GitObjectType.BLOB,
@@ -102,7 +119,7 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void findsAllPublishedLocationsIncludingRepeatedObjectsInOnePack(boolean local) throws Exception {
-        try (GitIndexApi index = index(local)) {
+        try (GitIndexAccess index = index(local)) {
             IndexedObject first = object(PackId.create(), "a", 12);
             IndexedObject repeated = object(first.packId(), "a", 25);
             IndexedObject other = object(PackId.create(), "a", 12);
@@ -125,8 +142,9 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void concurrentEqualChecksumsPublishBothPacksForTheClientToChoose(boolean local) throws Exception {
-        try (GitIndexApi first = index(local);
-             GitIndexApi second = local ? index(true) : first;
+        GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        try (GitIndexAccess first = factory.createAccess();
+             GitIndexAccess second = factory.createAccess();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             IndexedObject a = object(PackId.create(), "a", 12);
             IndexedObject b = object(PackId.create(), "a", 12);
@@ -151,12 +169,12 @@ class GitIndexApiTest {
             assertThat(first.objects(a.packId())).containsExactly(a);
             assertThat(second.objects(b.packId())).containsExactly(b);
         }
-    }
+        }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void publishesAnEmptyPackAndRejectsInvalidObjectMetadata(boolean local) throws Exception {
-        try (GitIndexApi index = index(local)) {
+        try (GitIndexAccess index = index(local)) {
             PackMetadata empty = pack(PackId.create(), "a", 0);
             assertThat(index.objects(empty.packId())).isEmpty();
             assertThat(index.publishIndex(empty)).isEqualTo(empty);
@@ -178,13 +196,13 @@ class GitIndexApiTest {
                 GitObjectType.BLOB, 5, 40, 9, Optional.of(new IndexedObject.Delta(available.objectId(), 3)));
         PackMetadata pack = new PackMetadata(available.packId(), new PackChecksum("b".repeat(40)),
                 "packs/каталог:pack\tdata", 2, 64);
-        try (GitIndexApi index = index(true)) {
+        try (GitIndexAccess index = index(true)) {
             index.addObject(available);
             index.addObject(delta);
             index.addObject(abandoned);
             index.publishIndex(pack);
         }
-        try (GitIndexApi index = index(true)) {
+        try (GitIndexAccess index = index(true)) {
             assertThat(index.packs()).containsExactly(pack);
             assertThat(index.packs(pack.packChecksum())).contains(pack);
             assertThat(index.locations(available.objectId())).containsExactly(available);
@@ -198,8 +216,9 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void repositoryDefaultsToSha1AndRejectsMixedAlgorithms(boolean local) throws Exception {
-        try (GitIndexApi index = index(local)) {
-            assertThat(index.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA1);
+        try (GitIndexAccess index = index(local)) {
+            assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex()).hashAlgorithm())
+                    .isEqualTo(GitHashAlgorithm.SHA1);
             PackId packId = PackId.create();
             ObjectId sha256 = new ObjectId("a".repeat(64));
             assertThatThrownBy(() -> index.addObject(new IndexedObject(packId, sha256,
@@ -232,9 +251,10 @@ class GitIndexApiTest {
         PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(64)), "pack", 1, 64);
         RefId ref = new RefId("refs/heads/main");
         Head head = new Head.Detached(new CommitId(objectId.toBytes()));
-        try (GitIndexApi index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256)
-                : new InMemoryIndex(GitHashAlgorithm.SHA256)) {
-            assertThat(index.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+        try (GitIndexAccess index = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256).createAccess()
+                : new InMemoryIndex(GitHashAlgorithm.SHA256).createAccess()) {
+            assertThat((local ? new LocalGitIndex(directory) : new InMemoryIndex(GitHashAlgorithm.SHA256))
+                    .hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
             index.addObject(object);
             index.publishIndex(pack);
             assertThat(index.locations(objectId)).containsExactly(object);
@@ -247,15 +267,15 @@ class GitIndexApiTest {
                     .isInstanceOf(IllegalArgumentException.class);
         }
         if (local) {
-            try (GitIndexApi reopened = new LocalGitIndex(directory)) {
-                assertThat(reopened.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
+            try (GitIndexAccess reopened = new LocalGitIndex(directory).createAccess()) {
+                assertThat(new LocalGitIndex(directory).hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
                 assertThat(reopened.locations(objectId)).containsExactly(object);
                 assertThat(reopened.packs(pack.packChecksum())).containsExactly(pack);
                 assertThat(reopened.snapshotRefs().refs()).containsEntry(ref, objectId);
                 assertThat(reopened.snapshotRefs().head()).isEqualTo(head);
             }
             byte[] original = Files.readAllBytes(directory.resolve("refs.mv"));
-            assertThatThrownBy(() -> new LocalGitIndex(directory, GitHashAlgorithm.SHA1))
+            assertThatThrownBy(() -> new LocalGitIndex(directory, GitHashAlgorithm.SHA1).createAccess())
                     .isInstanceOf(IOException.class).hasMessageContaining("hash algorithm");
             assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isEqualTo(original);
         }
@@ -273,13 +293,13 @@ class GitIndexApiTest {
             store.commit();
         }
         byte[] original = Files.readAllBytes(file);
-        assertThatThrownBy(() -> new LocalGitIndex(directory)).isInstanceOf(IOException.class)
+        assertThatThrownBy(() -> new LocalGitIndex(directory).createAccess()).isInstanceOf(IOException.class)
                 .hasMessageContaining("Unsupported repository index format");
         assertThat(Files.readAllBytes(file)).isEqualTo(original);
     }
 
-    private GitIndexApi index(boolean local) throws IOException {
-        return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+    private GitIndexAccess index(boolean local) throws IOException {
+        return local ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess();
     }
 
     private static IndexedObject object(PackId packId, String hex, long offset) {

@@ -17,7 +17,7 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
@@ -37,7 +37,7 @@ public class FetchCommand implements GitCommand {
     private final GitRepositoryContext repository;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
 
-    public FetchCommand(GitStorageApi storage, GitIndexApi index, GitCapabilities advertisedCapabilities) {
+    public FetchCommand(GitStorageApi storage, GitIndexAccess index, GitCapabilities advertisedCapabilities) {
         this(new GitRepositoryContext(storage, index), advertisedCapabilities);
     }
 

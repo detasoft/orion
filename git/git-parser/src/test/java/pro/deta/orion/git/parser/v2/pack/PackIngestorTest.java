@@ -6,7 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
@@ -40,7 +40,7 @@ class PackIngestorTest {
     void completesPrivatePackWithoutConsumingProtocolBytes(boolean memory) throws Exception {
         byte[] wire = pack();
         try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
              BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
             PackMetadata pack;
             try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
@@ -76,7 +76,7 @@ class PackIngestorTest {
             entries.add(PackTestData.entry(types[i], contents.get(i)));
         }
         byte[] wire = PackTestData.pack(entries.toArray(byte[][]::new));
-        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex();
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
              BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize);
              PackIngestor ingestor = new PackIngestor(input, storage, index)) {
             PackMetadata pack = ingestor.ingest();
@@ -97,7 +97,7 @@ class PackIngestorTest {
         byte[] wire = pack();
         wire[wire.length - 1] ^= 1;
         try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
              BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})));
              PackIngestor ingestor = new PackIngestor(input, storage, index)) {
             ObjectId previous = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{9});
@@ -110,20 +110,20 @@ class PackIngestorTest {
             assertThat(index.snapshotRefs().refs()).isEmpty();
             assertThat(input.readUnsignedByte()).isEqualTo(42);
         }
-    }
+        }
 
     @Test
     void rejectsEveryTruncatedPrefixWithoutAllowingASecondAttempt() throws Exception {
         byte[] wire = PackTestData.pack(PackTestData.delta(new ObjectId(new byte[20]), new byte[]{1, 1, 1, 9}));
         for (int length = 0; length < wire.length; length++) {
             try (InMemoryStorage storage = new InMemoryStorage();
-                 GitIndexApi index = new InMemoryIndex();
+                 GitIndexAccess index = new InMemoryIndex().createAccess();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(Arrays.copyOf(wire, length)));
                  PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
             }
-        }
+            }
     }
 
     @Test
@@ -150,18 +150,18 @@ class PackIngestorTest {
                 PackTestData.join(new byte[]{0x34}, valid), PackTestData.join(new byte[]{0x33}, corrupt),
                 PackTestData.join(new byte[]{0x33}, dictionary.toByteArray())}) {
             try (InMemoryStorage storage = new InMemoryStorage();
-                 GitIndexApi index = new InMemoryIndex();
+                 GitIndexAccess index = new InMemoryIndex().createAccess();
                  BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)));
                  PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                 assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
                 assertThat(index.packs()).isEmpty();
             }
-        }
+            }
     }
 
     @Test
     void acceptsEmptyPacksAndRejectsInvalidHeaders() throws Exception {
-        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
+        try (InMemoryStorage storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             PackMetadata pack = PackTestData.ingest(PackTestData.pack(), storage, index);
             assertThat(pack.objectCount()).isZero();
             assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(PackTestData.pack());

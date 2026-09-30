@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectInserter;
 import org.junit.jupiter.api.Test;
@@ -98,9 +99,11 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static void persist(NativeGitRepository repository, byte[] bytes) throws IOException {
-        try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), repository.index())) {
-            output.write(bytes);
-            repository.publishPack(output.complete()).packChecksum();
+        try (GitIndexAccess access1 = repository.index().createAccess()) {
+            try (PackIngestionOutput output = new PackIngestionOutput(repository.storage(), access1)) {
+                output.write(bytes);
+                repository.publishPack(output.complete()).packChecksum();
+            }
         }
     }
 

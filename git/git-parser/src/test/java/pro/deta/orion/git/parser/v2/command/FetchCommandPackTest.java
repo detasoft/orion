@@ -14,7 +14,7 @@ import pro.deta.orion.git.parser.v2.data.GitTransport;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -58,44 +58,46 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @CsvSource({"false,false", "false,true", "true,false", "true,true"})
     void sendsStoredBytesWithoutRecompressionWithBothV2Framings(boolean sidebandAll, boolean disk) throws Exception {
         GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
-        GitIndexApi index = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
-        byte[] content = new byte[200000];
-        new Random(17).nextBytes(content);
-        ObjectId id = store(storage, index, GitObjectType.BLOB, content);
-        byte[] stored = GitObjectRead.read(storage, index, id, (type, size, base, input) ->
-                input.readBytes(compressed(content).length)).orElseThrow();
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SIDEBAND_ALL),
-                sidebandAll ? "sideband-all" : "no-progress", "want " + id.toHex(), "done", "FLUSH");
-        byte[] pack = v2Pack(response, sidebandAll);
-        assertChecksum(pack);
-        try (GitIndexApi indexed = ingest(pack)) {
-            assertThat(indexed.packs().getFirst().objectCount()).isEqualTo(1);
-            IndexedObject entry = indexed.locations(id).getFirst();
-            assertThat(Arrays.copyOfRange(pack, pack.length - 20 - stored.length, pack.length - 20))
-                    .isEqualTo(stored);
+        try (GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess()) {
+            byte[] content = new byte[200000];
+            new Random(17).nextBytes(content);
+            ObjectId id = store(storage, index, GitObjectType.BLOB, content);
+            byte[] stored = GitObjectRead.read(storage, index, id, (type, size, base, input) ->
+                    input.readBytes(compressed(content).length)).orElseThrow();
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SIDEBAND_ALL),
+                    sidebandAll ? "sideband-all" : "no-progress", "want " + id.toHex(), "done", "FLUSH");
+            byte[] pack = v2Pack(response, sidebandAll);
+            assertChecksum(pack);
+            try (GitIndexAccess indexed = ingest(pack)) {
+                assertThat(indexed.packs().getFirst().objectCount()).isEqualTo(1);
+                IndexedObject entry = indexed.locations(id).getFirst();
+                assertThat(Arrays.copyOfRange(pack, pack.length - 20 - stored.length, pack.length - 20))
+                        .isEqualTo(stored);
+            }
+            storage.close();
         }
-        storage.close();
     }
 
     @Test
     void excludesCommonHistoryButIncludesNewTreeAndBlob() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId oldBlob = store(storage, index, GitObjectType.BLOB, new byte[]{1});
-        ObjectId oldTree = store(storage, index, GitObjectType.TREE, tree(oldBlob));
-        ObjectId oldCommit = store(storage, index, GitObjectType.COMMIT, commit(oldTree, Optional.empty()));
-        ObjectId newBlob = store(storage, index, GitObjectType.BLOB, new byte[]{2});
-        ObjectId newTree = store(storage, index, GitObjectType.TREE, tree(newBlob));
-        ObjectId newCommit = store(storage, index, GitObjectType.COMMIT, commit(newTree, Optional.of(oldCommit)));
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
-                "want " + newCommit.toHex(), "have " + oldCommit.toHex(), "done", "FLUSH");
-        try (GitIndexApi pack = ingest(v2Pack(response, false))) {
-            assertThat(pack.packs().getFirst().objectCount()).isEqualTo(3);
-            for (ObjectId id : Set.of(newBlob, newTree, newCommit)) {
-                assertThat(pack.locations(id)).isNotEmpty();
-            }
-            for (ObjectId id : Set.of(oldBlob, oldTree, oldCommit)) {
-                assertThat(pack.locations(id)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId oldBlob = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId oldTree = store(storage, index, GitObjectType.TREE, tree(oldBlob));
+            ObjectId oldCommit = store(storage, index, GitObjectType.COMMIT, commit(oldTree, Optional.empty()));
+            ObjectId newBlob = store(storage, index, GitObjectType.BLOB, new byte[]{2});
+            ObjectId newTree = store(storage, index, GitObjectType.TREE, tree(newBlob));
+            ObjectId newCommit = store(storage, index, GitObjectType.COMMIT, commit(newTree, Optional.of(oldCommit)));
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
+                    "want " + newCommit.toHex(), "have " + oldCommit.toHex(), "done", "FLUSH");
+            try (GitIndexAccess pack = ingest(v2Pack(response, false))) {
+                assertThat(pack.packs().getFirst().objectCount()).isEqualTo(3);
+                for (ObjectId id : Set.of(newBlob, newTree, newCommit)) {
+                    assertThat(pack.locations(id)).isNotEmpty();
+                }
+                for (ObjectId id : Set.of(oldBlob, oldTree, oldCommit)) {
+                    assertThat(pack.locations(id)).isEmpty();
+                }
             }
         }
     }
@@ -103,46 +105,49 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void waitForDoneKeepsTheResponseAtAcknowledgments() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{42});
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.WAIT_FOR_DONE),
-                "wait-for-done", "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
-        try (BufferedByteInputV2 input = input(response)) {
-            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
-                    .isEqualTo("acknowledgments");
-            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
-                    .isEqualTo("ACK " + id.toHex());
-            assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
-            assertThat(GitPktLine.readNextFrom(input)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{42});
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.WAIT_FOR_DONE),
+                    "wait-for-done", "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
+            try (BufferedByteInputV2 input = input(response)) {
+                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
+                        .isEqualTo("acknowledgments");
+                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
+                        .isEqualTo("ACK " + id.toHex());
+                assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
+                assertThat(GitPktLine.readNextFrom(input)).isEmpty();
+            }
         }
     }
 
     @Test
     void readyWithoutDoneSendsAnEmptyPackWhenEverythingIsCommon() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{42});
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
-                "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
-        try (GitIndexApi pack = ingest(v2Pack(response, false))) {
-            assertThat(pack.packs().getFirst().objectCount()).isZero();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{42});
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
+                    "want " + id.toHex(), "have " + id.toHex(), "FLUSH");
+            try (GitIndexAccess pack = ingest(v2Pack(response, false))) {
+                assertThat(pack.packs().getFirst().objectCount()).isZero();
+            }
         }
     }
 
     @Test
     void commonShallowCommitDoesNotImplyThatTheClientHasItsParents() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
-        ObjectId parent = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        ObjectId shallow = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
-                "want " + parent.toHex(), "have " + shallow.toHex(), "shallow " + shallow.toHex(),
-                "done", "FLUSH");
-        try (GitIndexApi pack = ingest(v2Pack(response, false))) {
-            assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
-            assertThat(pack.locations(parent)).isNotEmpty();
-            assertThat(pack.locations(shallow)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
+            ObjectId parent = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            ObjectId shallow = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+                    "want " + parent.toHex(), "have " + shallow.toHex(), "shallow " + shallow.toHex(),
+                    "done", "FLUSH");
+            try (GitIndexAccess pack = ingest(v2Pack(response, false))) {
+                assertThat(pack.packs().getFirst().objectCount()).isEqualTo(1);
+                assertThat(pack.locations(parent)).isNotEmpty();
+                assertThat(pack.locations(shallow)).isEmpty();
+            }
         }
     }
 
@@ -175,21 +180,22 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ValueSource(strings = {"", "side-band", "side-band-64k"})
     void legacySendsNakThenRawOrBoundedSidebandPack(String capability) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        byte[] content = new byte[9000];
-        new Random(4).nextBytes(content);
-        ObjectId id = store(storage, index, GitObjectType.BLOB, content);
-        byte[] response = execute(storage, index, GitProtocolVersion.V0,
-                capabilities(GitCapability.SIDE_BAND, GitCapability.SIDE_BAND_64K),
-                "want " + id.toHex() + (capability.isEmpty() ? "" : " " + capability), "FLUSH", "done");
-        byte[] pack;
-        try (BufferedByteInputV2 input = input(response)) {
-            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text()).isEqualTo("NAK");
-            pack = capability.isEmpty() ? input.newInputStream().readAllBytes()
-                    : readSideband(input, capability.equals("side-band") ? 1000 : GitPktLine.MAX_PKT_LINE_LENGTH);
-        }
-        try (GitIndexApi indexed = ingest(pack)) {
-            assertThat(indexed.locations(id)).isNotEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            byte[] content = new byte[9000];
+            new Random(4).nextBytes(content);
+            ObjectId id = store(storage, index, GitObjectType.BLOB, content);
+            byte[] response = execute(storage, index, GitProtocolVersion.V0,
+                    capabilities(GitCapability.SIDE_BAND, GitCapability.SIDE_BAND_64K),
+                    "want " + id.toHex() + (capability.isEmpty() ? "" : " " + capability), "FLUSH", "done");
+            byte[] pack;
+            try (BufferedByteInputV2 input = input(response)) {
+                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text()).isEqualTo("NAK");
+                pack = capability.isEmpty() ? input.newInputStream().readAllBytes()
+                        : readSideband(input, capability.equals("side-band") ? 1000 : GitPktLine.MAX_PKT_LINE_LENGTH);
+            }
+            try (GitIndexAccess indexed = ingest(pack)) {
+                assertThat(indexed.locations(id)).isNotEmpty();
+            }
         }
     }
 
@@ -199,57 +205,59 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         boolean thin = mode.equals("thin");
         boolean includeBase = mode.equals("base-in-pack");
         GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage();
-        GitIndexApi index = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
-        byte[] base = {1, 2, 3};
-        byte[] target = {1, 2, 4};
-        byte[] delta = {3, 3, 3, 1, 2, 4};
-        ObjectId baseId = hash(GitObjectType.BLOB, base);
-        ObjectId targetId = hash(GitObjectType.BLOB, target);
-        byte[] baseZlib = compressed(base);
-        byte[] deltaZlib = compressed(delta);
-        int deltaOffset = 13 + baseZlib.length;
-        ByteBuffer bytes = ByteBuffer.allocate(deltaOffset + 2 + deltaZlib.length);
-        bytes.putInt(0x5041434b).putInt(2).putInt(2).put((byte) 0x33).put(baseZlib);
-        bytes.put((byte) 0x66).put((byte) (deltaOffset - 12)).put(deltaZlib);
-        PackTestData.publish(PackTestData.join(bytes.array(),
-                MessageDigest.getInstance("SHA-1").digest(bytes.array())), storage, index);
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
-                thin ? "thin-pack" : "no-progress", "want " + targetId.toHex(),
-                (includeBase ? "want " : "have ") + baseId.toHex(), "done", "FLUSH");
-        byte[] pack = v2Pack(response, false);
-        assertChecksum(pack);
-        assertThat(ByteBuffer.wrap(pack, 8, 4).getInt()).isEqualTo(includeBase ? 2 : 1);
-        if (thin || includeBase) {
-            assertThat(pack[12]).isEqualTo((byte) 0x76);
-            assertThat(Arrays.copyOfRange(pack, 13, 33)).isEqualTo(baseId.toBytes());
-            assertThat(Arrays.copyOfRange(pack, 33, 33 + deltaZlib.length)).isEqualTo(deltaZlib);
-        } else {
-            try (GitIndexApi indexed = ingest(pack)) {
-                assertThat(indexed.locations(targetId).getFirst().type()).isEqualTo(GitObjectType.BLOB);
-                assertThat(indexed.locations(baseId)).isEmpty();
+        try (GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess()) {
+            byte[] base = {1, 2, 3};
+            byte[] target = {1, 2, 4};
+            byte[] delta = {3, 3, 3, 1, 2, 4};
+            ObjectId baseId = hash(GitObjectType.BLOB, base);
+            ObjectId targetId = hash(GitObjectType.BLOB, target);
+            byte[] baseZlib = compressed(base);
+            byte[] deltaZlib = compressed(delta);
+            int deltaOffset = 13 + baseZlib.length;
+            ByteBuffer bytes = ByteBuffer.allocate(deltaOffset + 2 + deltaZlib.length);
+            bytes.putInt(0x5041434b).putInt(2).putInt(2).put((byte) 0x33).put(baseZlib);
+            bytes.put((byte) 0x66).put((byte) (deltaOffset - 12)).put(deltaZlib);
+            PackTestData.publish(PackTestData.join(bytes.array(),
+                    MessageDigest.getInstance("SHA-1").digest(bytes.array())), storage, index);
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
+                    thin ? "thin-pack" : "no-progress", "want " + targetId.toHex(),
+                    (includeBase ? "want " : "have ") + baseId.toHex(), "done", "FLUSH");
+            byte[] pack = v2Pack(response, false);
+            assertChecksum(pack);
+            assertThat(ByteBuffer.wrap(pack, 8, 4).getInt()).isEqualTo(includeBase ? 2 : 1);
+            if (thin || includeBase) {
+                assertThat(pack[12]).isEqualTo((byte) 0x76);
+                assertThat(Arrays.copyOfRange(pack, 13, 33)).isEqualTo(baseId.toBytes());
+                assertThat(Arrays.copyOfRange(pack, 33, 33 + deltaZlib.length)).isEqualTo(deltaZlib);
+            } else {
+                try (GitIndexAccess indexed = ingest(pack)) {
+                    assertThat(indexed.locations(targetId).getFirst().type()).isEqualTo(GitObjectType.BLOB);
+                    assertThat(indexed.locations(baseId)).isEmpty();
+                }
             }
+            storage.close();
         }
-        storage.close();
     }
 
     @Test
     void sendsLegacyShallowBoundariesBeforeNegotiationAndPack() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
-        ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
-        byte[] response = execute(storage, index, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
-                "want " + tip.toHex() + " shallow", "deepen 1", "FLUSH", "done");
-        try (BufferedByteInputV2 input = input(response)) {
-            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
-                    .isEqualTo("shallow " + tip.toHex());
-            assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
-            assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text()).isEqualTo("NAK");
-            try (GitIndexApi pack = ingest(input.newInputStream().readAllBytes())) {
-                assertThat(pack.locations(tip)).isNotEmpty();
-                assertThat(pack.locations(tree)).isNotEmpty();
-                assertThat(pack.locations(root)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
+            ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+            byte[] response = execute(storage, index, GitProtocolVersion.V0, capabilities(GitCapability.SHALLOW),
+                    "want " + tip.toHex() + " shallow", "deepen 1", "FLUSH", "done");
+            try (BufferedByteInputV2 input = input(response)) {
+                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text())
+                        .isEqualTo("shallow " + tip.toHex());
+                assertThat(GitPktLine.readNextFrom(input)).contains(GitPktLine.Control.FLUSH);
+                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(input).orElseThrow()).text()).isEqualTo("NAK");
+                try (GitIndexAccess pack = ingest(input.newInputStream().readAllBytes())) {
+                    assertThat(pack.locations(tip)).isNotEmpty();
+                    assertThat(pack.locations(tree)).isNotEmpty();
+                    assertThat(pack.locations(root)).isEmpty();
+                }
             }
         }
     }
@@ -258,79 +266,82 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ValueSource(booleans = {false, true})
     void deepensOneGenerationFromClientBoundary(boolean sidebandAll) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
-        ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        ObjectId parent = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
-        ObjectId boundary = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
-        ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(boundary)));
-        byte[] response = execute(storage, index, GitProtocolVersion.V2,
-                capabilities(GitCapability.SHALLOW, GitCapability.SIDEBAND_ALL),
-                sidebandAll ? "sideband-all" : "no-progress", "want " + tip.toHex(),
-                "shallow " + boundary.toHex(), "have " + boundary.toHex(),
-                "deepen 1", "deepen-relative", "done", "FLUSH");
-        assertThat(new String(response, StandardCharsets.ISO_8859_1))
-                .contains("shallow " + parent.toHex() + "\n", "unshallow " + boundary.toHex() + "\n");
-        try (GitIndexApi pack = ingest(v2Pack(response, sidebandAll))) {
-            assertThat(pack.locations(tip)).isNotEmpty();
-            assertThat(pack.locations(parent)).isNotEmpty();
-            assertThat(pack.locations(root)).isEmpty();
-            assertThat(pack.locations(boundary)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
+            ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            ObjectId parent = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+            ObjectId boundary = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(parent)));
+            ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(boundary)));
+            byte[] response = execute(storage, index, GitProtocolVersion.V2,
+                    capabilities(GitCapability.SHALLOW, GitCapability.SIDEBAND_ALL),
+                    sidebandAll ? "sideband-all" : "no-progress", "want " + tip.toHex(),
+                    "shallow " + boundary.toHex(), "have " + boundary.toHex(),
+                    "deepen 1", "deepen-relative", "done", "FLUSH");
+            assertThat(new String(response, StandardCharsets.ISO_8859_1))
+                    .contains("shallow " + parent.toHex() + "\n", "unshallow " + boundary.toHex() + "\n");
+            try (GitIndexAccess pack = ingest(v2Pack(response, sidebandAll))) {
+                assertThat(pack.locations(tip)).isNotEmpty();
+                assertThat(pack.locations(parent)).isNotEmpty();
+                assertThat(pack.locations(root)).isEmpty();
+                assertThat(pack.locations(boundary)).isEmpty();
+            }
         }
     }
 
     @Test
     void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
-        ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        byte[] parentContent = new String(commit(tree, Optional.of(root)), StandardCharsets.US_ASCII)
-                .replace(" 0 +0000", " 100 +0000").getBytes(StandardCharsets.US_ASCII);
-        ObjectId parent = store(storage, index, GitObjectType.COMMIT, parentContent);
-        byte[] tipContent = new String(commit(tree, Optional.of(parent)), StandardCharsets.US_ASCII)
-                .replace(" 0 +0000", " 300 +0000").getBytes(StandardCharsets.US_ASCII);
-        ObjectId tip = store(storage, index, GitObjectType.COMMIT, tipContent);
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
-                "want " + tip.toHex(), "deepen-since 200", "done", "FLUSH");
-        assertThat(new String(response, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
-        try (GitIndexApi pack = ingest(v2Pack(response, false))) {
-            assertThat(pack.locations(tip)).isNotEmpty();
-            assertThat(pack.locations(parent)).isEmpty();
-        }
-        index.updateRefs(List.of(new RefUpdate(
-                new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
-        byte[] excluded = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
-                "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
-        assertThat(new String(excluded, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
-        try (GitIndexApi pack = ingest(v2Pack(excluded, false))) {
-            assertThat(pack.locations(tip)).isNotEmpty();
-            assertThat(pack.locations(parent)).isEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
+            ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            byte[] parentContent = new String(commit(tree, Optional.of(root)), StandardCharsets.US_ASCII)
+                    .replace(" 0 +0000", " 100 +0000").getBytes(StandardCharsets.US_ASCII);
+            ObjectId parent = store(storage, index, GitObjectType.COMMIT, parentContent);
+            byte[] tipContent = new String(commit(tree, Optional.of(parent)), StandardCharsets.US_ASCII)
+                    .replace(" 0 +0000", " 300 +0000").getBytes(StandardCharsets.US_ASCII);
+            ObjectId tip = store(storage, index, GitObjectType.COMMIT, tipContent);
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+                    "want " + tip.toHex(), "deepen-since 200", "done", "FLUSH");
+            assertThat(new String(response, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
+            try (GitIndexAccess pack = ingest(v2Pack(response, false))) {
+                assertThat(pack.locations(tip)).isNotEmpty();
+                assertThat(pack.locations(parent)).isEmpty();
+            }
+            index.updateRefs(List.of(new RefUpdate(
+                    new RefId("refs/heads/excluded"), Optional.empty(), Optional.of(parent))), true);
+            byte[] excluded = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.SHALLOW),
+                    "want " + tip.toHex(), "deepen-not refs/heads/excluded", "done", "FLUSH");
+            assertThat(new String(excluded, StandardCharsets.ISO_8859_1)).contains("shallow " + tip.toHex());
+            try (GitIndexAccess pack = ingest(v2Pack(excluded, false))) {
+                assertThat(pack.locations(tip)).isNotEmpty();
+                assertThat(pack.locations(parent)).isEmpty();
+            }
         }
     }
 
     @Test
     void blobFilterOmitsTreeBlobsAndRetainsExplicitlyWantedBlob() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
-        GitIndexApi index = new LocalGitIndex(directory);
-        ObjectId blob = store(storage, index, GitObjectType.BLOB, new byte[]{1});
-        ObjectId tree = store(storage, index, GitObjectType.TREE, tree(blob));
-        ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-        byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
-                "want " + tip.toHex(), "filter blob:none", "done", "FLUSH");
-        try (GitIndexApi pack = ingest(v2Pack(response, false))) {
-            assertThat(pack.locations(tip)).isNotEmpty();
-            assertThat(pack.locations(tree)).isNotEmpty();
-            assertThat(pack.locations(blob)).isEmpty();
-        }
-        byte[] explicit = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
-                "want " + blob.toHex(), "filter blob:none", "done", "FLUSH");
-        try (GitIndexApi pack = ingest(v2Pack(explicit, false))) {
-            assertThat(pack.locations(blob)).isNotEmpty();
+        try (GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
+            ObjectId blob = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId tree = store(storage, index, GitObjectType.TREE, tree(blob));
+            ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+            byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+                    "want " + tip.toHex(), "filter blob:none", "done", "FLUSH");
+            try (GitIndexAccess pack = ingest(v2Pack(response, false))) {
+                assertThat(pack.locations(tip)).isNotEmpty();
+                assertThat(pack.locations(tree)).isNotEmpty();
+                assertThat(pack.locations(blob)).isEmpty();
+            }
+            byte[] explicit = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.FILTER),
+                    "want " + blob.toHex(), "filter blob:none", "done", "FLUSH");
+            try (GitIndexAccess pack = ingest(v2Pack(explicit, false))) {
+                assertThat(pack.locations(blob)).isNotEmpty();
+            }
         }
     }
 
-    private ObjectId store(GitStorageApi storage, GitIndexApi index, GitObjectType type, byte[] content) throws Exception {
+    private ObjectId store(GitStorageApi storage, GitIndexAccess index, GitObjectType type, byte[] content) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
@@ -341,7 +352,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         return hash(type, content);
     }
 
-    private static GitIndexApi ingest(byte[] bytes) throws IOException {
+    private static GitIndexAccess ingest(byte[] bytes) throws IOException {
         return PackTestData.inspect(bytes);
     }
 
@@ -349,7 +360,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @CsvSource({"HTTP,'',true", "HTTP,00,false", "SSH,'',false"})
     void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
             throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
@@ -383,7 +394,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @EnumSource(GitProtocolVersion.class)
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); GitIndexApi index = new InMemoryIndex()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             ObjectId tree = store(storage, index, GitObjectType.TREE, new byte[0]);
             ObjectId tip = store(storage, index, GitObjectType.COMMIT, commit(tree, Optional.empty()));
             RefId main = new RefId("refs/heads/main");
@@ -412,7 +423,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         }
     }
 
-    private byte[] execute(GitStorageApi storage, GitIndexApi index, GitProtocolVersion version,
+    private byte[] execute(GitStorageApi storage, GitIndexAccess index, GitProtocolVersion version,
                            GitCapabilities advertised, String... lines) throws IOException {
         ByteArrayOutputStream request = new ByteArrayOutputStream();
         OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);

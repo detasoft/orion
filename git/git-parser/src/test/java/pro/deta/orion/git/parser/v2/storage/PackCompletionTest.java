@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -27,7 +27,8 @@ class PackCompletionTest {
 
     @Test
     void preservesSelfContainedAndEmptyGitExports() throws Exception {
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             for (byte[] bytes : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
                 PackMetadata metadata = ingest(bytes, storage, index);
                 byte[] exported = bytes(metadata, storage, index);
@@ -43,7 +44,8 @@ class PackCompletionTest {
     void appendsSharedExternalBaseOnceAndExportsPackThatGitCanIndex() throws Exception {
         byte[] base = new byte[30_000];
         new Random(17).nextBytes(base);
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             ObjectId baseId = store(storage, index, GitObjectType.BLOB, base);
             byte[] original = pack(delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 4}),
                     delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 5}));
@@ -66,7 +68,8 @@ class PackCompletionTest {
     void restoresPublishedDeltaBaseAndExportsOnlyItsFullContent() throws Exception {
         byte[] root = {1, 2, 3};
         byte[] base = {1, 2, 4};
-        try (GitStorageApi storage = new LocalGitStorage(directory); GitIndexApi index = new LocalGitIndex(directory)) {
+        try (GitStorageApi storage = new LocalGitStorage(directory);
+             GitIndexAccess index = new LocalGitIndex(directory).createAccess()) {
             ObjectId baseId = storeDelta(storage, index, GitObjectType.BLOB, root,
                     new byte[]{3, 3, 3, 1, 2, 4}, base);
             PackMetadata metadata = ingest(pack(delta(baseId, new byte[]{3, 1, 1, 9})), storage, index);

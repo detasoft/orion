@@ -36,8 +36,8 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
 
     NativeGitRepositoryContext(String name, NativeGitRepository repository,
             NativeGitRepositoryProvider provider, GitNativeRepositoryAccessHook accessHook,
-            Optional<String> packUriBase) {
-        super(repository.storage(), repository.index());
+            Optional<String> packUriBase) throws IOException {
+        super(repository.storage(), repository.index().createAccess());
         this.name = name;
         this.packUriBase = packUriBase;
         this.repository = repository;

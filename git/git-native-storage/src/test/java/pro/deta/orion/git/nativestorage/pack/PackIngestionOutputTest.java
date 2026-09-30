@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
@@ -25,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PackIngestionOutputTest {
     @Test
     void ingestsFragmentedBytesAndTransfersPackOwnership() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); InMemoryIndex index = new InMemoryIndex()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             NativeGitFileUpdate prepared = prepared();
             byte[] bytes = prepared.pack();
             PackMetadata pack;
@@ -59,7 +60,7 @@ class PackIngestionOutputTest {
         corrupt[corrupt.length - 1] ^= 1;
         for (byte[] invalid : new byte[][]{
                 Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
-            try (GitStorageApi storage = new InMemoryStorage(); InMemoryIndex index = new InMemoryIndex();
+            try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess();
                  PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
                 output.write(invalid);
                 assertThatThrownBy(output::complete).isInstanceOf(IOException.class);
@@ -70,7 +71,7 @@ class PackIngestionOutputTest {
 
     @Test
     void closeAbandonsIncompleteBytesAndRejectsFurtherWrites() throws Exception {
-        try (GitStorageApi storage = new InMemoryStorage(); InMemoryIndex index = new InMemoryIndex()) {
+        try (GitStorageApi storage = new InMemoryStorage(); GitIndexAccess index = new InMemoryIndex().createAccess()) {
             PackIngestionOutput output = new PackIngestionOutput(storage, index);
             output.write(new byte[]{'P', 'A'});
             output.close();

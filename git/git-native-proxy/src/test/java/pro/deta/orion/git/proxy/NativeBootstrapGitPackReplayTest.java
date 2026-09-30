@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import io.netty.buffer.ByteBuf;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.internal.storage.pack.DeltaEncoder;
@@ -86,35 +87,37 @@ class NativeBootstrapGitPackReplayTest {
             byte[] original = bytes.toByteArray();
             Optional<PackChecksum> received = ingest(repository, original);
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
-            PackMetadata metadata = repository.index().packs(received.orElseThrow()).getFirst();
-            repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
-            byte[] completed = exported.toByteArray();
-            assertThat(repository.index().objects(metadata.packId()))
-                    .extracting(IndexedObject::objectId)
-                    .contains(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()));
+            try (GitIndexAccess access1 = repository.index().createAccess()) {
+                PackMetadata metadata = access1.packs(received.orElseThrow()).getFirst();
+                repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+                byte[] completed = exported.toByteArray();
+                assertThat(access1.objects(metadata.packId()))
+                        .extracting(IndexedObject::objectId)
+                        .contains(new pro.deta.orion.git.parser.v2.id.ObjectId(baseId.toHex()));
 
-            try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
-                if (upstreamHasBase) {
-                    try (var inserter = upstream.getRepository().newObjectInserter()) {
-                        ObjectId id = inserter.insert(Constants.OBJ_BLOB, base);
-                        inserter.flush();
-                        var ref = upstream.getRepository().updateRef(REF);
-                        ref.setNewObjectId(id);
-                        ref.update();
+                try (Git upstream = Git.init().setDirectory(bare.toFile()).setBare(true).call()) {
+                    if (upstreamHasBase) {
+                        try (var inserter = upstream.getRepository().newObjectInserter()) {
+                            ObjectId id = inserter.insert(Constants.OBJ_BLOB, base);
+                            inserter.flush();
+                            var ref = upstream.getRepository().updateRef(REF);
+                            ref.setNewObjectId(id);
+                            ref.update();
+                        }
                     }
+                    ByteArrayOutputStream sent = new ByteArrayOutputStream();
+                    List<RefUpdate> updates = List.of(RefUpdate.fromWire(
+                            REF, upstreamHasBase ? baseId.toHex() : ZERO, targetId.toHex()));
+
+                    assertThat(new NativeBootstrapGitPusher().push(location(bare), recordingTransport(sent),
+                            repository, received, updates, true)).containsExactly(true);
+
+                    byte[] forwarded = packFrom(sent.toByteArray());
+                    assertThat(forwarded).isEqualTo(completed);
+                    assertThat(upstream.getRepository().resolve(REF).name()).isEqualTo(targetId.toHex());
+                    assertThat(upstream.getRepository().open(ObjectId.fromString(targetId.toHex())).getBytes())
+                            .isEqualTo(target);
                 }
-                ByteArrayOutputStream sent = new ByteArrayOutputStream();
-                List<RefUpdate> updates = List.of(RefUpdate.fromWire(
-                        REF, upstreamHasBase ? baseId.toHex() : ZERO, targetId.toHex()));
-
-                assertThat(new NativeBootstrapGitPusher().push(location(bare), recordingTransport(sent),
-                        repository, received, updates, true)).containsExactly(true);
-
-                byte[] forwarded = packFrom(sent.toByteArray());
-                assertThat(forwarded).isEqualTo(completed);
-                assertThat(upstream.getRepository().resolve(REF).name()).isEqualTo(targetId.toHex());
-                assertThat(upstream.getRepository().open(ObjectId.fromString(targetId.toHex())).getBytes())
-                        .isEqualTo(target);
             }
         }
     }

@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -233,10 +234,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> {
                     ByteArrayOutputStream exported = new ByteArrayOutputStream();
-                    repository.writePack(repository.index().packs(received.orElseThrow()).getFirst(),
-                            new OutputStreamBufferedByteOutput(exported));
-                    forwarded.add(exported.toByteArray());
-                    return Collections.nCopies(updates.size(), true);
+                    try (GitIndexAccess access1 = repository.index().createAccess()) {
+                        repository.writePack(access1.packs(received.orElseThrow()).getFirst(),
+                                new OutputStreamBufferedByteOutput(exported));
+                        forwarded.add(exported.toByteArray());
+                        return Collections.nCopies(updates.size(), true);
+                    }
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
@@ -460,9 +463,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         NativeGitRepository repository = provider.openForRead(repositoryName).valueOrFailure("open proxy");
         repository.refs();
         repository.readObject(new ObjectId("0".repeat(40)));
-        GitObjectRead.exists(repository.storage(), repository.index(), new ObjectId("0".repeat(40)));
+        try (GitIndexAccess access2 = repository.index().createAccess()) {
+            GitObjectRead.exists(repository.storage(), access2, new ObjectId("0".repeat(40)));
 
-        assertThat(refreshes).hasValue(2);
+            assertThat(refreshes).hasValue(2);
+        }
     }
 
     @Test

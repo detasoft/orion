@@ -196,12 +196,12 @@ class FetchCapabilitiesTest {
         var request = request(true);
         request.setFilter(Optional.of("blob:none"));
         var context = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex(), advertised);
+                new InMemoryIndex().createAccess(), advertised);
         advertised.clear();
         new FetchNegotiatorIterator(context, HTTP);
 
         var denied = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex(), advertised) {
+                new InMemoryIndex().createAccess(), advertised) {
             @Override
             public boolean objectExists(ObjectId id) {
                 throw new AssertionError("Unsupported request must not query storage");
@@ -225,6 +225,6 @@ class FetchCapabilitiesTest {
     private static void validate(FetchRequest request, GitCapabilities advertised, GitTransport transport)
             throws IOException {
         new FetchNegotiatorIterator(new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex(), advertised), transport);
+                new InMemoryIndex().createAccess(), advertised), transport);
     }
 }

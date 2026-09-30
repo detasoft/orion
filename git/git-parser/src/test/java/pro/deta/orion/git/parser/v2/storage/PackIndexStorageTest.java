@@ -6,7 +6,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -39,12 +39,12 @@ class PackIndexStorageTest {
         bytes[bytes.length - 1] ^= 1;
         AtomicReference<PackId> packId = new AtomicReference<>();
         try (GitStorageApi backend = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-             GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory)) {
+             GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess()) {
             GitStorageApi recording = new GitStorageApi() {
                 public PackDataStorage newPack(PackId id) throws IOException {
                     packId.set(id);
                     return backend.newPack(id);
-                }
+        }
                 public <R> R readPack(PackId id, long offset, long length, GitPackRead<R> reader) throws IOException {
                     return backend.readPack(id, offset, length, reader);
                 }

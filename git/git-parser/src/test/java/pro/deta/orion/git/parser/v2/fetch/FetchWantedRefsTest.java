@@ -108,6 +108,6 @@ class FetchWantedRefsTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().addAll(List.of(refs));
         return new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex(), capabilities(GitCapability.REF_IN_WANT));
+                new InMemoryIndex().createAccess(), capabilities(GitCapability.REF_IN_WANT));
     }
 }

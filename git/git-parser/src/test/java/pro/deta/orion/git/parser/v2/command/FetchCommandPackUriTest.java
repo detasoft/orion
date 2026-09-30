@@ -15,7 +15,7 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FetchCommandPackUriTest {
     private final InMemoryStorage storage = new InMemoryStorage();
-    private final GitIndexApi index = new InMemoryIndex();
+    private final GitIndexAccess index = new InMemoryIndex().createAccess();
     private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
         @Override
         public Optional<URI> packUri(PackChecksum id) {
@@ -79,7 +79,7 @@ class FetchCommandPackUriTest {
             pack.writeTo(writer);
             writer.finish();
         }
-        try (GitIndexApi inline = ingest(output.toByteArray())) {
+        try (GitIndexAccess inline = ingest(output.toByteArray())) {
             assertThat(inline.objects(inline.packs().getFirst().packId()))
                     .extracting(IndexedObject::objectId).containsExactlyInAnyOrderElementsOf(inlineIds);
         }
@@ -94,7 +94,7 @@ class FetchCommandPackUriTest {
         byte[] response = fetch(ids, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains("packfile-uris\n", packId.toHex() + " " + repository.packUri(packId).orElseThrow() + "\n");
-        try (GitIndexApi inline = inlinePack(response)) {
+        try (GitIndexAccess inline = inlinePack(response)) {
             assertThat(inline.packs().getFirst().objectCount()).isZero();
         }
         assertThat(index.objects(index.packs(packId).getFirst().packId()))
@@ -111,7 +111,7 @@ class FetchCommandPackUriTest {
         byte[] response = fetch(wanted, "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1))
                 .contains(externalPack.toHex() + " " + repository.packUri(externalPack).orElseThrow() + "\n");
-        try (GitIndexApi inline = inlinePack(response)) {
+        try (GitIndexAccess inline = inlinePack(response)) {
             assertThat(inline.packs().getFirst().objectCount()).isEqualTo(1);
             assertThat(inline.objects(inline.packs().getFirst().packId()))
                     .extracting(IndexedObject::objectId).containsExactly(shared.getFirst());
@@ -123,7 +123,7 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1});
         byte[] response = fetch(ids, "http");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (GitIndexApi inline = inlinePack(response)) {
+        try (GitIndexAccess inline = inlinePack(response)) {
             assertThat(inline.objects(inline.packs().getFirst().packId()))
                     .extracting(IndexedObject::objectId).containsExactlyElementsOf(ids);
         }
@@ -134,7 +134,7 @@ class FetchCommandPackUriTest {
         List<ObjectId> ids = store(new byte[]{1}, new byte[]{2});
         byte[] response = fetch(List.of(ids.getFirst()), "https");
         assertThat(new String(response, StandardCharsets.ISO_8859_1)).doesNotContain("packfile-uris\n");
-        try (GitIndexApi inline = inlinePack(response)) {
+        try (GitIndexAccess inline = inlinePack(response)) {
             assertThat(inline.objects(inline.packs().getFirst().packId()))
                     .extracting(IndexedObject::objectId).containsExactly(ids.getFirst());
         }
@@ -183,7 +183,7 @@ class FetchCommandPackUriTest {
         output.writeBytes(content);
     }
 
-    private static GitIndexApi inlinePack(byte[] response) throws IOException {
+    private static GitIndexAccess inlinePack(byte[] response) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(response))) {
             boolean pack = false;
@@ -202,7 +202,7 @@ class FetchCommandPackUriTest {
         return ingest(bytes.toByteArray());
     }
 
-    private static GitIndexApi ingest(byte[] bytes) throws IOException {
+    private static GitIndexAccess ingest(byte[] bytes) throws IOException {
         return PackTestData.inspect(bytes);
     }
 }

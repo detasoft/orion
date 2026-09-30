@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
@@ -29,8 +30,10 @@ class NativeGitRepositoryPackIngestionTest {
                 PackMetadata pack = repository.ingest(input);
                 storage.close();
                 assertThatThrownBy(() -> repository.publishPack(pack)).isInstanceOf(IOException.class);
-                assertThat(repository.index().packs()).isEmpty();
-                assertThat(repository.index().snapshotRefs().refs()).isEmpty();
+                try (GitIndexAccess access1 = repository.index().createAccess()) {
+                    assertThat(access1.packs()).isEmpty();
+                    assertThat(access1.snapshotRefs().refs()).isEmpty();
+                }
             }
         }
     }
@@ -48,10 +51,12 @@ class NativeGitRepositoryPackIngestionTest {
                 PackMetadata first = repository.ingest(firstInput);
                 PackMetadata second = repository.ingest(secondInput);
                 assertThat(first).isNotSameAs(second);
-                assertThat(repository.index().packs()).isEmpty();
-                assertThat(first.packId()).isNotEqualTo(second.packId());
-                repository.publishPack(second);
-                assertThat(repository.index().packs()).hasSize(1);
+                try (GitIndexAccess access2 = repository.index().createAccess()) {
+                    assertThat(access2.packs()).isEmpty();
+                    assertThat(first.packId()).isNotEqualTo(second.packId());
+                    repository.publishPack(second);
+                    assertThat(access2.packs()).hasSize(1);
+                }
             }
         }
     }

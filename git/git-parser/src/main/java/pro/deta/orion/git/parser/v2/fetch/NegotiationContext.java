@@ -6,7 +6,7 @@ import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
 import pro.deta.orion.git.parser.v2.data.*;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -59,7 +59,7 @@ import java.util.Set;
 public class NegotiationContext {
     private final FetchRequest request;
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
     private final GitCapabilities advertisedCapabilities = new GitCapabilities();
     private final Set<ObjectId> commonObjects = new LinkedHashSet<>();
     private Map<RefId, ObjectId> wantedRefs = Map.of();
@@ -67,7 +67,7 @@ public class NegotiationContext {
     private boolean ready;
     private boolean doneReceived;
 
-    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitIndexApi index,
+    public NegotiationContext(FetchRequest request, GitStorageApi storage, GitIndexAccess index,
                               GitCapabilities advertisedCapabilities) {
         this.request = Objects.requireNonNull(request, "request");
         this.storage = Objects.requireNonNull(storage, "storage");

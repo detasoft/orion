@@ -2,7 +2,7 @@ package pro.deta.orion.git.parser.v2.read;
 
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 
@@ -19,9 +19,9 @@ import java.util.Set;
 
 public final class GitObjectGraph {
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
 
-    public GitObjectGraph(GitStorageApi storage, GitIndexApi index) {
+    public GitObjectGraph(GitStorageApi storage, GitIndexAccess index) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
     }

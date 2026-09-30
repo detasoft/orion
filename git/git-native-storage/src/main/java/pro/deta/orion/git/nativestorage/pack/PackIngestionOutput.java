@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -16,12 +16,12 @@ import java.util.Objects;
 
 public final class PackIngestionOutput implements BufferedByteOutput, AutoCloseable {
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
     private final Path temporary;
     private final OutputStream output;
     private boolean finished;
 
-    public PackIngestionOutput(GitStorageApi storage, GitIndexApi index) throws IOException {
+    public PackIngestionOutput(GitStorageApi storage, GitIndexAccess index) throws IOException {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
         temporary = Files.createTempFile("orion-fetch-", ".pack");

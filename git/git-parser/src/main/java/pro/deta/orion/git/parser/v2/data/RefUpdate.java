@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Describes a conditional ref update submitted through GitIndexApi.
+ * Describes a conditional ref update submitted through GitIndexAccess.
  * An empty expectedOld requires the ref to be absent (creation); an empty newId requests deletion.
  * With both IDs present, replace the value only if it matches expectedOld, including for force updates.
  * The ref and both Optional containers must be non-null; both IDs cannot be absent at once.

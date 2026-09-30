@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.NullProgressMonitor;
@@ -68,12 +69,14 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository")) {
             repository.files().saveFiles("main", files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
             Map<String, String> refs = repository.refs();
-            Set<PackMetadata> packs = Set.copyOf(repository.index().packs());
-            for (String path : List.of("../config.txt", "./config.txt")) {
-                assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
-                        "invalid", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalArgumentException.class);
-                assertThat(repository.refs()).isEqualTo(refs);
-                assertThat(repository.index().packs()).containsExactlyInAnyOrderElementsOf(packs);
+            try (GitIndexAccess access1 = repository.index().createAccess()) {
+                Set<PackMetadata> packs = Set.copyOf(access1.packs());
+                for (String path : List.of("../config.txt", "./config.txt")) {
+                    assertThatThrownBy(() -> repository.files().saveFiles("main", files("changed"), Set.of(path),
+                            "invalid", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalArgumentException.class);
+                    assertThat(repository.refs()).isEqualTo(refs);
+                    assertThat(access1.packs()).containsExactlyInAnyOrderElementsOf(packs);
+                }
             }
         }
     }
@@ -84,17 +87,19 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository");
 
         repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
+        try (GitIndexAccess access2 = repository.index().createAccess()) {
 
-        assertThat(repository.index().packs()).hasSize(1);
-        PackMetadata metadata = repository.index().packs().getFirst();
-        ByteArrayOutputStream exported = new ByteArrayOutputStream();
-        repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
-        assertThat(Arrays.copyOf(exported.toByteArray(), 4))
-                .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
-        NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
-                .find("demo").valueOrFailure("repository");
-        assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
-                .containsAllEntriesOf(files("first"));
+            assertThat(access2.packs()).hasSize(1);
+            PackMetadata metadata = access2.packs().getFirst();
+            ByteArrayOutputStream exported = new ByteArrayOutputStream();
+            repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+            assertThat(Arrays.copyOf(exported.toByteArray(), 4))
+                    .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
+            NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
+                    .find("demo").valueOrFailure("repository");
+            assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
+                    .containsAllEntriesOf(files("first"));
+        }
     }
 
     @Test
@@ -119,8 +124,10 @@ class NativeGitFileUpdateTest {
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
         assertThat(repository.files().loadFiles("main", List.of("config.txt")).files())
                 .containsAllEntriesOf(files("second"));
-        assertThat(repository.index().packs()).hasSize(3);
-        assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
+        try (GitIndexAccess access3 = repository.index().createAccess()) {
+            assertThat(access3.packs()).hasSize(3);
+            assertThat(repository.readObject(update.refUpdates().getFirst().newId().orElseThrow())).isPresent();
+        }
     }
 
     @Test
@@ -174,7 +181,9 @@ class NativeGitFileUpdateTest {
                     rejected, update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .isInstanceOf(GitOperationException.class);
             assertThat(repository.refs()).isEmpty();
-            assertThat(repository.index().packs()).isEmpty();
+            try (GitIndexAccess access4 = repository.index().createAccess()) {
+                assertThat(access4.packs()).isEmpty();
+            }
         }
     }
 

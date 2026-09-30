@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
@@ -80,8 +81,10 @@ class NativeGitReceivePackTest {
         assertThatThrownBy(() -> repository.publishPack(
                 prepared.pack(), prepared.refUpdates(), true, denied))
                 .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
-        assertThat(repository.index().packs()).isEmpty();
-        assertThat(repository.refs()).isEmpty();
+        try (GitIndexAccess access1 = repository.index().createAccess()) {
+            assertThat(access1.packs()).isEmpty();
+            assertThat(repository.refs()).isEmpty();
+        }
     }
 
     @Test

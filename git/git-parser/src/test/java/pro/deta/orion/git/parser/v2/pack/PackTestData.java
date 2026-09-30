@@ -3,7 +3,7 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -69,39 +69,39 @@ public final class PackTestData {
         return new ObjectId(hash.digest(content));
     }
 
-    public static GitIndexApi inspect(byte[] bytes) throws IOException {
-        GitIndexApi index = new InMemoryIndex();
+    public static GitIndexAccess inspect(byte[] bytes) throws IOException {
+        GitIndexAccess index = new InMemoryIndex().createAccess();
         try (GitStorageApi storage = new InMemoryStorage()) {
             publish(bytes, storage, index);
         }
         return index;
     }
 
-    public static PackMetadata ingest(byte[] bytes, GitStorageApi storage, GitIndexApi index) throws IOException {
+    public static PackMetadata ingest(byte[] bytes, GitStorageApi storage, GitIndexAccess index) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes));
              PackIngestor ingestor = new PackIngestor(input, storage, index)) {
             return ingestor.ingest();
         }
     }
 
-    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexApi index) throws IOException {
+    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexAccess index) throws IOException {
         return index.publishIndex(ingest(bytes, storage, index));
     }
 
-    public static ObjectId store(GitStorageApi storage, GitIndexApi index,
+    public static ObjectId store(GitStorageApi storage, GitIndexAccess index,
                                  GitObjectType type, byte[] content) throws IOException {
         publish(pack(entry(type, content)), storage, index);
         return objectId(type, content);
     }
 
-    public static ObjectId storeDelta(GitStorageApi storage, GitIndexApi index,
+    public static ObjectId storeDelta(GitStorageApi storage, GitIndexAccess index,
                                       GitObjectType type, byte[] base, byte[] instructions, byte[] result)
             throws IOException {
         publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, index);
         return objectId(type, result);
     }
 
-    public static byte[] bytes(PackMetadata pack, GitStorageApi storage, GitIndexApi index) throws IOException {
+    public static byte[] bytes(PackMetadata pack, GitStorageApi storage, GitIndexAccess index) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(output), pack.objectCount())) {
             writer.writeObjects(storage, index.objects(pack.packId()));

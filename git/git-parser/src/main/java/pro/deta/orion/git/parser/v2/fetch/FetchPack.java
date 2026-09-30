@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -35,7 +35,7 @@ import java.util.Set;
 
 public final class FetchPack {
     private final GitStorageApi storage;
-    private final GitIndexApi index;
+    private final GitIndexAccess index;
     private final Set<ObjectId> objects = new LinkedHashSet<>();
     private final Set<ObjectId> common = new HashSet<>();
     private final Set<ObjectId> shallow = new LinkedHashSet<>();
@@ -44,13 +44,13 @@ public final class FetchPack {
     private List<IndexedObject> entries = List.of();
     private Map<PackChecksum, URI> packUris = Map.of();
 
-    private FetchPack(GitStorageApi storage, GitIndexApi index, boolean thin) {
+    private FetchPack(GitStorageApi storage, GitIndexAccess index, boolean thin) {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
         this.thin = thin;
     }
 
-    public static FetchPack prepare(GitStorageApi storage, GitIndexApi index, FetchPlan plan) throws IOException {
+    public static FetchPack prepare(GitStorageApi storage, GitIndexAccess index, FetchPlan plan) throws IOException {
         return prepare(new GitRepositoryContext(storage, index), plan);
     }
 
