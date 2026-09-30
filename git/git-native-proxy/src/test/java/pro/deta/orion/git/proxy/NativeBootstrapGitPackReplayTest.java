@@ -132,7 +132,7 @@ class NativeBootstrapGitPackReplayTest {
                 "main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
                 GitCommitAuthor.EMPTY);
         String commit = repository.refs().get("refs/heads/main");
-        var unrelated = repository.files().prepareFileUpdate("other",
+        var unrelated = FileUpdateFixture.prepare(repository.files(), "other",
                 Map.of("other.txt", GitFile.regular(new byte[]{2})), Set.of(),
                 "unrelated", GitCommitAuthor.EMPTY);
         Optional<PackChecksum> received = ingest(repository, unrelated.pack());

@@ -245,8 +245,8 @@ class RemoteBootstrapConfigurationIT {
                                             Map.of("configuration-marker", GitFile.regular(payload)), Set.of(),
                                             "write configuration upstream", GitCommitAuthor.EMPTY);
                             assertThat(configurationRepository.files().loadFiles(
-                                    acl.getRef(), List.of("configuration-marker"))
-                                    .files()).containsEntry("configuration-marker", GitFile.regular(payload));
+                                    acl.getRef(), List.of("configuration-marker")))
+                                    .containsEntry("configuration-marker", GitFile.regular(payload));
                             assertThat(materialRepository.refs()).isEqualTo(materialRefs);
                             var configurationRefs = configurationRepository.refs();
                             provider.openForWrite(materialCache).valueOrFailure("material proxy")
@@ -254,8 +254,8 @@ class RemoteBootstrapConfigurationIT {
                                             Map.of("material-marker", GitFile.regular(payload)), Set.of(),
                                             "write material upstream", GitCommitAuthor.EMPTY);
                             assertThat(materialRepository.files().loadFiles(
-                                    material.getRef(), List.of("material-marker"))
-                                    .files()).containsEntry("material-marker", GitFile.regular(payload));
+                                    material.getRef(), List.of("material-marker")))
+                                    .containsEntry("material-marker", GitFile.regular(payload));
                             assertThat(configurationRepository.refs()).isEqualTo(configurationRefs);
                             configurationRevision = configurationRepository.refs().get(acl.getRef());
                             materialRevision = materialRepository.refs().get(material.getRef());

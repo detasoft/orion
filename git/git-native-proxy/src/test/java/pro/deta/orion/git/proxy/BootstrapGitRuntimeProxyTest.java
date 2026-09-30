@@ -12,7 +12,6 @@ import pro.deta.orion.decision.DecisionRequiredException;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
@@ -51,7 +50,7 @@ class BootstrapGitRuntimeProxyTest {
                 "first",
                 GitCommitAuthor.EMPTY);
         String oldId = repository.refs().get(location.refName());
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("second".getBytes())), Set.of(),
                 "second",
@@ -85,7 +84,7 @@ class BootstrapGitRuntimeProxyTest {
                 location.refName(), Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                 "first", GitCommitAuthor.EMPTY);
         String previous = repository.refs().get(location.refName());
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(location.refName(),
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), location.refName(),
                 Map.of("file", GitFile.regular(new byte[]{2})), Set.of(), "second", GitCommitAuthor.EMPTY);
         GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"),
                 new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), Optional.empty(),
@@ -131,7 +130,8 @@ class BootstrapGitRuntimeProxyTest {
         return BootstrapGitLocation.parse(config);
     }
 
-    private static Optional<PackChecksum> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
+    private static Optional<PackChecksum> ingest(
+            NativeGitRepository repository, FileUpdateFixture.Prepared update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             PackMetadata pack = repository.ingest(input);
             return Optional.of(repository.publishPack(pack).packChecksum());

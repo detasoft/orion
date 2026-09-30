@@ -2,7 +2,6 @@ package pro.deta.orion.git.nativestorage;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitFile;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 
 import java.util.LinkedHashMap;
@@ -14,20 +13,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFileTest {
     @Test
-    void ownsContentAndKeepsSnapshotIndependentOfItsCallers() {
+    void ownsContentAndKeepsLoadedFilesIndependentOfItsCallers() throws Exception {
         byte[] content = new byte[]{1, 2};
         GitFile file = new GitFile(FileMode.EXECUTABLE_FILE, content);
-        Map<String, GitFile> files = new LinkedHashMap<>(Map.of("run", file));
-        GitRepositoryFileSnapshot snapshot = new GitRepositoryFileSnapshot(files, Optional.of("revision"));
-        content[0] = 3;
-        file.content()[1] = 4;
-        files.clear();
-        snapshot.files().get("run").content()[0] = 5;
-
-        assertThat(snapshot.files()).containsExactly(Map.entry("run",
-                new GitFile(FileMode.EXECUTABLE_FILE, new byte[]{1, 2})));
-        assertThat(snapshot.version()).contains("revision");
-        assertThatThrownBy(() -> snapshot.files().clear()).isInstanceOf(UnsupportedOperationException.class);
+        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("demo").valueOrFailure("repository")) {
+            Map<String, GitFile> files = new LinkedHashMap<>(Map.of("run", file));
+            repository.files().saveFiles("main", files, java.util.Set.of(), "initial",
+                    pro.deta.orion.git.fileapi.GitCommitAuthor.EMPTY);
+            Map<String, GitFile> loaded = repository.files().loadFiles("main", java.util.List.of("run"));
+            content[0] = 3;
+            file.content()[1] = 4;
+            files.clear();
+            loaded.get("run").content()[0] = 5;
+            assertThat(loaded).containsExactly(Map.entry("run",
+                    new GitFile(FileMode.EXECUTABLE_FILE, new byte[]{1, 2})));
+            assertThatThrownBy(loaded::clear).isInstanceOf(UnsupportedOperationException.class);
+        }
     }
 
     @Test

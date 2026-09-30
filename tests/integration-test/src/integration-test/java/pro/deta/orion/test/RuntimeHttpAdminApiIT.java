@@ -57,7 +57,7 @@ class RuntimeHttpAdminApiIT {
             byte[] persisted = orion.repositoryProvider().openForRead("orion")
                     .valueOrFailure("configuration repository").files().loadFiles(
                             orion.configuration().getBootstrap().getAccessControl().selectedRef(),
-                            List.of("orion.xml")).files().get("orion.xml").content();
+                            List.of("orion.xml")).get("orion.xml").content();
             String xml = new String(persisted, StandardCharsets.UTF_8);
             assertThat(xml).doesNotContain("private-proxy-value");
             OrionDocument stored = OrionXml.read(new ByteArrayInputStream(persisted));

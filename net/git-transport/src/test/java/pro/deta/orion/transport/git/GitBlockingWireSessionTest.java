@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -49,7 +48,7 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        NativeGitFileUpdate prepared = repository.files().prepareFileUpdate("main",
+        FileUpdateFixture.Prepared prepared = FileUpdateFixture.prepare(repository.files(), "main",
                 Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
                 "prepared", GitCommitAuthor.EMPTY);
         byte[] original = prepared.pack();

@@ -23,7 +23,7 @@ class NativeGitRepositoryPackIngestionTest {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", storage, new InMemoryIndex(), "refs/heads/main")) {
-            byte[] bytes = repository.files().prepareFileUpdate(
+            byte[] bytes = FileUpdateFixture.prepare(repository.files(),
                     "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
@@ -44,7 +44,7 @@ class NativeGitRepositoryPackIngestionTest {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
                 "project.git", storage, new InMemoryIndex(), "refs/heads/main")) {
-            byte[] bytes = repository.files().prepareFileUpdate(
+            byte[] bytes = FileUpdateFixture.prepare(repository.files(),
                     "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY).pack();
             try (BufferedByteInputV2 firstInput = new BufferedByteInputV2(new ByteArrayInputStream(bytes));

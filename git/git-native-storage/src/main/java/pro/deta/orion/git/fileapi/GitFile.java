@@ -9,7 +9,9 @@ import java.util.Objects;
  * A blob-backed Git file with an explicit tree mode and owned content. Symbolic-link content is the
  * link target, not the target file's bytes. Trees and gitlinks have no file payload and are not accepted.
  * Saves use the supplied mode; files omitted from an update retain their existing mode and object ID.
+ * @deprecated Use the streaming read callback and GitFileAccess.write instead of materializing file DTOs.
  */
+@Deprecated(forRemoval = true)
 public record GitFile(FileMode mode, byte[] content) {
     public GitFile {
         Objects.requireNonNull(mode, "mode");

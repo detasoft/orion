@@ -119,9 +119,7 @@ class PlaywrightExternalServicesIT {
             OrionAccessControlServiceImpl accessControl, OrionConfiguration configuration) throws Exception {
         String revision = component.nativeGitRepositoryProvider().find("orion")
                 .valueOrFailure("test configuration repository")
-                .files().loadFiles(
-                        configuration.getBootstrap().getAccessControl().selectedRef(), List.of("orion.xml"))
-                .version().orElseThrow();
+                .refs().get(configuration.getBootstrap().getAccessControl().selectedRef());
         OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
                 true, URI.create(DIRECTORY_URL), "orion@orion.test", List.of("orion.test"), "Orion",
                 Optional.of(new OrionMaterialReference("acme-account", 1)), 90, 120, true, false,

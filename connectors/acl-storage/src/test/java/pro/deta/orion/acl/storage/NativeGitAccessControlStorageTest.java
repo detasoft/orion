@@ -101,7 +101,7 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSnapshot(Map.of(ACL_PATH, bytes("versioned update")), loaded.version()),
                 new AccessControlSaveRequest("versioned update", UserEmail.EMPTY));
 
-        assertThat(selected.files().loadFiles(ref, List.of(ACL_PATH)).files())
+        assertThat(selected.files().loadFiles(ref, List.of(ACL_PATH)))
                 .containsEntry(ACL_PATH, GitFile.regular(bytes("versioned update")));
         assertThat(backend.repositoryNames()).containsExactly("team/repo");
     }
@@ -238,7 +238,7 @@ class NativeGitAccessControlStorageTest {
         assertThat(repository.refs().get("refs/heads/configuration")).isEqualTo(winningVersion);
         assertThat(repository.files().loadFiles(
                 "refs/heads/configuration",
-                List.of(ACL_PATH, "winner.txt")).files())
+                List.of(ACL_PATH, "winner.txt")))
                 .containsEntry(ACL_PATH, GitFile.regular(bytes("version two")))
                 .containsEntry("winner.txt", GitFile.regular(bytes("winner")));
     }
@@ -260,7 +260,7 @@ class NativeGitAccessControlStorageTest {
 
         assertThat(repository.files().loadFiles(
                 "refs/heads/configuration",
-                List.of(ACL_PATH, "winner.txt")).files())
+                List.of(ACL_PATH, "winner.txt")))
                 .containsEntry(ACL_PATH, GitFile.regular(bytes("created")))
                 .containsEntry("winner.txt", GitFile.regular(bytes("winner")));
     }
@@ -293,7 +293,6 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSaveRequest("provider ACL", UserEmail.EMPTY));
 
         assertThat(provider.saves).hasValue(1);
-        assertThat(provider.savedRef).isEqualTo("refs/heads/configuration");
         assertThat(provider.find("internal/configuration").valueOrFailure("repository").refs())
                 .containsKey("refs/heads/configuration");
     }
@@ -341,7 +340,6 @@ class NativeGitAccessControlStorageTest {
         private final NativeGitRepositoryProvider backend;
         private final AtomicInteger reads = new AtomicInteger();
         private final AtomicInteger saves = new AtomicInteger();
-        private String savedRef;
 
         private RecordingProvider(NativeGitRepositoryProvider backend) {
             this.backend = backend;
@@ -374,16 +372,9 @@ class NativeGitAccessControlStorageTest {
         }
 
         @Override
-        public void saveFiles(
-                String repositoryName,
-                String refName,
-                Map<String, GitFile> files,
-                Set<String> deletedPaths,
-                String message,
-                GitCommitAuthor author) throws pro.deta.orion.git.nativestorage.GitOperationException {
+        public Result<NativeGitRepository> openForWrite(String repositoryName) {
             saves.incrementAndGet();
-            savedRef = refName;
-            NativeGitRepositoryProvider.super.saveFiles(repositoryName, refName, files, deletedPaths, message, author);
+            return backend.openForWrite(repositoryName);
         }
     }
 }

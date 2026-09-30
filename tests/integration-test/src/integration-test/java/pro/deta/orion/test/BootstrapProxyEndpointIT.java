@@ -174,7 +174,7 @@ class BootstrapProxyEndpointIT {
                                             .extracting(RemoteRefUpdate::getStatus).isEqualTo(RemoteRefUpdate.Status.OK);
                                 }
                                 assertThat(repository.refs()).containsEntry(REF, commit.name());
-                                assertThat(repository.files().loadFiles(REF, List.of("client-marker")).files())
+                                assertThat(repository.files().loadFiles(REF, List.of("client-marker")))
                                         .containsEntry("client-marker",
                                                 GitFile.regular(("launch " + launch).getBytes(StandardCharsets.UTF_8)));
                                 assertThat(Git.lsRemoteRepository().setRemote(reader.uri(ENDPOINT))

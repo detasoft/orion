@@ -41,14 +41,14 @@ class NativeGitFileUpdateTest {
                     "keep.txt", GitFile.regular(new byte[]{2}),
                     "change.txt", GitFile.regular(new byte[]{3})), Set.of(), "initial", GitCommitAuthor.EMPTY);
             String initial = repository.refs().get("refs/heads/main");
-            NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
+            FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), "main",
                     Map.of("change.txt", GitFile.regular(new byte[]{4})),
                     Set.of("nested/remove.txt"), "delete and replace", GitCommitAuthor.EMPTY);
             assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
             assertThat(repository.publishPack(update.pack(), update.refUpdates(), true,
                     GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(repository.files().loadFiles("main", List.of("keep.txt", "change.txt")).files())
+            assertThat(repository.files().loadFiles("main", List.of("keep.txt", "change.txt")))
                     .containsExactlyInAnyOrderEntriesOf(Map.of(
                             "keep.txt", GitFile.regular(new byte[]{2}),
                             "change.txt", GitFile.regular(new byte[]{4})));
@@ -97,7 +97,7 @@ class NativeGitFileUpdateTest {
                     .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
             NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                     .find("demo").valueOrFailure("repository");
-            assertThat(reopened.files().loadFiles("main", List.of("config.txt")).files())
+            assertThat(reopened.files().loadFiles("main", List.of("config.txt")))
                     .containsAllEntriesOf(files("first"));
             return null;
         });
@@ -109,11 +109,11 @@ class NativeGitFileUpdateTest {
                 .create("demo").valueOrFailure("repository");
         repository.files().saveFiles("main", files("first"), Set.of(), "first", GitCommitAuthor.EMPTY);
         String expected = repository.refs().get("refs/heads/main");
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
+                "main", expected, files("stale"), Set.of(), "stale", GitCommitAuthor.EMPTY);
         repository.files().saveFiles("main", files("second"), Set.of(), "second", GitCommitAuthor.EMPTY);
         String current = repository.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
-                "main", expected, files("stale"), Set.of(), "stale", GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
 
@@ -123,7 +123,7 @@ class NativeGitFileUpdateTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs()).containsEntry("refs/heads/main", current);
-        assertThat(repository.files().loadFiles("main", List.of("config.txt")).files())
+        assertThat(repository.files().loadFiles("main", List.of("config.txt")))
                 .containsAllEntriesOf(files("second"));
         repository.index().withAccess(access3 -> {
             assertThat(access3.packs()).hasSize(3);
@@ -136,7 +136,7 @@ class NativeGitFileUpdateTest {
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create("demo").valueOrFailure("repository");
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 "main", files("prepared"), Set.of(), "prepared", GitCommitAuthor.EMPTY);
         String commitId = update.refUpdates().getFirst().newId().orElseThrow().toHex();
         byte[] firstRead = update.pack();
@@ -163,7 +163,7 @@ class NativeGitFileUpdateTest {
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-            assertThat(target.files().loadFiles("main", List.of("config.txt")).files())
+            assertThat(target.files().loadFiles("main", List.of("config.txt")))
                     .containsAllEntriesOf(files("prepared"));
         }
     }
@@ -172,7 +172,7 @@ class NativeGitFileUpdateTest {
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
         NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository");
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 "main", files("prepared"), Set.of(), "prepared", GitCommitAuthor.EMPTY);
         byte[] corrupt = update.pack();
         corrupt[corrupt.length - 1] ^= 1;

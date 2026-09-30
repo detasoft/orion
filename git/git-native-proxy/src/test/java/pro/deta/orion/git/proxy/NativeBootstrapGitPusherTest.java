@@ -12,7 +12,6 @@ import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -48,7 +47,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("from proxy".getBytes()),
                         "run.sh", new GitFile(FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes()),
@@ -93,7 +92,7 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         new NativeBootstrapGitFetcher().fetch(location, new GitFileClientTransport(), repository);
         String localOldId = repository.refs().get(location.refName());
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 location.refName(),
                 Map.of("orion.xml", GitFile.regular("proxy change".getBytes())), Set.of(),
                 "proxy update",
@@ -129,7 +128,7 @@ class NativeBootstrapGitPusherTest {
     void runtimeRecordsNativePushAuthenticationFailureAndPreservesItsCause() throws Exception {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(location.refName(),
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), location.refName(),
                 Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY);
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
@@ -215,7 +214,8 @@ class NativeBootstrapGitPusherTest {
     private record Upstream(Git git, Path worktree, Path bare) {
     }
 
-    private static Optional<PackChecksum> ingest(NativeGitRepository repository, NativeGitFileUpdate update) throws IOException {
+    private static Optional<PackChecksum> ingest(
+            NativeGitRepository repository, FileUpdateFixture.Prepared update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             PackMetadata pack = repository.ingest(input);
             return Optional.of(repository.publishPack(pack).packChecksum());

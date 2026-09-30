@@ -10,7 +10,6 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -139,7 +138,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void publishesIndependentUpdatesAndAbortsAtomicGroupOnStaleRef(boolean atomic) throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        NativeGitFileUpdate prepared = repository.files().prepareFileUpdate("feature",
+        FileUpdateFixture.Prepared prepared = FileUpdateFixture.prepare(repository.files(), "feature",
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         RefUpdate feature = prepared.refUpdates().getFirst();
@@ -166,7 +165,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{0})), Set.of(), "initial",
                 GitCommitAuthor.EMPTY);
         String initial = repository.refs().get("refs/heads/main");
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), "main",
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
@@ -190,7 +189,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void publishesThroughProviderAndRetainsProviderRejection() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectPublication = true;
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate("main",
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), "main",
                 Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
                 "update", GitCommitAuthor.EMPTY);
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
@@ -236,7 +235,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "first",
                 GitCommitAuthor.EMPTY);
         String first = repository.refs().get("refs/heads/main");
-        NativeGitFileUpdate next = repository.files().prepareFileUpdate("main",
+        FileUpdateFixture.Prepared next = FileUpdateFixture.prepare(repository.files(), "main",
                 Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
                 "next", GitCommitAuthor.EMPTY);
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {

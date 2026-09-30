@@ -6,7 +6,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -34,7 +33,7 @@ class NativeGitRepositoryTest {
             GitFile file = GitFile.regular("content".getBytes(StandardCharsets.UTF_8));
             repository.files().saveFiles("topic", Map.of("./каталог//файл.txt", file), Set.of(),
                     "create", GitCommitAuthor.EMPTY);
-            assertThat(repository.files().loadFiles("refs/heads/topic", List.of("каталог/./файл.txt")).files())
+            assertThat(repository.files().loadFiles("refs/heads/topic", List.of("каталог/./файл.txt")))
                     .containsExactlyEntriesOf(Map.of("каталог/файл.txt", file));
             assertThatThrownBy(() -> repository.files().loadFiles("topic", List.of("missing")))
                     .isInstanceOf(GitRepositoryFileNotFoundException.class);
@@ -68,7 +67,7 @@ class NativeGitRepositoryTest {
             repository.updateRef("refs/heads/main", NULL_ID, commit.toHex());
             assertThatThrownBy(() -> repository.files().loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
-            assertThatThrownBy(() -> repository.files().prepareFileUpdate("main",
+            assertThatThrownBy(() -> FileUpdateFixture.prepare(repository.files(), "main",
                     Map.of("other", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Malformed tree entry");
         }
@@ -82,7 +81,7 @@ class NativeGitRepositoryTest {
             repository.updateRef("refs/heads/main", NULL_ID, commit.toHex());
             assertThatThrownBy(() -> repository.files().loadFiles("main", List.of("file")))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
-            assertThatThrownBy(() -> repository.files().prepareFileUpdate("main",
+            assertThatThrownBy(() -> FileUpdateFixture.prepare(repository.files(), "main",
                     Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY))
                     .isInstanceOf(GitOperationException.class).hasMessageContaining("Commit is missing root tree");
         }
@@ -114,7 +113,7 @@ class NativeGitRepositoryTest {
                 updates.add(result);
             });
             repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
-            NativeGitFileUpdate prepared = repository.files().prepareFileUpdate("configuration",
+            FileUpdateFixture.Prepared prepared = FileUpdateFixture.prepare(repository.files(), "configuration",
                     Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
                     "configuration", GitCommitAuthor.EMPTY);
             repository.publishPack(prepared.pack(), prepared.refUpdates(), true,
@@ -166,9 +165,9 @@ class NativeGitRepositoryTest {
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
-        GitRepositoryFileSnapshot snapshot =
+        Map<String, GitFile> snapshot =
                 repository.files().loadFiles("main", List.of("orion.xml"));
-        assertThat(snapshot.files())
+        assertThat(snapshot)
                 .containsEntry(
                         "orion.xml",
                         GitFile.regular("initial acl".getBytes(StandardCharsets.UTF_8)));
@@ -182,7 +181,7 @@ class NativeGitRepositoryTest {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
 
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 "main",
                 Map.of("orion.xml", GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "prepared acl",
@@ -192,7 +191,7 @@ class NativeGitRepositoryTest {
         assertThat(repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
-        assertThat(repository.files().loadFiles("main", List.of("orion.xml")).files())
+        assertThat(repository.files().loadFiles("main", List.of("orion.xml")))
                 .containsEntry(
                         "orion.xml",
                         GitFile.regular("prepared acl".getBytes(StandardCharsets.UTF_8)));
@@ -220,9 +219,9 @@ class NativeGitRepositoryTest {
                 "updated acl",
                 GitCommitAuthor.EMPTY);
 
-        GitRepositoryFileSnapshot snapshot =
+        Map<String, GitFile> snapshot =
                 repository.files().loadFiles("main", List.of("orion.xml", "nested/acl.xml"));
-        assertThat(snapshot.files())
+        assertThat(snapshot)
                 .containsEntry(
                         "orion.xml",
                         GitFile.regular("updated acl".getBytes(StandardCharsets.UTF_8)))
@@ -241,7 +240,13 @@ class NativeGitRepositoryTest {
                 Map.of("orion.xml", GitFile.regular("version one".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
-        String versionOne = repository.files().loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        String versionOne = repository.refs().get("refs/heads/main");
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
+                "main",
+                versionOne,
+                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
+                "stale",
+                GitCommitAuthor.EMPTY);
         repository.files().saveFiles(
                 "main",
                 Map.of(
@@ -251,12 +256,6 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = repository.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
-                "main",
-                versionOne,
-                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "stale",
-                GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = repository.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
 
@@ -266,7 +265,7 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(repository.files().loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+        assertThat(repository.files().loadFiles("main", List.of("orion.xml", "winner.txt")))
                 .containsEntry("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)))
                 .containsEntry("winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8)));
     }
@@ -282,7 +281,13 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
-        String versionOne = second.files().loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        String versionOne = second.refs().get("refs/heads/main");
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(second.files(),
+                "main",
+                versionOne,
+                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
+                "stale",
+                GitCommitAuthor.EMPTY);
         first.files().saveFiles(
                 "main",
                 Map.of(
@@ -292,12 +297,6 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
         String versionTwo = first.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = second.files().prepareFileUpdate(
-                "main",
-                versionOne,
-                Map.of("orion.xml", GitFile.regular("stale".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "stale",
-                GitCommitAuthor.EMPTY);
         List<RefUpdateResult> results = second.publishPack(
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
 
@@ -307,7 +306,7 @@ class NativeGitRepositoryTest {
                 .isInstanceOf(GitRepositoryConcurrentUpdateException.class);
 
         assertThat(second.refs().get("refs/heads/main")).isEqualTo(versionTwo);
-        assertThat(second.files().loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+        assertThat(second.files().loadFiles("main", List.of("orion.xml", "winner.txt")))
                 .containsEntry("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)))
                 .containsEntry("winner.txt", GitFile.regular("winner".getBytes(StandardCharsets.UTF_8)));
     }
@@ -324,10 +323,9 @@ class NativeGitRepositoryTest {
                         "preserved.txt", GitFile.regular("preserved".getBytes(StandardCharsets.UTF_8))), Set.of(),
                 "version one",
                 GitCommitAuthor.EMPTY);
-        String expectedVersion = repository.files().loadFiles(
-                "main", List.of("orion.xml")).version().orElseThrow();
+        String expectedVersion = repository.refs().get("refs/heads/main");
 
-        NativeGitFileUpdate update = repository.files().prepareFileUpdate(
+        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
                 "main",
                 expectedVersion,
                 Map.of("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8))), Set.of(),
@@ -337,12 +335,11 @@ class NativeGitRepositoryTest {
                 update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                 .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
 
-        GitRepositoryFileSnapshot saved = repository.files().loadFiles(
+        Map<String, GitFile> saved = repository.files().loadFiles(
                 "main",
                 List.of("orion.xml", "preserved.txt"));
-        assertThat(saved.version()).hasValue(repository.refs().get("refs/heads/main"));
-        assertThat(saved.version().orElseThrow()).isNotEqualTo(expectedVersion);
-        assertThat(saved.files())
+        assertThat(repository.refs().get("refs/heads/main")).isNotEqualTo(expectedVersion);
+        assertThat(saved)
                 .containsEntry("orion.xml", GitFile.regular("version two".getBytes(StandardCharsets.UTF_8)))
                 .containsEntry("preserved.txt", GitFile.regular("preserved".getBytes(StandardCharsets.UTF_8)));
     }

@@ -189,7 +189,7 @@ class OrionGitHttpInteroperabilityTest {
                 received.publishPack(pack).packChecksum();
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
                 assertThat(new String(received.files().loadFiles("main",
-                        List.of("README.md")).files().get("README.md").content(),
+                        List.of("README.md")).get("README.md").content(),
                         StandardCharsets.UTF_8)).isEqualTo(content);
             }
         }

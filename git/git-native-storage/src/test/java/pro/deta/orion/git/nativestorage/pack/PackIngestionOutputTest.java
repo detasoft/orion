@@ -1,11 +1,12 @@
 package pro.deta.orion.git.nativestorage.pack;
 
+import pro.deta.orion.git.nativestorage.FileUpdateFixture;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -30,7 +31,7 @@ class PackIngestionOutputTest {
             try (GitStorageApi storage = new InMemoryStorage()) {
                 GitIndexAccess index = new InMemoryIndex().createAccess();
                 try {
-                    NativeGitFileUpdate prepared = prepared();
+                    FileUpdateFixture.Prepared prepared = prepared();
                     byte[] bytes = prepared.pack();
                     PackMetadata pack;
                     try (PackIngestionOutput output = new PackIngestionOutput(storage, index)) {
@@ -100,11 +101,11 @@ class PackIngestionOutputTest {
         }
     }
 
-    private static NativeGitFileUpdate prepared() throws Exception {
+    private static FileUpdateFixture.Prepared prepared() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         try (NativeGitRepository repository = new NativeGitRepository(
                 "source", storage, new InMemoryIndex(), "refs/heads/main")) {
-            return repository.files().prepareFileUpdate(
+            return FileUpdateFixture.prepare(repository.files(),
                     "main", Map.of("file", GitFile.regular(new byte[]{1, 2, 3})), Set.of(),
                     "initial", GitCommitAuthor.EMPTY);
         }

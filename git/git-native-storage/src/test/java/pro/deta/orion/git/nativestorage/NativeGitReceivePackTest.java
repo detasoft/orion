@@ -27,7 +27,7 @@ class NativeGitReceivePackTest {
     void authorizesEachRefAndHonorsAtomicAndIndependentUpdates() throws Exception {
         for (boolean atomic : List.of(true, false)) {
             NativeGitRepository repository = repository();
-            NativeGitFileUpdate prepared = prepare(repository, "initial");
+            FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
             String newId = prepared.refUpdates().getFirst().newId().orElseThrow().toHex();
             List<String> calls = new ArrayList<>();
             GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -70,7 +70,7 @@ class NativeGitReceivePackTest {
     @Test
     void checksRepositoryAccessBeforeIngestingThePack() throws Exception {
         NativeGitRepository repository = repository();
-        NativeGitFileUpdate prepared = prepare(repository, "initial");
+        FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
         GitNativeRepositoryAccessHook denied = new GitNativeRepositoryAccessHook() {
             @Override
             public void beforeWrite(String name) {
@@ -92,7 +92,7 @@ class NativeGitReceivePackTest {
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
         repository.files().saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
-        NativeGitFileUpdate stale = prepare(repository, "stale");
+        FileUpdateFixture.Prepared stale = prepare(repository, "stale");
         repository.files().saveFiles(MAIN, files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
         String current = repository.refs().get(MAIN);
 
@@ -106,7 +106,7 @@ class NativeGitReceivePackTest {
     @Test
     void rejectsMissingObjectClosureWithAllowAll() throws Exception {
         NativeGitRepository repository = repository();
-        NativeGitFileUpdate prepared = prepare(repository, "initial");
+        FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
 
         assertThat(repository.publishPack(prepared.pack(),
                 List.of(RefUpdate.fromWire(MAIN, ZERO, "1".repeat(40))), true,
@@ -167,7 +167,7 @@ class NativeGitReceivePackTest {
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
         repository.files().saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
-        NativeGitFileUpdate prepared = prepare(repository, "prepared");
+        FileUpdateFixture.Prepared prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
         repository.files().saveFiles(
                 "side", files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
@@ -189,9 +189,9 @@ class NativeGitReceivePackTest {
         return new InMemoryNativeGitRepositoryProvider().create("demo").valueOrFailure("repository");
     }
 
-    private static NativeGitFileUpdate prepare(NativeGitRepository repository, String value)
+    private static FileUpdateFixture.Prepared prepare(NativeGitRepository repository, String value)
             throws GitOperationException {
-        return repository.files().prepareFileUpdate(MAIN, files(value), Set.of(), value, GitCommitAuthor.EMPTY);
+        return FileUpdateFixture.prepare(repository.files(), MAIN, files(value), Set.of(), value, GitCommitAuthor.EMPTY);
     }
 
     private static Map<String, GitFile> files(String value) {

@@ -40,6 +40,7 @@ public interface NativeGitRepositoryProvider extends AutoCloseable {
         return find(repositoryName);
     }
 
+    @Deprecated(forRemoval = true)
     default void saveFiles(
             String repositoryName,
             String refName,
@@ -50,19 +51,6 @@ public interface NativeGitRepositoryProvider extends AutoCloseable {
         openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
                 .files().saveFiles(refName, files, deletedPaths, message, author);
-    }
-
-    default NativeGitFileUpdate prepareFileUpdate(
-            String repositoryName,
-            String refName,
-            String expectedRefRevision,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        return openForWrite(repositoryName)
-                .valueOrFailure("Cannot open native repository " + repositoryName)
-                .files().prepareFileUpdate(refName, expectedRefRevision, files, deletedPaths, message, author);
     }
 
     default List<RefUpdateResult> publishPack(

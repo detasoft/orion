@@ -1,29 +1,25 @@
 package pro.deta.orion;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.data.FileMode;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore {
     private static final String SAVE_MESSAGE = "Update server identity material";
@@ -54,8 +50,8 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
             return Optional.empty();
         }
         try {
-            GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(refName, List.of(path));
-            byte[] bytes = snapshot.files().get(path).content();
+            byte[] bytes = repository.files().readFile(new ObjectId(refRevision), path,
+                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
             String version = materialVersion(bytes);
             observation = new Observation(version, refRevision);
             return Optional.of(new KeyMaterialSnapshot(bytes, version));
@@ -76,29 +72,23 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
         }
 
         try {
-            NativeGitFileUpdate update = repositoryProvider.prepareFileUpdate(
-                    repositoryName,
-                    refName,
-                    observation.refRevision(),
-                    Map.of(path, GitFile.regular(bytes)), Set.of(),
-                    SAVE_MESSAGE,
-                    GitCommitAuthor.EMPTY);
-            List<RefUpdateResult> results = repositoryProvider.publishPack(
-                    repositoryName,
-                    update.pack(),
-                    update.refUpdates(),
-                    true, GitNativeRepositoryAccessHook.ALLOW_ALL);
-            try {
-                GitOperationException.requireSuccess(results);
-            } catch (GitRepositoryConcurrentUpdateException conflict) {
-                throw conflict();
-            }
+            NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
+                    .valueOrFailure("Cannot open key material repository");
+            String revision = repository.files().withAccess(refName, observation.refRevision(),
+                    SAVE_MESSAGE, GitCommitAuthor.EMPTY, access -> {
+                        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes))) {
+                            access.write(path, FileMode.REGULAR_FILE, bytes.length, input);
+                        }
+                        String next = access.refUpdates().getFirst().newId().orElseThrow().toHex();
+                        access.apply();
+                        return next;
+                    });
             String version = materialVersion(bytes);
-            observation = new Observation(version, update.refUpdates().getFirst().newId().orElseThrow().toHex());
+            observation = new Observation(version, revision);
             return version;
-        } catch (KeyMaterialStoreConflictException conflict) {
-            throw conflict;
-        } catch (GitOperationException | RuntimeException failure) {
+        } catch (GitRefConflictException failure) {
+            throw conflict();
+        } catch (Exception failure) {
             throw new IOException("Cannot write key material store", failure);
         }
     }

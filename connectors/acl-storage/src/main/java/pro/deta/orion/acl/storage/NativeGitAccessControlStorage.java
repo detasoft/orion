@@ -1,24 +1,27 @@
 package pro.deta.orion.acl.storage;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
+import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
-import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
-import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
-import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.data.FileMode;
+import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
+import pro.deta.orion.internal.CheckedFunction;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class NativeGitAccessControlStorage implements AccessControlStorage {
@@ -49,21 +52,22 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
         try {
-            if (!repository.refs().containsKey(configurationRef)) {
+            String revision = repository.refs().get(configurationRef);
+            if (revision == null) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
-            GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(configurationRef, paths);
             Map<String, byte[]> files = new LinkedHashMap<>();
-            for (Map.Entry<String, GitFile> entry : snapshot.files().entrySet()) {
-                files.put(entry.getKey(), entry.getValue().content());
+            for (String path : paths) {
+                files.put(path, repository.files().readFile(new ObjectId(revision), path,
+                        (type, size, base, input) -> input.readBytes(Math.toIntExact(size))));
             }
-            return new Result.Success<>(new AccessControlSnapshot(files, snapshot.version()));
+            return new Result.Success<>(new AccessControlSnapshot(files, Optional.of(revision)));
         } catch (GitRepositoryFileNotFoundException error) {
             if (primaryPathIsMissing(repository)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
-        } catch (GitOperationException | RuntimeException error) {
+        } catch (IOException | GitOperationException | RuntimeException error) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
     }
@@ -74,39 +78,40 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         Objects.requireNonNull(request, "request");
         try {
             GitCommitAuthor author = author(request);
-            Map<String, GitFile> files = new LinkedHashMap<>();
-            for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                files.put(entry.getKey(), GitFile.regular(entry.getValue()));
-            }
-            if (snapshot.version().isPresent()) {
-                NativeGitFileUpdate update = repositoryProvider.prepareFileUpdate(
-                        repositoryName,
-                        configurationRef,
-                        snapshot.version().orElseThrow(),
-                        files, Set.of(),
-                        request.message(),
-                        author);
-                List<RefUpdateResult> results = repositoryProvider.publishPack(
-                        repositoryName,
-                        update.pack(),
-                        update.refUpdates(),
-                        true, GitNativeRepositoryAccessHook.ALLOW_ALL);
-                try {
-                    GitOperationException.requireSuccess(results);
-                } catch (GitRepositoryConcurrentUpdateException conflict) {
-                    throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", conflict);
+            NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
+                    .valueOrFailure("Cannot open native repository " + repositoryName);
+            CheckedFunction<GitFileAccess, Void> update = access -> {
+                for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
+                    byte[] content = entry.getValue();
+                    if (snapshot.version().isPresent()) {
+                        byte[] previous;
+                        try {
+                            previous = repository.files().readFile(
+                                    new ObjectId(snapshot.version().orElseThrow()), entry.getKey(),
+                                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
+                        } catch (GitRepositoryFileNotFoundException missing) {
+                            previous = null;
+                        }
+                        if (Arrays.equals(content, previous)) {
+                            continue;
+                        }
+                    }
+                    try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
+                        access.write(entry.getKey(), FileMode.REGULAR_FILE, content.length, input);
+                    }
                 }
+                access.apply();
+                return null;
+            };
+            if (snapshot.version().isPresent()) {
+                repository.files().withAccess(configurationRef, snapshot.version().orElseThrow(),
+                        request.message(), author, update);
             } else {
-                repositoryProvider.saveFiles(
-                        repositoryName,
-                        configurationRef,
-                        files, Set.of(),
-                        request.message(),
-                        author);
+                repository.files().withAccess(configurationRef, request.message(), author, update);
             }
-        } catch (AccessControlConcurrentUpdateException error) {
-            throw error;
-        } catch (GitOperationException | RuntimeException error) {
+        } catch (GitRefConflictException error) {
+            throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", error);
+        } catch (Exception error) {
             throw new IllegalStateException("Cannot save ACL to native repository " + repositoryName, error);
         }
     }
@@ -120,11 +125,16 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             return true;
         }
         try {
-            repository.files().loadFiles(configurationRef, List.of(paths.getFirst()));
+            String revision = repository.refs().get(configurationRef);
+            if (revision == null) {
+                return true;
+            }
+            repository.files().readFile(new ObjectId(revision), paths.getFirst(),
+                    (type, size, base, input) -> Boolean.TRUE);
             return false;
         } catch (GitRepositoryFileNotFoundException missing) {
             return true;
-        } catch (GitOperationException failure) {
+        } catch (IOException | GitOperationException failure) {
             return false;
         }
     }

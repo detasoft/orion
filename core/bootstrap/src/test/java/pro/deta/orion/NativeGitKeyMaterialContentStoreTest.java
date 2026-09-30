@@ -6,7 +6,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -46,12 +45,12 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThat(store.read()).isEmpty();
         String version = store.write(bytes("encrypted-material"), null);
 
-        GitRepositoryFileSnapshot snapshot = fixture.repository().files().loadFiles(
+        Map<String, GitFile> snapshot = fixture.repository().files().loadFiles(
                 REF,
                 List.of("orion.xml", MATERIAL_PATH));
         assertThat(store.read().orElseThrow().version()).isEqualTo(version);
-        assertThat(snapshot.files()).containsEntry("orion.xml", GitFile.regular(bytes("configuration")));
-        assertThat(snapshot.files()).containsEntry(MATERIAL_PATH, GitFile.regular(bytes("encrypted-material")));
+        assertThat(snapshot).containsEntry("orion.xml", GitFile.regular(bytes("configuration")));
+        assertThat(snapshot).containsEntry(MATERIAL_PATH, GitFile.regular(bytes("encrypted-material")));
     }
 
     @Test
@@ -67,7 +66,7 @@ class NativeGitKeyMaterialContentStoreTest {
         String saved = store.write(bytes("updated material"), version);
 
         assertThat(store.read().orElseThrow().version()).isEqualTo(saved);
-        assertThat(fixture.repository().files().loadFiles(REF, List.of("orion.xml", MATERIAL_PATH)).files())
+        assertThat(fixture.repository().files().loadFiles(REF, List.of("orion.xml", MATERIAL_PATH)))
                 .containsEntry("orion.xml", GitFile.regular(bytes("new config")))
                 .containsEntry(MATERIAL_PATH, GitFile.regular(bytes("updated material")));
     }
@@ -116,11 +115,11 @@ class NativeGitKeyMaterialContentStoreTest {
         assertThatThrownBy(() -> store.write(bytes("stale material"), observedVersion))
                 .isInstanceOf(KeyMaterialStoreConflictException.class);
 
-        GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(
+        Map<String, GitFile> snapshot = repository.files().loadFiles(
                 REF,
                 List.of(MATERIAL_PATH, "orion.xml"));
-        assertThat(snapshot.files()).containsEntry(MATERIAL_PATH, GitFile.regular(bytes("initial")));
-        assertThat(snapshot.files()).containsEntry("orion.xml",
+        assertThat(snapshot).containsEntry(MATERIAL_PATH, GitFile.regular(bytes("initial")));
+        assertThat(snapshot).containsEntry("orion.xml",
                 GitFile.regular(bytes("concurrent configuration")));
     }
 
@@ -220,17 +219,12 @@ class NativeGitKeyMaterialContentStoreTest {
         }
 
         @Override
-        public List<RefUpdateResult> publishPack(
-                String repositoryName,
-                byte[] pack,
-                List<RefUpdate> updates,
-                boolean atomic,
-                GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
+        public Result<NativeGitRepository> openForWrite(String repositoryName) {
             if (!interleaved) {
                 interleaved = true;
                 beforePublish.run();
             }
-            return delegate.publishPack(repositoryName, pack, updates, atomic, accessHook);
+            return delegate.openForWrite(repositoryName);
         }
     }
 }

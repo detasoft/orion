@@ -53,7 +53,7 @@ class NativeBootstrapGitFetcherTest {
 
         try {
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")))
                     .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
 
             Files.writeString(upstream.worktree().resolve("orion.xml"), "second");
@@ -62,7 +62,7 @@ class NativeBootstrapGitFetcherTest {
             upstream.git().push().setRemote(upstream.bare().toUri().toString()).call();
 
             fetcher.fetch(location, new GitFileClientTransport(), repository);
-            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")))
                     .containsEntry("orion.xml", GitFile.regular("second".getBytes()));
         } finally {
             upstream.git().close();
@@ -115,7 +115,7 @@ class NativeBootstrapGitFetcherTest {
             fetcher.fetch(location, discoveryOnly, repository);
 
             assertThat(repository.refs()).containsEntry(location.refName(), firstId);
-            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")).files())
+            assertThat(repository.files().loadFiles(location.refName(), List.of("orion.xml")))
                     .containsEntry("orion.xml", GitFile.regular("first".getBytes()));
         } finally {
             upstream.git().close();

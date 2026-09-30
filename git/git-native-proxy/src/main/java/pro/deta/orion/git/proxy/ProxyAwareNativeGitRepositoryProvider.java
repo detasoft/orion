@@ -13,7 +13,6 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
-import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
@@ -173,14 +172,21 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
             try {
-                GitRepositoryFileSnapshot snapshot = repository.files().loadFiles(refName, paths);
-                return resolved(id, repositoryName, refName, paths, snapshot.version(), allowMissing);
+                String revision = repository.refs().get(refName);
+                if (revision == null) {
+                    throw new GitRepositoryFileNotFoundException("Branch not found: " + refName);
+                }
+                for (String path : paths) {
+                    repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
+                            (type, size, base, input) -> Boolean.TRUE);
+                }
+                return resolved(id, repositoryName, refName, paths, Optional.of(revision), allowMissing);
             } catch (GitRepositoryFileNotFoundException error) {
                 if (allowMissing && primaryPathIsMissing(repository, refName, paths)) {
                     return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
                 }
                 throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
-            } catch (GitOperationException error) {
+            } catch (IOException | GitOperationException error) {
                 throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
             }
         } catch (RuntimeException error) {
@@ -616,6 +622,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     @Override
+    @Deprecated(forRemoval = true)
     public void saveFiles(
             String repositoryName,
             String refName,
@@ -731,11 +738,16 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             return true;
         }
         try {
-            repository.files().loadFiles(refName, List.of(paths.getFirst()));
+            String revision = repository.refs().get(refName);
+            if (revision == null) {
+                return true;
+            }
+            repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), paths.getFirst(),
+                    (type, size, base, input) -> Boolean.TRUE);
             return false;
         } catch (GitRepositoryFileNotFoundException missing) {
             return true;
-        } catch (GitOperationException failure) {
+        } catch (IOException | GitOperationException failure) {
             return false;
         }
     }

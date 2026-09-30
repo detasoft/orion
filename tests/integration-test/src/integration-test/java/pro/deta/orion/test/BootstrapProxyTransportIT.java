@@ -122,7 +122,7 @@ class BootstrapProxyTransportIT {
                                 REF, Map.of("orion.xml", GitFile.regular(updatedConfiguration)), Set.of(),
                                 "upstream edit", GitCommitAuthor.EMPTY);
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                        assertThat(retained.files().loadFiles(REF, List.of("orion.xml")).files())
+                        assertThat(retained.files().loadFiles(REF, List.of("orion.xml")))
                                 .containsEntry("orion.xml", GitFile.regular(updatedConfiguration));
 
                         Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
@@ -161,10 +161,10 @@ class BootstrapProxyTransportIT {
                         retained.files().saveFiles(
                                 REF, Map.of("marker.txt", GitFile.regular(bytes("proxy edit"))), Set.of(),
                                 "proxy edit", GitCommitAuthor.EMPTY);
-                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")).files())
+                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")))
                                 .containsEntry("marker.txt", GitFile.regular(bytes("proxy edit")));
 
-                        var stale = retained.files().prepareFileUpdate(
+                        var stale = FileUpdateFixture.prepare(retained.files(),
                                 REF, Map.of("marker.txt", GitFile.regular(bytes("stale edit"))), Set.of(),
                                 "stale candidate", GitCommitAuthor.EMPTY);
                         repository.files().saveFiles(REF,
@@ -176,7 +176,7 @@ class BootstrapProxyTransportIT {
                                 .extracting(RefUpdateResult::status)
                                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
                         assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
-                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")).files())
+                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")))
                                 .containsEntry("marker.txt",
                                         GitFile.regular(bytes("concurrent upstream edit")));
                     } finally {
