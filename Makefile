@@ -9,10 +9,12 @@ TEST_ANALYTICS_REPORT_ARGS ?=
 TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
 TEST_JFR_MAVEN_ARGS ?=
 SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
+ORION_MAVEN_LOCK_RUN = $(if $(filter Darwin,$(shell uname -s)),lockf -k,flock) \
+	'$(shell git rev-parse --path-format=absolute --git-common-dir)/orion-maven.lock'
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dist test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
+.PHONY: help dist clean test test-all integration-test test-jfr test-jfr-report xml-schema dependency-audit \
 	dependency-minimize \
 	skill-check skills-check docker-exec build-processes \
 	cargo-init rust-install rust-maven-plugin-install session-host session-host-test session-host-linux-test
@@ -50,20 +52,18 @@ build-processes: ## Show running Maven builds and Make test processes
 dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-# The build cache attaches unsuffixed class directories, so these runs bypass it.
+clean: ## Clean Maven outputs and this repository's build cache
+	$(ORION_MAVEN_LOCK_RUN) $(MAVEN) clean -Pdev,clean-build-cache -T 4 -q
+
 test: ## Run package with unit tests; MODULE+TEST select tests, LOG sets a log file
 test-all: ## Run verify with unit and integration tests, including the Git matrix; supports MODULE+TEST and LOG
-test test-all: SHELL := /bin/bash
 test test-all:
 	@if { [ -n '$(strip $(value MODULE))' ] && [ -z '$(strip $(value TEST))' ]; } \
 		|| { [ -z '$(strip $(value MODULE))' ] && [ -n '$(strip $(value TEST))' ]; }; then \
 		echo 'Set both MODULE and TEST for focused tests.' >&2; exit 2; \
 	fi
-	@letters=abcdefghijklmnopqrstuvwxyz; \
-	slot=$${letters:RANDOM%26:1}; \
-	printf 'Test classes slot: %s\n' "$$slot"; \
+	$(ORION_MAVEN_LOCK_RUN) \
 	$(MAVEN) $(if $(filter test-all,$@),verify,package) -Pdev -T 4 -q \
-		-Dorion.classes.suffix=-$$slot -Dmaven.build.cache.enabled=false \
 		$(if $(strip $(value MODULE)),-pl '$(value MODULE)' -am \
 		$(if $(filter test-all,$@),-Dit.test='$(value TEST)' -Dfailsafe.failIfNoSpecifiedTests=false,\
 		-Dtest='$(value TEST)' -Dsurefire.failIfNoSpecifiedTests=false)) \

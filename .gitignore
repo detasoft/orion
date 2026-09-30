@@ -6,6 +6,7 @@ build
 .gradle
 /orion
 .orion-cache/
+/.orion-build-cache/
 .DS_Store
 .test-durations/
 .worktrees/

@@ -6,6 +6,10 @@
     <configuration>
         <enabled>true</enabled>
         <hashAlgorithm>SHA-256</hashAlgorithm>
+        <!-- Keep this directory in sync with the clean-build-cache profile in pom.xml. -->
+        <local>
+            <location>.orion-build-cache</location>
+        </local>
         <attachedOutputs>
             <dirNames>
                 <dirName>classes</dirName>
