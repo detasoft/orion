@@ -82,7 +82,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(repository.files().loadFiles("refs/heads/main", List.of("file")).files())
                 .containsEntry("file", GitFile.regular(new byte[]{1}));
         assertThat(provider.isPublicRepositoryName(
-                BootstrapGitLocation.persistent(document.system().proxies().getFirst()).proxyName())).isFalse();
+                BootstrapGitLocation.persistent(document.system().proxies().getFirst(), document.system()).proxyName())).isFalse();
     }
 
     @Test
@@ -150,17 +150,18 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         visited.clear();
         var added = proxyDocument("other", "file:///other.git").system().proxies().getFirst();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(initial.system().accessControl(),
-                Optional.empty(), List.of(), List.of(initial.system().proxies().getFirst(), added)), List.of()));
+                Optional.empty(), List.of(), List.of(initial.system().proxies().getFirst(), added),
+                        initial.system().connections()), List.of()));
 
         assertThat(provider.retry(added.alias(), current::get, secrets(current.get())))
                 .isInstanceOfSatisfying(Result.Failure.class, failure ->
                         assertThat(failure.throwable()).isInstanceOf(BootstrapGitProxyException.class));
-        assertThat(provider.syncObservation(added).status()).isEqualTo(AUTHENTICATION_FAILED);
+        assertThat(provider.syncObservation(added, current.get().system()).status()).isEqualTo(AUTHENTICATION_FAILED);
         unavailable.set(false);
         assertThat(provider.retry(added.alias(), current::get, secrets(current.get()))
                 .valueOrFailure("retry").status()).isEqualTo(SUCCESS);
         assertThat(visited).containsExactly("/other.git", "/other.git");
-        assertThat(provider.syncObservation(initial.system().proxies().getFirst()).status()).isEqualTo(SUCCESS);
+        assertThat(provider.syncObservation(initial.system().proxies().getFirst(), initial.system()).status()).isEqualTo(SUCCESS);
         assertThat(provider.repositoryNames()).isEmpty();
     }
 
@@ -171,17 +172,17 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var provider = provider(refreshes, pushes);
         OrionDocument document = proxyDocument("configuration", "file:///upstream.git");
         GitProxyBinding binding = document.system().proxies().getFirst();
-        assertThat(provider.syncObservation(binding).status()).isEqualTo(NOT_CHECKED);
+        assertThat(provider.syncObservation(binding, document.system()).status()).isEqualTo(NOT_CHECKED);
         provider.activate(() -> document, secrets(document));
         refreshes.set(0);
 
-        var observation = provider.syncObservation(binding);
+        var observation = provider.syncObservation(binding, document.system());
 
         assertThat(observation.status()).isEqualTo(SUCCESS);
         assertThat(observation.observedAt()).isNotNull();
-        assertThat(provider.syncObservation(binding)).isEqualTo(observation);
+        assertThat(provider.syncObservation(binding, document.system())).isEqualTo(observation);
         assertThat(provider.syncObservation(
-                proxyDocument("configuration", "file:///other.git").system().proxies().getFirst()).status())
+                proxyDocument("configuration", "file:///other.git").system().proxies().getFirst(), document.system()).status())
                 .isEqualTo(NOT_CHECKED);
         assertThat(refreshes).hasValue(0);
         assertThat(pushes).hasValue(0);
@@ -205,25 +206,25 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.activate(() -> document, secrets(document));
         failure.set(new GitClientFailure(GitClientFailure.Kind.AUTHENTICATION_FAILED,
                 GitClientFailure.Phase.OPEN, false, "private upstream response with secret", null));
-        String internal = BootstrapGitLocation.persistent(binding).proxyName();
+        String internal = BootstrapGitLocation.persistent(binding, document.system()).proxyName();
 
         assertThatThrownBy(() -> provider.openForRead(internal))
                 .hasMessageNotContaining("secret")
                 .hasCauseInstanceOf(GitClientTransportException.class)
                 .cause().hasMessage("private upstream response with secret");
-        assertThat(provider.syncObservation(binding).status()).isEqualTo(AUTHENTICATION_FAILED);
-        var failedAt = provider.syncObservation(binding).observedAt();
+        assertThat(provider.syncObservation(binding, document.system()).status()).isEqualTo(AUTHENTICATION_FAILED);
+        var failedAt = provider.syncObservation(binding, document.system()).observedAt();
         assertThat(failedAt).isNotNull();
 
         failure.set(new GitClientFailure(GitClientFailure.Kind.TIMEOUT,
                 GitClientFailure.Phase.OPEN, true, "private timeout details", null));
         assertThatThrownBy(() -> provider.openForRead(internal)).hasMessageNotContaining("private");
-        assertThat(provider.syncObservation(binding).status()).isEqualTo(UNAVAILABLE);
+        assertThat(provider.syncObservation(binding, document.system()).status()).isEqualTo(UNAVAILABLE);
 
         failure.set(null);
         provider.openForRead(internal).valueOrFailure("recovered");
-        assertThat(provider.syncObservation(binding).status()).isEqualTo(SUCCESS);
-        assertThat(provider.syncObservation(binding).observedAt()).isAfterOrEqualTo(failedAt);
+        assertThat(provider.syncObservation(binding, document.system()).status()).isEqualTo(SUCCESS);
+        assertThat(provider.syncObservation(binding, document.system()).observedAt()).isAfterOrEqualTo(failedAt);
     }
 
     @Test
@@ -541,8 +542,8 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
         OrionDocument first = proxyDocument("first", "file:///first.git");
         OrionDocument second = proxyDocument("second", "file:///second.git");
-        String firstName = BootstrapGitLocation.persistent(first.system().proxies().getFirst()).proxyName();
-        String secondName = BootstrapGitLocation.persistent(second.system().proxies().getFirst()).proxyName();
+        String firstName = BootstrapGitLocation.persistent(first.system().proxies().getFirst(), first.system()).proxyName();
+        String secondName = BootstrapGitLocation.persistent(second.system().proxies().getFirst(), second.system()).proxyName();
 
         provider.activate(() -> first, secrets(first));
         assertThat(provider.openForRead(firstName)).isInstanceOf(Result.Success.class);
@@ -851,10 +852,10 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     private static OrionDocument proxyDocument(String alias, String upstream) {
-        var binding = new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
+        var binding = new GitProxyBinding(new RemoteAlias(alias),
+                new GitProxyBinding.Direct(URI.create(upstream), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "main");
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(), List.of(binding)), List.of());
+                List.of(), List.of(binding), List.of()), List.of());
     }
 
     private static ConfigurationSecrets secrets(OrionDocument document) {

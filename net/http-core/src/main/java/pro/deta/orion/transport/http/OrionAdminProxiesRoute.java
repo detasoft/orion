@@ -19,6 +19,8 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.Connection;
+import pro.deta.orion.schema.orion.ConnectionReference;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.util.Result;
@@ -64,7 +66,8 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         var snapshot = desiredState.current();
         var aliases = new ArrayList<AliasResponse>();
         for (GitProxyBinding binding : snapshot.document().system().proxies()) {
-            aliases.add(project(binding, provider.syncObservation(binding)));
+            aliases.add(project(binding, snapshot.document().system(), provider.syncObservation(binding,
+                    snapshot.document().system())));
         }
         aliases.sort(Comparator.comparing(AliasResponse::alias));
         return OrionHttpResponse.ok(new AliasListResponse(aliases, snapshot.revision().orElse(null)));
@@ -110,7 +113,8 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             String status = action.equals("retry") ? "retried" : "saved";
             resultCode = status + ":" + wireStatus(observation);
             response = OrionHttpResponse.json(action.equals("create") ? 201 : 200,
-                    new MutationResponse(status, project(binding, observation), snapshot.revision().orElse(null)));
+                    new MutationResponse(status, project(binding, snapshot.document().system(), observation),
+                            snapshot.revision().orElse(null)));
         } catch (AccessControlConcurrentUpdateException failure) {
             try {
                 acl.reload("proxy configuration conflict");
@@ -147,7 +151,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             throw new AccessControlConcurrentUpdateException("Configuration changed during retry", null);
         }
         if (result instanceof Result.Success<SyncObservation> success) return success.value();
-        return provider.syncObservation(binding);
+        return provider.syncObservation(binding, snapshot.document().system());
     }
 
     private OrionDocument update(OrionDocument document, RemoteAlias alias, MutationRequest request) {
@@ -164,17 +168,24 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         if ((!create && !replace && request.credential() != null) || (replace && request.credential() == null)) {
             throw new Rejected("explicit-credential-replacement-required");
         }
-        URI upstream = request.upstream() == null ? existing.upstream() : URI.create(request.upstream());
+        URI upstream = request.upstream() == null ? existing.upstream(document.system()) : URI.create(request.upstream());
         String ref = request.ref() == null ? existing.ref() : request.ref();
         GitCredentialKind kind = request.credentialKind() == null
-                ? (existing == null ? GitCredentialKind.NONE : existing.credentialKind())
+                ? (existing == null ? GitCredentialKind.NONE : existing.credentialKind(document.system()))
                 : GitCredentialKind.valueOf(request.credentialKind());
-        Optional<String> secret = existing == null ? Optional.empty() : existing.secret();
+        Optional<String> secret = existing == null ? Optional.empty() : existing.secret(document.system());
         boolean newSecret = secret.isEmpty();
         if (replace && secret.isPresent()) {
             for (GitProxyBinding binding : document.system().proxies()) {
-                if (!binding.alias().equals(alias) && binding.secret().equals(secret)) newSecret = true;
+                if (!binding.alias().equals(alias) && binding.secret(document.system()).equals(secret)) newSecret = true;
             }
+            for (Connection connection : document.system().connections()) {
+                boolean own = existing != null && existing.source() instanceof GitProxyBinding.Ssh ssh
+                        && ssh.connection().name().equals(connection.name());
+                if (!own && connection.referencesSecret(secret.orElseThrow())) newSecret = true;
+            }
+            if (document.system().https().flatMap(value -> value.acme()).flatMap(value -> value.eabSecret())
+                    .equals(secret)) newSecret = true;
         }
         if (kind == GitCredentialKind.NONE) {
             if (request.credential() != null) throw new Rejected("credential-not-supported");
@@ -184,24 +195,57 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             secret = Optional.of("proxy-" + UUID.randomUUID());
         }
         Optional<String> username = request.username() == null
-                ? (existing == null ? Optional.empty() : existing.username()) : Optional.of(request.username());
+                ? (existing == null ? Optional.empty() : existing.username(document.system())) : Optional.of(request.username());
         if (kind != GitCredentialKind.PASSWORD || "ssh".equalsIgnoreCase(upstream.getScheme())) {
             username = Optional.empty();
         }
+        URI previousUpstream = existing == null ? null : existing.upstream(document.system());
+        URI selectedUpstream = GitProxyBinding.canonicalUpstream(upstream);
+        boolean sameSshServer = previousUpstream != null && "ssh".equals(previousUpstream.getScheme())
+                && "ssh".equals(selectedUpstream.getScheme())
+                && previousUpstream.getHost().equals(selectedUpstream.getHost())
+                && previousUpstream.getPort() == selectedUpstream.getPort();
         Set<String> knownHosts = request.knownHosts() == null
-                ? (existing == null || !existing.upstream().equals(GitProxyBinding.canonicalUpstream(upstream))
-                        ? Set.of() : existing.knownHosts())
+                ? (sameSshServer ? existing.knownHosts(document.system()) : Set.of())
                 : request.knownHosts();
         if (!"ssh".equalsIgnoreCase(upstream.getScheme())) knownHosts = Set.of();
-        GitProxyBinding replacement = new GitProxyBinding(alias, upstream, ref, kind, secret, username, knownHosts);
-        if (existing != null && provider.isBootstrapSource(existing, sources)
-                && (!existing.upstream().equals(replacement.upstream()) || !existing.ref().equals(replacement.ref()))) {
+        List<Connection> connections = new ArrayList<>(document.system().connections());
+        GitProxyBinding.Source transport;
+        if ("ssh".equalsIgnoreCase(upstream.getScheme())) {
+            String connectionName = existing != null && existing.source() instanceof GitProxyBinding.Ssh ssh
+                    ? ssh.connection().name() : alias.value() + "-ssh";
+            Connection.Ssh replacementConnection = Connection.Ssh.fromUpstream(connectionName, upstream, kind,
+                    secret, knownHosts);
+            if (existing != null && existing.source() instanceof GitProxyBinding.Ssh) {
+                Connection.Ssh previousConnection = existing.sshConnection(document.system());
+                if (!previousConnection.equals(replacementConnection) || replace) {
+                    for (GitProxyBinding other : document.system().proxies()) {
+                        if (!other.alias().equals(alias) && other.source() instanceof GitProxyBinding.Ssh otherSsh
+                                && otherSsh.connection().name().equals(connectionName)) {
+                            throw new Rejected("shared-connection-requires-explicit-edit");
+                        }
+                    }
+                }
+                connections.set(connections.indexOf(previousConnection), replacementConnection);
+            } else {
+                connections.add(replacementConnection);
+            }
+            transport = new GitProxyBinding.Ssh(
+                    new ConnectionReference(ConnectionReference.Scope.SYSTEM, connectionName), upstream.getRawPath());
+        } else {
+            transport = new GitProxyBinding.Direct(upstream, kind, secret, username);
+        }
+        GitProxyBinding replacement = new GitProxyBinding(alias, transport, ref);
+        if (existing != null && provider.isBootstrapSource(existing, sources, document.system())
+                && (!existing.upstream(document.system()).equals(GitProxyBinding.canonicalUpstream(upstream))
+                        || !existing.ref().equals(replacement.ref()))) {
             throw new Rejected("bootstrap-source-fixed");
         }
         var bindings = new ArrayList<GitProxyBinding>();
         for (GitProxyBinding binding : document.system().proxies()) {
             if (!binding.alias().equals(alias)) {
-                if (binding.upstream().equals(replacement.upstream()) && binding.ref().equals(replacement.ref())) {
+                if (binding.upstream(document.system()).equals(GitProxyBinding.canonicalUpstream(upstream))
+                        && binding.ref().equals(replacement.ref())) {
                     throw new Rejected("upstream-already-bound");
                 }
                 bindings.add(binding);
@@ -215,7 +259,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     : secrets.replaceSystem(document, id, request.credential());
         }
         OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
-                document.system().accessControl(), document.system().https(), document.system().secrets(), bindings),
+                document.system().accessControl(), document.system().https(), document.system().secrets(), bindings, connections),
                 document.organizations());
         secrets.validate(candidate);
         return candidate;
@@ -241,9 +285,10 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         }
     }
 
-    private static AliasResponse project(GitProxyBinding binding, SyncObservation observation) {
-        return new AliasResponse("system", binding.alias().value(), sanitizedUpstream(binding.upstream()),
-                binding.upstream().getScheme(), binding.ref(), "/r/" + binding.publicRepositoryName() + ".git",
+    private static AliasResponse project(GitProxyBinding binding, OrionDocument.SystemConfiguration system,
+            SyncObservation observation) {
+        return new AliasResponse("system", binding.alias().value(), sanitizedUpstream(binding.upstream(system)),
+                binding.upstream(system).getScheme(), binding.ref(), "/r/" + binding.publicRepositoryName() + ".git",
                 wireStatus(observation),
                 observation.observedAt() == null ? null : observation.observedAt().toString());
     }

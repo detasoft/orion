@@ -19,6 +19,20 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
         Objects.requireNonNull(system, "system");
         organizations = copyOrganizations(organizations);
         OrionDocumentGraphValidator.validate(organizations);
+        for (Organization organization : organizations) {
+            for (Team team : organization.teams()) {
+                for (Repository repository : team.repositories()) {
+                    if (repository.storage().isPresent()) {
+                        ConnectionReference reference = repository.storage().orElseThrow().connection();
+                        List<Connection> definitions = reference.scope() == ConnectionReference.Scope.SYSTEM
+                                ? system.connections() : organization.connections();
+                        if (!(findConnection(definitions, reference.name()) instanceof Connection.S3)) {
+                            throw new IllegalArgumentException("Repository storage requires an S3 connection");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public static OrionDocument withAccessControl(AccessControl accessControl) {
@@ -27,7 +41,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public OrionDocument replaceAccessControl(AccessControl accessControl) {
         return new OrionDocument(
-                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies()),
+                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies(), system.connections()),
                 organizations);
     }
 
@@ -47,15 +61,17 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             AccessControl accessControl,
             Optional<OrionHttpsConfiguration> https,
             List<ConfigurationSecret> secrets,
-            List<GitProxyBinding> proxies) {
+            List<GitProxyBinding> proxies,
+            List<Connection> connections) {
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, Optional.empty(), List.of(), List.of());
+            this(accessControl, Optional.empty(), List.of(), List.of(), List.of());
         }
 
         public SystemConfiguration {
             Objects.requireNonNull(accessControl, "accessControl");
             https = Objects.requireNonNullElseGet(https, Optional::empty);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            connections = copyConnections(connections, secrets);
             proxies = new ArrayList<>(copyUnique(proxies, GitProxyBinding::alias, "proxy"));
             proxies.sort(Comparator.comparing(proxy -> proxy.alias().value()));
             proxies = List.copyOf(proxies);
@@ -70,10 +86,23 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
                 throw new IllegalArgumentException("ACME EAB secret is unavailable in system scope");
             }
             for (GitProxyBinding proxy : proxies) {
-                if (!upstreams.add(proxy.upstream().toASCIIString() + "#" + proxy.ref())) {
+                java.net.URI upstream;
+                Optional<String> secret;
+                if (proxy.source() instanceof GitProxyBinding.Direct direct) {
+                    upstream = direct.upstream();
+                    secret = direct.secret();
+                } else {
+                    GitProxyBinding.Ssh ssh = (GitProxyBinding.Ssh) proxy.source();
+                    if (!(findConnection(connections, ssh.connection().name()) instanceof Connection.Ssh connection)) {
+                        throw new IllegalArgumentException("Proxy requires an SSH connection");
+                    }
+                    upstream = connection.upstream(ssh.path());
+                    secret = connection.secret();
+                }
+                if (!upstreams.add(upstream.toASCIIString() + "#" + proxy.ref())) {
                     throw new IllegalArgumentException("duplicate proxy upstream/ref");
                 }
-                if (proxy.secret().isPresent() && !secretIds.contains(proxy.secret().orElseThrow())) {
+                if (secret.isPresent() && !secretIds.contains(secret.orElseThrow())) {
                     throw new IllegalArgumentException("proxy secret is unavailable in system scope");
                 }
             }
@@ -89,7 +118,8 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<Team> teams,
             List<ConfigurationSecret> secrets,
             List<OidcProvider> oidcProviders,
-            List<OrganizationInvitation> invitations) {
+            List<OrganizationInvitation> invitations,
+            List<Connection> connections) {
         public Organization {
             Objects.requireNonNull(id, "id");
             users = copyUnique(users, AccessControl.User::getId, "user");
@@ -99,6 +129,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
             oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
             invitations = copyUnique(invitations, OrganizationInvitation::tokenHash, "invitation");
+            connections = copyConnections(connections, secrets);
             Set<String> secretIds = new HashSet<>();
             for (ConfigurationSecret secret : secrets) {
                 secretIds.add(secret.id());
@@ -158,13 +189,15 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<RepositoryRemote> remotes,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
-            List<ConfigurationSecret> secrets) {
+            List<ConfigurationSecret> secrets,
+            Optional<S3StorageBinding> storage) {
         public static final String DEFAULT_BRANCH = "refs/heads/main";
 
         public Repository {
             Objects.requireNonNull(id, "id");
             defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
             Objects.requireNonNull(policy, "repository policy");
+            storage = Objects.requireNonNull(storage, "repository storage");
             remotes = copyRemotes(remotes);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
             grants = copyUnique(grants, ScopedGrant::id, "grant");
@@ -184,6 +217,31 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             remotes.sort(Comparator.comparing(remote -> remote.alias().value()));
             return List.copyOf(remotes);
         }
+    }
+
+    public static Connection findConnection(List<Connection> definitions, String name) {
+        for (Connection connection : definitions) {
+            if (connection.name().equals(name)) return connection;
+        }
+        throw new IllegalArgumentException("Unknown connection: " + name);
+    }
+
+    private static List<Connection> copyConnections(List<Connection> source, List<ConfigurationSecret> secrets) {
+        List<Connection> connections = copyUnique(source, Connection::name, "connection");
+        Set<String> available = new HashSet<>();
+        for (ConfigurationSecret secret : secrets) available.add(secret.id());
+        for (Connection connection : connections) {
+            List<Optional<String>> references = switch (connection) {
+                case Connection.S3 s3 -> List.of(s3.secretKey(), s3.sessionToken());
+                case Connection.Ssh ssh -> List.of(ssh.secret());
+            };
+            for (Optional<String> reference : references) {
+                if (reference.isPresent() && !available.contains(reference.orElseThrow())) {
+                    throw new IllegalArgumentException("Connection secret is unavailable in its owner scope");
+                }
+            }
+        }
+        return connections;
     }
 
     private static <T, I> List<T> copyUnique(

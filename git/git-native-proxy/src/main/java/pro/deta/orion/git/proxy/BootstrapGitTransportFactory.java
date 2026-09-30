@@ -40,7 +40,7 @@ final class BootstrapGitTransportFactory {
     private final Function<BootstrapGitLocation, Connection> connection;
     private final Function<BootstrapGitLocation, List<String>> bootstrapSections;
     private final ConnectionFailureHandler connectionFailures;
-    private final BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions;
+    private final BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions;
     private final Map<BootstrapGitLocation, Set<String>> acceptedKeys = new ConcurrentHashMap<>();
 
     BootstrapGitTransportFactory(BootstrapSecretResolver secretResolver,
@@ -51,18 +51,18 @@ final class BootstrapGitTransportFactory {
         Objects.requireNonNull(secretResolver, "secretResolver");
         connection = location -> {
             if (location.credentialKind() == GitCredentialKind.NONE) {
-                return new Connection(location, new char[0], null);
+                return new Connection(location, new char[0], null, null);
             }
             try (BootstrapSecret secret = secretResolver.resolve(
                     "Remote Git credential", location.credentialReference())) {
-                return new Connection(location, secret.copy(), null);
+                return new Connection(location, secret.copy(), null, null);
             }
         };
     }
 
     private BootstrapGitTransportFactory(Function<BootstrapGitLocation, Connection> connection,
             ConnectionFailureHandler connectionFailures,
-            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
+            BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         this.connection = connection;
         this.connectionFailures = connectionFailures;
         this.hostKeyDecisions = hostKeyDecisions;
@@ -72,17 +72,18 @@ final class BootstrapGitTransportFactory {
     static BootstrapGitTransportFactory persistent(
             Supplier<OrionDocument> current, ConfigurationSecrets secrets,
             ConnectionFailureHandler connectionFailures,
-            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
+            BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         Objects.requireNonNull(current, "current configuration");
         Objects.requireNonNull(secrets, "configuration secrets");
         return new BootstrapGitTransportFactory(original -> {
             OrionDocument snapshot = current.get();
             for (var binding : snapshot.system().proxies()) {
-                BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
+                BootstrapGitLocation location = BootstrapGitLocation.persistent(binding, snapshot.system());
                 if (location.proxyName().equals(original.proxyName())) {
-                    char[] credential = binding.secret().isPresent()
-                            ? secrets.resolveSystem(snapshot, binding.secret().orElseThrow()) : new char[0];
-                    return new Connection(location, credential, binding);
+                    char[] credential = binding.secret(snapshot.system()).isPresent()
+                            ? secrets.resolveSystem(snapshot, binding.secret(snapshot.system()).orElseThrow()) : new char[0];
+                    return new Connection(location, credential, binding,
+                            binding.source() instanceof GitProxyBinding.Ssh ? binding.sshConnection(snapshot.system()) : null);
                 }
             }
             throw new BootstrapGitProxyException("persistent binding lookup");
@@ -122,7 +123,7 @@ final class BootstrapGitTransportFactory {
                     if (cause instanceof Decisionable) break;
                     if (cause instanceof HostKeyRejectedException rejected) {
                         prepared = new DecisionRequiredException(
-                                hostKeyDecisions.apply(selected.binding(), rejected), failure);
+                                hostKeyDecisions.apply(new ProxySshConnection(selected.binding(), selected.ssh()), rejected), failure);
                         break;
                     }
                 }
@@ -165,7 +166,8 @@ final class BootstrapGitTransportFactory {
         return accept;
     }
 
-    private record Connection(BootstrapGitLocation location, char[] credential, GitProxyBinding binding) {
+    private record Connection(BootstrapGitLocation location, char[] credential, GitProxyBinding binding,
+            pro.deta.orion.schema.orion.Connection.Ssh ssh) {
     }
 
     @FunctionalInterface

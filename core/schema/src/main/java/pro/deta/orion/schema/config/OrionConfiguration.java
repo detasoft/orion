@@ -31,6 +31,7 @@ public class OrionConfiguration {
     @Data
     public static class StorageConfig {
         private String location = "file:orion/repos";
+        private String endpoint;
         private boolean createOnPush = true;
         private Map<String, String> auth = new LinkedHashMap<>();
     }

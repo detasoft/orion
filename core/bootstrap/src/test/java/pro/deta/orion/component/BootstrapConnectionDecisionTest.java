@@ -57,12 +57,14 @@ class BootstrapConnectionDecisionTest {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
-            assertThat(request.description()).contains(fixture.previous.upstream().toString(),
+            assertThat(request.description()).contains(fixture.previous.upstream(fixture.desired.current()
+                    .document().system()).toString(),
                     fixture.upstream.toUri().toString());
             assertThat(fixture.desired.current().document().system().proxies()).containsExactly(fixture.previous);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream()).isEqualTo(fixture.upstream.toUri()));
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.desired.current().document()
+                            .system())).isEqualTo(fixture.upstream.toUri()));
             assertThat(fixture.decisions.list(ACTOR)).isEmpty();
             assertThat(fixture.storage.load().isFailure()).isFalse();
             assertThat(fixture.provider.bootstrapChanges(fixture.desired.current().document())).isEmpty();
@@ -90,18 +92,19 @@ class BootstrapConnectionDecisionTest {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
             GitProxyBinding unrelated = new GitProxyBinding(new RemoteAlias("other"),
-                    directory.resolve("other.git").toUri(), "main", GitCredentialKind.NONE,
-                    Optional.empty(), Optional.empty(), Set.of());
+                new GitProxyBinding.Direct(directory.resolve("other.git").toUri(), GitCredentialKind.NONE,
+                        Optional.empty(), Optional.empty()), "main");
             fixture.acl.updatePrimaryConfiguration(fixture.desired.current().revision().orElseThrow(), document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), document.system().secrets(),
-                            List.of(fixture.previous, unrelated)), document.organizations()),
+                            List.of(fixture.previous, unrelated), document.system().connections()), document.organizations()),
                     new AccessControlSaveRequest("unrelated edit", UserEmail.EMPTY));
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).contains(unrelated);
             assertThat(fixture.desired.current().document().system().proxies()).filteredOn(
                     binding -> binding.alias().equals(fixture.previous.alias())).singleElement()
-                    .satisfies(binding -> assertThat(binding.upstream()).isEqualTo(fixture.upstream.toUri()));
+                    .satisfies(binding -> assertThat(binding.upstream(fixture.desired.current().document()
+                            .system())).isEqualTo(fixture.upstream.toUri()));
         }
     }
 
@@ -110,8 +113,9 @@ class BootstrapConnectionDecisionTest {
         try (Fixture fixture = new Fixture(directory)) {
             fixture.start();
             DecisionRequest request = fixture.decisions.list(ACTOR).getFirst();
-            GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(), fixture.previous.upstream(),
-                    "refs/heads/other", GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
+            GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(),
+                new GitProxyBinding.Direct(fixture.previous.upstream(fixture.desired.current().document()
+                        .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
             fixture.acl.updatePrimaryConfiguration(fixture.desired.current().revision().orElseThrow(),
                     document -> withBinding(concurrent), new AccessControlSaveRequest("concurrent edit", UserEmail.EMPTY));
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
@@ -122,7 +126,7 @@ class BootstrapConnectionDecisionTest {
 
     private static OrionDocument withBinding(GitProxyBinding binding) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(), List.of(binding)), List.of());
+                List.of(), List.of(binding), List.of()), List.of());
     }
 
     private static final class Fixture implements AutoCloseable {
@@ -135,11 +139,15 @@ class BootstrapConnectionDecisionTest {
         final AccessControlStorage storage;
         final OrionAccessControlServiceImpl acl;
         final ConfigurationSecrets secrets;
+        final pro.deta.orion.git.s3.S3Transport transport = new pro.deta.orion.git.s3.S3Transport();
+        final pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider configured =
+                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(), transport);
 
         Fixture(Path directory) throws Exception {
             upstream = directory.resolve("moved.git");
-            previous = new GitProxyBinding(new RemoteAlias("configuration"), directory.resolve("old.git").toUri(),
-                    "main", GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
+            previous = new GitProxyBinding(new RemoteAlias("configuration"),
+                new GitProxyBinding.Direct(directory.resolve("old.git").toUri(), GitCredentialKind.NONE,
+                        Optional.empty(), Optional.empty()), "main");
             Path worktree = directory.resolve("worktree");
             try (Git git = Git.init().setDirectory(worktree.toFile()).setInitialBranch("main").call()) {
                 ByteArrayOutputStream xml = new ByteArrayOutputStream();
@@ -154,7 +162,7 @@ class BootstrapConnectionDecisionTest {
                 }
             }
             provider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
-                    new InMemoryNativeGitRepositoryProvider(), Map.of());
+                    configured, Map.of());
             BootstrapSourceConfig source = new BootstrapSourceConfig();
             source.setLocation("git+" + upstream.toUri());
             source.setPath("orion.xml");
@@ -177,7 +185,10 @@ class BootstrapConnectionDecisionTest {
         }
 
         void start() {
-            OrionRuntimeModule.bootstrapProxies(storage, provider, material.configurationCipher(), secrets,
+            OrionRuntimeModule.bootstrapProxies(storage,
+                    configured,
+                    new pro.deta.orion.git.proxy.BootstrapRepositorySources(List.of()), provider,
+                            material.configurationCipher(), secrets,
                     desired, acl, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),
                     OrionRuntimeModule.proxyHostKeyDecisions(desired, acl, record -> { })).run();
@@ -187,6 +198,7 @@ class BootstrapConnectionDecisionTest {
         @Override
         public void close() {
             decisions.close();
+            transport.close();
             material.close();
         }
     }

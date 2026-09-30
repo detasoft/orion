@@ -1,6 +1,10 @@
 package pro.deta.orion;
 
 import org.eclipse.jgit.api.Git;
+import com.sun.net.httpserver.HttpServer;
+import pro.deta.orion.config.LocationConfigurationProvider;
+
+import java.net.InetSocketAddress;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.component.DaggerOrionComponent;
@@ -21,6 +25,8 @@ import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.fileapi.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -83,6 +89,21 @@ class BootstrapContextTest {
 
     @TempDir
     private Path tempDir;
+
+    @Test
+    void componentExposesTheSameS3TransportUsedByConfiguredRepositories() throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration, Map.of(
+                "orion.xml", GitFile.regular(xml()), "material.p12", GitFile.regular(materialBytes(configuration))));
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            OrionComponent component = runtimeComponent(configuration, context);
+            assertThat(component.s3Transport()).isSameAs(context.s3Transport());
+            context.storageProvider().repositoryNames();
+            component.s3Transport().close();
+            assertThatThrownBy(() -> context.storageProvider().repositoryNames())
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+        }
+    }
 
     @Test
     void opensConfigurationAndMaterialFromOneLocalRepository() throws Exception {
@@ -399,9 +420,109 @@ class BootstrapContextTest {
     }
 
     @Test
+    void selectsS3MetadataBackendAndPreservesFileDefault() {
+        OrionConfiguration configuration = configuration();
+        assertThat(new OrionConfiguration().getStorage().getLocation()).isEqualTo("file:orion/repos");
+        assertThat(new OrionConfiguration().getStorage().getEndpoint()).isNull();
+        assertThat(BootstrapContext.createRepositoryBackend(configuration, ENVIRONMENT))
+                .isInstanceOf(FileNativeGitRepositoryProvider.class);
+        configuration.getStorage().setLocation("s3://bucket/repositories");
+        configuration.getStorage().setAuth(Map.of("accessKeyId", "test", "secretAccessKey", "env:S3_SECRET"));
+        try (S3NativeGitRepositoryProvider backend =
+                     (S3NativeGitRepositoryProvider) BootstrapContext.createRepositoryBackend(
+                             configuration, Map.of("S3_SECRET", "test"))) {
+            assertThat(backend).isNotNull();
+        }
+    }
+
+    @Test
+    void validatesTheEndpointBoundFromYaml() throws Exception {
+        Path yaml = tempDir.resolve("s3-invalid-endpoint.yml");
+        Files.writeString(yaml, """
+                storage:
+                  location: s3://bucket/repositories
+                  endpoint: file:/tmp/not-an-s3-endpoint
+                  auth:
+                    accessKeyId: test
+                    secretAccessKey: env:S3_SECRET
+                """);
+        OrionConfiguration configuration = new LocationConfigurationProvider(yaml.toString()).readConfiguration();
+        assertThat(configuration.getStorage().getEndpoint()).isEqualTo("file:/tmp/not-an-s3-endpoint");
+        assertThatThrownBy(() -> {
+            try (S3NativeGitRepositoryProvider ignored =
+                         (S3NativeGitRepositoryProvider) BootstrapContext.createRepositoryBackend(
+                                 configuration, Map.of("S3_SECRET", "test"))) {
+                // Close the client if invalid endpoint validation regresses.
+            }
+        }).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("S3 endpoint");
+    }
+
+    @Test
+    void usesTheEndpointBoundFromYamlForS3Requests() throws Exception {
+        HttpServer endpoint = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicInteger requests = new AtomicInteger();
+        endpoint.createContext("/bucket/", exchange -> {
+            requests.incrementAndGet();
+            byte[] missing = "<Error><Code>NoSuchKey</Code></Error>".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/xml");
+            exchange.sendResponseHeaders(404, missing.length);
+            exchange.getResponseBody().write(missing);
+            exchange.close();
+        });
+        endpoint.start();
+        try {
+            String url = "http://127.0.0.1:" + endpoint.getAddress().getPort();
+            Path yaml = tempDir.resolve("s3-endpoint.yml");
+            Files.writeString(yaml, """
+                    storage:
+                      location: s3://bucket/repositories
+                      endpoint: %s
+                      auth:
+                        region: eu-west-1
+                        accessKeyId: test
+                        secretAccessKey: env:S3_SECRET
+                    """.formatted(url));
+            OrionConfiguration configuration = new LocationConfigurationProvider(yaml.toString())
+                    .readConfiguration();
+            assertThat(configuration.getStorage().getEndpoint()).isEqualTo(url);
+            try (S3NativeGitRepositoryProvider backend =
+                         (S3NativeGitRepositoryProvider) BootstrapContext.createRepositoryBackend(
+                                 configuration, Map.of("S3_SECRET", "test"))) {
+                assertThat(backend.find("missing")).isInstanceOf(Result.Failure.class);
+                assertThat(backend.exists("missing")).isFalse();
+                assertThat(requests.get()).isEqualTo(2);
+            }
+            Files.writeString(yaml, Files.readString(yaml).replace("  endpoint: " + url + "\n", ""));
+            configuration = new LocationConfigurationProvider(yaml.toString()).readConfiguration();
+            try (S3NativeGitRepositoryProvider ignored =
+                         (S3NativeGitRepositoryProvider) BootstrapContext.createRepositoryBackend(
+                                 configuration, Map.of("S3_SECRET", "test"))) {
+                assertThat(configuration.getStorage().getEndpoint()).isNull();
+            }
+        } finally {
+            endpoint.stop(0);
+        }
+    }
+
+    @Test
+    void closesOwnedS3BackendWhenBootstrapFails() {
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getAccessControl().setPaths(List.of());
+        S3NativeGitRepositoryProvider backend =
+                new S3NativeGitRepositoryProvider("s3://bucket/repositories", null,
+                        Map.of("accessKeyId", "test", "secretAccessKey", "env:S3_SECRET"),
+                        Map.of("S3_SECRET", "test"));
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, backend))
+                .isInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage("At least one ACL path must be configured");
+        assertThatThrownBy(backend::repositoryNames).hasMessageContaining("closed");
+        backend.close();
+    }
+
+    @Test
     void rejectsUnsupportedRepositoryStorageOnFirstStart() {
         OrionConfiguration configuration = configuration();
-        String location = "s3://bucket/repositories";
+        String location = "unsupported://bucket/repositories";
         configuration.getStorage().setLocation(location);
 
         assertThatThrownBy(() -> {
@@ -1080,10 +1201,10 @@ class BootstrapContextTest {
         OrionConfiguration configuration = configuration();
         Upstream unrelatedUpstream = upstream("unrelated-proxy", Map.of("README", bytes("unrelated")));
         GitProxyBinding unrelated = new GitProxyBinding(new RemoteAlias("unrelated"),
-                unrelatedUpstream.bare().toUri(), "main", GitCredentialKind.NONE,
-                Optional.empty(), Optional.empty(), Set.of());
+                new GitProxyBinding.Direct(unrelatedUpstream.bare().toUri(), GitCredentialKind.NONE,
+                        Optional.empty(), Optional.empty()), "main");
         OrionDocument first = new OrionDocument(new OrionDocument.SystemConfiguration(
-                new AccessControl(), Optional.empty(), List.of(), List.of(unrelated)), List.of());
+                new AccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
         ByteArrayOutputStream firstXml = new ByteArrayOutputStream();
         OrionXml.write(first, firstXml);
         Upstream upstream = upstream("deferred-bootstrap", Map.of(
@@ -1120,7 +1241,7 @@ class BootstrapContextTest {
                 draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
-                        draft.toAccessControl(), Optional.empty(), List.of(), List.of(unrelated)), List.of());
+                        draft.toAccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
                 OrionXml.write(valid, output);
                 source.files().saveFiles(
                         "refs/heads/main", Map.of("orion.xml", GitFile.regular(output.toByteArray())),
@@ -1176,7 +1297,7 @@ class BootstrapContextTest {
         Files.createDirectories(directory);
         OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(new ConfigurationSecret("bad", "invalid")),
-                List.of()), List.of());
+                List.of(), List.of()), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(invalid, output);
         seedExternalConfiguration(directory, output.toByteArray());
@@ -1245,6 +1366,8 @@ class BootstrapContextTest {
                 .sshHostKeyCapability(context.sshHostKeys())
                 .configurationCipherCapability(context.configurationCipher())
                 .nativeGitRepositoryProvider(context.repositoryProvider())
+                .configuredRepositoryProvider(context.storageProvider())
+                .s3Transport(context.s3Transport())
                 .bootstrapRepositorySources(context.repositorySources())
                 .build();
     }

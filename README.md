@@ -883,11 +883,14 @@ Orion persists server-side agent and reconciled session records below
 holds its process lock and local session journals. Remote host provisioning,
 SSH credential resolution, and packaged deployment are administered separately.
 
-`storage.location` supports local filesystem storage with `file:` locations.
+`storage.location` defaults to local filesystem storage with `file:` locations.
 `bootstrap.accessControl.location` can point to a local ACL directory with
 `file:` or to a repository in Orion's configured storage with
-`local:<repository>`. The codebase contains an S3 storage module, but the
-current top-level S3 repository provider is not implemented yet.
+`local:<repository>`. The [S3 backend bootstrap](git/git-s3-storage/README.md)
+supports repository metadata with `s3://bucket/prefix` locations. Runtime repositories
+reference scoped S3 connections in `config.xml`; one injected `S3Transport` shares
+its client and HTTP pool across connections. Git refs, objects, push/fetch, and
+full server startup with S3 are not implemented yet.
 
 ## ACL Startup Model
 
@@ -908,8 +911,9 @@ including those without `default`.
 Accepted pushes to the configured ref reload the ACL; an invalid candidate
 leaves the last valid ACL active. The internal repository is returned by
 `GET /api/admin/repositories` together with user-created repositories.
-Remote storage credentials, for example S3 credentials, should come from the
-backend's normal environment or provider-specific mechanisms.
+Runtime S3 connections use encrypted scoped configuration secrets or the AWS SDK
+default credentials chain. Bootstrap configuration and key-material storage stay
+file-backed.
 
 ## Remote Git Proxy Endpoints
 

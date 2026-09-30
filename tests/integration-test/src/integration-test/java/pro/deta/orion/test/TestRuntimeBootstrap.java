@@ -6,6 +6,8 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
@@ -38,8 +40,11 @@ final class TestRuntimeBootstrap {
             OrionRuntimeOptions runtimeOptions) {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(
                 new ConfigurationContext(configuration).getFileGitStoragePath());
+        S3Transport transport = new S3Transport();
+        ConfiguredNativeGitRepositoryProvider configured =
+                new ConfiguredNativeGitRepositoryProvider(backend, transport);
         ProxyAwareNativeGitRepositoryProvider provider =
-                ProxyAwareNativeGitRepositoryProvider.bootstrap(backend, Map.copyOf(System.getenv()));
+                ProxyAwareNativeGitRepositoryProvider.bootstrap(configured, Map.copyOf(System.getenv()));
         ResolvedBootstrapSource source = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION,
                 configuration.getBootstrap().getAccessControl(),
@@ -56,6 +61,8 @@ final class TestRuntimeBootstrap {
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
+                .configuredRepositoryProvider(configured)
+                .s3Transport(transport)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(source)));
     }
 }

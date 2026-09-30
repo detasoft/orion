@@ -194,14 +194,14 @@ class OrionAccessControlServiceImplTest {
                 List.of(GrantAddress.parse("acme/read")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));
         OidcProvider provider = new OidcProvider("oidc", URI.create("https://login.example.test"), "client",
                 "secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
                 users, List.of(grant), List.of(role), List.of(team),
-                List.of(new ConfigurationSecret("secret", "opaque-test-envelope")), List.of(provider), List.of());
+                List.of(new ConfigurationSecret("secret", "opaque-test-envelope")), List.of(provider), List.of(), List.of());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
@@ -284,7 +284,8 @@ class OrionAccessControlServiceImplTest {
             var result = fixture.service.updatePrimaryConfiguration("version-one", document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
-                            "credential", testEnvelope())), document.system().proxies()), document.organizations()),
+                            "credential", testEnvelope())), document.system().proxies(),
+                                    document.system().connections()), document.organizations()),
                     new AccessControlSaveRequest("update proxy", null));
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
@@ -335,7 +336,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
                         Optional.of(https),
-                        List.of(), List.of()),
+                        List.of(), List.of(), List.of()),
                 List.of());
         InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
                 Map.of(ACL_PATH, serialize(initial)),
@@ -389,7 +390,7 @@ class OrionAccessControlServiceImplTest {
                     Optional.of(new OrionMaterialReference("missing-identity", 1)), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    initialAcl, Optional.of(https), List.of(), List.of()), List.of());
+                    initialAcl, Optional.of(https), List.of(), List.of(), List.of()), List.of());
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
                     Optional.of("invalid-commit"));
 
@@ -420,7 +421,7 @@ class OrionAccessControlServiceImplTest {
                     URI.create("https://localhost:8443"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    acl, Optional.of(https), List.of(), List.of()), List.of());
+                    acl, Optional.of(https), List.of(), List.of(), List.of()), List.of());
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(changed)),
                     Optional.of("second-commit"));
 
@@ -449,7 +450,7 @@ class OrionAccessControlServiceImplTest {
             OrionDesiredState.Snapshot lastValid = desiredState.current();
             OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
                     new AccessControl(), Optional.empty(),
-                    List.of(new ConfigurationSecret("invalid", "not-an-envelope")), List.of()), List.of());
+                    List.of(new ConfigurationSecret("invalid", "not-an-envelope")), List.of(), List.of()), List.of());
             storage.snapshot = new AccessControlSnapshot(Map.of(ACL_PATH, serialize(candidate)),
                     Optional.of("invalid-commit"));
 

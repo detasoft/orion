@@ -85,7 +85,8 @@ class ConfigurationSecretsTest {
                 OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
-                organization.roles(), organization.teams(), organization.secrets(), List.of(provider), List.of()))));
+                organization.roles(), organization.teams(), organization.secrets(), List.of(provider),
+                        List.of(), organization.connections()))));
 
         current.set(secrets.replace(current.get(), organizationScope, "oidc-client", "replacement".toCharArray()));
         current.set(secrets.create(current.get(), ConfigurationScope.repository(REPOSITORY),
@@ -168,7 +169,7 @@ class ConfigurationSecretsTest {
         OrionDocument corrupt = new OrionDocument(new OrionDocument.SystemConfiguration(
                 candidate.system().accessControl(), candidate.system().https(),
                 List.of(new ConfigurationSecret("renamed", candidate.system().secrets().getFirst().envelope())),
-                List.of()), candidate.organizations());
+                List.of(), candidate.system().connections()), candidate.organizations());
         assertThatThrownBy(() -> secrets.validate(corrupt)).isInstanceOf(IllegalStateException.class);
         assertThat(current.get().system().secrets()).isEmpty();
     }
@@ -177,17 +178,18 @@ class ConfigurationSecretsTest {
     void preservesProxyIdentityWhenCreatingAndRotatingSystemSecrets() {
         current.set(secrets.createSystem(current.get(), "bootstrap-token", "old-token".toCharArray()));
         GitProxyBinding proxy = new GitProxyBinding(new RemoteAlias("configuration"),
-                URI.create("https://git.example/config"), "main", GitCredentialKind.TOKEN,
-                Optional.of("bootstrap-token"), Optional.empty(), Set.of());
+                new GitProxyBinding.Direct(URI.create("https://git.example/config"), GitCredentialKind.TOKEN,
+                        Optional.of("bootstrap-token"), Optional.empty()), "main");
         OrionDocument before = current.get();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(before.system().accessControl(),
-                before.system().https(), before.system().secrets(), List.of(proxy)), before.organizations()));
+                before.system().https(), before.system().secrets(), List.of(proxy),
+                        before.system().connections()), before.organizations()));
 
         current.set(secrets.createSystem(current.get(), "other-token", "other".toCharArray()));
         current.set(secrets.replaceSystem(current.get(), "bootstrap-token", "rotated-token".toCharArray()));
 
         assertThat(current.get().system().proxies()).containsExactly(proxy);
-        char[] resolved = secrets.resolveSystem(proxy.secret().orElseThrow());
+        char[] resolved = secrets.resolveSystem(proxy.secret(current.get().system()).orElseThrow());
         try {
             assertThat(resolved).isEqualTo("rotated-token".toCharArray());
         } finally {
@@ -258,7 +260,7 @@ class ConfigurationSecretsTest {
         String envelope = repository(current.get()).secrets().getFirst().envelope();
         OrionDocument.SystemConfiguration system = new OrionDocument.SystemConfiguration(
                 current.get().system().accessControl(), current.get().system().https(),
-                List.of(new ConfigurationSecret("github-token", envelope)), List.of());
+                List.of(new ConfigurationSecret("github-token", envelope)), List.of(), current.get().system().connections());
         current.set(new OrionDocument(system, current.get().organizations()));
         assertThatThrownBy(() -> secrets.resolveSystem("github-token"))
                 .isInstanceOf(IllegalStateException.class)
@@ -278,7 +280,7 @@ class ConfigurationSecretsTest {
         OrionDocument.Organization original = current.get().organizations().getFirst();
         OrionDocument.Organization other = new OrionDocument.Organization(new OrganizationId("other"),
                 original.displayName(), original.users(), original.grants(), original.roles(),
-                original.teams(), original.secrets(), List.of(), List.of());
+                original.teams(), original.secrets(), List.of(), List.of(), original.connections());
         current.set(new OrionDocument(current.get().system(), List.of(original, other)));
 
         assertThat(secrets.resolve(REPOSITORY, REFERENCE)).isEqualTo("do-not-report".toCharArray());
@@ -356,13 +358,14 @@ class ConfigurationSecretsTest {
         OrionDocument.Repository repository = repository(current.get());
         OrionDocument.Repository changed = new OrionDocument.Repository(
                 repository.id(), repository.displayName(), repository.defaultBranch(), repository.policy(),
-                repository.remotes(), repository.grants(), repository.roles(), List.of(secret));
+                repository.remotes(), repository.grants(), repository.roles(), List.of(secret), repository.storage());
         OrionDocument.Organization organization = current.get().organizations().getFirst();
         OrionDocument.Team team = organization.teams().getFirst();
         current.set(new OrionDocument(current.get().system(), List.of(new OrionDocument.Organization(
                 organization.id(), organization.displayName(), organization.users(), organization.grants(),
                 organization.roles(), List.of(new OrionDocument.Team(team.id(), team.displayName(),
-                team.grants(), team.roles(), List.of(changed))), organization.secrets(), List.of(), List.of()))));
+                team.grants(), team.roles(), List.of(changed))), organization.secrets(), List.of(), List.of(),
+                        organization.connections()))));
     }
 
     private static OrionDocument.Repository repository(OrionDocument document) {
@@ -372,11 +375,11 @@ class ConfigurationSecretsTest {
     private static OrionDocument document() {
         OrionDocument.Repository repository = new OrionDocument.Repository(
                 new RepositoryId("api"), "API", "refs/heads/main", RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(),
                 List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("platform"), "Platform",
-                List.of(), List.of(), List.of(repository))), List.of(), List.of(), List.of())));
+                List.of(), List.of(), List.of(repository))), List.of(), List.of(), List.of(), List.of())));
     }
 
     private static KeyMaterialOptions options() {

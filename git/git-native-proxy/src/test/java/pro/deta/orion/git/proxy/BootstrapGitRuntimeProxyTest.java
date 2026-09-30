@@ -87,10 +87,11 @@ class BootstrapGitRuntimeProxyTest {
         String previous = repository.refs().get(location.refName());
         NativeGitFileUpdate update = repository.files().prepareFileUpdate(location.refName(),
                 Map.of("file", GitFile.regular(new byte[]{2})), Set.of(), "second", GitCommitAuthor.EMPTY);
-        GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"), location.remoteUri(),
-                location.refName(), location.credentialKind(), Optional.empty(), Optional.empty(), Set.of());
+        GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"),
+                new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), Optional.empty(),
+                        Optional.empty()), location.refName());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.empty(), List.of(), List.of(binding)), List.of());
+                Optional.empty(), List.of(), List.of(binding), List.of()), List.of());
         ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, ConfigurationCipherCapability.unavailable());
         IOException origin = new IOException("connection rejected");
         PrincipalAddress actor = PrincipalAddress.parse("system/operator");

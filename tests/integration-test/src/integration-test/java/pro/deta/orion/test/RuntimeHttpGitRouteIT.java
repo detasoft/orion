@@ -128,7 +128,7 @@ class RuntimeHttpGitRouteIT {
                     assigned.getGrants());
             OrionDocument updated = new OrionDocument(document.system(), List.of(new OrionDocument.Organization(
                     acme.id(), acme.displayName(), List.of(revoked), acme.grants(), acme.roles(), acme.teams(),
-                    acme.secrets(), acme.oidcProviders(), acme.invitations()), document.organizations().get(1)));
+                    acme.secrets(), acme.oidcProviders(), acme.invitations(), acme.connections()), document.organizations().get(1)));
             assertThat(RuntimeHttpTestSupport.request("POST", orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(rootToken), "application/xml", serializeDocument(updated),
                     RuntimeHttpTestSupport.aclEtag(orion, rootToken)).status())
@@ -166,14 +166,14 @@ class RuntimeHttpGitRouteIT {
                 List.of(GrantAddress.parse(id + "/write")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 "refs/heads/" + BRANCH,
-                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of());
+                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));
         OidcProvider provider = new OidcProvider("oidc", URI.create(issuer), "client", "oidc",
                 OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
         return new OrionDocument.Organization(new OrganizationId(id), "", List.of(user), List.of(grant),
                 List.of(role), List.of(team), List.of(new ConfigurationSecret("oidc", "placeholder")),
-                List.of(provider), List.of());
+                List.of(provider), List.of(), List.of());
     }
 
     private static String organizationToken(RuntimeHttpTestSupport.StartedOrion orion, String organization) {

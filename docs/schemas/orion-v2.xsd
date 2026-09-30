@@ -35,6 +35,7 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="connections" type="connections" minOccurs="0"/>
     </xs:sequence>
   </xs:complexType>
 
@@ -200,11 +201,57 @@
 
   <xs:complexType name="gitProxy" final="extension restriction">
     <xs:sequence>
-      <xs:element name="upstream" type="xs:string"/>
+      <xs:element name="upstream" type="xs:string" minOccurs="0"/>
       <xs:element name="ref" type="xs:string"/>
-      <xs:element name="credentialKind" type="gitCredentialKind"/>
+      <xs:element name="credentialKind" type="gitCredentialKind" minOccurs="0"/>
       <xs:element name="secret" type="xs:string" minOccurs="0"/>
       <xs:element name="username" type="xs:string" minOccurs="0"/>
+      <xs:element name="ssh" type="sshProxy" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="alias" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="sshProxy" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="connection" type="connectionReference"/>
+      <xs:element name="path" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="connectionReference" final="extension restriction">
+    <xs:sequence/>
+    <xs:attribute name="scope" type="connectionScope" use="required"/>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="connections" final="extension restriction">
+    <xs:sequence>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="s3" type="s3Connection"/>
+        <xs:element name="ssh" type="sshConnection"/>
+      </xs:choice>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="s3Connection" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="endpoint" type="xs:string" minOccurs="0"/>
+      <xs:element name="region" type="xs:string" minOccurs="0"/>
+      <xs:element name="pathStyleAccess" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="accessKeyId" type="xs:string" minOccurs="0"/>
+      <xs:element name="secretKey" type="xs:string" minOccurs="0"/>
+      <xs:element name="sessionToken" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="sshConnection" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="host" type="xs:string"/>
+      <xs:element name="port" type="xs:int" minOccurs="0"/>
+      <xs:element name="username" type="xs:string" minOccurs="0"/>
+      <xs:element name="credentialKind" type="gitCredentialKind"/>
+      <xs:element name="secret" type="xs:string"/>
       <xs:element name="knownHosts" minOccurs="0">
         <xs:complexType>
           <xs:sequence>
@@ -213,7 +260,7 @@
         </xs:complexType>
       </xs:element>
     </xs:sequence>
-    <xs:attribute name="alias" type="xs:string" use="required"/>
+    <xs:attribute name="name" type="xs:string" use="required"/>
   </xs:complexType>
 
   <xs:complexType name="organization" final="extension restriction">
@@ -268,6 +315,7 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="connections" type="connections" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
@@ -374,6 +422,7 @@
           </xs:sequence>
         </xs:complexType>
       </xs:element>
+      <xs:element name="storage" type="storage" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
@@ -431,6 +480,19 @@
       <xs:element name="allowDeletes" type="xs:boolean"/>
       <xs:element name="allowTagRewrites" type="xs:boolean"/>
     </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="storage" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="s3" type="s3Storage"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="s3Storage" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="connection" type="connectionReference"/>
+    </xs:sequence>
+    <xs:attribute name="location" type="xs:string" use="required"/>
   </xs:complexType>
 
   <xs:complexType name="oidcProvider" final="extension restriction">
@@ -494,6 +556,13 @@
       <xs:enumeration value="PASSWORD"/>
       <xs:enumeration value="TOKEN"/>
       <xs:enumeration value="PRIVATE_KEY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="connectionScope">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="system"/>
+      <xs:enumeration value="organization"/>
     </xs:restriction>
   </xs:simpleType>
 

@@ -144,7 +144,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             providers.add(updated);
             organizations.add(new OrionDocument.Organization(candidate.id(), candidate.displayName(),
                     candidate.users(), candidate.grants(), candidate.roles(), candidate.teams(), candidate.secrets(),
-                    providers, candidate.invitations()));
+                    providers, candidate.invitations(), candidate.connections()));
         }
         return new OrionDocument(document.system(), organizations);
     }
@@ -152,6 +152,9 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
     private static boolean sharedSecret(OrionDocument.Organization organization, OidcProvider previous) {
         for (OidcProvider provider : organization.oidcProviders()) {
             if (!provider.id().equals(previous.id()) && provider.secret().equals(previous.secret())) return true;
+        }
+        for (pro.deta.orion.schema.orion.Connection connection : organization.connections()) {
+            if (connection.referencesSecret(previous.secret())) return true;
         }
         for (OrionDocument.Team team : organization.teams()) {
             for (OrionDocument.Repository repository : team.repositories()) {

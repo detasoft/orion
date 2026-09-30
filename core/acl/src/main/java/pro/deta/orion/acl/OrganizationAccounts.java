@@ -185,7 +185,7 @@ public final class OrganizationAccounts {
             List<AccessControl.User> users, List<OrganizationInvitation> invitations) {
         return new OrionDocument.Organization(organization.id(), organization.displayName(), users,
                 organization.grants(), organization.roles(), organization.teams(), organization.secrets(),
-                organization.oidcProviders(), invitations);
+                organization.oidcProviders(), invitations, organization.connections());
     }
 
     private static String digest(String value) {

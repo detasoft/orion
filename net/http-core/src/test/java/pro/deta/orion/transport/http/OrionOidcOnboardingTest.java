@@ -327,7 +327,7 @@ class OrionOidcOnboardingTest {
                     }
                     organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), users,
                             org.grants(), org.roles(), org.teams(), org.secrets(),
-                            removed.equals("provider") ? List.of() : org.oidcProviders(), org.invitations()));
+                            removed.equals("provider") ? List.of() : org.oidcProviders(), org.invitations(), org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
             }, new AccessControlSaveRequest("remove account", null));
@@ -450,7 +450,7 @@ class OrionOidcOnboardingTest {
                         expired.add(new OrganizationInvitation(invite.tokenHash(), invite.email(), 1));
                     }
                     organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), org.users(),
-                            org.grants(), org.roles(), org.teams(), org.secrets(), org.oidcProviders(), expired));
+                            org.grants(), org.roles(), org.teams(), org.secrets(), org.oidcProviders(), expired, org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
             }, new AccessControlSaveRequest("expire fixture invitation", null));
@@ -524,17 +524,34 @@ class OrionOidcOnboardingTest {
         }
     }
 
-    @Test
-    void rotatingSharedProviderSecretLeavesOtherConsumersAndOrganizationsUntouched() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void rotatingSharedProviderSecretLeavesOtherConsumersAndOrganizationsUntouched(boolean connectionConsumer) throws Exception {
         try (Fixture f = new Fixture()) {
             f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OidcProvider> providers = new ArrayList<>(org.oidcProviders());
-                    providers.add(new OidcProvider("second", f.issuer, "second-client", "oidc",
-                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0));
+                    List<Connection> connections = new ArrayList<>(org.connections());
+                    List<OrionDocument.Team> teams = org.teams();
+                    if (connectionConsumer) {
+                        connections.add(new Connection.S3("archive", Optional.empty(), "us-east-1", false,
+                                Optional.of("id"), Optional.of("oidc"), Optional.empty()));
+                        OrionDocument.Team team = teams.getFirst();
+                        OrionDocument.Repository repository = team.repositories().getFirst();
+                        OrionDocument.Repository bound = new OrionDocument.Repository(repository.id(),
+                                repository.displayName(), repository.defaultBranch(), repository.policy(),
+                                repository.remotes(), repository.grants(), repository.roles(), repository.secrets(),
+                                Optional.of(new S3StorageBinding(new ConnectionReference(
+                                        ConnectionReference.Scope.ORGANIZATION, "archive"), URI.create("s3://bucket/repos"))));
+                        teams = List.of(new OrionDocument.Team(team.id(), team.displayName(), team.grants(),
+                                team.roles(), List.of(bound)));
+                    } else {
+                        providers.add(new OidcProvider("second", f.issuer, "second-client", "oidc",
+                                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0));
+                    }
                     organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), org.users(),
-                            org.grants(), org.roles(), org.teams(), org.secrets(), providers, org.invitations()));
+                            org.grants(), org.roles(), teams, org.secrets(), providers, org.invitations(), connections));
                 }
                 return new OrionDocument(document.system(), organizations);
             }, new AccessControlSaveRequest("share fixture secret", null));
@@ -556,6 +573,10 @@ class OrionOidcOnboardingTest {
                 OrganizationId id = new OrganizationId(org);
                 assertThat(secrets.resolveOrganization(f.desired.current().document(), id, "oidc"))
                         .isEqualTo("secret".toCharArray());
+                if (connectionConsumer) {
+                    assertThat(f.accounts.organization(id).connections()).hasSize(1);
+                    assertThat(f.accounts.organization(id).teams().getFirst().repositories().getFirst().storage()).isPresent();
+                }
                 for (OidcProvider provider : f.accounts.organization(id).oidcProviders()) {
                     String expected = org.equals("acme") && provider.id().equals("corporate")
                             ? "new-secret" : "secret";
@@ -667,7 +688,7 @@ class OrionOidcOnboardingTest {
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repository"), "",
                     OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                    List.of(), List.of(), List.of(), List.of());
+                    List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
             OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                     List.of(repository));
             List<OrionDocument.Organization> organizations = new ArrayList<>();
@@ -675,10 +696,10 @@ class OrionOidcOnboardingTest {
                 organizations.add(new OrionDocument.Organization(new OrganizationId(id), id, List.of(), List.of(),
                         List.of(), List.of(team), List.of(new ConfigurationSecret("oidc", "placeholder")),
                         List.of(new OidcProvider("corporate", issuer, "client", "oidc",
-                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0)), List.of()));
+                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0)), List.of(), List.of()));
             }
             OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                    Optional.of(https), List.of(), List.of()), organizations);
+                    Optional.of(https), List.of(), List.of(), List.of()), organizations);
             for (String id : List.of("default", "acme")) {
                 document = secrets.replace(document, ConfigurationScope.organization(new OrganizationId(id)),
                         "oidc", "secret".toCharArray());

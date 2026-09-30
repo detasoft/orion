@@ -142,7 +142,8 @@ class BootstrapProxyTransportIT {
                         char[] replacement = Files.readString(credentialFile).toCharArray();
                         Files.writeString(credentialFile, external);
                         var rotated = component.configurationSecrets().replaceSystem(current.get(),
-                                current.get().system().proxies().getFirst().secret().orElseThrow(), replacement);
+                                current.get().system().proxies().getFirst().secret(current.get().system()).orElseThrow(),
+                                replacement);
                         assertThat(replacement).containsOnly('\0');
                         var beforeRotation = storage.load().valueOrFailure("before rotation");
                         var rotatedFiles = new LinkedHashMap<>(beforeRotation.files());

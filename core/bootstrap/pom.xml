@@ -36,6 +36,10 @@
             <artifactId>git-transport</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.git</groupId>
+            <artifactId>git-s3-storage</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>key-material</artifactId>
         </dependency>

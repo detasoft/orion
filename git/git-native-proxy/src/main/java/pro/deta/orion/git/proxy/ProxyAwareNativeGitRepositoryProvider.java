@@ -20,6 +20,8 @@ import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.Connection;
+import pro.deta.orion.schema.orion.ConnectionReference;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.schema.orion.RepositoryName;
@@ -57,7 +59,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     private volatile Map<RemoteAlias, BootstrapGitRuntimeProxy> bootstrapOverrides = Map.of();
     private volatile boolean activePhase;
     private ConnectionFailureHandler connectionFailures;
-    private BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions;
+    private BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions;
 
     @Inject
     public ProxyAwareNativeGitRepositoryProvider(
@@ -93,7 +95,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     public synchronized void connectionFailures(ConnectionFailureHandler handler,
-            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
+            BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         if (activePhase) throw new IllegalStateException("Connection failure handler must precede activation");
         connectionFailures = Objects.requireNonNull(handler, "connection failure handler");
         this.hostKeyDecisions = Objects.requireNonNull(hostKeyDecisions, "host key decisions");
@@ -226,10 +228,10 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
     }
 
-    public SyncObservation syncObservation(GitProxyBinding binding) {
+    public SyncObservation syncObservation(GitProxyBinding binding, OrionDocument.SystemConfiguration system) {
         Objects.requireNonNull(binding, "proxy binding");
         BootstrapGitRuntimeProxy proxy = bootstrapOverrides.get(binding.alias());
-        if (proxy == null) proxy = activeBindings.get(BootstrapGitLocation.persistent(binding).proxyName());
+        if (proxy == null) proxy = activeBindings.get(BootstrapGitLocation.persistent(binding, system).proxyName());
         return proxy == null ? new SyncObservation(SyncStatus.NOT_CHECKED, null) : proxy.syncObservation();
     }
 
@@ -261,7 +263,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         Map<String, BootstrapGitRuntimeProxy> previousBindings = activeBindings;
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding binding : document.system().proxies()) {
-            BootstrapGitLocation location = BootstrapGitLocation.persistent(binding);
+            BootstrapGitLocation location = BootstrapGitLocation.persistent(binding, document.system());
             BootstrapGitRuntimeProxy runtime = bootstrapOverrides.get(binding.alias());
             if (runtime == null) runtime = candidate.get(location.proxyName());
             if (runtime == null) runtime = previousBindings.get(location.proxyName());
@@ -283,10 +285,11 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         return Result.of(runtime.syncObservation());
     }
 
-    public boolean isBootstrapSource(GitProxyBinding binding, BootstrapRepositorySources sources) {
+    public boolean isBootstrapSource(GitProxyBinding binding, BootstrapRepositorySources sources,
+            OrionDocument.SystemConfiguration system) {
         BootstrapGitRuntimeProxy runtime = bootstrapOverrides.get(binding.alias());
         return sources.referencesRepository(runtime == null
-                ? BootstrapGitLocation.persistent(binding).proxyName() : runtime.repositoryName());
+                ? BootstrapGitLocation.persistent(binding, system).proxyName() : runtime.repositoryName());
     }
 
     public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
@@ -309,7 +312,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         } else {
             Set<String> adopted = new HashSet<>();
             for (GitProxyBinding binding : document.system().proxies()) {
-                adopted.add(BootstrapGitLocation.persistent(binding).proxyName());
+                adopted.add(BootstrapGitLocation.persistent(binding, document.system()).proxyName());
             }
             for (Map.Entry<String, String> source : provisionalSources.entrySet()) {
                 if (bootstrapSection(source.getKey()) == null) continue;
@@ -318,7 +321,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 GitProxyBinding binding = sourceBinding(document, source.getKey(), runtime.location());
                 if (binding == null) continue;
                 adopted.add(runtime.repositoryName());
-                if (!bootstrapReplacement(binding, runtime.location()).equals(binding)) {
+                if (!bootstrapReplacement(binding, runtime.location(), document.system()).unchanged()) {
                     BootstrapGitRuntimeProxy previous = overrides.putIfAbsent(binding.alias(), runtime);
                     if (previous != null && previous != runtime) {
                         throw new IllegalStateException("Bootstrap sources require distinct proxy aliases");
@@ -340,7 +343,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 current, secrets, connectionFailures, hostKeyDecisions);
         Map<String, BootstrapGitRuntimeProxy> candidate = new LinkedHashMap<>();
         for (GitProxyBinding configured : document.system().proxies()) {
-            BootstrapGitLocation location = BootstrapGitLocation.persistent(configured);
+            BootstrapGitLocation location = BootstrapGitLocation.persistent(configured, document.system());
             BootstrapGitRuntimeProxy runtime = overrides.get(configured.alias());
             if (runtime == null) runtime = candidate.get(location.proxyName());
             if (runtime == null) {
@@ -405,82 +408,85 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     public synchronized OrionDocument adoptProvisional(OrionDocument document, ConfigurationSecrets secrets) {
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(secrets, "secrets");
-        if (activePhase) {
-            throw new IllegalStateException("Bootstrap proxy adoption requires the provisional phase");
-        }
+        if (activePhase) throw new IllegalStateException("Bootstrap proxy adoption requires the provisional phase");
         secrets.validate(document);
-        Map<String, GitProxyBinding> identities = new LinkedHashMap<>();
-        var aliases = new HashSet<RemoteAlias>();
-        var secretIds = new HashSet<String>();
-        for (GitProxyBinding proxy : document.system().proxies()) {
-            identities.put(proxy.upstream().toASCIIString() + "#" + proxy.ref(), proxy);
-            aliases.add(proxy.alias());
-        }
-        for (var secret : document.system().secrets()) {
-            secretIds.add(secret.id());
-        }
-        Map<GitProxyBinding, BootstrapGitLocation> additions = new LinkedHashMap<>();
-        for (var source : new java.util.TreeMap<>(provisionalSources).entrySet()) {
+        OrionDocument candidate = document;
+        for (Map.Entry<String, String> source : new java.util.TreeMap<>(provisionalSources).entrySet()) {
             BootstrapGitRuntimeProxy runtime = provisionalBindings.get(source.getValue());
-            if (runtime == null) {
-                continue;
-            }
+            if (runtime == null) continue;
             BootstrapGitLocation location = runtime.location();
-            var upstream = GitProxyBinding.canonicalUpstream(location.remoteUri());
-            String identity = upstream.toASCIIString() + "#" + location.refName();
-            if (identities.containsKey(identity)
-                    || bootstrapSection(source.getKey()) != null
-                    && sourceBinding(document, source.getKey(), location) != null) {
-                continue;
+            boolean sameUpstream = false;
+            for (GitProxyBinding binding : candidate.system().proxies()) {
+                if (BootstrapGitLocation.persistent(binding, candidate.system()).proxyName().equals(location.proxyName())) {
+                    sameUpstream = true;
+                }
             }
+            if (sameUpstream || bootstrapSection(source.getKey()) != null
+                    && sourceBinding(candidate, source.getKey(), location) != null) continue;
             RemoteAlias alias = new RemoteAlias(source.getKey());
-            if (!aliases.add(alias)) {
-                throw new IllegalArgumentException("Bootstrap proxy alias is already occupied");
+            for (GitProxyBinding binding : candidate.system().proxies()) {
+                if (binding.alias().equals(alias)) throw new IllegalArgumentException("Bootstrap proxy alias is occupied");
             }
             Optional<String> secret = location.credentialKind() == GitCredentialKind.NONE
                     ? Optional.empty() : Optional.of(alias.value() + "-credential");
-            if (secret.isPresent() && !secretIds.add(secret.orElseThrow())) {
-                throw new IllegalArgumentException("Bootstrap proxy secret identity is already occupied");
-            }
-            GitProxyBinding binding = new GitProxyBinding(alias, upstream, location.refName(),
-                    location.credentialKind(), secret, Optional.ofNullable(location.credentialUsername()),
-                    location.knownHosts());
-            identities.put(identity, binding);
-            additions.put(binding, location);
-        }
-        if (additions.isEmpty()) {
-            return document;
-        }
-        OrionDocument candidate = document;
-        List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
-        for (var addition : additions.entrySet()) {
-            GitProxyBinding binding = addition.getKey();
-            if (binding.secret().isPresent()) {
-                try (BootstrapSecret value = secretResolver.resolve(
-                        "Remote Git credential", addition.getValue().credentialReference())) {
-                    candidate = secrets.createSystem(candidate, binding.secret().orElseThrow(), value.copy());
+            if (secret.isPresent()) {
+                try (BootstrapSecret value = secretResolver.resolve("Remote Git credential", location.credentialReference())) {
+                    candidate = secrets.createSystem(candidate, secret.orElseThrow(), value.copy());
                 }
             }
-            bindings.add(binding);
+            List<Connection> connections = new ArrayList<>(candidate.system().connections());
+            GitProxyBinding.Source transport;
+            if ("ssh".equals(location.remoteUri().getScheme())) {
+                String name = alias.value() + "-ssh";
+                connections.add(Connection.Ssh.fromUpstream(name, location.remoteUri(), location.credentialKind(),
+                        secret, location.knownHosts()));
+                transport = new GitProxyBinding.Ssh(new ConnectionReference(ConnectionReference.Scope.SYSTEM, name),
+                        location.remoteUri().getRawPath());
+            } else {
+                transport = new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), secret,
+                        Optional.ofNullable(location.credentialUsername()));
+            }
+            List<GitProxyBinding> bindings = new ArrayList<>(candidate.system().proxies());
+            bindings.add(new GitProxyBinding(alias, transport, location.refName()));
+            OrionDocument.SystemConfiguration system = candidate.system();
+            candidate = new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
+                    system.secrets(), bindings, connections), candidate.organizations());
         }
-        return new OrionDocument(new OrionDocument.SystemConfiguration(candidate.system().accessControl(),
-                candidate.system().https(), candidate.system().secrets(), bindings), candidate.organizations());
+        return candidate;
     }
 
-    public synchronized Map<GitProxyBinding, GitProxyBinding> bootstrapChanges(OrionDocument document) {
-        Map<GitProxyBinding, GitProxyBinding> changes = new LinkedHashMap<>();
+    public record BootstrapChange(GitProxyBinding previous, GitProxyBinding replacement,
+            Optional<Connection.Ssh> previousConnection, Optional<Connection.Ssh> replacementConnection) {
+        public boolean unchanged() {
+            return previous.equals(replacement) && previousConnection.equals(replacementConnection);
+        }
+    }
+
+    public synchronized List<BootstrapChange> bootstrapChanges(OrionDocument document) {
+        List<BootstrapChange> changes = new ArrayList<>();
         for (GitProxyBinding binding : document.system().proxies()) {
             BootstrapGitRuntimeProxy runtime = bootstrapOverrides.get(binding.alias());
             if (runtime == null) continue;
-            GitProxyBinding replacement = bootstrapReplacement(binding, runtime.location());
-            if (!binding.equals(replacement)) changes.put(binding, replacement);
+            BootstrapChange change = bootstrapReplacement(binding, runtime.location(), document.system());
+            if (!change.unchanged()) changes.add(change);
         }
-        return Map.copyOf(changes);
+        return List.copyOf(changes);
     }
 
-    private GitProxyBinding bootstrapReplacement(GitProxyBinding binding, BootstrapGitLocation location) {
-        return new GitProxyBinding(binding.alias(), location.remoteUri(), location.refName(),
-                binding.credentialKind(), binding.secret(), binding.username(), transportFactory.knownHosts(location));
+    private BootstrapChange bootstrapReplacement(GitProxyBinding binding, BootstrapGitLocation location,
+            OrionDocument.SystemConfiguration system) {
+        if (binding.source() instanceof GitProxyBinding.Ssh ssh) {
+            Connection.Ssh previous = binding.sshConnection(system);
+            Connection.Ssh replacement = Connection.Ssh.fromUpstream(previous.name(), location.remoteUri(),
+                    previous.credentialKind(), previous.secret(), transportFactory.knownHosts(location));
+            return new BootstrapChange(binding, new GitProxyBinding(binding.alias(),
+                    new GitProxyBinding.Ssh(ssh.connection(), location.remoteUri().getRawPath()), location.refName()),
+                    Optional.of(previous), Optional.of(replacement));
+        }
+        GitProxyBinding replacement = new GitProxyBinding(binding.alias(),
+                new GitProxyBinding.Direct(location.remoteUri(), binding.credentialKind(system),
+                        binding.secret(system), binding.username(system)), location.refName());
+        return new BootstrapChange(binding, replacement, Optional.empty(), Optional.empty());
     }
 
     private static GitProxyBinding sourceBinding(OrionDocument document, String sourceId,
@@ -489,7 +495,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (binding.alias().value().equals(sourceId)) return binding;
         }
         for (GitProxyBinding binding : document.system().proxies()) {
-            if (BootstrapGitLocation.persistent(binding).proxyName().equals(location.proxyName())) return binding;
+            if (BootstrapGitLocation.persistent(binding, document.system()).proxyName().equals(location.proxyName())) return binding;
         }
         return null;
     }

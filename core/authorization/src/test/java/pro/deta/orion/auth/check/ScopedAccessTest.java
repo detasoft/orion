@@ -72,13 +72,13 @@ class ScopedAccessTest {
                     base.grants().getFirst().expressions());
             OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                     OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(), List.of(),
-                    List.of(allow), List.of(role), List.of());
+                    List.of(allow), List.of(role), List.of(), java.util.Optional.empty());
             AccessControl.User user = new AccessControl.User("alice", null, null, null, List.of(),
                     List.of("acme/team/repo/local"), List.of());
             OrionDocument.Organization organization = new OrionDocument.Organization(base.id(), "",
                     List.of(user), base.grants(), base.roles(),
                     List.of(new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
-                            List.of(repository))), List.of(), List.of(), List.of());
+                            List.of(repository))), List.of(), List.of(), List.of(), base.connections());
             new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
             assertThat(allows(organization, target)).isEqualTo(effect == ScopedGrant.Effect.ALLOW);
             assertThat(allows(organization, TEAM)).isFalse();
@@ -106,7 +106,7 @@ class ScopedAccessTest {
                 List.of(grant), List.of(ancestor),
                 List.of(new OrionDocument.Team(new TeamId("team"), "Team",
                         List.of(new ScopedGrant(grant.id(), ScopedGrant.Effect.ALLOW, grant.expressions())),
-                        List.of(local, inherited), List.of())), List.of(), List.of(), List.of());
+                        List.of(local, inherited), List.of())), List.of(), List.of(), List.of(), List.of());
         new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
         return organization;
     }

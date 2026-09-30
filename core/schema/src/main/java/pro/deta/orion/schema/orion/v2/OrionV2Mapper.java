@@ -4,6 +4,9 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.Connection;
+import pro.deta.orion.schema.orion.ConnectionReference;
+import pro.deta.orion.schema.orion.S3StorageBinding;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
@@ -59,7 +62,7 @@ public final class OrionV2Mapper {
                         accessControl,
                         Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent),
                         toCurrentSecrets(system.getSecrets()),
-                        toCurrentProxies(system.getProxies())),
+                        toCurrentProxies(system.getProxies()), toCurrentConnections(system.getConnections())),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -71,7 +74,7 @@ public final class OrionV2Mapper {
                         fromCurrent(source.system().accessControl()),
                         source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null),
                         fromCurrentSecrets(source.system().secrets()),
-                        fromCurrentProxies(source.system().proxies())),
+                        fromCurrentProxies(source.system().proxies()), fromCurrentConnections(source.system().connections())),
                 fromCurrentOrganizations(source.organizations()));
     }
 
@@ -179,7 +182,8 @@ public final class OrionV2Mapper {
                     toCurrentTeams(organization.getTeams()),
                     toCurrentSecrets(organization.getSecrets()),
                     toCurrentOidcProviders(organization.getOidcProviders()),
-                    toCurrentInvitations(organization.getInvitations())));
+                    toCurrentInvitations(organization.getInvitations()),
+                    toCurrentConnections(organization.getConnections())));
         }
         return organizations;
     }
@@ -219,7 +223,8 @@ public final class OrionV2Mapper {
                     toCurrentRemotes(repository.getRemotes()),
                     toCurrentScopedGrants(repository.getGrants()),
                     toCurrentScopedRoles(repository.getRoles()),
-                    toCurrentSecrets(repository.getSecrets())));
+                    toCurrentSecrets(repository.getSecrets()),
+                    Optional.ofNullable(repository.getStorage()).map(OrionV2Mapper::toCurrent)));
         }
         return repositories;
     }
@@ -380,13 +385,73 @@ public final class OrionV2Mapper {
         return secrets;
     }
 
+    private static List<Connection> toCurrentConnections(OrionV2.Connections source) {
+        List<Connection> result = new ArrayList<>();
+        if (source == null) return result;
+        for (Object entry : listOrEmpty(source.getDefinitions())) {
+            if (entry instanceof OrionV2.S3Connection s3) {
+                result.add(new Connection.S3(s3.getName(), Optional.ofNullable(s3.getEndpoint()).map(URI::create),
+                        s3.getRegion(), Boolean.TRUE.equals(s3.getPathStyleAccess()), Optional.ofNullable(s3.getAccessKeyId()),
+                        Optional.ofNullable(s3.getSecretKey()), Optional.ofNullable(s3.getSessionToken())));
+            } else if (entry instanceof OrionV2.SshConnection ssh) {
+                result.add(new Connection.Ssh(ssh.getName(), ssh.getHost(), ssh.getPort() == null ? 22 : ssh.getPort(),
+                        Optional.ofNullable(ssh.getUsername()), ssh.getCredentialKind(),
+                        Optional.ofNullable(ssh.getSecret()),
+                        GitProxyBinding.canonicalKnownHosts(listOrEmpty(ssh.getKnownHosts()))));
+            } else throw new IllegalArgumentException("Unknown connection type");
+        }
+        return result;
+    }
+
+    private static OrionV2.Connections fromCurrentConnections(List<Connection> source) {
+        if (source.isEmpty()) return null;
+        List<Object> result = new ArrayList<>();
+        for (Connection connection : source) {
+            switch (connection) {
+                case Connection.S3 s3 -> result.add(new OrionV2.S3Connection(s3.name(),
+                        s3.endpoint().map(URI::toString).orElse(null), s3.region(), s3.pathStyleAccess(),
+                        s3.accessKeyId().orElse(null), s3.secretKey().orElse(null), s3.sessionToken().orElse(null)));
+                case Connection.Ssh ssh -> result.add(new OrionV2.SshConnection(ssh.name(), ssh.host(), ssh.port(),
+                        ssh.username().orElse(null), ssh.credentialKind(), ssh.secret().orElse(null),
+                        new ArrayList<>(ssh.knownHosts())));
+            }
+        }
+        return new OrionV2.Connections(result);
+    }
+
+    private static ConnectionReference toCurrent(OrionV2.ConnectionReference source) {
+        Objects.requireNonNull(source, "connection reference");
+        return new ConnectionReference(enumValue(ConnectionReference.Scope.class, source.getScope()), source.getName());
+    }
+
+    private static OrionV2.ConnectionReference fromCurrent(ConnectionReference source) {
+        return new OrionV2.ConnectionReference(enumValue(OrionV2.ConnectionScope.class, source.scope()), source.name());
+    }
+
+    private static S3StorageBinding toCurrent(OrionV2.Storage source) {
+        OrionV2.S3Storage s3 = Objects.requireNonNull(source.getS3(), "S3 storage");
+        return new S3StorageBinding(toCurrent(s3.getConnection()), URI.create(s3.getLocation()));
+    }
+
+    private static OrionV2.Storage fromCurrent(S3StorageBinding source) {
+        return new OrionV2.Storage(new OrionV2.S3Storage(source.location().toString(), fromCurrent(source.connection())));
+    }
+
     private static List<GitProxyBinding> toCurrentProxies(List<OrionV2.GitProxy> source) {
         List<GitProxyBinding> proxies = new ArrayList<>();
         for (OrionV2.GitProxy proxy : listOrEmpty(source)) {
-            proxies.add(new GitProxyBinding(new RemoteAlias(proxy.getAlias()), safeProxyUri(proxy.getUpstream()),
-                    proxy.getRef(), proxy.getCredentialKind(), Optional.ofNullable(proxy.getSecret()),
-                    Optional.ofNullable(proxy.getUsername()),
-                    GitProxyBinding.canonicalKnownHosts(listOrEmpty(proxy.getKnownHosts()))));
+            GitProxyBinding.Source transport;
+            if (proxy.getSsh() != null) {
+                if (proxy.getUpstream() != null || proxy.getCredentialKind() != null
+                        || proxy.getSecret() != null || proxy.getUsername() != null) {
+                    throw new IllegalArgumentException("SSH proxy cannot contain direct transport settings");
+                }
+                transport = new GitProxyBinding.Ssh(toCurrent(proxy.getSsh().getConnection()), proxy.getSsh().getPath());
+            } else {
+                transport = new GitProxyBinding.Direct(safeProxyUri(proxy.getUpstream()), proxy.getCredentialKind(),
+                        Optional.ofNullable(proxy.getSecret()), Optional.ofNullable(proxy.getUsername()));
+            }
+            proxies.add(new GitProxyBinding(new RemoteAlias(proxy.getAlias()), transport, proxy.getRef()));
         }
         return proxies;
     }
@@ -397,9 +462,14 @@ public final class OrionV2Mapper {
         }
         List<OrionV2.GitProxy> proxies = new ArrayList<>();
         for (GitProxyBinding proxy : source) {
-            proxies.add(new OrionV2.GitProxy(proxy.alias().value(), proxy.upstream().toASCIIString(), proxy.ref(),
-                    proxy.credentialKind(), proxy.secret().orElse(null), proxy.username().orElse(null),
-                    new ArrayList<>(proxy.knownHosts())));
+            if (proxy.source() instanceof GitProxyBinding.Direct direct) {
+                proxies.add(new OrionV2.GitProxy(proxy.alias().value(), direct.upstream().toASCIIString(), proxy.ref(),
+                        direct.credentialKind(), direct.secret().orElse(null), direct.username().orElse(null), null));
+            } else {
+                GitProxyBinding.Ssh ssh = (GitProxyBinding.Ssh) proxy.source();
+                proxies.add(new OrionV2.GitProxy(proxy.alias().value(), null, proxy.ref(), null, null, null,
+                        new OrionV2.SshProxy(fromCurrent(ssh.connection()), ssh.path())));
+            }
         }
         return proxies;
     }
@@ -559,7 +629,8 @@ public final class OrionV2Mapper {
                     fromCurrentTeams(organization.teams()),
                     fromCurrentSecrets(organization.secrets()),
                     fromCurrentOidcProviders(organization.oidcProviders()),
-                    fromCurrentInvitations(organization.invitations())));
+                    fromCurrentInvitations(organization.invitations()),
+                    fromCurrentConnections(organization.connections())));
         }
         return organizations;
     }
@@ -595,7 +666,8 @@ public final class OrionV2Mapper {
                     fromCurrentRemotes(repository.remotes()),
                     fromCurrentScopedGrants(repository.grants()),
                     fromCurrentScopedRoles(repository.roles()),
-                    fromCurrentSecrets(repository.secrets())));
+                    fromCurrentSecrets(repository.secrets()),
+                    repository.storage().map(OrionV2Mapper::fromCurrent).orElse(null)));
         }
         return repositories;
     }

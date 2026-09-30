@@ -141,7 +141,7 @@ public final class AcmeConfigurationService {
             int keyBytes = decoded.length;
             Arrays.fill(decoded, (byte) 0);
             if (keyBytes < 32) throw new IllegalArgumentException("EAB HMAC key must contain at least 256 bits");
-            if (secret.isPresent()) {
+            if (secret.isPresent() && !sharedSecret(document, secret.orElseThrow())) {
                 document = secrets.replaceSystem(document, secret.orElseThrow(), key);
             } else {
                 secret = Optional.of("acme-eab-" + UUID.randomUUID());
@@ -165,7 +165,7 @@ public final class AcmeConfigurationService {
                 https.serverIssuerTrustAnchor(), https.clientAuthentication(), https.clientTrustAnchors(),
                 Optional.of(acme));
         return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                Optional.of(configured), document.system().secrets(), document.system().proxies()),
+                Optional.of(configured), document.system().secrets(), document.system().proxies(), document.system().connections()),
                 document.organizations());
     }
 
@@ -192,4 +192,14 @@ public final class AcmeConfigurationService {
             return "AcmeSettings[credentials=<redacted>]";
         }
     }
+    private static boolean sharedSecret(OrionDocument document, String id) {
+        for (pro.deta.orion.schema.orion.Connection connection : document.system().connections()) {
+            if (connection.referencesSecret(id)) return true;
+        }
+        for (pro.deta.orion.schema.orion.GitProxyBinding proxy : document.system().proxies()) {
+            if (proxy.secret(document.system()).filter(id::equals).isPresent()) return true;
+        }
+        return false;
+    }
+
 }

@@ -20,6 +20,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.decision.Decision;
@@ -78,7 +79,8 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
             f.provider.activate(() -> f.desired.current().document(), f.secrets);
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
-            assertThat(f.provider.syncObservation(f.desired.current().document().system().proxies().getFirst())
+            assertThat(f.provider.syncObservation(f.desired.current().document().system().proxies().getFirst(),
+                    f.desired.current().document().system())
                     .status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
         }
     }
@@ -160,12 +162,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.storage.snapshot.files().get("secondary.xml")).isEqualTo(secondary);
             f.acl.reload("verify host key persistence");
             var binding = f.desired.current().document().system().proxies().getFirst();
-            assertThat(binding.knownHosts()).containsExactlyInAnyOrder(previous, f.hostKey());
+            assertThat(binding.knownHosts(f.desired.current().document().system())).containsExactlyInAnyOrder(previous, f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
             assertThat(f.post(f.command("retry", "cluster", null, null)).json.at("/alias/status").asText())
                     .isEqualTo("success");
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            assertThat(f.provider.syncObservation(binding).status().name()).isEqualTo("SUCCESS");
+            assertThat(f.provider.syncObservation(binding,
+                    f.desired.current().document().system()).status().name()).isEqualTo("SUCCESS");
             assertThat(f.sshAuthentications.get()).isPositive();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.audit).anySatisfy(record -> {
@@ -209,7 +212,8 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("configuration-conflict");
         }
     }
@@ -224,7 +228,8 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).isEmpty();
             assertThat(f.audit).extracting(CommandAuditRecord::resultCode).contains("operation-failed");
             DecisionRequest failed = f.decisions.list(OPERATOR).getFirst();
             Reply visible = f.request("/api/admin/decisions", "GET", Map.of(), true);
@@ -237,7 +242,8 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts())
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system()))
                     .contains(f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
         }
@@ -271,12 +277,13 @@ class OrionAdminProxyMutationTest {
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
             assertThat(f.work).isEmpty();
             assertThat(f.sshAuthentications).hasValue(0);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).isEmpty();
         }
     }
 
     @Test
-    void savesKnownHostsAsKeysAndDoesNotTransferTrustToAnotherUrl() throws Exception {
+    void savesKnownHostsAsKeysAndRetainsTrustOnlyForTheSameSshServer() throws Exception {
         try (var f = new Fixture()) {
             int unusedPort;
             try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
@@ -289,14 +296,22 @@ class OrionAdminProxyMutationTest {
             create.put("credentialKind", "PASSWORD");
             create.put("knownHosts", List.of(firstKey, secondKey, firstKey));
             assertThat(f.post(create).status).isEqualTo(201);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts())
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system()))
                     .containsExactlyInAnyOrder(firstKey, secondKey);
             assertThat(f.post(f.command("update", "cluster", null, null)).status).isEqualTo(200);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).hasSize(2);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).hasSize(2);
             Map<String, Object> update = f.command("update", "cluster", null, null);
             update.put("upstream", upstream + "-other");
             assertThat(f.post(update).status).isEqualTo(200);
-            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).containsExactlyInAnyOrder(firstKey, secondKey);
+            Map<String, Object> endpoint = f.command("update", "cluster", null, null);
+            endpoint.put("upstream", upstream.replace("127.0.0.1", "localhost"));
+            assertThat(f.post(endpoint).status).isEqualTo(200);
+            assertThat(f.desired.current().document().system().proxies().getFirst().knownHosts(f.desired
+                    .current().document().system())).isEmpty();
         }
     }
 
@@ -308,7 +323,8 @@ class OrionAdminProxyMutationTest {
             assertThat(created.status).isEqualTo(201);
             assertThat(created.json.get("status").asText()).isEqualTo("saved");
             assertThat(created.json.at("/alias/status").asText()).isEqualTo("authentication-failed");
-            String secret = f.desired.current().document().system().proxies().getFirst().secret().orElseThrow();
+            String secret = f.desired.current().document().system().proxies().getFirst().secret(f.desired
+                    .current().document().system()).orElseThrow();
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("first-private-token".toCharArray());
             assertThat(new String(f.storage.snapshot.files().get("orion.xml")))
                     .doesNotContain("first-private-token");
@@ -332,7 +348,8 @@ class OrionAdminProxyMutationTest {
         try (var f = new Fixture()) {
             assertThat(f.post(f.command("create", "first", f.upstream(), "shared-private-token")).status)
                     .isEqualTo(201);
-            String original = f.desired.current().document().system().proxies().getFirst().secret().orElseThrow();
+            String original = f.desired.current().document().system().proxies().getFirst().secret(f.desired
+                    .current().document().system()).orElseThrow();
             var metadata = f.command("update", "first", null, null);
             metadata.put("ref", "other");
             assertThat(f.post(metadata).status).isEqualTo(200);
@@ -342,20 +359,21 @@ class OrionAdminProxyMutationTest {
             f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
                 var first = document.system().proxies().getFirst();
                 var second = new pro.deta.orion.schema.orion.GitProxyBinding(
-                        new pro.deta.orion.schema.orion.RemoteAlias("second"), first.upstream(), "third",
-                        first.credentialKind(), first.secret(), first.username(), first.knownHosts());
+                        new pro.deta.orion.schema.orion.RemoteAlias("second"), first.source(), "third");
                 return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                        document.system().https(), document.system().secrets(), List.of(first, second)),
+                        document.system().https(), document.system().secrets(), List.of(first, second),
+                                document.system().connections()),
                         document.organizations());
             }, new AccessControlSaveRequest("share fixture credential", null));
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
             var bindings = f.desired.current().document().system().proxies();
-            assertThat(bindings.get(0).secret()).isNotEqualTo(bindings.get(1).secret());
-            assertThat(f.secrets.resolveSystem(bindings.get(0).secret().orElseThrow()))
+            assertThat(bindings.get(0).secret(f.desired.current().document().system())).isNotEqualTo(bindings
+                    .get(1).secret(f.desired.current().document().system()));
+            assertThat(f.secrets.resolveSystem(bindings.get(0).secret(f.desired.current().document().system()).orElseThrow()))
                     .isEqualTo("new-private-token".toCharArray());
-            assertThat(f.secrets.resolveSystem(bindings.get(1).secret().orElseThrow()))
+            assertThat(f.secrets.resolveSystem(bindings.get(1).secret(f.desired.current().document().system()).orElseThrow()))
                     .isEqualTo("shared-private-token".toCharArray());
         }
     }
@@ -385,7 +403,8 @@ class OrionAdminProxyMutationTest {
             Reply race = f.post(f.command("replace-credential", "credential", null, "new-private-token"));
             assertThat(race.status).isEqualTo(409);
             assertThat(race.json.get("status").asText()).isEqualTo("configuration-conflict");
-            String id = f.desired.current().document().system().proxies().getFirst().secret().orElseThrow();
+            String id = f.desired.current().document().system().proxies().getFirst().secret(f.desired.current()
+                    .document().system()).orElseThrow();
             assertThat(f.secrets.resolveSystem(id)).isEqualTo("private-token".toCharArray());
         }
     }
@@ -444,6 +463,57 @@ class OrionAdminProxyMutationTest {
                     .isEqualTo("success");
             assertThat(f.storage.saves).isEqualTo(saves);
             assertThat(f.provider.repositoryNames()).isEmpty();
+        }
+    }
+
+    @Test
+    void sharedSshConnectionPreservesTrustForPathEditsAndRejectsConnectionMutations() throws Exception {
+        try (Fixture f = new Fixture()) {
+            int unusedPort;
+            try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+                unusedPort = socket.getLocalPort();
+            }
+            Map<String, Object> create = f.command("create", "cluster",
+                    "ssh://git@127.0.0.1:" + unusedPort + "/repo", "ssh-private-password");
+            create.put("credentialKind", "PASSWORD");
+            create.put("knownHosts", Set.of(f.hostKey()));
+            assertThat(f.post(create).status).isEqualTo(201);
+            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+                var first = document.system().proxies().getFirst();
+                var source = (pro.deta.orion.schema.orion.GitProxyBinding.Ssh) first.source();
+                var second = new pro.deta.orion.schema.orion.GitProxyBinding(
+                        new pro.deta.orion.schema.orion.RemoteAlias("second"),
+                        new pro.deta.orion.schema.orion.GitProxyBinding.Ssh(source.connection(), "/second"), "main");
+                var system = document.system();
+                return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
+                        system.secrets(), List.of(first, second), system.connections()), document.organizations());
+            }, new AccessControlSaveRequest("share SSH connection", UserEmail.EMPTY));
+            OrionDocument original = f.desired.current().document();
+            String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
+            Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
+            path.put("credentialKind", "PASSWORD");
+            path.put("ref", "other");
+            assertThat(f.post(path).status).isEqualTo(200);
+            OrionDocument before = f.desired.current().document();
+            assertThat(before.system().connections()).isEqualTo(original.system().connections());
+            assertThat(before.system().proxies().getFirst().upstream(before.system()).getPath()).isEqualTo("/changed");
+            assertThat(before.system().proxies().getFirst().ref()).isEqualTo("refs/heads/other");
+            for (var binding : before.system().proxies()) {
+                assertThat(binding.knownHosts(before.system())).containsExactly(f.hostKey());
+            }
+            Map<String, Object> endpoint = f.command("update", "cluster",
+                    upstream.replace("127.0.0.1", "localhost"), null);
+            endpoint.put("credentialKind", "PASSWORD");
+            Reply moved = f.post(endpoint);
+            assertThat(moved.status).isEqualTo(400);
+            assertThat(moved.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
+            assertThat(f.desired.current().document()).isEqualTo(before);
+            Reply rejected = f.post(f.command("replace-credential", "cluster", null, "replacement-password"));
+            assertThat(rejected.status).isEqualTo(400);
+            assertThat(rejected.json.get("status").asText()).isEqualTo("shared-connection-requires-explicit-edit");
+            assertThat(f.desired.current().document()).isEqualTo(before);
+            String reference = before.system().proxies().getFirst().secret(before.system()).orElseThrow();
+            assertThat(f.secrets.resolveSystem(reference)).isEqualTo("ssh-private-password".toCharArray());
         }
     }
 

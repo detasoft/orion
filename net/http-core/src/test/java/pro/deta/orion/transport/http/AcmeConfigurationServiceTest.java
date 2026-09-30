@@ -156,7 +156,7 @@ class AcmeConfigurationServiceTest {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(), Optional.of(acme));
         OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.of(https), List.of(), List.of()), List.of());
+                Optional.of(https), List.of(), List.of(), List.of()), List.of());
         desired.publish(initial, Optional.of("r1"));
         AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null,
                 new AcmeCertificateService(new OrionConfiguration(), desired,
@@ -293,6 +293,34 @@ class AcmeConfigurationServiceTest {
                     () -> desired.current().document(), owner.configurationCipher());
             String reference = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
             assertThat(secrets.resolveSystem(reference)).containsExactly(EAB_KEY.toCharArray());
+        }
+    }
+
+    @Test
+    void replacingEabDoesNotOverwriteACredentialsSecretUsedByAnS3Connection() throws Exception {
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionDocument initial = OrionDocument.withAccessControl(new AccessControl());
+        desired.publish(initial, Optional.of("r1"));
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            ConfigurationSecrets secrets = new ConfigurationSecrets(
+                    () -> desired.current().document(), owner.configurationCipher());
+            AcmeConfigurationService service = new AcmeConfigurationService(desired, secrets, null,
+                    new AcmeCertificateService(new OrionConfiguration(), desired, owner.acme(), null, secrets),
+                    owner.configurationMaterial(), new OrionConfiguration());
+            OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
+            String original = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
+            var connection = new pro.deta.orion.schema.orion.Connection.S3("archive", Optional.empty(), "us-east-1",
+                    false, Optional.of("id"), Optional.of(original), Optional.empty());
+            saved = new OrionDocument(new OrionDocument.SystemConfiguration(saved.system().accessControl(),
+                    saved.system().https(), saved.system().secrets(), saved.system().proxies(), List.of(connection)),
+                    saved.organizations());
+            String changedKey = java.util.Base64.getUrlEncoder().encodeToString(new byte[32]);
+            OrionDocument changed = service.updated(saved, settings("zerossl", "key-id", changedKey));
+            String replacement = changed.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
+            assertThat(replacement).isNotEqualTo(original);
+            assertThat(secrets.resolveSystem(changed, original)).isEqualTo(EAB_KEY.toCharArray());
+            assertThat(secrets.resolveSystem(changed, replacement)).isEqualTo(changedKey.toCharArray());
+            assertThat(changed.system().connections()).containsExactly(connection);
         }
     }
 

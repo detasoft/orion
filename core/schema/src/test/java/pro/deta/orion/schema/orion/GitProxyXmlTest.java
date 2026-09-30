@@ -48,7 +48,7 @@ class GitProxyXmlTest {
         var system = first.system();
         List<GitProxyBinding> bindings = new ArrayList<>(system.proxies());
         var copied = new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
-                system.secrets(), bindings);
+                system.secrets(), bindings, system.connections());
         bindings.clear();
         assertThat(copied.proxies()).hasSize(2);
         assertThatThrownBy(copied.proxies()::clear).isInstanceOf(UnsupportedOperationException.class);
@@ -58,9 +58,9 @@ class GitProxyXmlTest {
     void preservesFileTransportWithoutASecret() throws Exception {
         OrionDocument document = read(document(proxy("configuration", "file:///srv/git/a/../repo.git",
                 "main", "NONE", "")));
-        assertThat(document.system().proxies().getFirst().upstream().toASCIIString())
+        assertThat(document.system().proxies().getFirst().upstream(document.system()).toASCIIString())
                 .isEqualTo("file:///srv/git/repo.git");
-        assertThat(document.system().proxies().getFirst().secret()).isEmpty();
+        assertThat(document.system().proxies().getFirst().secret(document.system())).isEmpty();
         assertThat(read(write(document))).isEqualTo(document);
     }
 
@@ -126,16 +126,16 @@ class GitProxyXmlTest {
 
     @Test
     void preservesMultipleSshKeysAndSystemSecretReference() throws Exception {
-        String binding = proxy("material", "ssh://git@git.example:22/repo", "main", "PRIVATE_KEY",
-                "<secret>bootstrap-token</secret><knownHosts><key>" + FIRST_KEY + "</key><key>"
-                        + SECOND_KEY + "</key><key>" + FIRST_KEY + "</key></knownHosts>");
-        OrionDocument parsed = read(document(binding));
-        assertThat(parsed.system().proxies().getFirst().knownHosts())
+        String connection = sshConnection("PRIVATE_KEY", "<secret>bootstrap-token</secret>"
+                + "<knownHosts><key>" + FIRST_KEY + "</key><key>" + SECOND_KEY + "</key><key>"
+                + FIRST_KEY + "</key></knownHosts>");
+        OrionDocument parsed = read(document(sshProxy(), connection));
+        assertThat(parsed.system().proxies().getFirst().knownHosts(parsed.system()))
                 .containsExactlyInAnyOrder(FIRST_KEY, SECOND_KEY);
-        assertThatThrownBy(() -> parsed.system().proxies().getFirst().knownHosts().clear())
+        assertThatThrownBy(() -> parsed.system().proxies().getFirst().knownHosts(parsed.system()).clear())
                 .isInstanceOf(UnsupportedOperationException.class);
         String serialized = write(parsed);
-        assertThat(serialized).contains("ssh://git@git.example/repo", "PRIVATE_KEY", FIRST_KEY, SECOND_KEY);
+        assertThat(serialized).contains("<host>git.example</host>", "<path>/repo</path>", "PRIVATE_KEY", FIRST_KEY, SECOND_KEY);
         assertThat(read(serialized)).isEqualTo(parsed);
     }
 
@@ -143,10 +143,9 @@ class GitProxyXmlTest {
     void sharesPasswordKindBetweenHttpAndSshWhileKeepingTheirUsernamesSeparate() throws Exception {
         String http = proxy("configuration", "https://git.example/repo", "main", "PASSWORD",
                 "<secret>bootstrap-token</secret><username>operator</username>");
-        String ssh = proxy("material", "ssh://git@git.example/repo", "main", "PASSWORD",
-                "<secret>bootstrap-token</secret>");
-        OrionDocument document = read(document(http + ssh));
-        assertThat(document.system().proxies()).extracting(GitProxyBinding::credentialKind)
+        OrionDocument document = read(document(http + sshProxy(),
+                sshConnection("PASSWORD", "<secret>bootstrap-token</secret>")));
+        assertThat(document.system().proxies()).extracting(binding -> binding.credentialKind(document.system()))
                 .containsExactly(GitCredentialKind.PASSWORD, GitCredentialKind.PASSWORD);
         assertThat(read(write(document))).isEqualTo(document);
     }
@@ -154,9 +153,9 @@ class GitProxyXmlTest {
     @ParameterizedTest
     @ValueSource(strings = {"invalid", "ssh-ed25519 !not-base64", "host ssh-ed25519 AAAA", "ssh-ed25519"})
     void rejectsMalformedSshTrust(String knownHosts) {
-        String binding = proxy("material", "ssh://git@git.example/repo", "main", "PRIVATE_KEY",
-                "<secret>bootstrap-token</secret><knownHosts><key>" + knownHosts + "</key></knownHosts>");
-        assertThatThrownBy(() -> read(document(binding)))
+        String connection = sshConnection("PRIVATE_KEY", "<secret>bootstrap-token</secret>"
+                + "<knownHosts><key>" + knownHosts + "</key></knownHosts>");
+        assertThatThrownBy(() -> read(document(sshProxy(), connection)))
                 .isInstanceOf(IOException.class).hasMessageContaining("host key");
     }
 
@@ -186,10 +185,25 @@ class GitProxyXmlTest {
     }
 
     private static String document(String proxies) {
+        return document(proxies, "");
+    }
+
+    private static String document(String proxies, String connections) {
         return "<orion schemaVersion=\"2\"><system><accessControl><users/><roles/><grants/></accessControl>"
                 + "<secrets><secret id=\"bootstrap-token\"><envelope>opaque-envelope</envelope></secret></secrets>"
                 + (proxies.isEmpty() ? "" : "<proxies>" + proxies + "</proxies>")
+                + (connections.isEmpty() ? "" : "<connections>" + connections + "</connections>")
                 + "</system><organizations/></orion>";
+    }
+
+    private static String sshProxy() {
+        return "<proxy alias=\"material\"><ref>main</ref><ssh><connection scope=\"system\" name=\"upstream\"/>"
+                + "<path>/repo</path></ssh></proxy>";
+    }
+
+    private static String sshConnection(String kind, String auth) {
+        return "<ssh name=\"upstream\"><host>git.example</host><username>git</username><credentialKind>"
+                + kind + "</credentialKind>" + auth + "</ssh>";
     }
 
     private static String proxy(String alias, String upstream, String ref, String kind, String auth) {

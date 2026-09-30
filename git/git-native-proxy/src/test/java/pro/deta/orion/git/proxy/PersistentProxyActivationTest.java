@@ -48,10 +48,11 @@ class PersistentProxyActivationTest {
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding old = new GitProxyBinding(actual.alias(),
-                    URI.create(actual.upstream() + "/old"), actual.ref(), actual.credentialKind(),
-                    actual.secret(), actual.username(), actual.knownHosts());
+                new GitProxyBinding.Direct(URI.create(actual.upstream(fixture.current.get().system()) + "/old"),
+                        actual.credentialKind(fixture.current.get().system()),
+                        actual.secret(fixture.current.get().system()), actual.username(fixture.current.get().system())), actual.ref());
             fixture.current.set(withProxies(fixture.current.get(), List.of(old)));
-            fixture.unavailable.set(old.upstream());
+            fixture.unavailable.set(old.upstream(fixture.current.get().system()));
             assertThat(provider.adoptProvisional(fixture.current.get(), fixture.secrets))
                     .isSameAs(fixture.current.get());
 
@@ -72,10 +73,13 @@ class PersistentProxyActivationTest {
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding previous = new GitProxyBinding(actual.alias(),
-                    URI.create(actual.upstream() + "/old"), actual.ref(), actual.credentialKind(),
-                    actual.secret(), actual.username(), actual.knownHosts());
-            GitProxyBinding ordinary = new GitProxyBinding(new RemoteAlias("other"), actual.upstream(),
-                    actual.ref(), actual.credentialKind(), actual.secret(), actual.username(), actual.knownHosts());
+                new GitProxyBinding.Direct(URI.create(actual.upstream(fixture.current.get().system()) + "/old"),
+                        actual.credentialKind(fixture.current.get().system()),
+                        actual.secret(fixture.current.get().system()), actual.username(fixture.current.get().system())), actual.ref());
+            GitProxyBinding ordinary = new GitProxyBinding(new RemoteAlias("other"),
+                new GitProxyBinding.Direct(actual.upstream(fixture.current.get().system()),
+                        actual.credentialKind(fixture.current.get().system()),
+                        actual.secret(fixture.current.get().system()), actual.username(fixture.current.get().system())), actual.ref());
             fixture.current.set(withProxies(fixture.current.get(), List.of(previous, ordinary)));
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("same bootstrap repository");
@@ -117,9 +121,9 @@ class PersistentProxyActivationTest {
             provider.activate(fixture.current::get, fixture.secrets);
             OrionDocument changed = fixture.secrets.createSystem(fixture.current.get(), "basic", "password".toCharArray());
             GitProxyBinding previous = changed.system().proxies().getFirst();
-            GitProxyBinding basic = new GitProxyBinding(previous.alias(), previous.upstream(), previous.ref(),
-                    GitCredentialKind.PASSWORD, Optional.of("basic"), Optional.of("user"),
-                    Set.of());
+            GitProxyBinding basic = new GitProxyBinding(previous.alias(),
+                new GitProxyBinding.Direct(previous.upstream(fixture.current.get().system()),
+                        GitCredentialKind.PASSWORD, Optional.of("basic"), Optional.of("user")), previous.ref());
             fixture.current.set(withProxies(changed, List.of(basic)));
 
             provider.openForRead(name).valueOrFailure("reloaded proxy");
@@ -137,8 +141,10 @@ class PersistentProxyActivationTest {
             provider.activate(fixture.current::get, fixture.secrets);
             GitProxyBinding previous = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding redirected = new GitProxyBinding(previous.alias(),
-                    URI.create(previous.upstream() + "/other"), previous.ref(), previous.credentialKind(),
-                    previous.secret(), previous.username(), previous.knownHosts());
+                new GitProxyBinding.Direct(URI.create(previous.upstream(fixture.current.get()
+                        .system()) + "/other"), previous.credentialKind(fixture.current.get().system()),
+                        previous.secret(fixture.current.get().system()),
+                        previous.username(fixture.current.get().system())), previous.ref());
             fixture.current.set(withProxies(fixture.current.get(), List.of(redirected)));
             fixture.authorization.clear();
 
@@ -157,17 +163,18 @@ class PersistentProxyActivationTest {
             fixture.rotate("stored-token");
             GitProxyBinding first = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding unavailable = new GitProxyBinding(new RemoteAlias("second"),
-                    URI.create(first.upstream() + "/unavailable"), first.ref(), first.credentialKind(),
-                    first.secret(), first.username(), first.knownHosts());
+                new GitProxyBinding.Direct(URI.create(first.upstream(fixture.current.get()
+                        .system()) + "/unavailable"), first.credentialKind(fixture.current.get().system()),
+                        first.secret(fixture.current.get().system()), first.username(fixture.current.get().system())), first.ref());
             fixture.current.set(withProxies(fixture.current.get(), List.of(first, unavailable)));
-            fixture.unavailable.set(unavailable.upstream());
+            fixture.unavailable.set(unavailable.upstream(fixture.current.get().system()));
 
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("upstream synchronization");
 
             provider.openForRead(name).valueOrFailure("provisional source after failed activation");
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
-            String failedCache = BootstrapGitLocation.persistent(unavailable).proxyName();
+            String failedCache = BootstrapGitLocation.persistent(unavailable, fixture.current.get().system()).proxyName();
             assertThat(provider.openForRead(failedCache)).isInstanceOf(Result.Failure.class);
             assertThat(provider.isPublicRepositoryName(failedCache)).isFalse();
             assertThat(provider.repositoryNames()).isEmpty();
@@ -197,7 +204,7 @@ class PersistentProxyActivationTest {
             var invalid = new ConfigurationSecret("configuration-credential", "invalid-envelope");
             fixture.current.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                     valid.system().accessControl(), valid.system().https(), List.of(invalid),
-                    valid.system().proxies()), valid.organizations()));
+                    valid.system().proxies(), valid.system().connections()), valid.organizations()));
 
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageNotContaining("invalid-envelope");
@@ -223,7 +230,7 @@ class PersistentProxyActivationTest {
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
             OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                    Optional.empty(), List.of(new ConfigurationSecret("broken", "invalid-envelope")), List.of()),
+                    Optional.empty(), List.of(new ConfigurationSecret("broken", "invalid-envelope")), List.of(), List.of()),
                     List.of());
 
             assertThatThrownBy(() -> provider.activate(() -> invalid, fixture.secrets))
@@ -256,7 +263,8 @@ class PersistentProxyActivationTest {
 
     private static OrionDocument withProxies(OrionDocument document, List<GitProxyBinding> bindings) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                document.system().https(), document.system().secrets(), bindings), document.organizations());
+                document.system().https(), document.system().secrets(), bindings,
+                        document.system().connections()), document.organizations());
     }
 
     private static final class Fixture implements AutoCloseable {

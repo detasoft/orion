@@ -64,7 +64,7 @@ class RuntimeHttpAdminApiIT {
             assertThat(stored.system().secrets()).hasSize(1);
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> stored,
                     orion.identity().material().configurationCipher());
-            String secretId = stored.system().proxies().getFirst().secret().orElseThrow();
+            String secretId = stored.system().proxies().getFirst().secret(stored.system()).orElseThrow();
             assertThat(secrets.resolveSystem(stored, secretId))
                     .isEqualTo("private-proxy-value".toCharArray());
             JsonNode after = OBJECT_MAPPER.readTree(RuntimeHttpTestSupport.request(

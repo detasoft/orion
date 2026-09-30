@@ -366,7 +366,8 @@ class OrionAuthorizationModelTest {
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
-        return new OrionDocument.Organization(new OrganizationId(id), null, users, grants, roles, teams, List.of(), List.of(), List.of());
+        return new OrionDocument.Organization(new OrganizationId(id), null, users, grants, roles, teams,
+                List.of(), List.of(), List.of(), List.of());
     }
 
     private static OrionDocument.Team team(
@@ -387,7 +388,7 @@ class OrionAuthorizationModelTest {
                 List.of(),
                 grants,
                 roles,
-                List.of());
+                List.of(), java.util.Optional.empty());
     }
 
     private static AccessControl.User user(

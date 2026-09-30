@@ -88,6 +88,8 @@ public class App {
                         .tlsCapability(bootstrap.tlsKeyMaterial())
                         .sshHostKeyCapability(bootstrap.sshHostKeys())
                         .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
+                        .configuredRepositoryProvider(bootstrap.storageProvider())
+                        .s3Transport(bootstrap.s3Transport())
                         .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);

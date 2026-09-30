@@ -15,6 +15,8 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.Connection;
+import pro.deta.orion.schema.orion.ConnectionReference;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.RemoteAlias;
 
@@ -42,11 +44,15 @@ class OrionAdminProxiesRouteTest {
 
     @Test
     void returnsOnlySafeSystemAliasFieldsThroughTheAuthorizedServletWithoutOpeningUpstreams() throws Exception {
-        var binding = new GitProxyBinding(new RemoteAlias("configuration"),
-                URI.create("ssh://private-user@git.example:2222/config.git"), "main",
-                GitCredentialKind.PRIVATE_KEY, Optional.of("private-key-id"),
-                Optional.empty(), Set.of("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"));
-        desired.publish(document(List.of(binding)), Optional.of("configuration-revision"));
+        Connection.Ssh connection = Connection.Ssh.fromUpstream("upstream",
+                URI.create("ssh://private-user@git.example:2222/config.git"), GitCredentialKind.PRIVATE_KEY,
+                Optional.of("private-key-id"), Set.of("ssh-ed25519 AAAA"));
+        GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("configuration"), new GitProxyBinding.Ssh(
+                new ConnectionReference(ConnectionReference.Scope.SYSTEM, "upstream"), "/config.git"), "main");
+        OrionDocument base = document(List.of());
+        desired.publish(new OrionDocument(new OrionDocument.SystemConfiguration(base.system().accessControl(),
+                base.system().https(), base.system().secrets(), List.of(binding), List.of(connection)), List.of()),
+                Optional.of("configuration-revision"));
 
         var response = get(context(grant(AccessControl.GrantKey.ADMIN)));
 
@@ -68,8 +74,9 @@ class OrionAdminProxiesRouteTest {
         desired.publish(document(List.of()), Optional.empty());
         assertThat(mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString())
                 .get("aliases").isEmpty()).isTrue();
-        var binding = new GitProxyBinding(new RemoteAlias("archive"), URI.create("file:///upstream.git"), "main",
-                GitCredentialKind.NONE, Optional.empty(), Optional.empty(), Set.of());
+        var binding = new GitProxyBinding(new RemoteAlias("archive"),
+                new GitProxyBinding.Direct(URI.create("file:///upstream.git"), GitCredentialKind.NONE,
+                        Optional.empty(), Optional.empty()), "main");
         desired.publish(document(List.of(binding)), Optional.of("new-revision"));
 
         JsonNode body = mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString());
@@ -93,7 +100,7 @@ class OrionAdminProxiesRouteTest {
 
     private static OrionDocument document(List<GitProxyBinding> bindings) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(new ConfigurationSecret("private-key-id", "private-ciphertext")), bindings), List.of());
+                List.of(new ConfigurationSecret("private-key-id", "private-ciphertext")), bindings, List.of()), List.of());
     }
 
     private Response get(SecurityContext context) throws Exception {

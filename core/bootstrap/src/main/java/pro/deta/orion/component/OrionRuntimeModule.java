@@ -29,6 +29,11 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.BootstrapChange;
+import pro.deta.orion.git.proxy.ProxySshConnection;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.schema.orion.Connection;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -66,11 +71,12 @@ public class OrionRuntimeModule {
     @Provides
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(AccessControlStorage storage,
+            ConfiguredNativeGitRepositoryProvider configured, BootstrapRepositorySources sources,
             ProxyAwareNativeGitRepositoryProvider provider, ConfigurationCipherCapability cipher,
             ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionAccessControlServiceImpl acl,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
-            BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> hostKeyDecisions) {
+            BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         return () -> {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
@@ -78,47 +84,61 @@ public class OrionRuntimeModule {
             if (adopted.isPresent() && !adopted.orElseThrow().equals(desiredState.current().document())) {
                 acl.reload("bootstrap proxy adoption");
             }
+            configured.activate(() -> desiredState.current().document(), secrets, sources::referencesRepository);
             provider.activate(() -> desiredState.current().document(), secrets, adopted.isEmpty());
             OrionDesiredState.Snapshot snapshot = desiredState.current();
-            for (Map.Entry<GitProxyBinding, GitProxyBinding> change
-                    : provider.bootstrapChanges(snapshot.document()).entrySet()) {
-                GitProxyBinding previous = change.getKey();
-                GitProxyBinding replacement = change.getValue();
-                Decision decision = bootstrapDecision(previous, replacement,
-                        actor -> saveBootstrapConnection(acl, desiredState.current(), previous, replacement, actor));
+            for (BootstrapChange change : provider.bootstrapChanges(snapshot.document())) {
+                Decision decision = bootstrapDecision(change,
+                        actor -> saveBootstrapConnection(acl, desiredState.current(), change, actor));
                 decisions.register(decision).valueOrFailure("Cannot register bootstrap connection decision");
             }
         };
     }
 
-    private static Decision bootstrapDecision(GitProxyBinding previous, GitProxyBinding replacement,
+    private static Decision bootstrapDecision(BootstrapChange change,
             Function<PrincipalAddress, Result<Void>> save) {
         String description = "Bootstrap is running with the connection from orion.yml. "
                 + "Update the XML connection to these parameters. Rejecting leaves the running connection unchanged."
-                + "\nXML URL: " + previous.upstream() + "\nBootstrap URL: " + replacement.upstream()
-                + "\nXML ref: " + previous.ref() + "\nBootstrap ref: " + replacement.ref()
-                + "\nXML knownHosts:\n" + String.join("\n", new TreeSet<>(previous.knownHosts()))
-                + "\nBootstrap knownHosts:\n" + String.join("\n", new TreeSet<>(replacement.knownHosts()));
-        return new Decision(previous.alias(), Optional.empty(),
-                "Update bootstrap connection " + previous.alias().value(), description,
+                + "\nXML URL: " + upstream(change.previous(), change.previousConnection())
+                + "\nBootstrap URL: " + upstream(change.replacement(), change.replacementConnection())
+                + "\nXML ref: " + change.previous().ref() + "\nBootstrap ref: " + change.replacement().ref()
+                + "\nXML knownHosts:\n" + keys(change.previousConnection())
+                + "\nBootstrap knownHosts:\n" + keys(change.replacementConnection());
+        return new Decision(change.previous().alias(), Optional.empty(),
+                "Update bootstrap connection " + change.previous().alias().value(), description,
                 List.of(new DecisionAction("Update XML connection", true, save),
                         new DecisionAction("Reject", false, actor -> Result.of(null))));
     }
 
+    private static java.net.URI upstream(GitProxyBinding binding, Optional<Connection.Ssh> connection) {
+        return binding.source() instanceof GitProxyBinding.Direct direct ? direct.upstream()
+                : connection.orElseThrow().upstream(((GitProxyBinding.Ssh) binding.source()).path());
+    }
+
+    private static String keys(Optional<Connection.Ssh> connection) {
+        return connection.map(value -> String.join("\n", new TreeSet<>(value.knownHosts()))).orElse("");
+    }
+
     private static Result<Void> saveBootstrapConnection(OrionAccessControlServiceImpl acl,
-            OrionDesiredState.Snapshot snapshot, GitProxyBinding previous, GitProxyBinding replacement,
-            PrincipalAddress actor) {
+            OrionDesiredState.Snapshot snapshot, BootstrapChange change, PrincipalAddress actor) {
         try {
             acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
-                if (!document.system().proxies().contains(previous)) {
+                if (!document.system().proxies().contains(change.previous())
+                        || change.previousConnection().filter(value -> !document.system().connections().contains(value))
+                            .isPresent()) {
                     throw new AccessControlConcurrentUpdateException("Bootstrap connection changed", null);
                 }
                 List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
-                bindings.set(bindings.indexOf(previous), replacement);
+                bindings.set(bindings.indexOf(change.previous()), change.replacement());
+                List<Connection> connections = new ArrayList<>(document.system().connections());
+                if (change.previousConnection().isPresent()) {
+                    connections.set(connections.indexOf(change.previousConnection().orElseThrow()),
+                            change.replacementConnection().orElseThrow());
+                }
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
-                        system.https(), system.secrets(), bindings), document.organizations());
-            }, new AccessControlSaveRequest("Reconcile bootstrap connection " + previous.alias().value()
+                        system.https(), system.secrets(), bindings, connections), document.organizations());
+            }, new AccessControlSaveRequest("Reconcile bootstrap connection " + change.previous().alias().value()
                     + " approved by " + actor, UserEmail.EMPTY));
             return Result.of(null);
         } catch (RuntimeException failure) {
@@ -135,42 +155,47 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    public static BiFunction<GitProxyBinding, HostKeyRejectedException, Decision> proxyHostKeyDecisions(
+    public static BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> proxyHostKeyDecisions(
             OrionDesiredState desiredState, OrionAccessControlServiceImpl acl, CommandAuditSink audit) {
-        return (connection, rejected) -> {
-            int port = connection.upstream().getPort() < 0 ? 22 : connection.upstream().getPort();
-            if (!connection.upstream().getHost().equalsIgnoreCase(rejected.host()) || port != rejected.port()) {
+        return (selected, rejected) -> {
+            Connection.Ssh connection = selected.connection();
+            GitProxyBinding binding = selected.binding();
+            if (!connection.host().equalsIgnoreCase(rejected.host()) || connection.port() != rejected.port()) {
                 throw new IllegalStateException("Rejected host key belongs to another server", rejected);
             }
             OrionDesiredState.Snapshot snapshot = desiredState.current();
-            if (!snapshot.document().system().proxies().contains(connection)) {
+            if (!snapshot.document().system().proxies().contains(binding)
+                    || !snapshot.document().system().connections().contains(connection)) {
                 throw new AccessControlConcurrentUpdateException("Connection configuration changed", rejected);
             }
             String key = PublicKeyEntry.toString(rejected.serverKey());
-            return SshHostKeyDecision.create(connection.alias(), Optional.empty(),
+            return SshHostKeyDecision.create(binding.alias(), Optional.empty(),
                     rejected.host(), rejected.port(), rejected.serverKey(),
-                    new DecisionAction("Add and trust", true, actor -> trust(acl, audit, snapshot, connection, key, actor)))
+                    new DecisionAction("Add and trust", true, actor -> trust(acl, audit, snapshot, selected, key, actor)))
                     .valueOrFailure("Could not prepare SSH host key decision");
         };
     }
 
     private static Result<Void> trust(OrionAccessControlServiceImpl acl, CommandAuditSink audit,
             OrionDesiredState.Snapshot snapshot,
-            GitProxyBinding binding, String key, PrincipalAddress actor) {
+            ProxySshConnection selected, String key, PrincipalAddress actor) {
+        GitProxyBinding binding = selected.binding();
+        Connection.Ssh connection = selected.connection();
         try {
-            Set<String> keys = new TreeSet<>(binding.knownHosts());
+            Set<String> keys = new TreeSet<>(connection.knownHosts());
             keys.add(key);
-            GitProxyBinding replacement = new GitProxyBinding(binding.alias(), binding.upstream(), binding.ref(),
-                    binding.credentialKind(), binding.secret(), binding.username(), keys);
+            Connection.Ssh replacement = new Connection.Ssh(connection.name(), connection.host(), connection.port(),
+                    connection.username(), connection.credentialKind(), connection.secret(), keys);
             acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
-                if (!document.system().proxies().contains(binding)) {
+                if (!document.system().proxies().contains(binding)
+                        || !document.system().connections().contains(connection)) {
                     throw new AccessControlConcurrentUpdateException("Connection configuration changed", null);
                 }
-                List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
-                bindings.set(bindings.indexOf(binding), replacement);
+                List<Connection> connections = new ArrayList<>(document.system().connections());
+                connections.set(connections.indexOf(connection), replacement);
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
-                        system.https(), system.secrets(), bindings), document.organizations());
+                        system.https(), system.secrets(), system.proxies(), connections), document.organizations());
             }, new AccessControlSaveRequest("Trust SSH host key for " + binding.alias().value()
                     + " approved by " + actor, UserEmail.EMPTY));
             recordTrustAudit(audit, binding, actor, "saved");

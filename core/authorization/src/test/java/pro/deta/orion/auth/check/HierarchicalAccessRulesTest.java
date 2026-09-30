@@ -102,7 +102,7 @@ class HierarchicalAccessRulesTest {
         OrionDocument.Organization organization = permitted.organizations().getFirst();
         current.set(new OrionDocument(permitted.system(), List.of(new OrionDocument.Organization(
                 organization.id(), "", List.of(), organization.grants(), organization.roles(),
-                organization.teams(), List.of(), List.of(), List.of()))));
+                organization.teams(), List.of(), List.of(), List.of(), organization.connections()))));
         assertThat(RepositoryAccessRules.read().evaluate(context, REPOSITORY).allowed()).isFalse();
     }
 
@@ -125,7 +125,7 @@ class HierarchicalAccessRulesTest {
         AccessControl.User otherUser = new AccessControl.User("alice", null, null, null, List.of(), List.of(),
                 List.of(new AccessControl.Grant("read", List.of(expression(READ, "true")))));
         OrionDocument.Organization other = new OrionDocument.Organization(new OrganizationId("other"), "",
-                List.of(otherUser), List.of(), List.of(), acme.teams(), List.of(), List.of(), List.of());
+                List.of(otherUser), List.of(), List.of(), acme.teams(), List.of(), List.of(), List.of(), acme.connections());
         OrionDocument document = new OrionDocument(base.system(), List.of(acme, other));
         SecurityContext acmeContext = context(document);
         SecurityContext otherContext = SecurityContext.createContext().withUserIdentity(
@@ -147,17 +147,17 @@ class HierarchicalAccessRulesTest {
                 List.of(GrantAddress.parse("acme/team/repo/force")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(force), List.of(local), List.of());
+                List.of(), List.of(force), List.of(local), List.of(), java.util.Optional.empty());
         OrionDocument.Repository sibling = new OrionDocument.Repository(new RepositoryId("sibling"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         AccessControl.User user = new AccessControl.User("alice", null, null, null, List.of(),
                 List.of("acme/team/repo/local"), List.of());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository, sibling));
         SecurityContext context = context(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                 organization.id(), "", List.of(user), organization.grants(), organization.roles(),
-                List.of(team), List.of(), List.of(), List.of()))));
+                List.of(team), List.of(), List.of(), List.of(), organization.connections()))));
         assertThat(RepositoryAccessRules.write().evaluate(context, REPOSITORY).allowed()).isTrue();
         assertThat(RepositoryAccessRules.force().evaluate(context, REPOSITORY).allowed()).isTrue();
         assertThat(push(context, "main")).isTrue();
@@ -234,11 +234,11 @@ class HierarchicalAccessRulesTest {
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(), references);
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"),
-                "", List.of(user), grants, List.of(role), List.of(team), List.of(), List.of(), List.of());
+                "", List.of(user), grants, List.of(role), List.of(team), List.of(), List.of(), List.of(), List.of());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 }

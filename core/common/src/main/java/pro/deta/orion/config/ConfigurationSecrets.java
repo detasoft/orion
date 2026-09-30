@@ -221,7 +221,7 @@ public final class ConfigurationSecrets {
         if (owner.isEmpty()) {
             return new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
-                    secrets, document.system().proxies()),
+                    secrets, document.system().proxies(), document.system().connections()),
                     document.organizations());
         }
         ConfigurationScope scope = owner.orElseThrow();
@@ -242,7 +242,7 @@ public final class ConfigurationSecrets {
                     repositories.add(repository.id().equals(scope.repositoryId().orElseThrow())
                             ? new OrionDocument.Repository(repository.id(), repository.displayName(),
                             repository.defaultBranch(), repository.policy(), repository.remotes(),
-                            repository.grants(), repository.roles(), secrets)
+                            repository.grants(), repository.roles(), secrets, repository.storage())
                             : repository);
                 }
                 teams.add(new OrionDocument.Team(team.id(), team.displayName(), team.grants(),
@@ -250,7 +250,8 @@ public final class ConfigurationSecrets {
             }
             organizations.add(new OrionDocument.Organization(organization.id(), organization.displayName(),
                     organization.users(), organization.grants(), organization.roles(), teams,
-                    scope.teamId().isEmpty() ? secrets : organization.secrets(), organization.oidcProviders(), organization.invitations()));
+                    scope.teamId().isEmpty() ? secrets : organization.secrets(), organization.oidcProviders(),
+                            organization.invitations(), organization.connections()));
         }
         return new OrionDocument(document.system(), organizations);
     }

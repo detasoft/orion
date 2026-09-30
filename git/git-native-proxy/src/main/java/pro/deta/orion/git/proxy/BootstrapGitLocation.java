@@ -3,6 +3,7 @@ package pro.deta.orion.git.proxy;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.OrionDocument;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -112,11 +113,11 @@ record BootstrapGitLocation(
                 cacheName(remote, refName));
     }
 
-    static BootstrapGitLocation persistent(GitProxyBinding binding) {
-        return new BootstrapGitLocation(binding.upstream(), binding.ref(), binding.credentialKind(),
-                binding.secret().orElse(null), binding.username().orElse(null),
-                binding.knownHosts(),
-                cacheName(binding.upstream(), binding.ref()));
+    static BootstrapGitLocation persistent(GitProxyBinding binding, OrionDocument.SystemConfiguration system) {
+        return new BootstrapGitLocation(binding.upstream(system), binding.ref(), binding.credentialKind(system),
+                binding.secret(system).orElse(null), binding.username(system).orElse(null),
+                binding.knownHosts(system),
+                cacheName(binding.upstream(system), binding.ref()));
     }
 
     private static String cacheName(URI upstream, String ref) {

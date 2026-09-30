@@ -11,47 +11,93 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** A system-owned transparent Git proxy; its secret resolves only in the system secret collection. */
-public record GitProxyBinding(
-        RemoteAlias alias,
-        URI upstream,
-        String ref,
-        GitCredentialKind credentialKind,
-        Optional<String> secret,
-        Optional<String> username,
-        Set<String> knownHosts) {
+/** A system Git proxy separates the repository/ref from its SSH connection or direct HTTP/file source. */
+public record GitProxyBinding(RemoteAlias alias, Source source, String ref) {
     public static final String REPOSITORY_PREFIX = "proxy/system/";
+
+    public sealed interface Source permits Direct, Ssh {}
+
+    public record Direct(URI upstream, GitCredentialKind credentialKind, Optional<String> secret,
+            Optional<String> username) implements Source {
+        public Direct {
+            upstream = canonicalUpstream(upstream);
+            if ("ssh".equals(upstream.getScheme())) {
+                throw new IllegalArgumentException("SSH proxy requires a connection reference");
+            }
+            Objects.requireNonNull(credentialKind, "proxy credential kind").requireTransport(upstream.getScheme());
+            secret = Objects.requireNonNull(secret, "proxy secret")
+                    .map(value -> IdentifierRules.requireCanonical(value, "proxy secret"));
+            username = Objects.requireNonNull(username, "proxy username");
+            if ((credentialKind == GitCredentialKind.NONE) != secret.isEmpty()) {
+                throw new IllegalArgumentException("Proxy secret does not match credential kind");
+            }
+            if (credentialKind == GitCredentialKind.PASSWORD) {
+                if (username.isEmpty() || username.orElseThrow().isBlank()
+                        || username.orElseThrow().indexOf(':') >= 0
+                        || username.orElseThrow().indexOf('\n') >= 0 || username.orElseThrow().indexOf('\r') >= 0) {
+                    throw new IllegalArgumentException("Proxy basic credential username is invalid");
+                }
+            } else if (username.isPresent()) {
+                throw new IllegalArgumentException("Proxy username does not match credential kind");
+            }
+        }
+    }
+
+    public record Ssh(ConnectionReference connection, String path) implements Source {
+        public Ssh {
+            Objects.requireNonNull(connection, "SSH connection");
+            if (connection.scope() != ConnectionReference.Scope.SYSTEM) {
+                throw new IllegalArgumentException("System proxy requires a system connection");
+            }
+            if (path == null || !path.startsWith("/") || path.contains("?") || path.contains("#")) {
+                throw new IllegalArgumentException("Invalid SSH repository path");
+            }
+            try {
+                URI.create(path);
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("Invalid SSH repository path");
+            }
+        }
+    }
+
+    public GitProxyBinding {
+        Objects.requireNonNull(alias, "proxy alias");
+        Objects.requireNonNull(source, "proxy source");
+        ref = canonicalRef(ref);
+    }
 
     public String publicRepositoryName() {
         return REPOSITORY_PREFIX + alias.value();
     }
 
-    public GitProxyBinding {
-        Objects.requireNonNull(alias, "proxy alias");
-        upstream = canonicalUpstream(upstream);
-        ref = canonicalRef(ref);
-        Objects.requireNonNull(credentialKind, "proxy credential kind");
-        secret = Objects.requireNonNull(secret, "proxy secret")
-                .map(value -> IdentifierRules.requireCanonical(value, "proxy secret"));
-        username = Objects.requireNonNull(username, "proxy username");
-        knownHosts = canonicalKnownHosts(knownHosts);
-        credentialKind.requireTransport(upstream.getScheme());
-        if ((credentialKind == GitCredentialKind.NONE) != secret.isEmpty()) {
-            throw new IllegalArgumentException("Proxy secret does not match credential kind");
+    public Connection.Ssh sshConnection(OrionDocument.SystemConfiguration system) {
+        if (!(source instanceof Ssh ssh)
+                || !(OrionDocument.findConnection(system.connections(), ssh.connection().name())
+                    instanceof Connection.Ssh connection)) {
+            throw new IllegalArgumentException("Proxy requires an SSH connection");
         }
-        if (credentialKind == GitCredentialKind.PASSWORD && !"ssh".equals(upstream.getScheme())) {
-            if (username.isEmpty() || username.orElseThrow().isBlank()
-                    || username.orElseThrow().indexOf(':') >= 0
-                    || username.orElseThrow().indexOf('\n') >= 0
-                    || username.orElseThrow().indexOf('\r') >= 0) {
-                throw new IllegalArgumentException("Proxy basic credential username is invalid");
-            }
-        } else if (username.isPresent()) {
-            throw new IllegalArgumentException("Proxy username does not match credential kind");
-        }
-        if (!knownHosts.isEmpty() && !"ssh".equals(upstream.getScheme())) {
-            throw new IllegalArgumentException("Proxy trusted host keys require SSH");
-        }
+        return connection;
+    }
+
+    public URI upstream(OrionDocument.SystemConfiguration system) {
+        return source instanceof Direct direct ? direct.upstream()
+                : sshConnection(system).upstream(((Ssh) source).path());
+    }
+
+    public GitCredentialKind credentialKind(OrionDocument.SystemConfiguration system) {
+        return source instanceof Direct direct ? direct.credentialKind() : sshConnection(system).credentialKind();
+    }
+
+    public Optional<String> secret(OrionDocument.SystemConfiguration system) {
+        return source instanceof Direct direct ? direct.secret() : sshConnection(system).secret();
+    }
+
+    public Optional<String> username(OrionDocument.SystemConfiguration system) {
+        return source instanceof Direct direct ? direct.username() : Optional.empty();
+    }
+
+    public Set<String> knownHosts(OrionDocument.SystemConfiguration system) {
+        return source instanceof Direct ? Set.of() : sshConnection(system).knownHosts();
     }
 
     public static Set<String> canonicalKnownHosts(Collection<String> keys) {

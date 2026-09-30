@@ -13,6 +13,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -60,6 +62,8 @@ public interface OrionComponent {
     @Named("runtime")
     AggregateStateMachine runtimeStateMachine();
 
+    S3Transport s3Transport();
+
     @Component.Builder
     interface Builder {
         OrionComponent build();
@@ -74,12 +78,17 @@ public interface OrionComponent {
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(ProxyAwareNativeGitRepositoryProvider repositoryProvider);
+        @BindsInstance Builder s3Transport(S3Transport transport);
+        @BindsInstance Builder configuredRepositoryProvider(ConfiguredNativeGitRepositoryProvider provider);
         @BindsInstance Builder bootstrapRepositorySources(BootstrapRepositorySources repositorySources);
 
         default Builder defaultConfigurationProvider() {
             OrionConfiguration configuration = new OrionConfiguration();
+            S3Transport transport = new S3Transport();
+            ConfiguredNativeGitRepositoryProvider configured =
+                    new ConfiguredNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(), transport);
             ProxyAwareNativeGitRepositoryProvider repositoryProvider =
-                    new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
+                    new ProxyAwareNativeGitRepositoryProvider(configured);
             ResolvedBootstrapSource configurationSource = repositoryProvider.resolveProvisional(
                     BootstrapRepositorySources.CONFIGURATION,
                     configuration.getBootstrap().getAccessControl(),
@@ -95,6 +104,8 @@ public interface OrionComponent {
                     .tlsCapability(TlsCapability.unavailable())
                     .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
+                    .configuredRepositoryProvider(configured)
+                    .s3Transport(transport)
                     .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)));
         }
     }

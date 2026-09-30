@@ -213,7 +213,7 @@ class RuntimeHttpAdminAclUpdateIT {
             OrionDocument base = OrionXml.read(new ByteArrayInputStream(
                     initial.body().getBytes(StandardCharsets.UTF_8)));
             OrionDocument.Organization acme = new OrionDocument.Organization(new OrganizationId("acme"), "Acme",
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
             RuntimeHttpTestSupport.HttpResponse organization = RuntimeHttpTestSupport.request(
                     "POST", orion.httpUrl("/api/admin/acl"), bearer, "application/xml",
                     serializeDocument(new OrionDocument(base.system(), List.of(acme))), initial.etag());
@@ -246,7 +246,7 @@ class RuntimeHttpAdminAclUpdateIT {
             OrionDocument plaintext = new OrionDocument(new OrionDocument.SystemConfiguration(
                     system.accessControl(), system.https(),
                     List.of(new ConfigurationSecret("plain", "open-xml-secret")),
-                    system.proxies()), stored.organizations());
+                    system.proxies(), system.connections()), stored.organizations());
             RuntimeHttpTestSupport.HttpResponse rejected = RuntimeHttpTestSupport.request(
                     "POST", orion.httpUrl("/api/admin/acl"), bearer, "application/xml",
                     serializeDocument(plaintext), current.etag());

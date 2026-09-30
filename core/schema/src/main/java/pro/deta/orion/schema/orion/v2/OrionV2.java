@@ -4,6 +4,7 @@ import jakarta.xml.bind.annotation.XmlAccessType;
 import jakarta.xml.bind.annotation.XmlAccessorType;
 import jakarta.xml.bind.annotation.XmlAttribute;
 import jakarta.xml.bind.annotation.XmlElement;
+import jakarta.xml.bind.annotation.XmlElements;
 import jakarta.xml.bind.annotation.XmlElementWrapper;
 import jakarta.xml.bind.annotation.XmlEnum;
 import jakarta.xml.bind.annotation.XmlEnumValue;
@@ -37,7 +38,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies"})
+    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies", "connections"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
@@ -48,9 +49,10 @@ public class OrionV2 {
         @XmlElementWrapper(name = "proxies")
         @XmlElement(name = "proxy")
         private List<GitProxy> proxies;
+        private Connections connections;
 
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, null, null, null);
+            this(accessControl, null, null, null, null);
         }
     }
 
@@ -58,21 +60,114 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"upstream", "ref", "credentialKind", "secret", "username", "knownHosts"})
+    @XmlType(propOrder = {"upstream", "ref", "credentialKind", "secret", "username", "ssh"})
     public static final class GitProxy {
         @XmlAttribute(required = true)
         private String alias;
-        @XmlElement(required = true)
         private String upstream;
         @XmlElement(required = true)
         private String ref;
-        @XmlElement(required = true)
         private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
         private String secret;
         private String username;
+        private SshProxy ssh;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"connection", "path"})
+    public static final class SshProxy {
+        @XmlElement(required = true)
+        private ConnectionReference connection;
+        @XmlElement(required = true)
+        private String path;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"definitions"})
+    public static final class Connections {
+        @XmlElements({@XmlElement(name = "s3", type = S3Connection.class),
+                @XmlElement(name = "ssh", type = SshConnection.class)})
+        private List<Object> definitions;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"endpoint", "region", "pathStyleAccess", "accessKeyId", "secretKey", "sessionToken"})
+    public static final class S3Connection {
+        @XmlAttribute(required = true)
+        private String name;
+        private String endpoint;
+        private String region;
+        private Boolean pathStyleAccess;
+        private String accessKeyId;
+        private String secretKey;
+        private String sessionToken;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"host", "port", "username", "credentialKind", "secret", "knownHosts"})
+    public static final class SshConnection {
+        @XmlAttribute(required = true)
+        private String name;
+        @XmlElement(required = true)
+        private String host;
+        private Integer port;
+        private String username;
+        @XmlElement(required = true)
+        private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
+        @XmlElement(required = true)
+        private String secret;
         @XmlElementWrapper(name = "knownHosts")
         @XmlElement(name = "key")
         private List<String> knownHosts;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    public static final class ConnectionReference {
+        @XmlAttribute(required = true)
+        private ConnectionScope scope;
+        @XmlAttribute(required = true)
+        private String name;
+    }
+
+    @XmlEnum
+    public enum ConnectionScope {
+        @XmlEnumValue("system") SYSTEM,
+        @XmlEnumValue("organization") ORGANIZATION
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    public static final class Storage {
+        @XmlElement(required = true)
+        private S3Storage s3;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    public static final class S3Storage {
+        @XmlAttribute(required = true)
+        private String location;
+        @XmlElement(required = true)
+        private ConnectionReference connection;
     }
 
     @Data
@@ -167,7 +262,8 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders", "invitations"})
+    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets", "oidcProviders",
+            "invitations", "connections"})
     public static final class Organization {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -193,6 +289,7 @@ public class OrionV2 {
         @XmlElementWrapper(name = "invitations")
         @XmlElement(name = "invitation")
         private List<Invitation> invitations;
+        private Connections connections;
     }
 
     @Data
@@ -250,7 +347,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets"})
+    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets", "storage"})
     public static final class Repository {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -269,6 +366,7 @@ public class OrionV2 {
         @XmlElementWrapper(name = "secrets")
         @XmlElement(name = "secret")
         private List<Secret> secrets;
+        private Storage storage;
     }
 
     @Data

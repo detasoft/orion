@@ -67,11 +67,12 @@ class GitHubRemoteProfileTest {
             return current.get();
         }, KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("api"), null,
-                "refs/heads/main", RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of());
+                "refs/heads/main", RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
+                        java.util.Optional.empty());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), null, List.of(), List.of(),
                 List.of(), List.of(new OrionDocument.Team(new TeamId("platform"), null, List.of(), List.of(),
-                List.of(repository))), List.of(), List.of(), List.of())));
+                List.of(repository))), List.of(), List.of(), List.of(), List.of())));
         current.set(secrets.create(document, ConfigurationScope.repository(REPOSITORY),
                 "github-token", "fine-grained-token".toCharArray()));
     }

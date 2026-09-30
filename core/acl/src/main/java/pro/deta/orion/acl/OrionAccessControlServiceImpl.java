@@ -885,7 +885,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private byte[] serializeInitialConfiguration(AccessControl accessControl) {
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("default"), "Default", List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of());
         return serializeOrionConfiguration(new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl), List.of(organization)));
     }

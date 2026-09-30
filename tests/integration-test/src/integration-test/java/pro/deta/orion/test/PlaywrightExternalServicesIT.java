@@ -133,7 +133,7 @@ class PlaywrightExternalServicesIT {
         accessControl.updatePrimaryConfiguration(revision, document -> new OrionDocument(
                         new OrionDocument.SystemConfiguration(
                                 document.system().accessControl(), Optional.of(https),
-                                document.system().secrets(), document.system().proxies()),
+                                document.system().secrets(), document.system().proxies(), document.system().connections()),
                         document.organizations()),
                 new AccessControlSaveRequest("configure test ACME", UserEmail.EMPTY));
     }

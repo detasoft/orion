@@ -24,7 +24,7 @@ class RepositoryConfigurationTest {
                 List.of(upstream),
                 List.of(),
                 List.of(),
-                List.of());
+                List.of(), java.util.Optional.empty());
 
         assertThat(repository.remotes()).containsExactly(upstream);
     }
@@ -77,7 +77,7 @@ class RepositoryConfigurationTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of()))
+                List.of(), java.util.Optional.empty()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("canonical full ref");
         assertThatThrownBy(() -> new RemoteRefMapping("main", "refs/heads/main"))
@@ -151,7 +151,7 @@ class RepositoryConfigurationTest {
                 remotes,
                 List.of(),
                 List.of(),
-                List.of());
+                List.of(), java.util.Optional.empty());
     }
 
     private static RepositoryRemote primaryUpstream() {

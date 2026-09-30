@@ -30,6 +30,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.Connection;
 import java.net.URI;
 import java.util.Set;
 
@@ -88,11 +89,12 @@ class BootstrapSshTrustTest {
                     OrionDocument.withAccessControl(new AccessControl()));
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
             current.set(fixture.provider.adoptProvisional(current.get(), secrets));
-            assertThat(current.get().system().proxies().getFirst().knownHosts()).isEmpty();
+            assertThat(current.get().system().proxies().getFirst().knownHosts(current.get().system())).isEmpty();
             fixture.events.list.clear();
             fixture.provider.activate(current::get, secrets);
-            assertThat(fixture.provider.bootstrapChanges(current.get()).values()).singleElement()
-                    .satisfies(binding -> assertThat(binding.knownHosts()).containsExactly(fixture.key()));
+            assertThat(fixture.provider.bootstrapChanges(current.get())).singleElement()
+                    .satisfies(binding -> assertThat(binding.replacementConnection().orElseThrow().knownHosts())
+                            .containsExactly(fixture.key()));
             fixture.keyPair.set(KeyPairGenerator.getInstance("EC").generateKeyPair());
             int authenticated = fixture.authentications.get();
             assertThat(fixture.provider.retry(current.get().system().proxies().getFirst().alias(),
@@ -113,17 +115,25 @@ class BootstrapSshTrustTest {
             current.set(fixture.provider.adoptProvisional(current.get(), secrets));
             GitProxyBinding actual = current.get().system().proxies().getFirst();
             String oldKey = PublicKeyEntry.toString(KeyPairGenerator.getInstance("EC").generateKeyPair().getPublic());
-            GitProxyBinding previous = new GitProxyBinding(actual.alias(),
-                    URI.create("ssh://git@127.0.0.1:1/old.git"), actual.ref(), actual.credentialKind(),
-                    actual.secret(), actual.username(), Set.of(oldKey));
             OrionDocument.SystemConfiguration system = current.get().system();
+            Connection.Ssh actualConnection = actual.sshConnection(system);
+            Connection.Ssh previousConnection = Connection.Ssh.fromUpstream(actualConnection.name(),
+                    URI.create("ssh://git@127.0.0.1:1/old.git"), actualConnection.credentialKind(),
+                    actualConnection.secret(), Set.of(oldKey));
+            GitProxyBinding previous = new GitProxyBinding(actual.alias(),
+                    new GitProxyBinding.Ssh(((GitProxyBinding.Ssh) actual.source()).connection(), "/old.git"), actual.ref());
             current.set(new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
-                    system.https(), system.secrets(), List.of(previous)), current.get().organizations()));
+                    system.https(), system.secrets(), List.of(previous), List.of(previousConnection)),
+                    current.get().organizations()));
             assertThat(fixture.provider.adoptProvisional(current.get(), secrets)).isSameAs(current.get());
             fixture.provider.activate(current::get, secrets);
             assertThat(fixture.provider.openForRead(repository).isFailure()).isFalse();
             assertThat(fixture.provider.retry(previous.alias(), current::get, secrets).isFailure()).isFalse();
-            assertThat(fixture.provider.bootstrapChanges(current.get())).containsEntry(previous, actual);
+            assertThat(fixture.provider.bootstrapChanges(current.get())).singleElement().satisfies(change -> {
+                assertThat(change.previous()).isEqualTo(previous);
+                assertThat(change.replacement()).isEqualTo(actual);
+                assertThat(change.replacementConnection()).contains(actualConnection);
+            });
             assertThat(current.get().system().proxies()).containsExactly(previous);
             assertThat(fixture.messages()).isEmpty();
         }

@@ -151,11 +151,11 @@ class OrionRuntimeModuleTest {
             for (List<AccessControl.User> users : List.of(organization.users(), List.<AccessControl.User>of())) {
                 desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                         organization.id(), "", List.of(assigned), List.of(grant), List.of(role),
-                        organization.teams(), List.of(), List.of(), List.of()))), Optional.empty());
+                        organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
                 assertThat(registry.list(actor)).containsExactly(pending.request());
                 desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                         organization.id(), "", users, List.of(grant), List.of(role),
-                        organization.teams(), List.of(), List.of(), List.of()))), Optional.empty());
+                        organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
                 assertThat(registry.list(actor)).isEmpty();
                 assertThat(registry.find(pending.request().id(), actor)).isEmpty();
                 assertThat(registry.decide(pending.request().id(), new DecisionAnswer(0, actor)).isFailure())
@@ -228,7 +228,7 @@ class OrionRuntimeModuleTest {
                         new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
         desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                 organization.id(), "", List.of(restricted), organization.grants(), organization.roles(),
-                organization.teams(), List.of(), List.of(), List.of()))), Optional.empty());
+                organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
         OrionAccessControlServiceImpl acl = decisionAcl(desired);
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
         assertThat(acl.canAdminister(actor, Optional.of(ConfigurationScope.parse("acme/platform/api")))).isTrue();
@@ -244,13 +244,13 @@ class OrionRuntimeModuleTest {
                 List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("api"), "API",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("platform"), "Platform",
                 List.of(), List.of(), List.of(repository));
         return new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(user), List.of(), List.of())),
                 List.of(new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(user),
-                        List.of(), List.of(), List.of(team), List.of(), List.of(), List.of())));
+                        List.of(), List.of(), List.of(team), List.of(), List.of(), List.of(), List.of())));
     }
 
     @Test

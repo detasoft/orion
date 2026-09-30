@@ -56,7 +56,7 @@ class BootstrapProxyAdoptionTest {
             assertThat(adopted.system().secrets()).hasSize(1);
             assertThat(adopted.toString()).doesNotContain("external-token", name);
             current.set(adopted);
-            char[] value = secrets.resolveSystem(adopted.system().proxies().getFirst().secret().orElseThrow());
+            char[] value = secrets.resolveSystem(adopted.system().proxies().getFirst().secret(adopted.system()).orElseThrow());
             try {
                 assertThat(value).isEqualTo("external-token".toCharArray());
             } finally {
@@ -120,7 +120,7 @@ class BootstrapProxyAdoptionTest {
         try (OrionKeyMaterial material = material()) {
             OrionDocument current = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.empty(), List.of(new ConfigurationSecret("token", "invalid-envelope")),
-                    List.of(binding("configuration", "https://git.example/repo", "token"))), List.of());
+                    List.of(binding("configuration", "https://git.example/repo", "token")), List.of()), List.of());
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, material.configurationCipher());
             var provider = provider("external-token");
             provider.prepareProvisional("configuration", source("https://git.example/repo"));
@@ -135,12 +135,14 @@ class BootstrapProxyAdoptionTest {
 
     private static OrionDocument withProxy(OrionDocument current, GitProxyBinding proxy) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(current.system().accessControl(),
-                current.system().https(), current.system().secrets(), List.of(proxy)), current.organizations());
+                current.system().https(), current.system().secrets(), List.of(proxy),
+                        current.system().connections()), current.organizations());
     }
 
     private static GitProxyBinding binding(String alias, String upstream, String secret) {
-        return new GitProxyBinding(new RemoteAlias(alias), URI.create(upstream), "main",
-                GitCredentialKind.TOKEN, Optional.of(secret), Optional.empty(), Set.of());
+        return new GitProxyBinding(new RemoteAlias(alias),
+                new GitProxyBinding.Direct(URI.create(upstream), GitCredentialKind.TOKEN, Optional.of(secret),
+                        Optional.empty()), "main");
     }
 
     private static BootstrapSourceConfig source(String upstream) {

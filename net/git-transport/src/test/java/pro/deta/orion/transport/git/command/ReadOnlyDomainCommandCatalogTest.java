@@ -57,11 +57,11 @@ class ReadOnlyDomainCommandCatalogTest {
                 ACLUtil.generateDefaultAccessControl("unused").getGrants());
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository));
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
-                List.of(user), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of());
+                List.of(user), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of(), List.of());
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 

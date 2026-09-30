@@ -225,7 +225,8 @@ class RemoteBootstrapConfigurationIT {
                         var document = OrionXml.read(new ByteArrayInputStream(xml));
                         assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
                                 .containsExactlyInAnyOrder("configuration", "material");
-                        assertThat(document.system().proxies()).extracting(binding -> binding.upstream().toString())
+                        assertThat(document.system().proxies())
+                                .extracting(binding -> binding.upstream(document.system()).toString())
                                 .containsExactlyInAnyOrder(acl.getLocation().substring(4),
                                         material.getLocation().substring(4));
                         assertThat(document.system().secrets()).hasSize(2);
