@@ -33,6 +33,12 @@
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>integration-test-support</artifactId>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.git</groupId>
+            <artifactId>git-compat-tool</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -49,6 +55,7 @@
                     <workingDirectory>${project.build.directory}</workingDirectory>
                     <systemPropertyVariables>
                         <cloudflare.it.enabled>${cloudflare.it.enabled}</cloudflare.it.enabled>
+                        <git.compat.tool.jar>${project.basedir}/../../git/git-compat-tool/target/git-compat-tool-${project.version}-all.jar</git.compat.tool.jar>
                     </systemPropertyVariables>
                 </configuration>
                 <executions>
