@@ -148,7 +148,6 @@ class OrionAdminProxyMutationTest {
             assertThat(pending.description()).contains(f.hostKey());
             Reply visible = f.request("/api/admin/decisions", "GET", Map.of(), true);
             assertThat(visible.json.get("decisions")).hasSize(1);
-            byte[] secondary = f.storage.snapshot.files().get("secondary.xml");
             int saves = f.storage.saves;
 
             assertThat(f.answer(pending, "0").status).isEqualTo(204);
@@ -159,7 +158,7 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
 
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            assertThat(f.storage.snapshot.files().get("secondary.xml")).isEqualTo(secondary);
+            assertThat(f.storage.snapshot.files()).containsOnlyKeys("orion.xml");
             f.acl.reload("verify host key persistence");
             var binding = f.desired.current().document().system().proxies().getFirst();
             assertThat(binding.knownHosts(f.desired.current().document().system())).containsExactlyInAnyOrder(previous, f.hostKey());
@@ -318,7 +317,6 @@ class OrionAdminProxyMutationTest {
     @Test
     void savesAnEncryptedCredentialReplacesItExplicitlyAndAuditsWithoutSecrets() throws Exception {
         try (var f = new Fixture()) {
-            byte[] secondary = f.storage.snapshot.files().get("secondary.xml");
             Reply created = f.post(f.command("create", "credential", f.upstream(), "first-private-token"));
             assertThat(created.status).isEqualTo(201);
             assertThat(created.json.get("status").asText()).isEqualTo("saved");
@@ -328,7 +326,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("first-private-token".toCharArray());
             assertThat(new String(f.storage.snapshot.files().get("orion.xml")))
                     .doesNotContain("first-private-token");
-            assertThat(f.storage.snapshot.files().get("secondary.xml")).isEqualTo(secondary);
+            assertThat(f.storage.snapshot.files()).containsOnlyKeys("orion.xml");
 
             Reply replaced = f.post(f.command("replace-credential", "credential", null, "second-private-token"));
             assertThat(replaced.status).isEqualTo(200);
@@ -683,8 +681,7 @@ class OrionAdminProxyMutationTest {
         MemoryStorage() throws IOException {
             var output = new ByteArrayOutputStream();
             OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
-            snapshot = new AccessControlSnapshot(Map.of("orion.xml", output.toByteArray(),
-                    "secondary.xml", output.toByteArray()), Optional.of("0"));
+            snapshot = new AccessControlSnapshot(Map.of("orion.xml", output.toByteArray()), Optional.of("0"));
         }
         @Override public Result<AccessControlSnapshot> load() { return new Result.Success<>(snapshot); }
         @Override public String primaryPath() { return "orion.xml"; }

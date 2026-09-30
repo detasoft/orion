@@ -91,6 +91,25 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void ignoresOtherRepositoryFilesWhenLoadingAndUpdatingAcl() {
+        AccessControlDraft primary = new AccessControlDraft();
+        primary.getUsers().add(user("alice"));
+        AccessControlDraft secondary = new AccessControlDraft();
+        secondary.getUsers().add(user("bob")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+
+        try (ServiceFixture fixture = fixture(primary, secondary)) {
+            assertThat(fixture.service.listSshCredentials("bob"))
+                    .isInstanceOfSatisfying(SshCredentialListResult.Failure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.USER_NOT_FOUND));
+            fixture.service.createOrUpdateUser(userUpdate("bob", "new-password-hash"));
+            assertThat(parse(fixture.storage.snapshot.files().get(ACL_PATH)).getUsers())
+                    .extracting(AccessControl.User::getId).containsExactlyInAnyOrder("alice", "bob");
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
+        }
+    }
+
+    @Test
     void connectionSelectorNeverGrantsAdministrationInSystemOrOrganizationScope() {
         AccessControl.Grant mixed = new AccessControl.Grant("mixed", List.of(
                 new AccessControl.GrantExpression(AccessControl.GrantKey.CONNECTION, "*"),
@@ -296,9 +315,8 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void updatesPrimaryConfigurationAtTheReadRevisionAndPreservesSecondaryFiles() throws Exception {
+    void updatesConfigurationAtTheReadRevisionInOneFile() throws Exception {
         try (var fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
-            byte[] secondary = fixture.storage.snapshot.files().get(EXTRA_ACL_PATH);
             var result = fixture.service.updatePrimaryConfiguration("version-one", document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
@@ -307,7 +325,8 @@ class OrionAccessControlServiceImplTest {
                     "update proxy", null);
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
-            assertThat(fixture.storage.snapshot.files().get(EXTRA_ACL_PATH)).isEqualTo(secondary);
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
+            assertThat(fixture.storage.snapshot.version()).contains("version-one");
             assertThat(parseDocument(fixture.storage.snapshot.files().get(ACL_PATH)).system().secrets())
                     .isEqualTo(result.document().system().secrets());
         }
@@ -517,7 +536,7 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void atomicallyAddsCanonicalKeysAndPreservesTheOtherAclFile() {
+    void atomicallyAddsCanonicalKeysToTheConfigurationFile() {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.ARGON2, "password-hash"));
@@ -526,7 +545,6 @@ class OrionAccessControlServiceImplTest {
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary, secondary)) {
-            byte[] unchanged = fixture.storage.snapshot.files().get(EXTRA_ACL_PATH);
             String commented = key(KEY_ONE.getPublic()) + " alice@example";
             SshCredentialUpdateResult first = fixture.service.addSshCredentials(
                     "alice",
@@ -540,7 +558,7 @@ class OrionAccessControlServiceImplTest {
             assertThat(second).isInstanceOfSatisfying(
                     SshCredentialUpdateResult.Success.class,
                     success -> assertThat(success.changed()).isFalse());
-            assertThat(fixture.storage.snapshot.files().get(EXTRA_ACL_PATH)).isEqualTo(unchanged);
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
             assertThat(fixture.storage.saveCount).isEqualTo(1);
             assertThat(sshValues(fixture.storage.snapshot, ACL_PATH, "alice"))
                     .containsExactlyInAnyOrder(key(KEY_ONE.getPublic()), key(KEY_TWO.getPublic()));
@@ -605,12 +623,10 @@ class OrionAccessControlServiceImplTest {
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
                 .addCredential(AccessControl.CredentialType.ARGON2, "password-hash"));
-        AccessControlDraft secondary = new AccessControlDraft();
-        secondary.getUsers().add(user("bob")
+        primary.getUsers().add(user("bob")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
-        try (ServiceFixture fixture = fixture(primary, secondary)) {
-            byte[] secondaryBefore = fixture.storage.snapshot.files().get(EXTRA_ACL_PATH);
+        try (ServiceFixture fixture = fixture(primary, new AccessControlDraft())) {
             SshCredentialUpdateResult removed = fixture.service.removeSshCredential(
                     "alice",
                     descriptor(KEY_ONE.getPublic()).fingerprint(),
@@ -624,8 +640,8 @@ class OrionAccessControlServiceImplTest {
                     .singleElement()
                     .extracting(AccessControl.Credential::getValue)
                     .isEqualTo("password-hash");
-            assertThat(fixture.storage.snapshot.files().get(EXTRA_ACL_PATH)).isEqualTo(secondaryBefore);
-            assertThat(sshValues(fixture.storage.snapshot, EXTRA_ACL_PATH, "bob"))
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
+            assertThat(sshValues(fixture.storage.snapshot, ACL_PATH, "bob"))
                     .containsExactly(key(KEY_ONE.getPublic()));
         }
     }
@@ -791,7 +807,7 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void adminUserUpdateMutatesOnlyTheUsersOwningAclFile() {
+    void adminUserUpdateWritesOnlyTheConfigurationFile() {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
@@ -800,13 +816,12 @@ class OrionAccessControlServiceImplTest {
                 .addCredential(AccessControl.CredentialType.ARGON2, "old-hash"));
 
         try (ServiceFixture fixture = fixture(primary, secondary)) {
-            byte[] primaryBefore = fixture.storage.snapshot.files().get(ACL_PATH);
-
             fixture.service.createOrUpdateUser(userUpdate("alice", "new-hash"));
 
-            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH, EXTRA_ACL_PATH);
-            assertThat(fixture.storage.snapshot.files().get(ACL_PATH)).isEqualTo(primaryBefore);
-            assertThat(credentials(fixture.storage.snapshot, EXTRA_ACL_PATH, "alice"))
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
+            assertThat(parse(fixture.storage.snapshot.files().get(ACL_PATH)).getUsers())
+                    .extracting(AccessControl.User::getId).containsExactlyInAnyOrder("root", "alice");
+            assertThat(credentials(fixture.storage.snapshot, ACL_PATH, "alice"))
                     .singleElement()
                     .extracting(AccessControl.Credential::getValue)
                     .isEqualTo("new-hash");
@@ -818,11 +833,10 @@ class OrionAccessControlServiceImplTest {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
-        AccessControlDraft secondary = new AccessControlDraft();
-        secondary.getUsers().add(user("alice")
+        primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.ARGON2, "old-hash"));
 
-        try (ServiceFixture fixture = fixture(primary, secondary);
+        try (ServiceFixture fixture = fixture(primary, new AccessControlDraft());
              var executor = Executors.newFixedThreadPool(2)) {
             fixture.storage.blockCredentialRemoval = true;
             var removal = executor.submit(() -> fixture.service.removeSshCredential(
@@ -848,7 +862,7 @@ class OrionAccessControlServiceImplTest {
                     .singleElement()
                     .asString()
                     .startsWith("root-auth-locked:");
-            assertThat(credentials(fixture.storage.snapshot, EXTRA_ACL_PATH, "alice"))
+            assertThat(credentials(fixture.storage.snapshot, ACL_PATH, "alice"))
                     .singleElement()
                     .extracting(AccessControl.Credential::getValue)
                     .isEqualTo("new-hash");
@@ -856,21 +870,20 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
-    void internalServerKeySynchronizationMutatesOnlyTheRootOwningFile() {
+    void internalServerKeySynchronizationKeepsOtherUsersInTheConfigurationFile() {
         AccessControlDraft primary = new AccessControlDraft();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.ARGON2, "alice-hash"));
-        byte[] primaryBefore = serialize(primary.toAccessControl());
-        AccessControlDraft secondary = new AccessControlDraft();
-        secondary.getUsers().add(user("root")
+        primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(
                 primary,
-                secondary,
+                new AccessControlDraft(),
                 testServerIdentity(List.of(KEY_THREE.getPublic())))) {
-            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH, EXTRA_ACL_PATH);
-            assertThat(fixture.storage.snapshot.files().get(ACL_PATH)).isEqualTo(primaryBefore);
+            assertThat(fixture.storage.snapshot.files()).containsOnlyKeys(ACL_PATH);
+            assertThat(credentials(fixture.storage.snapshot, ACL_PATH, "alice"))
+                    .singleElement().extracting(AccessControl.Credential::getValue).isEqualTo("alice-hash");
             assertThat(fixture.service.listSshCredentials("root"))
                     .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
                             assertThat(success.credentials()).containsExactlyInAnyOrder(

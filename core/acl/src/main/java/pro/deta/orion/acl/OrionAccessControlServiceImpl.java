@@ -326,13 +326,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private SshCredentialListResult listSshCredentials(AccessControlSnapshot snapshot, String userId) {
         try {
-            UserLocation location = findUserLocation(accessControlDrafts(snapshot), userId);
-            if (location == null) {
+            AccessControlDraft.User user = findUser(accessControlDraft(snapshot), userId);
+            if (user == null) {
                 return SshCredentialListResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
                         "User is not available");
             }
-            return SshCredentialListResult.success(sshCredentials(location.user()).descriptors());
+            return SshCredentialListResult.success(sshCredentials(user).descriptors());
         } catch (InvalidStoredSshKeyException e) {
             return SshCredentialListResult.failure(
                     SshCredentialFailureCode.INVALID_STORED_KEY,
@@ -384,25 +384,25 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String userId,
             List<PublicKey> publicKeys) {
         try {
-            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
-            UserLocation location = findUserLocation(drafts, userId);
-            if (location == null) {
+            AccessControlDraft draft = accessControlDraft(snapshot);
+            AccessControlDraft.User user = findUser(draft, userId);
+            if (user == null) {
                 return SshCredentialUpdateResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
                         "User is not available");
             }
-            if (isLockedRoot(location.user())) {
+            if (isLockedRoot(user)) {
                 return SshCredentialUpdateResult.failure(
                         SshCredentialFailureCode.ROOT_LOCKED,
                         "Root SSH credentials are locked");
             }
-            ParsedSshCredentials existing = sshCredentials(location.user());
-            boolean changed = addMissingPublicKeys(location.user(), existing, publicKeys);
+            ParsedSshCredentials existing = sshCredentials(user);
+            boolean changed = addMissingPublicKeys(user, existing, publicKeys);
             if (!changed) {
                 return SshCredentialUpdateResult.success(existing.descriptors(), false);
             }
-            saveCredentialDraft(snapshot, location, "add SSH credentials");
-            return SshCredentialUpdateResult.success(sshCredentials(location.user()).descriptors(), true);
+            saveCredentialDraft(snapshot, draft, user, "add SSH credentials");
+            return SshCredentialUpdateResult.success(sshCredentials(user).descriptors(), true);
         } catch (InvalidStoredSshKeyException e) {
             return SshCredentialUpdateResult.failure(
                     SshCredentialFailureCode.INVALID_STORED_KEY,
@@ -462,13 +462,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String fingerprintPrefix,
             boolean force) {
         try {
-            UserLocation location = findUserLocation(accessControlDrafts(snapshot), userId);
-            if (location == null) {
+            AccessControlDraft draft = accessControlDraft(snapshot);
+            AccessControlDraft.User user = findUser(draft, userId);
+            if (user == null) {
                 return SshCredentialUpdateResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
                         "User is not available");
             }
-            ParsedSshCredentials existing = sshCredentials(location.user());
+            ParsedSshCredentials existing = sshCredentials(user);
             List<ParsedSshCredential> matches = new ArrayList<>();
             for (ParsedSshCredential credential : existing.byEncodedKey().values()) {
                 if (credential.descriptor().fingerprint().startsWith(fingerprintPrefix)) {
@@ -498,12 +499,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         "Removing the last SSH credential requires force");
             }
 
-            removePublicKey(location.user(), matches.getFirst().publicKey());
-            if (existing.byEncodedKey().size() == 1 && isRoot(location.user().getId())) {
-                lockRoot(location.user());
+            removePublicKey(user, matches.getFirst().publicKey());
+            if (existing.byEncodedKey().size() == 1 && isRoot(user.getId())) {
+                lockRoot(user);
             }
-            saveCredentialDraft(snapshot, location, "remove SSH credential");
-            return SshCredentialUpdateResult.success(sshCredentials(location.user()).descriptors(), true);
+            saveCredentialDraft(snapshot, draft, user, "remove SSH credential");
+            return SshCredentialUpdateResult.success(sshCredentials(user).descriptors(), true);
         } catch (InvalidStoredSshKeyException e) {
             return SshCredentialUpdateResult.failure(
                     SshCredentialFailureCode.INVALID_STORED_KEY,
@@ -610,35 +611,28 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String expectedGeneration,
             List<PublicKey> publicKeys) {
         try {
-            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
-            List<RootLocation> roots = rootLocations(drafts);
+            AccessControlDraft draft = accessControlDraft(snapshot);
+            List<AccessControlDraft.User> roots = rootUsers(draft);
             if (roots.size() != 1) {
                 return SshKeyEnrollmentResult.failure("key enrollment failed");
             }
-            RootLocation location = roots.getFirst();
-            AccessControl.User currentRoot = location.user().toAccessControl();
+            AccessControlDraft.User root = roots.getFirst();
+            AccessControl.User currentRoot = root.toAccessControl();
             if (!expectedGeneration.equals(rootRecoveryGeneration(currentRoot))) {
                 return SshKeyEnrollmentResult.failure("key enrollment failed");
             }
 
-            location.user().getCredentials().clear();
+            root.getCredentials().clear();
             for (PublicKey publicKey : publicKeys) {
-                location.user().addCredential(
+                root.addCredential(
                         OPENSSH_PUBLIC_KEY,
                         generationKeyId(expectedGeneration),
                         PublicKeyEntry.toString(publicKey));
             }
-            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
-            updatedFiles.put(
-                    location.path(),
-                    serializeAccessControlConfiguration(
-                            snapshot,
-                            location.path(),
-                            location.draft().toAccessControl()));
             saveAccessControlSnapshotAndReload(
-                    new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                    withAccessControl(snapshot, draft.toAccessControl()),
                     "complete root SSH key enrollment",
-                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(location.user().getEmail(), "root@orion.pro")));
+                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.getEmail(), "root@orion.pro")));
             return SshKeyEnrollmentResult.success();
         } catch (RuntimeException e) {
             return SshKeyEnrollmentResult.failure("key enrollment failed", e);
@@ -885,6 +879,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return serializeOrionConfiguration(document);
     }
 
+    private AccessControlSnapshot withAccessControl(AccessControlSnapshot snapshot, AccessControl accessControl) {
+        String path = accessControlStorage.primaryPath();
+        byte[] content = serializeAccessControlConfiguration(snapshot, path, accessControl);
+        return new AccessControlSnapshot(Map.of(path, content), snapshot.version());
+    }
+
     private byte[] serializeOrionConfiguration(OrionDocument document) {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             OrionXml.write(document, output);
@@ -911,25 +911,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         try {
             String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
             String authenticationGeneration = UUID.randomUUID().toString();
-            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
-            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+            AccessControlDraft draft = accessControlDraft(snapshot);
             AccessControl canonical = ACLUtil.generateDefaultAccessControl(
                     passwordHash,
                     AccessControl.CredentialType.ARGON2);
             AccessControlDraft.User root = AccessControlDraft.User.from(canonical.getUsers().getFirst());
             root.getCredentials().getFirst().setKeyId(generationKeyId(authenticationGeneration));
-            removeRootAndCanonicalAuthorization(snapshot, drafts, canonical, updatedFiles);
-            AccessControlDraft primary = primaryDraft(drafts);
-            addCanonicalRootAuthorization(primary, canonical);
-            primary.getUsers().add(root);
-            updatedFiles.put(
-                    accessControlStorage.primaryPath(),
-                    serializeAccessControlConfiguration(
-                            snapshot,
-                            accessControlStorage.primaryPath(),
-                            primary.toAccessControl()));
+            removeRootAndCanonicalAuthorization(draft, canonical);
+            addCanonicalRootAuthorization(draft, canonical);
+            draft.getUsers().add(root);
             saveAccessControlSnapshotAndReload(
-                    new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                    withAccessControl(snapshot, draft.toAccessControl()),
                     "root password reset",
                     new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.getEmail(), "root@orion.pro")));
             printAndClearPlainTextPasswordMessage(System.out, rootPassword);
@@ -938,61 +930,33 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private Map<String, AccessControlDraft> accessControlDrafts(AccessControlSnapshot snapshot) {
-        Map<String, AccessControlDraft> drafts = new LinkedHashMap<>();
-        for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-            drafts.put(
-                    entry.getKey(),
-                    parseAccessControlConfiguration(entry.getValue(), entry.getKey()).toDraft());
+    private AccessControlDraft accessControlDraft(AccessControlSnapshot snapshot) {
+        String path = accessControlStorage.primaryPath();
+        byte[] content = snapshot.files().get(path);
+        if (content == null) {
+            throw new IllegalStateException("ACL configuration file is missing: " + path);
         }
-        return drafts;
+        return parseAccessControlConfiguration(content, path).toDraft();
     }
 
-    private List<RootLocation> rootLocations(Map<String, AccessControlDraft> drafts) {
-        List<RootLocation> roots = new ArrayList<>();
-        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
-            for (AccessControlDraft.User user : entry.getValue().getUsers()) {
-                if (isRoot(user.getId())) {
-                    roots.add(new RootLocation(entry.getKey(), entry.getValue(), user));
-                }
+    private List<AccessControlDraft.User> rootUsers(AccessControlDraft draft) {
+        List<AccessControlDraft.User> roots = new ArrayList<>();
+        for (AccessControlDraft.User user : draft.getUsers()) {
+            if (isRoot(user.getId())) {
+                roots.add(user);
             }
         }
         return List.copyOf(roots);
     }
 
-    private AccessControlDraft primaryDraft(Map<String, AccessControlDraft> drafts) {
-        AccessControlDraft primary = drafts.get(accessControlStorage.primaryPath());
-        if (primary == null) {
-            throw new IllegalStateException("Primary ACL configuration file is missing: "
-                    + accessControlStorage.primaryPath());
-        }
-        return primary;
-    }
-
     private void removeRootAndCanonicalAuthorization(
-            AccessControlSnapshot snapshot,
-            Map<String, AccessControlDraft> drafts,
-            AccessControl canonical,
-            Map<String, byte[]> updatedFiles) {
-        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
-            AccessControlDraft draft = entry.getValue();
-            boolean changed = draft.getUsers().removeIf(user ->
-                    user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId()));
-            for (AccessControl.Role canonicalRole : canonical.getRoles()) {
-                changed |= draft.getRoles().removeIf(role -> idsAreEqual(role.getId(), canonicalRole.getId()));
-            }
-            for (AccessControl.Grant canonicalGrant : canonical.getGrants()) {
-                changed |= draft.getGrants().removeIf(
-                        grant -> idsAreEqual(grant.getId(), canonicalGrant.getId()));
-            }
-            if (changed) {
-                updatedFiles.put(
-                        entry.getKey(),
-                        serializeAccessControlConfiguration(
-                                snapshot,
-                                entry.getKey(),
-                                draft.toAccessControl()));
-            }
+            AccessControlDraft draft, AccessControl canonical) {
+        draft.getUsers().removeIf(user -> isRoot(user.getId()));
+        for (AccessControl.Role canonicalRole : canonical.getRoles()) {
+            draft.getRoles().removeIf(role -> idsAreEqual(role.getId(), canonicalRole.getId()));
+        }
+        for (AccessControl.Grant canonicalGrant : canonical.getGrants()) {
+            draft.getGrants().removeIf(grant -> idsAreEqual(grant.getId(), canonicalGrant.getId()));
         }
     }
 
@@ -1011,19 +975,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void prepareAndUpdateAccessControl(AccessControlSnapshot loadedSnapshot) {
         AccessControlSnapshot preparedSnapshot = loadedSnapshot;
-        Map<String, AccessControlDraft> drafts = accessControlDrafts(loadedSnapshot);
-        List<RootLocation> roots = rootLocations(drafts);
-        if (roots.size() == 1 && synchronizeInternalServerKeysToRoot(roots.getFirst().user())) {
-            RootLocation root = roots.getFirst();
-            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(loadedSnapshot.files());
-            updatedFiles.put(
-                    root.path(),
-                    serializeAccessControlConfiguration(
-                            loadedSnapshot,
-                            root.path(),
-                            root.draft().toAccessControl()));
+        AccessControlDraft draft = accessControlDraft(loadedSnapshot);
+        List<AccessControlDraft.User> roots = rootUsers(draft);
+        if (roots.size() == 1 && synchronizeInternalServerKeysToRoot(roots.getFirst())) {
             accessControlStorage.save(
-                    new AccessControlSnapshot(updatedFiles, loadedSnapshot.version()),
+                    withAccessControl(loadedSnapshot, draft.toAccessControl()),
                     "add internal server keys to root", UserEmail.EMPTY);
             preparedSnapshot = switch (loadValidatedAccessControlSnapshot()) {
                 case Result.Success<AccessControlSnapshot>(var snapshot) -> snapshot;
@@ -1195,16 +1151,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return false;
     }
 
-    private UserLocation findUserLocation(Map<String, AccessControlDraft> drafts, String userId) {
-        UserLocation matched = null;
-        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
-            for (AccessControlDraft.User user : entry.getValue().getUsers()) {
-                if (user.getId() != null && user.getId().equalsIgnoreCase(userId)) {
-                    if (matched != null) {
-                        throw new IllegalStateException("More than one user matches the requested id");
-                    }
-                    matched = new UserLocation(entry.getKey(), entry.getValue(), user);
+    private AccessControlDraft.User findUser(AccessControlDraft draft, String userId) {
+        AccessControlDraft.User matched = null;
+        for (AccessControlDraft.User user : draft.getUsers()) {
+            if (user.getId() != null && user.getId().equalsIgnoreCase(userId)) {
+                if (matched != null) {
+                    throw new IllegalStateException("More than one user matches the requested id");
                 }
+                matched = user;
             }
         }
         return matched;
@@ -1281,21 +1235,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void saveCredentialDraft(
             AccessControlSnapshot snapshot,
-            UserLocation location,
+            AccessControlDraft draft,
+            AccessControlDraft.User user,
             String operation) {
-        Map<String, byte[]> files = new LinkedHashMap<>(snapshot.files());
-        files.put(
-                location.path(),
-                serializeAccessControlConfiguration(
-                        snapshot,
-                        location.path(),
-                        location.draft().toAccessControl()));
         saveAccessControlSnapshotAndReload(
-                new AccessControlSnapshot(files, snapshot.version()),
-                operation + " for " + location.user().getId(),
+                withAccessControl(snapshot, draft.toAccessControl()),
+                operation + " for " + user.getId(),
                 new UserEmail(
-                        location.user().getId(),
-                        Objects.requireNonNullElse(location.user().getEmail(), "")));
+                        user.getId(),
+                        Objects.requireNonNullElse(user.getEmail(), "")));
     }
 
     private static boolean isLockedRoot(AccessControlDraft.User user) {
@@ -1492,28 +1440,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             "Cannot load ACL for user update: [" + failure.code() + "] " + failure.message(),
                             failure.throwable());
                 };
-                Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
-                UserLocation existing = findUserLocation(drafts, userUpdate.id());
-                AccessControlDraft owningDraft;
-                String owningPath;
-                if (existing == null) {
-                    owningDraft = primaryDraft(drafts);
-                    owningPath = accessControlStorage.primaryPath();
-                } else {
-                    owningDraft = existing.draft();
-                    owningPath = existing.path();
-                    owningDraft.getUsers().remove(existing.user());
+                AccessControlDraft draft = accessControlDraft(snapshot);
+                AccessControlDraft.User existing = findUser(draft, userUpdate.id());
+                if (existing != null) {
+                    draft.getUsers().remove(existing);
                 }
-                owningDraft.getUsers().add(userFrom(userUpdate));
-                Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
-                updatedFiles.put(
-                        owningPath,
-                        serializeAccessControlConfiguration(
-                                snapshot,
-                                owningPath,
-                                owningDraft.toAccessControl()));
+                draft.getUsers().add(userFrom(userUpdate));
                 saveAccessControlSnapshotAndReload(
-                        new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                        withAccessControl(snapshot, draft.toAccessControl()),
                         "createOrUpdateUser() " + userUpdate.id(),
                         author);
             }
@@ -1598,40 +1532,20 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private Result<OrionDocument> documentFrom(AccessControlSnapshot snapshot) {
-        if (snapshot.files().isEmpty()) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
-        }
-
-        AccessControlDraft result = new AccessControlDraft();
-        OrionDocument primary = null;
-        for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-            try (ByteArrayInputStream input = new ByteArrayInputStream(entry.getValue())) {
-                OrionDocument document = OrionXml.read(input);
-                mergeAccessControl(result, document.system().accessControl());
-                if (entry.getKey().equals(accessControlStorage.primaryPath())) {
-                    primary = document;
-                } else {
-                    validateConfiguration(document);
-                }
-            } catch (IOException | RuntimeException e) {
-                return new Result.Failure<>(
-                        Result.FailureCode.GENERAL,
-                        "Cannot validate configuration file " + entry.getKey(),
-                        e);
-            }
-        }
-        if (primary == null) {
+        String path = accessControlStorage.primaryPath();
+        byte[] content = snapshot.files().get(path);
+        if (content == null) {
             return new Result.Failure<>(
                     Result.FailureCode.NOT_FOUND,
-                    "Primary ACL configuration file is missing: " + accessControlStorage.primaryPath());
+                    "ACL configuration file is missing: " + path);
         }
-        try {
-            OrionDocument document = primary.replaceAccessControl(result.toAccessControl());
+        try (ByteArrayInputStream input = new ByteArrayInputStream(content)) {
+            OrionDocument document = OrionXml.read(input);
             validateConfiguration(document);
             return new Result.Success<>(document);
-        } catch (RuntimeException failure) {
+        } catch (IOException | RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
-                    "Configuration material or secrets are invalid", failure);
+                    "Cannot validate configuration file " + path, failure);
         }
     }
 
@@ -1672,10 +1586,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version()), materialScope));
     }
 
-    private static void mergeAccessControl(AccessControlDraft target, AccessControl source) {
-        target.merge(source);
-    }
-
     private void saveAccessControlSnapshotAndReload(
             AccessControlSnapshot snapshot,
             String message,
@@ -1698,12 +1608,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             throw new AccessControlConcurrentUpdateException("Configuration revision changed", null);
         }
         validateSnapshot(loaded).valueOrFailure("Cannot validate configuration for update");
-        Map<String, byte[]> files = new LinkedHashMap<>(loaded.files());
-        String primaryPath = accessControlStorage.primaryPath();
-        OrionDocument primary = parseOrionConfiguration(files.get(primaryPath), primaryPath);
-        files.put(primaryPath, serializeOrionConfiguration(
-                Objects.requireNonNull(update.apply(primary), "updated configuration")));
-        AccessControlSnapshot candidate = new AccessControlSnapshot(files, loaded.version());
+        String path = accessControlStorage.primaryPath();
+        OrionDocument document = parseOrionConfiguration(loaded.files().get(path), path);
+        byte[] updated = serializeOrionConfiguration(
+                Objects.requireNonNull(update.apply(document), "updated configuration"));
+        AccessControlSnapshot candidate = new AccessControlSnapshot(Map.of(path, updated), loaded.version());
         documentFrom(candidate).valueOrFailure("Invalid updated configuration");
         saveAccessControlSnapshotAndReload(candidate, message, author);
         return desiredState.current();
@@ -1719,18 +1628,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         failure.throwable());
             }
         }
-    }
-
-    private record RootLocation(
-            String path,
-            AccessControlDraft draft,
-            AccessControlDraft.User user) {
-    }
-
-    private record UserLocation(
-            String path,
-            AccessControlDraft draft,
-            AccessControlDraft.User user) {
     }
 
     private record ParsedSshCredential(PublicKey publicKey, SshCredential descriptor) {
