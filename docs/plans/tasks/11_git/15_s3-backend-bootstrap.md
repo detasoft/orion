@@ -1,17 +1,20 @@
 # Bootstrap the S3 Git Backend
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf, branch `codex/s3-backend-01a0f177`,
-  worktree `.worktrees/s3-backend-01a0f177`, paused 2026-09-30 11:46 Europe/Amsterdam;
-  next: integration remains declined; reviewed endpoint correction is prepared as
-  `11492fd87233b62f54ae117370b0e26d73fb53f7`. XML configuration and shared-client
-  ownership are under separate design discussion, not implemented by this task.
+  worktree `.worktrees/s3-backend-01a0f177`, resumed 2026-09-30 11:57 Europe/Amsterdam;
+  next: implement the approved connections/config foundation after rebasing the
+  existing S3 metadata result. UI and SSH creation commands remain a later step.
+  Integration remains declined. The metadata result rebased onto `c158cda9`
+  is prepared as `5dc7f0f2ae80aa2bb3ff62bd9c5ce4ee0559f5f5`.
 
 ## Required result
 
 Deliver the user-approved first S3 backend stage in a new `git/git-s3-storage`
 module: real repository metadata create/find/exists/list, S3 configuration,
 and two explicit stubs implementing the existing `GitIndexApi` and
-`GitStorageApi`. Prove the implemented behavior against MinIO.
+`GitStorageApi`. Extend this foundation with named scoped connections in
+`config.xml`, existing key-material-backed secrets, shared S3 clients, and
+repository storage bindings. Prove the implemented behavior against MinIO.
 
 ## Dependencies and scope
 
@@ -23,6 +26,8 @@ implements Git object/ref publication semantics. The broader work in
 Do not implement refs, pack storage, push/fetch, load/save files, migrations,
 maintenance, locks, or local fallback. Full stateless server operation remains
 outside this stage because bootstrap Git reads require the deferred APIs.
+Connection/repository creation through UI and SSH commands is explicitly
+deferred. Do not add mutation endpoints or commands in this step.
 
 ## Current model and design
 
@@ -39,14 +44,65 @@ Support a bucket, prefix, region, endpoint, and test-compatible credentials
 without logging secrets. Make S3 explicitly selectable; validate configuration
 and provide a clear failure for unsupported Git operations.
 
-The S3 endpoint is an optional `storage.endpoint` field alongside
-`storage.location`, not an entry in `storage.auth`. Pass it explicitly to the
-S3 provider and update every module consumer/test/example; do not retain the
-old `auth.endpoint` configuration path. With no endpoint, AWS SDK regional
-endpoint resolution remains in effect. Document an explicit AWS regional
-endpoint, for example `https://s3.eu-west-1.amazonaws.com` with region
-`eu-west-1`, and the equivalent MinIO configuration. Preserve existing
-credential and addressing behavior unless correcting a demonstrated defect.
+Use one `<connections>` collection under `<system>` and each organization,
+with typed `<s3>` and `<ssh>` entries and names unique within their owner.
+Connections are not restricted to system administrators: organizations may
+configure their own connections. Ownership in this foundation is the enclosing
+system/organization scope; do not invent per-user ownership or new ACL policy
+before the deferred creation flows are designed. References identify the scope explicitly;
+never fall back between organization and system names. Reject references to
+another organization's connection. System-scoped use must be explicitly bound.
+
+S3 connections own optional endpoint, signing region, addressing settings, and
+authentication; repository storage bindings own connection reference and
+`s3://bucket/prefix` location. One connection may serve multiple buckets and
+prefixes. An omitted endpoint uses AWS regional resolution; an explicit AWS
+endpoint may be `https://s3.eu-west-1.amazonaws.com`. MinIO examples use
+`http://localhost:9000`. Preserve the documented default signing region when
+omitted; endpoint omission does not eliminate request signing requirements.
+
+Store credentials through existing `ConfigurationSecrets` encrypted envelopes
+and `ConfigurationCipherCapability` from key-material. Connections contain
+secret references, never plaintext secret keys. Reuse same-owner system and
+organization secret resolution, including optional session tokens, rather than
+introducing a second secret store or plaintext XML path. Keep SDK default
+credentials available when explicit credentials are omitted.
+
+Runtime ownership is per scoped named connection/configuration, not per
+repository and not deduplicated by endpoint. Reuse an S3 client across that
+connection's bucket/prefix bindings. Repository closure must not close the
+shared client. Configuration/secret changes must use updated credentials
+without closing a client underneath active operations; shutdown releases owned
+resources through existing application lifecycle mechanisms. Avoid a generic
+transport framework or speculative SSH connection pool.
+
+Split existing SSH proxy configuration into the canonical connection plus a
+proxy binding containing alias, ref, and SSH repository path with explicit
+connection reference. The SSH connection owns host/port/user, authentication,
+secret reference, and trusted host keys. Preserve direct HTTP(S)/file proxy
+behavior and existing operator projections. Remove the old inline SSH
+authority/auth/trust path and update bootstrap adoption and host-key decisions
+to use the connection. Do not broaden unrelated repository remote semantics.
+
+Runtime repository resolution composes existing bootstrap/file behavior with
+configured S3 bindings after XML is loaded. Bootstrap retains the minimum
+external configuration needed to obtain XML and key-material itself, without
+a circular dependency on the configuration being loaded. The existing optional
+bootstrap `storage.endpoint` stays alongside `storage.location`, never inside
+`storage.auth`; runtime connection configuration belongs in XML. Repository
+read authorization remains separate from connection binding/configuration
+ownership: authorized readers need not own a bound connection.
+Keep configuration, key-material, and proxy cache repositories file-backed
+until the data plane exists. Explicit S3 bindings are authoritative: never fall
+back to same-name local data after an S3 failure. Listing includes a bound name
+only when its S3 metadata exists, suppresses any same-name local repository,
+and otherwise preserves unbound file repository discovery. No data migration
+or automatic repository provisioning is part of reading a binding.
+
+Update immutable document rebuilds, XML mappings/schema, validation, examples,
+and every real consumer together. Preserve connections and storage bindings
+through unrelated document edits. Do not add compatibility constructors or
+parallel configuration paths to avoid updating consumers.
 
 Persist minimal repository metadata under safe deterministic repository keys.
 Use conditional creation so competing providers cannot overwrite an existing
@@ -68,9 +124,14 @@ continue to work across independent provider instances.
 3. Add minimal S3 metadata operations with conditional create, validated keys,
    bounded transport behavior, correct missing/error distinction, and explicit
    resource ownership.
-4. Add configuration and composition wiring for explicit S3 selection, with a
-   usable configuration example documenting this stage's limitations.
-5. Add observable-behavior tests and actual MinIO tests using the existing
+4. Present typed connection, reference, and repository binding contracts before
+   their implementations. Extend XML/domain validation and update all immutable
+   document reconstruction paths.
+5. Integrate existing encrypted secrets, shared-client lifecycle, and configured
+   repository resolution; convert SSH proxy consumers to connection references.
+6. Add AWS and MinIO XML examples and document bootstrap/runtime ownership and
+   the still unsupported Git data plane.
+7. Add observable-behavior tests and actual MinIO tests using the existing
    `MinioS3TestServer` fixture where practical. Keep tests in the new module
    when possible; avoid production dependencies on test support.
 
@@ -85,6 +146,13 @@ continue to work across independent provider instances.
   and prefix isolation, invalid names/configuration, and storage failures.
 - Verify configuration selects S3 and preserves the existing file default.
 - Verify binding and use of `storage.endpoint`, plus omitted endpoint for AWS.
+- Verify XML round trips, scoped duplicate names, unknown/wrong-type/cross-org
+  references, encrypted secret resolution, and preservation during document edits.
+- Verify two repository bindings on one connection, independent connections at
+  the same endpoint, prefix/bucket isolation, configuration/credential changes,
+  safe active-operation ownership, and application shutdown.
+- Verify existing HTTP/file/SSH proxy behavior, bootstrap adoption, and SSH
+  trusted-host-key decisions through the canonical connection representation.
 - Verify stub operations clearly fail and resource closure is safe.
 - Report exact tested boundaries. Do not claim push/fetch or full server
   startup works with the intentionally incomplete APIs.
@@ -94,5 +162,5 @@ continue to work across independent provider instances.
 Preserve existing file and memory backends, authorization above the repository
 provider, canonical names, and existing API semantics. Parallel changes to Git
 APIs in the primary worktree are unrelated and must not be copied or altered.
-This stage establishes S3 metadata persistence and wiring only; the Git data
-plane will be implemented later.
+This stage establishes S3 metadata persistence and connections/config wiring;
+the Git data plane and UI/SSH repository creation will be implemented later.
