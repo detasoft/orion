@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
-import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.schema.orion.RepositoryName;

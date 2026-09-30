@@ -17,7 +17,7 @@ import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;

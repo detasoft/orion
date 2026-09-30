@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.git.parser.v2.index.local.LocalGitIndex;
+import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.ContentGitObjectRead;
