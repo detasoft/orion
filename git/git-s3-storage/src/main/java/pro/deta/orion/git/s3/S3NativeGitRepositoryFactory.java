@@ -42,7 +42,8 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
         this.overrides = Objects.requireNonNull(overrides, "request configuration");
     }
 
-    List<String> repositoryNames() {
+    @Override
+    public List<String> repositoryNames() {
         List<String> names = new ArrayList<>();
         try {
             for (ListObjectsV2Response page : transport.client().listObjectsV2Paginator(
@@ -67,7 +68,8 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
 
     }
 
-    boolean exists(RepositoryName repositoryName) {
+    @Override
+    public boolean exists(RepositoryName repositoryName) {
         String name = repositoryName.value();
         try {
             return readName(key(name)) != null;

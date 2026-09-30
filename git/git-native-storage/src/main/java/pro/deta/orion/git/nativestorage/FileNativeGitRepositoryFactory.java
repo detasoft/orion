@@ -32,7 +32,8 @@ final class FileNativeGitRepositoryFactory implements NativeGitRepositoryFactory
         createDirectories(this.rootDirectory);
     }
 
-    List<String> repositoryNames() {
+    @Override
+    public List<String> repositoryNames() {
         List<String> names = new ArrayList<>();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(rootDirectory)) {
             for (Path entry : entries) {
@@ -47,7 +48,8 @@ final class FileNativeGitRepositoryFactory implements NativeGitRepositoryFactory
         return List.copyOf(names);
     }
 
-    boolean exists(RepositoryName name) {
+    @Override
+    public boolean exists(RepositoryName name) {
         return Files.isRegularFile(repositoryDirectory(name).resolve(METADATA_FILE));
     }
 
