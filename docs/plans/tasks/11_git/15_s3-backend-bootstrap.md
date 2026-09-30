@@ -1,11 +1,13 @@
 # Bootstrap the S3 Git Backend
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf, branch `codex/s3-backend-01a0f177`,
-  worktree `.worktrees/s3-backend-01a0f177`, resumed 2026-09-30 11:57 Europe/Amsterdam;
-  next: implement the approved connections/config foundation after rebasing the
-  existing S3 metadata result. UI and SSH creation commands remain a later step.
-  Integration remains declined. The metadata result rebased onto `c158cda9`
-  is prepared as `5dc7f0f2ae80aa2bb3ff62bd9c5ce4ee0559f5f5`.
+  worktree `.worktrees/s3-backend-01a0f177`, paused 2026-09-30 13:09 Europe/Amsterdam;
+  next: integration remains declined. Reviewed connections/config foundation is
+  prepared as `5a65481aaab89c9f19fadf3afa2cf7869f1bf36c`, based on
+  `1019b3432710bfe614ad324fb8976f9da56cf869`; the task worktree is clean.
+  Full `make test` passed: 3586 JVM tests, no failures/errors/skips, and Rust checks.
+  Actual MinIO verification passed all 5 tests; XML schema generation passed.
+  UI and SSH creation commands remain a later step.
 
 ## Required result
 
@@ -13,7 +15,7 @@ Deliver the user-approved first S3 backend stage in a new `git/git-s3-storage`
 module: real repository metadata create/find/exists/list, S3 configuration,
 and two explicit stubs implementing the existing `GitIndexApi` and
 `GitStorageApi`. Extend this foundation with named scoped connections in
-`config.xml`, existing key-material-backed secrets, shared S3 clients, and
+`config.xml`, existing key-material-backed secrets, one shared S3 transport, and
 repository storage bindings. Prove the implemented behavior against MinIO.
 
 ## Dependencies and scope
