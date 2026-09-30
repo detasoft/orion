@@ -232,12 +232,11 @@ class RemoteBootstrapConfigurationIT {
                         byte[] xml = component.orionAccessControlService().accessControlConfigurationFile().content();
                         var document = OrionXml.read(new ByteArrayInputStream(xml));
                         assertThat(document.system().proxies()).extracting(binding -> binding.alias().value())
-                                .containsExactlyInAnyOrder("configuration", "material");
+                                .containsExactly("material");
                         assertThat(document.system().proxies())
                                 .extracting(binding -> binding.upstream(document.system()).toString())
-                                .containsExactlyInAnyOrder(acl.getLocation().substring(4),
-                                        material.getLocation().substring(4));
-                        assertThat(document.system().secrets()).hasSize(2);
+                                .containsExactly(material.getLocation().substring(4));
+                        assertThat(document.system().secrets()).hasSize(1);
                         for (var source : List.of(acl, material)) {
                             String credential = Files.readString(Path.of(URI.create(source.getAuth().get("credential"))));
                             assertThat(new String(xml, StandardCharsets.UTF_8)).doesNotContain(credential);

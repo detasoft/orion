@@ -5,7 +5,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
@@ -16,7 +15,6 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
-import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -29,7 +27,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -111,8 +108,9 @@ class BootstrapProxyTransportIT {
                                 .isEqualTo(RUNNING);
                         var current = new AtomicReference<>(OrionXml.read(new ByteArrayInputStream(
                                 storage.load().valueOrFailure("runtime configuration").files().get("orion.xml"))));
-                        assertThat(current.get().system().proxies()).hasSize(1);
-                        assertThat(current.get().system().secrets()).hasSize(1);
+                        assertThat(cache).isEqualTo("bootstrap");
+                        assertThat(current.get().system().proxies()).isEmpty();
+                        assertThat(current.get().system().secrets()).isEmpty();
                         assertThat(provider.repositoryNames()).doesNotContain(cache);
                         assertThat(provider.isPublicRepositoryName(cache)).isFalse();
 
@@ -134,7 +132,8 @@ class BootstrapProxyTransportIT {
                         String external = Files.readString(credentialFile);
                         Files.writeString(credentialFile, "invalid-external-credential");
                         try {
-                            provider.openForRead(cache).valueOrFailure("stored credential");
+                            assertThatThrownBy(() -> provider.openForRead(cache))
+                                    .isInstanceOf(IllegalStateException.class);
                             assertThatThrownBy(() -> BootstrapContext.open(configuration, environment))
                                     .isInstanceOf(IllegalStateException.class)
                                     .hasMessage("Bootstrap inputs are unavailable or invalid");
@@ -143,22 +142,6 @@ class BootstrapProxyTransportIT {
                         }
 
                         configureSources(tempDir, configuration, upstream, transport);
-                        char[] replacement = Files.readString(credentialFile).toCharArray();
-                        Files.writeString(credentialFile, external);
-                        var rotated = component.configurationSecrets().replaceSystem(current.get(),
-                                current.get().system().proxies().getFirst().secret(current.get().system()).orElseThrow(),
-                                replacement);
-                        assertThat(replacement).containsOnly('\0');
-                        var beforeRotation = storage.load().valueOrFailure("before rotation");
-                        var rotatedFiles = new LinkedHashMap<>(beforeRotation.files());
-                        ByteArrayOutputStream rotatedXml = new ByteArrayOutputStream();
-                        OrionXml.write(rotated, rotatedXml);
-                        rotatedFiles.put(storage.primaryPath(), rotatedXml.toByteArray());
-                        storage.save(new AccessControlSnapshot(
-                                        rotatedFiles, beforeRotation.version()),
-                                "rotate proxy credential", UserEmail.EMPTY);
-                        component.orionAccessControlService().reload("credential rotation");
-                        current.set(rotated);
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
                         retained.files().withAccess(REF, "proxy edit", GitCommitAuthor.EMPTY, fileAccess -> {

@@ -1,6 +1,11 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.fileapi.GitFileApi;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.object.LooseObject;
+import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
@@ -12,22 +17,30 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
-final class BootstrapGitRuntimeProxy {
+/** A remote Git repository backed by a local cache and the native Git client. */
+final class ProxyNativeGitRepository extends NativeGitRepository {
 
-    private final BootstrapGitLocation location;
+    private volatile BootstrapGitLocation location;
     private final NativeGitRepository repository;
-    private final BootstrapGitTransportFactory transportFactory;
+    private BootstrapGitTransportFactory transportFactory;
     private final BootstrapGitFetcher fetcher;
     private final BootstrapGitPusher pusher;
-    private volatile SyncObservation observation = new SyncObservation(SyncStatus.NOT_CHECKED, null);
+    private volatile AtomicReference<SyncObservation> observation =
+            new AtomicReference<>(new SyncObservation(SyncStatus.NOT_CHECKED, null));
+    private volatile boolean available = true;
 
-    BootstrapGitRuntimeProxy(
+    private ProxyNativeGitRepository(
+            String name,
             BootstrapGitLocation location,
             NativeGitRepository repository,
             BootstrapGitTransportFactory transportFactory,
             BootstrapGitFetcher fetcher,
             BootstrapGitPusher pusher) {
+        super(name, repository.storage(), repository.index(), repository.defaultHead());
         this.location = Objects.requireNonNull(location, "location");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.transportFactory = Objects.requireNonNull(transportFactory, "transportFactory");
@@ -35,8 +48,38 @@ final class BootstrapGitRuntimeProxy {
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
 
+    static ProxyNativeGitRepository create(String name, BootstrapGitLocation location,
+            NativeGitRepository cache, BootstrapGitTransportFactory transportFactory,
+            BootstrapGitFetcher fetcher, BootstrapGitPusher pusher) {
+        return new ProxyNativeGitRepository(name, location, cache, transportFactory, fetcher, pusher);
+    }
+
+    ProxyNativeGitRepository named(String name) {
+        ProxyNativeGitRepository result = create(name, location, repository, transportFactory, fetcher, pusher);
+        result.observation = observation;
+        return result;
+    }
+
+    void reconfigure(ProxyNativeGitRepository replacement) {
+        synchronized (repository) {
+            location = replacement.location;
+            transportFactory = replacement.transportFactory;
+            observation = replacement.observation;
+        }
+    }
+
+    void revoke() {
+        synchronized (repository) {
+            available = false;
+        }
+    }
+
+    private void requireAvailable() {
+        if (!available) throw new IllegalStateException("Proxy binding is unavailable");
+    }
+
     SyncObservation syncObservation() {
-        return observation;
+        return observation.get();
     }
 
     BootstrapGitLocation location() {
@@ -48,40 +91,117 @@ final class BootstrapGitRuntimeProxy {
     }
 
     private void observed(SyncStatus status) {
-        observation = new SyncObservation(status, Instant.now());
+        observation.set(new SyncObservation(status, Instant.now()));
     }
 
-    public synchronized void refresh() {
-        try {
-            transportFactory.withTransport(location, (selected, transport) -> {
-                fetcher.fetch(selected, transport, repository);
-                return null;
-            });
-            observed(SyncStatus.SUCCESS);
-        } catch (BootstrapGitProxyException error) {
-            observed(error.status());
-            throw error;
-        } catch (Exception error) {
-            observed(SyncStatus.UNAVAILABLE);
-            throw new BootstrapGitProxyException("upstream synchronization", error);
+    public void refresh() {
+        synchronized (repository) {
+            requireAvailable();
+            try {
+                transportFactory.withTransport(location, (selected, transport) -> {
+                    fetcher.fetch(selected, transport, repository);
+                    return null;
+                });
+                observed(SyncStatus.SUCCESS);
+            } catch (BootstrapGitProxyException error) {
+                observed(error.status());
+                throw error;
+            } catch (Exception error) {
+                observed(SyncStatus.UNAVAILABLE);
+                throw new BootstrapGitProxyException("upstream synchronization", error);
+            }
         }
     }
 
-    public synchronized List<RefUpdateResult> publish(
+    @Override
+    public List<RefUpdateResult> publishReceivedPack(
             Optional<PackChecksum> received,
             List<RefUpdate> updates,
             boolean atomic) {
-        try {
-            List<RefUpdateResult> results = publishUpdates(received, updates, atomic);
-            observed(hasConflict(results) ? SyncStatus.CONFLICT : SyncStatus.SUCCESS);
-            return results;
-        } catch (BootstrapGitProxyException error) {
-            observed(error.status());
-            throw error;
-        } catch (RuntimeException error) {
-            observed(SyncStatus.UNAVAILABLE);
-            throw error;
+        synchronized (repository) {
+            requireAvailable();
+            try {
+                List<RefUpdateResult> results = publishUpdates(received, updates, atomic);
+                observed(hasConflict(results) ? SyncStatus.CONFLICT : SyncStatus.SUCCESS);
+                return results;
+            } catch (BootstrapGitProxyException error) {
+                observed(error.status());
+                throw error;
+            } catch (RuntimeException error) {
+                observed(SyncStatus.UNAVAILABLE);
+                throw error;
+            }
         }
+    }
+
+    @Override
+    public GitStorageApi storage() {
+        return repository().storage();
+    }
+
+    @Override
+    public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
+        return publishReceivedPack(Optional.empty(), updates, atomic);
+    }
+
+    @Override
+    public GitFileApi files() {
+        repository();
+        return new GitFileApi(this, false);
+    }
+
+    @Override
+    public String defaultHead() {
+        return repository().defaultHead();
+    }
+
+    @Override
+    public Map<String, String> refs() {
+        return repository().refs();
+    }
+
+    @Override
+    public RefUpdateResult updateRef(String refName, String expectedOldId, String newId) {
+        return publishReceivedPack(
+                Optional.empty(),
+                List.of(RefUpdate.fromWire(refName, expectedOldId, newId)),
+                true).getFirst();
+    }
+
+    @Override
+    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdateResult> listener) {
+        return repository().onRefUpdate(listener);
+    }
+
+    @Override
+    public ObjectId writeObject(GitObjectType type, byte[] data) {
+        throw new UnsupportedOperationException("Proxy objects require a ref publication");
+    }
+
+    @Override
+    public Optional<LooseObject> readObject(ObjectId id) {
+        return repository().readObject(id);
+    }
+
+    @Override
+    public List<RefUpdateResult> previewRefUpdates(
+            List<RefUpdate> updates,
+            boolean atomic) {
+        return repository().previewRefUpdates(updates, atomic);
+    }
+
+    @Override
+    public boolean hasCompleteObjectClosure(ObjectId root) {
+        return repository().hasCompleteObjectClosure(root);
+    }
+
+    @Override
+    public void close() {
+    }
+
+    private NativeGitRepository repository() {
+        requireAvailable();
+        return repository;
     }
 
     private List<RefUpdateResult> publishUpdates(

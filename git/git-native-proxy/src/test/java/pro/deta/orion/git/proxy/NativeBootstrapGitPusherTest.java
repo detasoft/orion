@@ -54,14 +54,12 @@ class NativeBootstrapGitPusherTest {
             fileAccess.write("link", FileMode.SYMLINK, "run.sh".getBytes());
             return null;
         });
-        BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
-                location,
-                repository,
+        ProxyNativeGitRepository proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 fetcher,
                 new NativeBootstrapGitPusher());
 
-        List<RefUpdateResult> results = proxy.publish(
+        List<RefUpdateResult> results = proxy.publishReceivedPack(
                 ingest(repository, update),
                 update.refUpdates(),
                 true);
@@ -113,10 +111,10 @@ class NativeBootstrapGitPusherTest {
                 true);
 
         assertThat(accepted).containsExactly(false);
-        var proxy = new BootstrapGitRuntimeProxy(location, repository,
+        var proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { }, new NativeBootstrapGitPusher());
-        assertThat(proxy.publish(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
+        assertThat(proxy.publishReceivedPack(received, update.refUpdates(), true)).extracting(RefUpdateResult::status)
                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
         assertThat(proxy.syncObservation().status()).isEqualTo(CONFLICT);
         assertThat(repository.refs()).containsEntry(location.refName(), localOldId);
@@ -133,7 +131,7 @@ class NativeBootstrapGitPusherTest {
             fileAccess.write("orion.xml", new byte[]{1});
             return null;
         });
-        var proxy = new BootstrapGitRuntimeProxy(location, repository,
+        var proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { },
                 (selected, transport, target, received, updates, atomic) -> new NativeBootstrapGitPusher().push(
@@ -142,7 +140,7 @@ class NativeBootstrapGitPusherTest {
                                     false, "upstream-secret-response");
                         }, target, received, updates, atomic));
 
-        assertThatThrownBy(() -> proxy.publish(ingest(repository, update), update.refUpdates(), true))
+        assertThatThrownBy(() -> proxy.publishReceivedPack(ingest(repository, update), update.refUpdates(), true))
                 .hasMessageNotContaining("upstream-secret-response")
                 .hasCauseInstanceOf(GitClientTransportException.class)
                 .cause().hasMessage("upstream-secret-response");

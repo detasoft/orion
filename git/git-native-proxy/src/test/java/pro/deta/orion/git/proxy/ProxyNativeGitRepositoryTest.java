@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
-class BootstrapGitRuntimeProxyTest {
+class ProxyNativeGitRepositoryTest {
     @Test
     void rejectedUpstreamCasDoesNotAdvanceLocalRef() throws Exception {
         BootstrapGitLocation location = fileLocation();
@@ -56,15 +56,13 @@ class BootstrapGitRuntimeProxyTest {
             return null;
         });
         AtomicInteger refreshes = new AtomicInteger();
-        BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
-                location,
-                repository,
+        ProxyNativeGitRepository proxy = ProxyNativeGitRepository.create(repository.name(), location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (ignoredLocation, ignoredTransport, ignoredRepository) -> refreshes.incrementAndGet(),
                 (ignoredLocation, ignoredTransport, ignoredRepository, received, updates, atomic) ->
                         Collections.nCopies(updates.size(), false));
 
-        List<RefUpdateResult> results = proxy.publish(
+        List<RefUpdateResult> results = proxy.publishReceivedPack(
                 ingest(repository, update),
                 update.refUpdates(),
                 true);
@@ -106,14 +104,14 @@ class BootstrapGitRuntimeProxyTest {
             BootstrapGitTransportFactory factory = BootstrapGitTransportFactory.persistent(() -> document, secrets,
                     new ConnectionFailureHandler(registry), null);
             AtomicInteger publications = new AtomicInteger();
-            BootstrapGitRuntimeProxy runtime = new BootstrapGitRuntimeProxy(location, repository, factory,
+            ProxyNativeGitRepository runtime = ProxyNativeGitRepository.create(repository.name(), location, repository, factory,
                     (selected, transport, target) -> { if (failFetch) throw required; },
                     (selected, transport, target, received, updates, atomic) -> {
                         publications.incrementAndGet();
                         throw required;
                     });
             Optional<PackChecksum> pack = ingest(repository, update);
-            assertThatThrownBy(() -> runtime.publish(pack, update.refUpdates(), true))
+            assertThatThrownBy(() -> runtime.publishReceivedPack(pack, update.refUpdates(), true))
                     .isInstanceOf(BootstrapGitProxyException.class)
                     .satisfies(failure -> {
                         assertThat(failure.getCause()).isInstanceOf(DecisionRequiredException.class);

@@ -152,7 +152,7 @@ class OrionStartupIT {
             loadedDocument = OrionXml.read(new ByteArrayInputStream(configurationFile.content()));
 
             assertThat(hasUser(loadedDocument.system().accessControl(), "remote-user")).isTrue();
-            assertThat(loadedDocument.system().proxies()).hasSize(1);
+            assertThat(loadedDocument.system().proxies()).isEmpty();
             assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
 
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(

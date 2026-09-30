@@ -144,7 +144,7 @@ class BootstrapConnectionDecisionTest {
 
         Fixture(Path directory) throws Exception {
             upstream = directory.resolve("moved.git");
-            previous = new GitProxyBinding(new RemoteAlias("configuration"),
+            previous = new GitProxyBinding(new RemoteAlias("material"),
                 new GitProxyBinding.Direct(directory.resolve("old.git").toUri(), GitCredentialKind.NONE,
                         Optional.empty(), Optional.empty()), "main");
             Path worktree = directory.resolve("worktree");
@@ -165,8 +165,10 @@ class BootstrapConnectionDecisionTest {
             BootstrapSourceConfig source = new BootstrapSourceConfig();
             source.setLocation("git+" + upstream.toUri());
             source.setPath("orion.xml");
-            ResolvedBootstrapSource resolved = provider.resolveProvisional("configuration", source, false);
-            storage = new AccessControlStorageResolver(new BootstrapRepositorySources(List.of(resolved)), provider)
+            ResolvedBootstrapSource resolved = provider.resolveProvisional("material", source, false);
+            ResolvedBootstrapSource configuration = new ResolvedBootstrapSource("configuration", resolved.location(),
+                    resolved.repositoryName(), resolved.refName(), resolved.path(), resolved.revision(), false);
+            storage = new AccessControlStorageResolver(new BootstrapRepositorySources(List.of(configuration)), provider)
                     .resolve();
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
                     KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),

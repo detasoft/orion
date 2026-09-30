@@ -81,34 +81,43 @@ class BootstrapSshTrustTest {
         }
     }
 
-    @Test
-    void keepsAcceptedKeyInMemoryAndProposesItForXmlAfterActivation() throws Exception {
+    @ParameterizedTest
+    @CsvSource({"configuration", "material"})
+    void keepsAcceptedKeyInMemoryAfterActivation(String sourceId) throws Exception {
         try (Fixture fixture = new Fixture(); OrionKeyMaterial material = material()) {
-            fixture.provider.prepareProvisional("configuration", fixture.source(""));
+            String repository = fixture.provider.prepareProvisional(sourceId, fixture.source(""));
             AtomicReference<OrionDocument> current = new AtomicReference<>(
                     OrionDocument.withAccessControl(new AccessControl()));
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
             current.set(fixture.provider.adoptProvisional(current.get(), secrets));
-            assertThat(current.get().system().proxies().getFirst().knownHosts(current.get().system())).isEmpty();
+            if (sourceId.equals("configuration")) {
+                assertThat(repository).isEqualTo("bootstrap");
+                assertThat(current.get().system().proxies()).isEmpty();
+            } else {
+                assertThat(current.get().system().proxies().getFirst().knownHosts(current.get().system())).isEmpty();
+            }
             fixture.events.list.clear();
             fixture.provider.activate(current::get, secrets);
-            assertThat(fixture.provider.bootstrapChanges(current.get())).singleElement()
-                    .satisfies(binding -> assertThat(binding.replacementConnection().orElseThrow().knownHosts())
-                            .containsExactly(fixture.key()));
+            if (sourceId.equals("configuration")) {
+                assertThat(fixture.provider.bootstrapChanges(current.get())).isEmpty();
+            } else {
+                assertThat(fixture.provider.bootstrapChanges(current.get())).singleElement()
+                        .satisfies(binding -> assertThat(binding.replacementConnection().orElseThrow().knownHosts())
+                                .containsExactly(fixture.key()));
+            }
             fixture.keyPair.set(KeyPairGenerator.getInstance("EC").generateKeyPair());
             int authenticated = fixture.authentications.get();
-            assertThat(fixture.provider.retry(current.get().system().proxies().getFirst().alias(),
-                    current::get, secrets).isFailure()).isTrue();
+            assertThatThrownBy(() -> fixture.provider.openForRead(repository))
+                    .isInstanceOf(BootstrapGitProxyException.class);
             assertThat(fixture.authentications).hasValue(authenticated);
             assertThat(fixture.messages()).contains("rejected");
         }
     }
 
-    @ParameterizedTest
-    @CsvSource({"configuration", "material"})
-    void yamlUrlAndKeyTakePrecedenceOverAnOlderXmlConnection(String sourceId) throws Exception {
+    @Test
+    void materialUrlAndKeyTakePrecedenceOverAnOlderXmlConnection() throws Exception {
         try (Fixture fixture = new Fixture(); OrionKeyMaterial material = material()) {
-            String repository = fixture.provider.prepareProvisional(sourceId, fixture.source(fixture.key()));
+            String repository = fixture.provider.prepareProvisional("material", fixture.source(fixture.key()));
             AtomicReference<OrionDocument> current = new AtomicReference<>(
                     OrionDocument.withAccessControl(new AccessControl()));
             ConfigurationSecrets secrets = new ConfigurationSecrets(current::get, material.configurationCipher());

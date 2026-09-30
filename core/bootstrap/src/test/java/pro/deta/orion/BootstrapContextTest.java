@@ -872,7 +872,7 @@ class BootstrapContextTest {
     }
 
     @Test
-    void persistsSharedProxyOnceAndKeepsExistingSourceHandlesOnRetry() throws Exception {
+    void keepsSharedBootstrapWithoutPersistingAProxyAlias() throws Exception {
         OrionConfiguration configuration = configuration();
         Upstream upstream = upstream("adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
@@ -884,10 +884,10 @@ class BootstrapContextTest {
                      new InMemoryNativeGitRepositoryProvider())) {
             var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
             OrionDocument adopted = adopt(context, storage);
-            assertThat(adopted.system().proxies()).hasSize(1);
+            assertThat(adopted.system().proxies()).isEmpty();
             assertThat(adopted.system().secrets()).isEmpty();
             assertThat(adopt(context, storage)).isEqualTo(adopted);
-            assertThat(storage.saves).isEqualTo(1);
+            assertThat(storage.saves).isZero();
             assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION))
                     .isSameAs(source);
             assertThat(context.repositoryProvider().repositoryNames()).isEmpty();
@@ -898,7 +898,7 @@ class BootstrapContextTest {
     }
 
     @Test
-    void persistsAdoptionThroughNativeGitAndDoesNotRewriteItOnRestart() throws Exception {
+    void keepsBootstrapRevisionUnchangedAcrossRestart() throws Exception {
         OrionConfiguration configuration = configuration();
         Upstream upstream = upstream("durable-adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
@@ -914,8 +914,8 @@ class BootstrapContextTest {
                 Optional<String> initialRevision = storage.load().valueOrFailure("configuration").version();
                 adopted = adopt(first, storage);
                 adoptedRevision = storage.load().valueOrFailure("configuration").version();
-                assertThat(adopted.system().proxies()).hasSize(1);
-                assertThat(adoptedRevision).isNotEqualTo(initialRevision);
+                assertThat(adopted.system().proxies()).isEmpty();
+                assertThat(adoptedRevision).isEqualTo(initialRevision);
             }
             try (BootstrapContext restarted = BootstrapContext.open(configuration, ENVIRONMENT,
                     new InMemoryNativeGitRepositoryProvider())) {
@@ -939,6 +939,8 @@ class BootstrapContextTest {
     @ValueSource(strings = {"material", "primary", "secondary", "added", "removed"})
     void rechecksConfigurationWhenTheRepositoryAdvancesBeforeAdoptionSave(String changedFile) throws Exception {
         OrionConfiguration configuration = configuration();
+        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         Upstream upstream = upstream("revision-before-save", Map.of("orion.xml", xml()));
         configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration,
@@ -963,7 +965,7 @@ class BootstrapContextTest {
             storage.files = Map.copyOf(changed);
             storage.version++;
         };
-        try (Git ignored = upstream.git();
+        try (Git ignored = upstream.git(); Git ignoredMaterial = materialUpstream.git();
              BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             Optional<OrionDocument> adopted = adoptApproved(context, storage, approved);
             if ("material".equals(changedFile)) {
@@ -1019,13 +1021,15 @@ class BootstrapContextTest {
 
     private void exerciseAdoptionSave(AdoptionStorage.Mode mode, boolean success) throws Exception {
         OrionConfiguration configuration = configuration();
+        Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         Upstream upstream = upstream("transaction", Map.of("orion.xml", xml()));
         configuration.getBootstrap().getAccessControl().setLocation("git+" + upstream.bare().toUri());
         var backend = repositoryWith(configuration,
                 Map.of("material.p12", materialBytes(configuration)));
         AdoptionStorage storage = new AdoptionStorage(xml());
         storage.mode = mode;
-        try (var ignored = upstream.git();
+        try (var ignored = upstream.git(); var ignoredMaterial = materialUpstream.git();
              BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             OrionDesiredState.Snapshot approved = approved(storage);
             if (mode == AdoptionStorage.Mode.CONCURRENT_WINNER
@@ -1145,7 +1149,7 @@ class BootstrapContextTest {
     }
 
     @Test
-    void runtimeAdoptsAndActivatesTheResolvedRemoteSources() throws Exception {
+    void runtimeActivatesBootstrapWithoutCreatingAProxyAlias() throws Exception {
         OrionConfiguration configuration = configuration();
         Upstream upstream = upstream("runtime-adoption", Map.of("orion.xml", xml(),
                 "material.p12", materialBytes(configuration)));
@@ -1162,7 +1166,7 @@ class BootstrapContextTest {
                         context.repositoryProvider()).resolve();
                 var snapshot = storage.load().valueOrFailure("runtime configuration");
                 assertThat(OrionXml.read(new ByteArrayInputStream(snapshot.files().get("orion.xml")))
-                        .system().proxies()).hasSize(1);
+                        .system().proxies()).isEmpty();
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
@@ -1338,7 +1342,7 @@ class BootstrapContextTest {
                         context.repositorySources(), context.repositoryProvider()).resolve();
                 assertThat(OrionXml.read(new ByteArrayInputStream(
                         local.load().valueOrFailure("published configuration").files().get("orion.xml")))
-                        .system().proxies()).hasSize(remoteMaterial ? 2 : 1);
+                        .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");

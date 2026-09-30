@@ -446,7 +446,7 @@ class OrionAdminProxyMutationTest {
             source.setPath("file");
             source.setAuth(Map.of());
             var bootstrap = new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
-            var resolved = bootstrap.resolveProvisional("configuration", source, false);
+            var resolved = bootstrap.resolveProvisional("material", source, false);
             f.routes(new BootstrapRepositorySources(List.of(resolved)));
             var changeSource = f.command("update", "archive", null, null);
             changeSource.put("ref", "other");

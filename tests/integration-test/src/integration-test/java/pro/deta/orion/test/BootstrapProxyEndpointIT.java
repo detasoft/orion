@@ -30,6 +30,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,7 +87,7 @@ class BootstrapProxyEndpointIT {
             rootDraft.addCredential(AccessControl.CredentialType.SHA1,
                     new OrionPasswordHashingService().calculateHash(
                             PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray()));
-            for (String name : List.of("proxy/system/*", "bootstrap/*")) {
+            for (String name : List.of("proxy/system/*", "bootstrap")) {
                 rootDraft.addGrant("probe-" + rootDraft.getGrants().size())
                         .addKey(AccessControl.GrantKey.REPOSITORY, name)
                         .addKey(AccessControl.GrantKey.READ, "true")
@@ -111,13 +112,43 @@ class BootstrapProxyEndpointIT {
                                 ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
+                            acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
+                            URL proxyApi = URI.create("http://127.0.0.1:"
+                                    + component.httpTransport().boundHttpPort() + "/api/admin/proxies").toURL();
+                            String token = pro.deta.orion.test.integration.OrionTestRootAccess.issueToken(
+                                    acl, rootKey.getPublic(), 600);
+                            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                            var before = mapper.readTree(RuntimeHttpTestSupport.request(
+                                    "GET", proxyApi, TestBearerTokens.bearer(token)).body());
+                            var source = target.getBootstrap().getAccessControl();
+                            Map<String, Object> command = new java.util.LinkedHashMap<>();
+                            command.put("action", "create");
+                            command.put("scope", "system");
+                            command.put("revision", before.get("revision").asText());
+                            command.put("alias", "configuration");
+                            command.put("upstream", source.getLocation().substring(4));
+                            command.put("ref", REF);
+                            command.put("credentialKind", transport.equals("http") ? "TOKEN" : "PRIVATE_KEY");
+                            command.put("credential", Files.readString(Path.of(URI.create(
+                                    source.getAuth().get("credential")))));
+                            if (transport.equals("ssh")) {
+                                command.put("knownHosts", source.getAuth().get("knownHosts").lines().toList());
+                            }
+                            assertThat(RuntimeHttpTestSupport.request("POST", proxyApi,
+                                    TestBearerTokens.bearer(token), "application/json",
+                                    mapper.writeValueAsBytes(command)).status()).isEqualTo(409);
+                            before = mapper.readTree(RuntimeHttpTestSupport.request(
+                                    "GET", proxyApi, TestBearerTokens.bearer(token)).body());
+                            command.put("revision", before.get("revision").asText());
+                            assertThat(RuntimeHttpTestSupport.request("POST", proxyApi,
+                                    TestBearerTokens.bearer(token), "application/json",
+                                    mapper.writeValueAsBytes(command)).status()).isEqualTo(201);
                             for (var user : List.of(
                                     user("writer", writerKey, ENDPOINT, true),
                                     user("reader", readerKey, ENDPOINT, false),
                                     user("outsider", outsiderKey, "ordinary", true))) {
                                 acl.createOrUpdateUser(user);
                             }
-                            acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
                                     .files().withAccess(REF, "ordinary seed", GitCommitAuthor.EMPTY,
                                             fileAccess -> {
@@ -143,7 +174,7 @@ class BootstrapProxyEndpointIT {
                             assertDenied(outsider, ENDPOINT);
                             assertDenied(writer, cache);
                             assertDenied(root, cache);
-                            assertDenied(root, "bootstrap%2f" + cache.substring("bootstrap/".length()));
+                            assertDenied(root, "%62ootstrap");
                             assertDenied(root, "proxy/system/missing");
                             try (var clone = Git.cloneRepository().setURI(writer.uri(ENDPOINT))
                                     .setDirectory(tempDir.resolve("clone-" + launch).toFile())

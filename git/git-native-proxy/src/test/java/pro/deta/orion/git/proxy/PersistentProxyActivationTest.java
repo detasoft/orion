@@ -43,7 +43,7 @@ class PersistentProxyActivationTest {
     void movedBootstrapSourceKeepsYamlConnectionUntilConfigurationIsReconciled() throws Exception {
         try (Fixture fixture = new Fixture()) {
             ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding old = new GitProxyBinding(actual.alias(),
@@ -68,7 +68,7 @@ class PersistentProxyActivationTest {
     void ordinaryProxyCannotInheritTrustFromARelocatedBootstrapConnection() throws Exception {
         try (Fixture fixture = new Fixture()) {
             ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
             GitProxyBinding previous = new GitProxyBinding(actual.alias(),
@@ -90,7 +90,7 @@ class PersistentProxyActivationTest {
     void retainedHandlesUseStoredCredentialsAndPickUpRotationOnTheNextConnection() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             var retained = provider.openForWrite(name).valueOrFailure("proxy");
             fixture.adopt(provider);
             fixture.rotate("stored-token");
@@ -117,7 +117,7 @@ class PersistentProxyActivationTest {
     void reloadUsesCredentialMetadataAndValueFromOneSnapshot() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
             OrionDocument changed = fixture.secrets.createSystem(fixture.current.get(), "basic", "password".toCharArray());
@@ -137,7 +137,7 @@ class PersistentProxyActivationTest {
     void reassigningAnAliasCannotRedirectAnAlreadyResolvedSource() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
             GitProxyBinding previous = fixture.current.get().system().proxies().getFirst();
@@ -159,7 +159,7 @@ class PersistentProxyActivationTest {
     void failedCandidateRefreshDoesNotExposeAnyNewCacheOrSwitchExistingCredentials() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             fixture.rotate("stored-token");
             GitProxyBinding first = fixture.current.get().system().proxies().getFirst();
@@ -186,7 +186,7 @@ class PersistentProxyActivationTest {
     void rejectsMissingAdoptionAndLeavesProvisionalSourceUsable() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("adopted");
             assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
@@ -199,10 +199,10 @@ class PersistentProxyActivationTest {
     void invalidCredentialPreventsTheWholeActivationAndDoesNotFallBackAfterRotation() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             OrionDocument valid = fixture.current.get();
-            var invalid = new ConfigurationSecret("configuration-credential", "invalid-envelope");
+            var invalid = new ConfigurationSecret("material-credential", "invalid-envelope");
             fixture.current.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                     valid.system().accessControl(), valid.system().https(), List.of(invalid),
                     valid.system().proxies(), valid.system().connections()), valid.organizations()));
@@ -227,7 +227,7 @@ class PersistentProxyActivationTest {
     void failedActivationKeepsThePreviouslyActiveBindingSet() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
             OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
@@ -245,7 +245,7 @@ class PersistentProxyActivationTest {
     void removingAnActiveBindingRevokesRetainedHandlesAndKeepsItsCachePrivate() throws Exception {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
-            String name = provider.prepareProvisional("configuration", fixture.source());
+            String name = provider.prepareProvisional("material", fixture.source());
             var retained = provider.openForWrite(name).valueOrFailure("proxy");
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
@@ -327,7 +327,7 @@ class PersistentProxyActivationTest {
         }
 
         void rotate(String token) {
-            current.set(secrets.replaceSystem(current.get(), "configuration-credential", token.toCharArray()));
+            current.set(secrets.replaceSystem(current.get(), "material-credential", token.toCharArray()));
         }
 
         @Override
