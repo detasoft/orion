@@ -1,21 +1,10 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
-import java.io.IOException;
-import java.io.Reader;
-import java.io.UncheckedIOException;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
-import java.util.Objects;
-import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -40,147 +29,58 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
             }
         }
         repositories.clear();
+        factory.close();
         if (failure != null) throw failure;
     }
 
-    private static final String DEFAULT_HEAD = "refs/heads/main";
-    private static final String METADATA_FILE = "orion-native-repository.properties";
-    private static final String NAME_PROPERTY = "name";
-    private static final String DEFAULT_HEAD_PROPERTY = "defaultHead";
-
-    private final Path rootDirectory;
+    private final FileNativeGitRepositoryFactory factory;
     private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
 
     public FileNativeGitRepositoryProvider(Path rootDirectory) {
-        this.rootDirectory = Objects.requireNonNull(
-                rootDirectory,
-                "rootDirectory").toAbsolutePath().normalize();
-        createDirectories(this.rootDirectory);
+        factory = new FileNativeGitRepositoryFactory(rootDirectory);
     }
 
     @Override
     public synchronized List<String> repositoryNames() {
         requireOpen();
-        List<String> names = new ArrayList<>();
-        try (var entries = Files.newDirectoryStream(rootDirectory)) {
-            for (Path entry : entries) {
-                if (Files.isRegularFile(entry.resolve(METADATA_FILE))) {
-                    names.add(readMetadata(entry).name());
-                }
-            }
-        } catch (IOException error) {
-            throw new UncheckedIOException("Failed to list native repositories", error);
-        }
-        names.sort(String::compareTo);
-        return List.copyOf(names);
+        return factory.repositoryNames();
     }
 
     @Override
     public synchronized boolean exists(String repositoryName) {
         requireOpen();
-        String name = requireName(repositoryName);
-        return Files.isRegularFile(metadataPath(name));
+        return factory.exists(RepositoryName.parse(repositoryName));
     }
 
     @Override
     public synchronized Result<NativeGitRepository> find(String repositoryName) {
         requireOpen();
-        String name = requireName(repositoryName);
-        if (!Files.isRegularFile(metadataPath(name))) {
+        RepositoryName name = RepositoryName.parse(repositoryName);
+        if (!factory.exists(name)) {
             return new Result.Failure<>(
                     Result.FailureCode.NOT_FOUND,
-                    "Native repository does not exist: " + name);
+                    "Native repository does not exist: " + name.value());
         }
-        return new Result.Success<>(open(name));
+        NativeGitRepository repository = repositories.get(name.value());
+        if (repository != null) return new Result.Success<>(repository);
+        return retain(name, factory.open(name));
     }
 
     @Override
     public synchronized Result<NativeGitRepository> create(String repositoryName) {
         requireOpen();
-        String name = requireName(repositoryName);
-        Path metadata = metadataPath(name);
-        if (Files.isRegularFile(metadata)) {
-            return new Result.Failure<>(
-                    Result.FailureCode.FILE_ALREADY_EXISTS,
-                    "Native repository already exists: " + name);
+        RepositoryName name = RepositoryName.parse(repositoryName);
+        return retain(name, factory.create(name));
+    }
+
+    private Result<NativeGitRepository> retain(RepositoryName name, Result<NativeGitRepository> result) {
+        if (result instanceof Result.Success<NativeGitRepository> success) {
+            NativeGitRepository previous = repositories.putIfAbsent(name.value(), success.value());
+            if (previous != null) {
+                success.value().close();
+                return new Result.Success<>(previous);
+            }
         }
-        createRepository(name);
-        return new Result.Success<>(open(name));
-    }
-
-    private NativeGitRepository open(String name) {
-        return repositories.computeIfAbsent(name, ignored -> {
-            Path repositoryDirectory = repositoryDirectory(name);
-            RepositoryMetadata metadata = readMetadata(repositoryDirectory);
-            return NativeGitRepository.openLocal(
-                    RepositoryName.parse(metadata.name()), repositoryDirectory, metadata.defaultHead());
-        });
-    }
-
-    private void createRepository(String name) {
-        Path repositoryDirectory = repositoryDirectory(name);
-        createDirectories(repositoryDirectory);
-        Properties properties = new Properties();
-        properties.setProperty(NAME_PROPERTY, name);
-        properties.setProperty(DEFAULT_HEAD_PROPERTY, DEFAULT_HEAD);
-        Path metadata = repositoryDirectory.resolve(METADATA_FILE);
-        try (Writer writer = Files.newBufferedWriter(metadata, StandardCharsets.UTF_8)) {
-            properties.store(writer, null);
-        } catch (IOException error) {
-            throw new UncheckedIOException("Failed to create native repository metadata", error);
-        }
-    }
-
-    private RepositoryMetadata readMetadata(Path repositoryDirectory) {
-        Properties properties = new Properties();
-        try (Reader reader = Files.newBufferedReader(
-                repositoryDirectory.resolve(METADATA_FILE),
-                StandardCharsets.UTF_8)) {
-            properties.load(reader);
-        } catch (IOException error) {
-            throw new UncheckedIOException("Failed to read native repository metadata", error);
-        }
-        String name = properties.getProperty(NAME_PROPERTY);
-        String defaultHead = properties.getProperty(DEFAULT_HEAD_PROPERTY, DEFAULT_HEAD);
-        if (name == null) {
-            throw new IllegalStateException("Native repository metadata is missing a name");
-        }
-        String canonicalName = requireName(name);
-        if (!canonicalName.equals(name)) {
-            throw new IllegalArgumentException("Native repository metadata name is not canonical: " + name);
-        }
-        return new RepositoryMetadata(canonicalName, defaultHead);
-    }
-
-    private Path metadataPath(String repositoryName) {
-        return repositoryDirectory(repositoryName).resolve(METADATA_FILE);
-    }
-
-    private Path repositoryDirectory(String repositoryName) {
-        return rootDirectory.resolve(repositoryId(repositoryName));
-    }
-
-    private static String requireName(String repositoryName) {
-        return RepositoryName.parse(repositoryName).value();
-    }
-
-    private static String repositoryId(String repositoryName) {
-        return HexFormat.of().formatHex(GitHashAlgorithm.SHA256.newDigest()
-                .digest(repositoryName.getBytes(StandardCharsets.UTF_8)));
-    }
-
-    private static void createDirectories(Path path) {
-        try {
-            Files.createDirectories(path);
-        } catch (IOException error) {
-            throw new UncheckedIOException("Failed to create directory: " + path, error);
-        }
-    }
-
-    private record RepositoryMetadata(String name, String defaultHead) {
-        private RepositoryMetadata {
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(defaultHead, "defaultHead");
-        }
+        return result;
     }
 }
