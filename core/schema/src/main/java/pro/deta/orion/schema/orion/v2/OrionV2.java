@@ -604,6 +604,8 @@ public class OrionV2 {
     }
 
     public enum GrantKey {
+        CONNECTION,
+        CONNECTION_USE,
         REPOSITORY,
         BRANCH,
         FORCE,

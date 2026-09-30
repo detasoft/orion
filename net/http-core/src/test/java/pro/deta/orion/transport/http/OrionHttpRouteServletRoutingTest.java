@@ -202,7 +202,8 @@ class OrionHttpRouteServletRoutingTest {
         NativeGitRepositoryProvider provider = stub(NativeGitRepositoryProvider.class, (proxy, method, args) -> {
             throw new IllegalArgumentException("private provider details");
         });
-        OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider, OBJECT_MAPPER);
+        OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider,
+                StorageManagementFixture.create(provider, List.of()), OBJECT_MAPPER);
         for (String json : List.of("{\"name\":\"../repo\"}", "null", "{}")) {
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(), json), response.proxy());
@@ -213,7 +214,8 @@ class OrionHttpRouteServletRoutingTest {
         servlet(route).service(request("POST", OrionAdminPaths.REPOSITORIES, admin(),
                 "{\"name\":\"team/repo\"}"), response.proxy());
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-        assertThat(response.errorMessage).isEqualTo("Internal server error");
+        assertThat(response.body.toString()).contains("Repository creation failed")
+                .doesNotContain("private provider details");
     }
 
     @Test

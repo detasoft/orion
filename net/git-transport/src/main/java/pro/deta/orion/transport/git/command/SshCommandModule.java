@@ -23,6 +23,13 @@ public final class SshCommandModule {
 
     @Provides
     @Singleton
+    static pro.deta.orion.auth.StorageManagement storageManagement(
+            pro.deta.orion.transport.git.ConfiguredStorageManagement implementation) {
+        return implementation;
+    }
+
+    @Provides
+    @Singleton
     static CommandLineParser commandLineParser() {
         return new CommandLineParser();
     }
@@ -48,11 +55,22 @@ public final class SshCommandModule {
     @Provides
     @Singleton
     static CommandNode commandTree(LegacySshCommandCatalog catalog,
-            @jakarta.inject.Named("acmeCommands") CommandNode acmeCommands) {
+            @jakarta.inject.Named("acmeCommands") CommandNode acmeCommands,
+            RepositoryCreationCommand creation) {
         CommandNode legacy = catalog.commandTree();
         CommandNode.Builder tree = CommandNode.builder().child("acme", acmeCommands);
         for (java.util.Map.Entry<String, CommandNode> child : legacy.children().entrySet()) {
-            tree.child(child.getKey(), child.getValue());
+            if (child.getKey().equals("repository")) {
+                CommandNode existing = child.getValue();
+                CommandNode.Builder repository = CommandNode.builder().action(creation.definition());
+                for (pro.deta.orion.command.CommandDefinition action : existing.actions().values()) {
+                    repository.action(action);
+                }
+                repository.dynamicChild(existing.dynamicChild().resolver(), existing.dynamicChild().node());
+                tree.child("repository", repository.build());
+            } else {
+                tree.child(child.getKey(), child.getValue());
+            }
         }
         for (pro.deta.orion.command.CommandDefinition action : legacy.actions().values()) {
             tree.action(action);

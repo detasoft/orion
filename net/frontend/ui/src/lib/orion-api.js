@@ -214,10 +214,20 @@ export function createOrionClient(options = {}) {
     repositories() {
       return request('/api/admin/repositories')
     },
-    createRepository(name) {
+    storageConnections(organization) {
+      const query = organization ? `?organization=${encodeURIComponent(organization)}` : ''
+      return request(`/api/storage/connections${query}`, { signal: AbortSignal.timeout(15000) })
+    },
+    saveStorageConnection(organization, input) {
+      const query = organization ? `?organization=${encodeURIComponent(organization)}` : ''
+      return request(`/api/storage/connections${query}`, { method: 'POST', body: JSON.stringify(input),
+        signal: AbortSignal.timeout(15000) })
+    },
+    createRepository(name, storage = null) {
       return request('/api/admin/repositories', {
         method: 'POST',
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, ...storage }),
+        ...(storage ? { signal: AbortSignal.timeout(45000) } : {}),
       })
     },
     createOrUpdateUser(user) {

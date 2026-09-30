@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionAdminCreateRepositoryRouteTest {
     private final InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
-            provider,
+            provider, StorageManagementFixture.create(provider, organizationDocument().organizations()),
             new ObjectMapper());
 
     private static OrionDocument organizationDocument() {

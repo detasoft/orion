@@ -9,6 +9,27 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('bounds storage requests and sends scoped write-only inputs', async () => {
+    const signal = new AbortController().signal
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(signal)
+    try {
+      const fetchImpl = vi.fn().mockImplementation(async () => new Response('{}', {
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      const client = createOrionClient({ token: 'token', fetchImpl })
+      await client.storageConnections('acme')
+      const input = { revision: 'v1', create: true, connection: { name: 'archive', secretKey: 'write-only' } }
+      await client.saveStorageConnection('acme', input)
+      const storage = { connectionScope: 'organization', connection: 'archive', location: 's3://bucket/prefix' }
+      await client.createRepository('acme/team/repo', storage)
+      expect(timeout.mock.calls).toEqual([[15000], [15000], [45000]])
+      expect(fetchImpl.mock.calls[0][0]).toBe('/api/storage/connections?organization=acme')
+      expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).toEqual(input)
+      expect(JSON.parse(fetchImpl.mock.calls[2][1].body)).toEqual({ name: 'acme/team/repo', ...storage })
+      for (const [, init] of fetchImpl.mock.calls) expect(init.signal).toBe(signal)
+    } finally { timeout.mockRestore() }
+  })
+
   it('loads sessions through the authenticated endpoint with cancellation', async () => {
     const result = { sessions: [{ id: 'one', agent: 'agent-a', state: 'RUNNING' }] }
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), {

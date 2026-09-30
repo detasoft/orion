@@ -101,6 +101,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute storageConnectionsRoute(OrionStorageConnectionsRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute proxiesRoute(OrionAdminProxiesRoute route) {
         return route;
     }

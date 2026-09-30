@@ -236,7 +236,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     public boolean canAdminister(PrincipalAddress actor,
             Optional<ConfigurationScope> scope) {
-        OrionDocument document = desiredState.current().document();
+        return canAdminister(actor, scope, desiredState.current().document());
+    }
+
+    public boolean canAdminister(PrincipalAddress actor, Optional<ConfigurationScope> scope,
+            OrionDocument document) {
         if (actor instanceof PrincipalAddress.OrganizationPrincipalAddress org) {
             if (scope.isEmpty() || !scope.orElseThrow().organizationId().equals(org.organizationId())) return false;
             for (OrionDocument.Organization organization : document.organizations()) {
@@ -253,8 +257,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 instanceof Result.Success<AccessControl.User>(var user)) || isLockedRoot(user)) return false;
         Result<List<AccessControl.Grant>> grants = mergeGrants(snapshot, user);
         if (!(grants instanceof Result.Success<List<AccessControl.Grant>>(var assigned))) return false;
-        return !MatcherUtils.filterGrants(assigned,
-                GrantMatcher.of(AccessControl.GrantKey.ADMIN)).isEmpty();
+        for (AccessControl.Grant grant : assigned) {
+            if (!GrantMatcher.of(AccessControl.GrantKey.CONNECTION).matchesAny(grant.getInfo())
+                    && GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(grant.getInfo())) return true;
+        }
+        return false;
     }
 
     private static boolean matchesScopedAdministration(List<AccessControl.GrantExpression> expressions,
@@ -269,7 +276,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     repositoryMatches |= scope.repositoryId().isPresent()
                             && MatcherUtils.matchExpressionValue(expression.getValue(), scope.toString());
                 }
-                case BRANCH, NETWORK_SOURCE, NETWORK_PORT -> {
+                case CONNECTION, BRANCH, NETWORK_SOURCE, NETWORK_PORT -> {
                     return false;
                 }
                 default -> { }

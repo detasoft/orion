@@ -49,7 +49,73 @@ Inside a repository owned by an organization:
 Use `scope="system"` to bind a system connection explicitly. The same connection
 can serve other buckets and prefixes. Existing repository Git authorization
 still governs read/write access; a reader need not own the connection.
-Connection and repository creation UI/SSH commands are deferred.
+Create these repositories from the UI's **Create repository** dialog: choose S3,
+enter `organization/team/repository`, select a permitted storage connection, and
+enter `s3://bucket/prefix`. **Add connection** and **Edit connection** manage S3
+storage connections independently of the UI's server sign-in settings. Credentials
+are write-only: omitted replacement fields preserve existing values, and the
+explicit remove-token control clears a session token. Replacing credentials
+creates new owner-bound encrypted secret references; it never changes a secret
+that another consumer may share. Nonadministrators must supply explicit credentials.
+Only system administrators can select system connections or the server AWS
+credential chain.
+
+SSH uses existing connections and accepts no secret arguments:
+
+```sh
+ssh -p 8022 user@orion.example 'repository create acme/team/local'
+ssh -p 8022 user@orion.example 'repository create acme/team/archive connection=organization/minio location=s3://orion-repositories/archive'
+ssh -p 8022 root@orion.example 'repository create acme/team/archive connection=system/minio location=s3://orion-repositories/archive'
+```
+
+The existing organization and team must be configured before S3 creation.
+Repository CREATE and CONNECTION_USE on the selected connection are both required.
+The binding is committed
+to configuration before S3 metadata creation. A storage failure retains the binding
+and returns retry guidance: repeat the identical request to finish. A different
+binding or an existing local repository is rejected. Metadata is never overwritten,
+and an S3 failure never falls back to local storage. Git data operations remain
+unsupported, as stated in the creation dialog.
+
+Connection grants require the `CONNECTION` selector. CREATE permits creation,
+READ_WRITE permits modification, READ permits inspection, and CONNECTION_USE permits binding
+a new repository. Creation, modification, and use are independent permissions.
+READ permits inspection alone; CONNECTION_USE and READ_WRITE also expose the safe settings
+needed for their operations. A connection grant never grants repository, branch,
+network, or administration access. Organization role assignment
+and deny-wins inheritance apply normally. For example, an organization user's
+direct grants may contain:
+
+```xml
+<grants>
+  <grant id="create-storage"><info><expression><key>CONNECTION</key><value>archive-*</value></expression>
+    <expression><key>CREATE</key><value>true</value></expression></info></grant>
+  <grant id="change-storage"><info><expression><key>CONNECTION</key><value>archive-*</value></expression>
+    <expression><key>READ_WRITE</key><value>true</value></expression></info></grant>
+  <grant id="use-storage"><info><expression><key>CONNECTION</key><value>archive-*</value></expression>
+    <expression><key>CONNECTION_USE</key><value>true</value></expression></info></grant>
+  <grant id="create-repository"><info><expression><key>REPOSITORY</key><value>acme/team/*</value></expression>
+    <expression><key>CREATE</key><value>true</value></expression></info></grant>
+</grants>
+```
+
+These selectors resolve only within the user's organization. Organization grants
+cannot authorize system connections or server default credentials. An administrator
+can bind a system connection to an organization repository; later repository reads
+continue to require only repository permissions.
+
+HTTP clients use `GET /api/storage/connections?organization=acme` for safe connection
+projections and their configuration revision. POST to the same URL accepts
+`{revision, create, connection: {name, endpoint, region, pathStyleAccess,
+accessKeyId, secretKey, sessionToken, defaultCredentials}}`. Omit `organization` for
+system scope. Null secret fields preserve stored values on update; an empty
+session token clears that token. An empty secret key is invalid. Selecting
+`defaultCredentials: true` requires a system administrator and excludes explicit
+credential fields. POST `/api/admin/repositories` accepts
+`{name, connectionScope: "organization", connection: "minio", location: "s3://bucket/prefix"}`;
+omit storage fields for local creation. Connection mutations require the returned
+revision and return 409 on stale revisions. Repository storage failures return 503
+with `retryable: true` and a safe error message.
 
 For AWS, omit `<endpoint>` for standard regional resolution, or configure:
 

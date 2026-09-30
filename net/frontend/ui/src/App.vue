@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import AppIcon from './components/AppIcon.vue'
+import RepositoryStorage from './components/RepositoryStorage.vue'
 import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
 import { startServerLogs } from './lib/server-logs.js'
@@ -51,6 +52,7 @@ const repositories = ref([])
 const connectedActivity = ref([])
 const toast = ref(null)
 const newRepository = ref({ name: '' })
+const repositoryStorage = ref(null)
 const settings = ref({ sshUsername: '', token: '' })
 const settingsDraft = ref({ sshUsername: '', token: '' })
 const draftConnectionState = ref('disconnected')
@@ -319,7 +321,8 @@ async function createRepository() {
   submitting.value = true
   const attempt = connectionAttempt
   try {
-    const response = await api.createRepository(name)
+    if (repositoryStorage.value === false) throw new Error('Choose an accessible S3 connection and location.')
+    const response = await api.createRepository(name, repositoryStorage.value)
     if (attempt !== connectionAttempt) return
     if (response.created === false) {
       createOpen.value = false
@@ -347,12 +350,17 @@ async function createRepository() {
     showToast('Repository created')
   } catch (error) {
     if (attempt !== connectionAttempt) return
-    if (isAuthorizationError(error)) {
+    if (error.status === 401) {
       clearExpiredCredentials()
       showToast('Your access token is no longer valid. Sign in again.', 'error')
       return
     }
-    showToast(error.message, 'error')
+    let message = error.message
+    if (repositoryStorage.value && ['TimeoutError', 'AbortError'].includes(error.name)) {
+      message = 'Creation timed out. The binding may already be saved; retry with the same name, connection and location.'
+    }
+    try { message = JSON.parse(message).error || message } catch { /* Plain-text errors remain readable. */ }
+    showToast(message, 'error')
   } finally {
     if (attempt === connectionAttempt) submitting.value = false
   }
@@ -783,19 +791,20 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <div v-if="createOpen" class="modal-layer" @mousedown.self="createOpen = false">
+    <div v-if="createOpen" class="modal-layer" @mousedown.self="!(submitting && repositoryStorage) && (createOpen = false)">
       <form
         class="modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-repository-title"
-        @keydown.esc="createOpen = false"
+        @keydown.esc="!(submitting && repositoryStorage) && (createOpen = false)"
         @submit.prevent="createRepository"
       >
         <button
           type="button"
           class="icon-button close-button"
           aria-label="Close"
+          :disabled="submitting && !!repositoryStorage"
           @click="createOpen = false"
         >
           <AppIcon name="close" />
@@ -804,11 +813,14 @@ onUnmounted(() => {
         <h2 id="create-repository-title">Create a repository</h2>
         <p>Start a new project on your Orion server.</p>
         <label>
-          Repository name<input v-model="newRepository.name" autofocus placeholder="team/project" />
+          Repository name<input v-model="newRepository.name" :disabled="submitting" autofocus placeholder="team/project" />
         </label>
+        <RepositoryStorage :client="api" :organization="identity?.organization || newRepository.name.split('/')[0]"
+          :admin="!!identity?.admin" :disabled="submitting" @change="repositoryStorage = $event" />
         <div class="modal-actions">
-          <button type="button" class="secondary-button" @click="createOpen = false">Cancel</button>
-          <button class="primary-button" :disabled="submitting">
+          <button type="button" class="secondary-button" :disabled="submitting && !!repositoryStorage"
+            @click="createOpen = false">Cancel</button>
+          <button class="primary-button" :disabled="submitting || repositoryStorage === false">
             <span v-if="submitting" class="spinner" />
             {{ submitting ? 'Creating…' : 'Create repository' }}
           </button>

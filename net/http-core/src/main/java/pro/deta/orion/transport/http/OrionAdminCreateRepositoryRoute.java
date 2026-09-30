@@ -11,7 +11,11 @@ import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
-import pro.deta.orion.util.Result;
+import pro.deta.orion.auth.StorageManagement;
+import pro.deta.orion.schema.orion.ConnectionReference;
+import pro.deta.orion.schema.orion.S3StorageBinding;
+import java.net.URI;
+import java.util.Optional;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -21,10 +25,12 @@ import java.util.Map;
 public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
     private final ObjectMapper objectMapper;
     private final NativeGitRepositoryProvider gitRepositoryProvider;
+    private final StorageManagement storageManagement;
 
     @Inject
     public OrionAdminCreateRepositoryRoute(
             NativeGitRepositoryProvider gitRepositoryProvider,
+            StorageManagement storageManagement,
             ObjectMapper objectMapper) {
         super(
                 OrionAdminPaths.REPOSITORIES,
@@ -32,6 +38,7 @@ public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
                 OrionHttpRouteDefinition.Method.GET,
                 OrionHttpRouteDefinition.Method.POST);
         this.gitRepositoryProvider = gitRepositoryProvider;
+        this.storageManagement = storageManagement;
         this.objectMapper = objectMapper;
     }
 
@@ -70,20 +77,36 @@ public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
         } catch (IllegalArgumentException failure) {
             throw new HttpRequestValidationException("Invalid repository name");
         }
-        if (!admin && !RepositoryAccessRules.create()
-                .evaluate(context, RepositoryResource.of(repositoryName)).allowed()) {
-            return OrionHttpResponse.empty(403);
+        Optional<S3StorageBinding> storage = Optional.empty();
+        if (request.connection() != null || request.location() != null || request.connectionScope() != null) {
+            try {
+                storage = Optional.of(new S3StorageBinding(new ConnectionReference(
+                        ConnectionReference.Scope.valueOf(request.connectionScope().toUpperCase(java.util.Locale.ROOT)),
+                        request.connection()), URI.create(request.location())));
+            } catch (IllegalArgumentException | NullPointerException invalid) {
+                throw new HttpRequestValidationException("Invalid S3 storage binding");
+            }
         }
-        Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
-        boolean repositoryCreated = true;
-        if (created instanceof Result.Failure<NativeGitRepository> failure
-                && failure.code() != Result.FailureCode.FILE_ALREADY_EXISTS) {
-            failure.valueOrFailure("Cannot create repository " + repositoryName);
-        } else if (created instanceof Result.Failure<NativeGitRepository>) {
-            repositoryCreated = false;
+        StorageManagement.Outcome<StorageManagement.Created> result =
+                storageManagement.createRepository(context, repositoryName, storage);
+        if (result instanceof StorageManagement.Failure<StorageManagement.Created> failure) {
+            return storageFailure(failure);
         }
-        Map<String, Object> body = Map.of("status", "ok", "created", repositoryCreated);
-        return repositoryCreated ? OrionHttpResponse.created(body) : OrionHttpResponse.ok(body);
+        boolean created = ((StorageManagement.Success<StorageManagement.Created>) result).value().created();
+        Map<String, Object> body = Map.of("status", "ok", "created", created);
+        return created ? OrionHttpResponse.created(body) : OrionHttpResponse.ok(body);
+    }
+
+    static OrionHttpResponse storageFailure(StorageManagement.Failure<?> failure) {
+        int status = switch (failure.code()) {
+            case DENIED -> 403;
+            case INVALID -> 400;
+            case CONFLICT -> 409;
+            case UNAVAILABLE -> 500;
+            case STORAGE_RETRY -> 503;
+        };
+        return OrionHttpResponse.json(status, Map.of("error", failure.message(),
+                "retryable", failure.code() == StorageManagement.FailureCode.STORAGE_RETRY));
     }
 
     private static SecurityContext context(HttpServletRequest request) {
@@ -95,7 +118,7 @@ public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
         return ApplicationAccessRules.admin().evaluate(context, ApplicationAdminResource.applicationAdmin()).allowed();
     }
 
-    public record AdminRepositoryRequest(String name) {
+    public record AdminRepositoryRequest(String name, String connectionScope, String connection, String location) {
     }
 
     public record RepositoryResponse(String name) {

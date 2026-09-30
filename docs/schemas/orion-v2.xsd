@@ -529,6 +529,8 @@
 
   <xs:simpleType name="grantKey">
     <xs:restriction base="xs:string">
+      <xs:enumeration value="CONNECTION"/>
+      <xs:enumeration value="CONNECTION_USE"/>
       <xs:enumeration value="REPOSITORY"/>
       <xs:enumeration value="BRANCH"/>
       <xs:enumeration value="FORCE"/>

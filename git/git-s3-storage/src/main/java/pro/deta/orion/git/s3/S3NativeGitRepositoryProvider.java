@@ -80,6 +80,10 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
 
     private record Location(String bucket, String prefix) {}
 
+    public static void validateLocation(String location) {
+        parseLocation(location);
+    }
+
     private static Location parseLocation(String location) {
         URI uri = uri(location, "storage location");
         String host = uri.getHost();

@@ -11,6 +11,7 @@ const client = {
   oidcSettings: vi.fn(),
   invitations: vi.fn(),
   createRepository: vi.fn(),
+  storageConnections: vi.fn(),
   createOrUpdateUser: vi.fn(),
   decisions: vi.fn(),
   resolveDecision: vi.fn(),
@@ -100,6 +101,7 @@ beforeEach(() => {
     ssh: { enabled: true, url: 'ssh://localhost:8022' },
     nativeGit: { enabled: true, url: 'git://localhost:9419' },
   })
+  client.storageConnections.mockResolvedValue({ revision: 'v1', connections: [{ name: 'archive', canUse: true }] })
   client.createRepository.mockResolvedValue({ status: 'ok' })
   client.serverLogs.mockResolvedValue({ cursor: 'process:1', gap: false, entries: [] })
   client.scopedLogFiles.mockResolvedValue([{ id: 'acme-certificate', file: 'current.log', size: 20 }])
@@ -756,7 +758,7 @@ describe('Orion connection', () => {
     await flushPromises()
     await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
 
-    expect(client.createRepository).toHaveBeenCalledWith('platform/my-repo')
+    expect(client.createRepository).toHaveBeenCalledWith('platform/my-repo', null)
     expect(wrapper.text()).toContain('platform/my-repo')
     expect(wrapper.text()).toContain('reported by Orion')
     expect(wrapper.text()).toContain('ssh://alice@git.example:2222/platform/my-repo.git')
@@ -764,6 +766,51 @@ describe('Orion connection', () => {
     expect(wrapper.text()).toContain('git://git.example:9418/platform/my-repo')
     expect(wrapper.findAll('.clone-url')).toHaveLength(3)
   })
+
+  it('ends S3 timeout loading and preserves the identical request for retry', async () => {
+    const pending = deferred()
+    client.createRepository.mockReturnValueOnce(pending.promise)
+    const wrapper = mountApp()
+    await connect(wrapper)
+    await wrapper.get('.primary-button.compact').trigger('click')
+    await wrapper.get('input[placeholder="team/project"]').setValue('acme/team/archive')
+    await wrapper.get('[name=storage]').setValue('s3')
+    await flushPromises()
+    await wrapper.get('[name=connection]').setValue('archive')
+    await wrapper.get('[name=location]').setValue('s3://bucket/prefix')
+    await wrapper.get('form.modal').trigger('submit')
+    expect(wrapper.get('input[placeholder="team/project"]').element.disabled).toBe(true)
+    expect(wrapper.get('[name=storage]').element.matches(':disabled')).toBe(true)
+    expect(wrapper.get('[name=connection]').element.matches(':disabled')).toBe(true)
+    expect(wrapper.get('[name=location]').element.matches(':disabled')).toBe(true)
+    expect(wrapper.get('.close-button').element.disabled).toBe(true)
+    await wrapper.get('form.modal').trigger('keydown', { key: 'Escape' })
+    expect(wrapper.get('form.modal').exists()).toBe(true)
+    pending.reject(Object.assign(new Error('Timed out'), { name: 'TimeoutError' }))
+    await flushPromises()
+    expect(wrapper.get('[name=storage]').element.matches(':disabled')).toBe(false)
+    expect(wrapper.get('input[placeholder="team/project"]').element.disabled).toBe(false)
+    expect(wrapper.get('.close-button').element.disabled).toBe(false)
+    expect(wrapper.text()).toContain('binding may already be saved')
+    expect(wrapper.get('form.modal .modal-actions .primary-button').element.disabled).toBe(false)
+    expect(wrapper.get('input[placeholder="team/project"]').element.value).toBe('acme/team/archive')
+    expect(wrapper.get('[name=connection]').element.value).toBe('archive')
+    expect(wrapper.get('[name=location]').element.value).toBe('s3://bucket/prefix')
+  })
+
+  it.each([[403, 'Access denied'], [503, 'The binding is saved; retry the identical request.']])(
+    'keeps signed in and displays safe repository failure %s', async (status, message) => {
+      client.createRepository.mockRejectedValueOnce(Object.assign(
+        new Error(JSON.stringify({ error: message, retryable: status === 503 })), { status }))
+      const wrapper = mountApp()
+      await connect(wrapper)
+      await startRepository(wrapper, 'acme/team/repo')
+      await flushPromises()
+      expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+      expect(wrapper.get('form.modal').exists()).toBe(true)
+      expect(wrapper.text()).toContain(message)
+      expect(wrapper.text()).not.toContain('token is no longer valid')
+    })
 
   it('clears verified state when the saved token is removed', async () => {
     const wrapper = mountApp()
@@ -842,7 +889,7 @@ describe('Orion connection', () => {
     client.routes.mockReturnValueOnce(verification.promise)
     await wrapper.get('button.secondary-button').trigger('click')
 
-    creation.reject(Object.assign(new Error('Expired'), { status: 403 }))
+    creation.reject(Object.assign(new Error('Expired'), { status: 401 }))
     await flushPromises()
     verification.resolve({ routes: [] })
     await flushPromises()
@@ -976,7 +1023,7 @@ describe('Orion connection', () => {
   })
 
   it('disconnects and removes an expired token after an authenticated request', async () => {
-    const expired = Object.assign(new Error('Expired token'), { status: 403 })
+    const expired = Object.assign(new Error('Expired token'), { status: 401 })
     client.createRepository.mockRejectedValueOnce(expired)
     const wrapper = mountApp()
     await connect(wrapper)

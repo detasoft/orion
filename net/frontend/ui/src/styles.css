@@ -1183,7 +1183,7 @@ button,
   padding: 24px;
   background: rgb(10 13 11 / 55%);
   backdrop-filter: blur(5px);
-  place-items: center;
+  place-items: safe center;
 }
 
 .modal {

@@ -91,6 +91,24 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void connectionSelectorNeverGrantsAdministrationInSystemOrOrganizationScope() {
+        AccessControl.Grant mixed = new AccessControl.Grant("mixed", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.CONNECTION, "*"),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+        AccessControl.User actor = new AccessControl.User("alice", "", "", "", List.of(), List.of(), List.of(mixed));
+        OrionDocument.Organization org = new OrionDocument.Organization(new OrganizationId("acme"), "",
+                List.of(actor), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
+                new AccessControl(List.of(actor), List.of(), List.of())), List.of(org));
+        try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {
+            assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("system/alice"),
+                    Optional.empty(), document)).isFalse();
+            assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("acme/alice"),
+                    Optional.of(pro.deta.orion.schema.orion.ConfigurationScope.parse("acme")), document)).isFalse();
+        }
+    }
+
+    @Test
     void userMutationsArePersistedAndActiveWhenTheyReturn() throws Exception {
         OrionPasswordHashingService hashing = new OrionPasswordHashingService();
         try (ServiceFixture fixture = fixture(new AccessControlDraft(), new AccessControlDraft())) {

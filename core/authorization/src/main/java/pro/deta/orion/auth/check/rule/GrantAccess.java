@@ -39,7 +39,11 @@ final class GrantAccess {
         if (userIdentity == null) {
             return List.of();
         }
-        return filterGrants(userIdentity.getGrants(), matchers);
+        java.util.ArrayList<AccessControl.Grant> grants = new java.util.ArrayList<>();
+        for (AccessControl.Grant grant : userIdentity.getGrants()) {
+            if (!hasKey(grant.getInfo(), AccessControl.GrantKey.CONNECTION)) grants.add(grant);
+        }
+        return filterGrants(grants, matchers);
     }
 
     static AccessDecision scopedRepositoryAccess(UserIdentity identity, RepositoryResource repository,
@@ -87,7 +91,8 @@ final class GrantAccess {
 
     private static boolean matchesRepositoryAction(List<AccessControl.GrantExpression> expressions,
             String repositoryName, AccessControl.GrantKey action) {
-        if (hasKey(expressions, AccessControl.GrantKey.NETWORK_SOURCE)
+        if (hasKey(expressions, AccessControl.GrantKey.CONNECTION)
+                || hasKey(expressions, AccessControl.GrantKey.NETWORK_SOURCE)
                 || hasKey(expressions, AccessControl.GrantKey.NETWORK_PORT)) return false;
         boolean repositoryRestricted = hasKey(expressions, AccessControl.GrantKey.REPOSITORY);
         if (repositoryRestricted && !repositoryGrant(repositoryName).matchesAny(expressions)) return false;
