@@ -17,7 +17,6 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -98,12 +97,10 @@ class InternalConfigurationRepositoryLifecycleIT {
                         .isInstanceOf(TokenIssueResult.Failure.class);
                 assertThat(first.nativeGitRepositoryProvider().repositoryNames())
                         .containsExactly(REPOSITORY_NAME);
-                Map<String, GitFile> snapshot = repository(first).files().loadFiles(
-                        CONFIGURATION_REF,
-                        List.of(ACL_PATH));
+                byte[] content = repository(first).files().readBytes(CONFIGURATION_REF, ACL_PATH);
                 firstVersion = repository(first).refs().get(CONFIGURATION_REF);
                 AccessControl acl = OrionXml.read(
-                        new ByteArrayInputStream(snapshot.get(ACL_PATH).content()))
+                        new ByteArrayInputStream(content))
                                 .system().accessControl();
                 assertThat(acl.getUsers()).extracting(AccessControl.User::getId).contains("root");
             } finally {
@@ -278,12 +275,10 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
             assertThat(reset.orionAccessControlService().userExists("alice")).isTrue();
 
-            Map<String, GitFile> snapshot = repository(reset).files().loadFiles(
-                    CONFIGURATION_REF,
-                    List.of(ACL_PATH));
+            byte[] content = repository(reset).files().readBytes(CONFIGURATION_REF, ACL_PATH);
             assertThat(repository(reset).refs().get(CONFIGURATION_REF)).isNotNull().isNotEqualTo(versionBeforeReset);
             AccessControl acl = OrionXml.read(
-                    new ByteArrayInputStream(snapshot.get(ACL_PATH).content()))
+                    new ByteArrayInputStream(content))
                             .system().accessControl();
             AccessControl.User root = acl.getUsers().stream()
                     .filter(user -> "root".equalsIgnoreCase(user.getId()))
@@ -476,11 +471,13 @@ class InternalConfigurationRepositoryLifecycleIT {
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
                 .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
-        repository.files().saveFiles(
-                CONFIGURATION_REF,
-                Map.of(ACL_PATH, GitFile.regular(primaryAcl), secondaryPath, GitFile.regular(secondaryAcl)), Set.of(),
-                "seed split ACL",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess(CONFIGURATION_REF, "seed split ACL", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write(ACL_PATH, primaryAcl);
+            fileAccess.write(secondaryPath, secondaryAcl);
+            fileAccess.apply();
+            return null;
+        });
 
         OrionApplicationLifecycle lifecycle = reset.orionApplicationLifecycle();
         String newPassword;
@@ -495,14 +492,13 @@ class InternalConfigurationRepositoryLifecycleIT {
                     "old-root-password".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Failure.class);
 
-            Map<String, GitFile> snapshot = repository.files().loadFiles(
-                    CONFIGURATION_REF,
-                    List.of(ACL_PATH, secondaryPath));
+            Map<String, byte[]> snapshot = Map.of(ACL_PATH, repository.files().readBytes(CONFIGURATION_REF,
+                    ACL_PATH), secondaryPath, repository.files().readBytes(CONFIGURATION_REF, secondaryPath));
             AccessControl primary = OrionXml.read(
-                    new ByteArrayInputStream(snapshot.get(ACL_PATH).content()))
+                    new ByteArrayInputStream(snapshot.get(ACL_PATH)))
                             .system().accessControl();
             AccessControl secondary = OrionXml.read(
-                    new ByteArrayInputStream(snapshot.get(secondaryPath).content()))
+                    new ByteArrayInputStream(snapshot.get(secondaryPath)))
                             .system().accessControl();
             assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
@@ -557,11 +553,12 @@ class InternalConfigurationRepositoryLifecycleIT {
         String versionBeforeReset;
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            repository(first).files().saveFiles(
-                    CONFIGURATION_REF,
-                    Map.of(ACL_PATH, GitFile.regular(duplicateRootAclBytes())), Set.of(),
-                    "seed ambiguous root ACL",
-                    GitCommitAuthor.EMPTY);
+            repository(first).files().withAccess(CONFIGURATION_REF, "seed ambiguous root ACL",
+                    GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write(ACL_PATH, duplicateRootAclBytes());
+                fileAccess.apply();
+                return null;
+            });
             versionBeforeReset = repository(first).refs().get(CONFIGURATION_REF);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -933,11 +930,12 @@ class InternalConfigurationRepositoryLifecycleIT {
             String candidateName,
             byte[] content) throws Exception {
         String candidateRef = "refs/heads/candidate-" + candidateName;
-        repository.files().saveFiles(
-                candidateRef,
-                Map.of(ACL_PATH, GitFile.regular(content)), Set.of(),
-                "candidate " + candidateName,
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess(candidateRef, "candidate " + candidateName, GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write(ACL_PATH, content);
+            fileAccess.apply();
+            return null;
+        });
         return repository.refs().get(candidateRef);
     }
 
@@ -1027,12 +1025,12 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     private static List<AccessControl.User> usersAcross(
-            Map<String, GitFile> snapshot,
+            Map<String, byte[]> snapshot,
             String... paths) throws Exception {
         List<AccessControl.User> users = new java.util.ArrayList<>();
 
         for (String path : paths) {
-            AccessControl acl = OrionXml.read(new ByteArrayInputStream(snapshot.get(path).content()))
+            AccessControl acl = OrionXml.read(new ByteArrayInputStream(snapshot.get(path)))
                     .system().accessControl();
             users.addAll(acl.getUsers());
         }

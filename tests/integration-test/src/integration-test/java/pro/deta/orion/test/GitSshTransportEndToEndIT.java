@@ -35,7 +35,6 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
@@ -1541,11 +1540,12 @@ class GitSshTransportEndToEndIT {
         new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
-                .files().saveFiles(
-                        "refs/heads/" + BRANCH,
-                        Map.of("orion.xml", GitFile.regular(output.toByteArray())), Set.of(),
-                        "seed e2e access control",
-                        new GitCommitAuthor("E2E Test", "e2e@example.test"));
+                .files().withAccess("refs/heads/" + BRANCH, "seed e2e access control",
+                        new GitCommitAuthor("E2E Test", "e2e@example.test"), fileAccess -> {
+            fileAccess.write("orion.xml", output.toByteArray());
+            fileAccess.apply();
+            return null;
+        });
     }
 
     private static AccessControl accessControlFor(PublicKey userPublicKey) {
@@ -1615,11 +1615,12 @@ class GitSshTransportEndToEndIT {
         new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
-                .files().saveFiles(
-                        "refs/heads/" + BRANCH,
-                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
-                        "seed " + repositoryName,
-                        new GitCommitAuthor("E2E Test", "e2e@example.test"));
+                .files().withAccess("refs/heads/" + BRANCH, "seed " + repositoryName,
+                        new GitCommitAuthor("E2E Test", "e2e@example.test"), fileAccess -> {
+            fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
+            fileAccess.apply();
+            return null;
+        });
     }
 
     private static Git initRepository(Path directory) throws Exception {

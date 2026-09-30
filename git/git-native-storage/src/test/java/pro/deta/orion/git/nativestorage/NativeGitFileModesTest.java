@@ -1,6 +1,5 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
 import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
 import org.eclipse.jgit.lib.Constants;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -28,11 +26,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -48,23 +43,34 @@ class NativeGitFileModesTest {
         NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository");
         byte[] script = bytes("#!/bin/sh\nexit 0\n");
-        Map<String, GitFile> initial = Map.of(
-                "run.sh", new GitFile(EXECUTABLE_FILE, script),
-                "next.sh", GitFile.regular(script),
-                "link", new GitFile(SYMLINK, bytes("run.sh")));
-        repository.files().saveFiles("main", initial, Set.of(), "create", GitCommitAuthor.EMPTY);
-        List<String> paths = List.of("run.sh", "next.sh", "link");
-        assertThat(repository.files().loadFiles("main", paths)).isEqualTo(initial);
+        Map<String, byte[]> initial = Map.of(
+                "run.sh", script,
+                "next.sh", script,
+                "link", bytes("run.sh"));
+        repository.files().withAccess("main", "create", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("run.sh", EXECUTABLE_FILE, script);
+            fileAccess.write("next.sh", script);
+            fileAccess.write("link", SYMLINK, bytes("run.sh"));
+            fileAccess.apply();
+            return null;
+        });
+        assertContents(repository, initial);
 
-        Map<String, GitFile> updated = Map.of(
-                "run.sh", GitFile.regular(bytes("updated")),
-                "next.sh", new GitFile(EXECUTABLE_FILE, script),
-                "link", new GitFile(SYMLINK, bytes("next.sh")));
-        repository.files().saveFiles("main", updated, Set.of(), "update", GitCommitAuthor.EMPTY);
+        Map<String, byte[]> updated = Map.of(
+                "run.sh", bytes("updated"),
+                "next.sh", script,
+                "link", bytes("next.sh"));
+        repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("run.sh", bytes("updated"));
+            fileAccess.write("next.sh", EXECUTABLE_FILE, script);
+            fileAccess.write("link", SYMLINK, bytes("next.sh"));
+            fileAccess.apply();
+            return null;
+        });
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
-        assertThat(reopened.files().loadFiles("main", paths)).isEqualTo(updated);
+        assertContents(reopened, updated);
         try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
             copyPacks(reopened, observed);
             try (RevWalk walk = new RevWalk(observed)) {
@@ -74,11 +80,16 @@ class NativeGitFileModesTest {
                     assertThat(original.getFileMode(0)).isEqualTo(FileMode.REGULAR_FILE);
                     assertEntry(observed, commit, "next.sh", FileMode.EXECUTABLE_FILE, original.getObjectId(0));
                 }
-                for (Map.Entry<String, GitFile> entry : updated.entrySet()) {
+                for (Map.Entry<String, byte[]> entry : updated.entrySet()) {
                     try (TreeWalk tree = TreeWalk.forPath(observed, entry.getKey(), commit.getTree())) {
-                        assertThat(tree.getRawMode(0)).isEqualTo(entry.getValue().mode().code());
+                        FileMode expectedMode = switch (entry.getKey()) {
+                            case "next.sh" -> FileMode.EXECUTABLE_FILE;
+                            case "link" -> FileMode.SYMLINK;
+                            default -> FileMode.REGULAR_FILE;
+                        };
+                        assertThat(tree.getFileMode(0)).isEqualTo(expectedMode);
                         assertThat(observed.open(tree.getObjectId(0)).getBytes())
-                                .isEqualTo(entry.getValue().content());
+                                .isEqualTo(entry.getValue());
                     }
                 }
             }
@@ -108,9 +119,12 @@ class NativeGitFileModesTest {
         assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                 .isEqualTo(RefUpdateResult.Status.APPLIED);
 
-        assertThatCode(() -> repository.files().saveFiles(
-                "main", Map.of("config.txt", GitFile.regular(bytes("updated"))), Set.of(),
-                "update", GitCommitAuthor.EMPTY)).doesNotThrowAnyException();
+        assertThatCode(() -> repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("config.txt", bytes("updated"));
+            fileAccess.apply();
+            return null;
+        })).doesNotThrowAnyException();
 
         NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository");
@@ -131,51 +145,68 @@ class NativeGitFileModesTest {
 
     @Test
     void preservesUnicodeFilesAcrossInternalSaveUpdateAndReopen() throws Exception {
-        Map<String, GitFile> files = Map.of(
-                "\uE000", new GitFile(EXECUTABLE_FILE, bytes("private-use name")),
-                "\uD800\uDC00", GitFile.regular(bytes("supplementary name")),
-                "nested/\uE000", GitFile.regular(bytes("nested private-use name")),
-                "nested/\uD800\uDC00", new GitFile(SYMLINK, bytes("../\uE000")),
-                "a.c", GitFile.regular(bytes("sibling before directory")),
-                "a/x", GitFile.regular(bytes("nested sibling")),
-                "a0", GitFile.regular(bytes("sibling after directory")));
-        List<String> paths = new ArrayList<>(files.keySet());
-        Map<String, GitFile> expected = new LinkedHashMap<>(files);
-        GitFile updated = GitFile.regular(bytes("updated nested sibling"));
+        Map<String, byte[]> files = Map.of(
+                "\uE000", bytes("private-use name"),
+                "\uD800\uDC00", bytes("supplementary name"),
+                "nested/\uE000", bytes("nested private-use name"),
+                "nested/\uD800\uDC00", bytes("../\uE000"),
+                "a.c", bytes("sibling before directory"),
+                "a/x", bytes("nested sibling"),
+                "a0", bytes("sibling after directory"));
+        Map<String, byte[]> expected = new LinkedHashMap<>(files);
+        byte[] updated = bytes("updated nested sibling");
         expected.put("a/x", updated);
+        Map<String, FileMode> modes = Map.of("\uE000", FileMode.EXECUTABLE_FILE,
+                "nested/\uD800\uDC00", FileMode.SYMLINK);
         try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().saveFiles("main", files, Set.of(), "create", GitCommitAuthor.EMPTY);
+            repository.files().withAccess("main", "create", GitCommitAuthor.EMPTY, fileAccess -> {
+                for (Map.Entry<String, byte[]> fileEntry : files.entrySet()) {
+                    pro.deta.orion.git.parser.v2.data.FileMode mode = switch (fileEntry.getKey()) {
+                        case "\uE000" -> EXECUTABLE_FILE;
+                        case "nested/\uD800\uDC00" -> SYMLINK;
+                        default -> pro.deta.orion.git.parser.v2.data.FileMode.REGULAR_FILE;
+                    };
+                    fileAccess.write(fileEntry.getKey(), mode, fileEntry.getValue());
+                }
+                fileAccess.apply();
+                return null;
+            });
             assertGitTreeOrdering(repository);
-            assertThat(repository.files().loadFiles("main", paths)).isEqualTo(files);
+            assertContents(repository, files, modes);
 
-            repository.files().saveFiles(
-                    "main", Map.of("a/x", updated), Set.of(), "update", GitCommitAuthor.EMPTY);
+            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("a/x", updated);
+                fileAccess.apply();
+                return null;
+            });
             assertGitTreeOrdering(repository);
-            assertThat(repository.files().loadFiles("main", paths)).isEqualTo(expected);
+            assertContents(repository, expected, modes);
         }
 
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository")) {
-            assertThat(reopened.files().loadFiles("main", paths)).isEqualTo(expected);
+            assertContents(reopened, expected, modes);
         }
     }
 
     @Test
     void preservesImportedUnicodeFilesWhenSavingAnotherFile() throws Exception {
-        GitFile executable = new GitFile(EXECUTABLE_FILE, bytes("executable"));
-        GitFile link = new GitFile(SYMLINK, bytes("\uE000"));
-        Map<String, GitFile> files = Map.of(
+        byte[] executable = bytes("executable");
+        byte[] link = bytes("\uE000");
+        Map<String, byte[]> files = Map.of(
                 "\uE000", executable, "\uD800\uDC00", link,
                 "nested/\uE000", executable, "nested/\uD800\uDC00", link);
-        GitFile configuration = GitFile.regular(bytes("updated configuration"));
-        Map<String, GitFile> expected = new LinkedHashMap<>(files);
+        byte[] configuration = bytes("updated configuration");
+        Map<String, byte[]> expected = new LinkedHashMap<>(files);
         expected.put("config.txt", configuration);
-        List<String> paths = new ArrayList<>(expected.keySet());
+        Map<String, FileMode> modes = Map.of(
+                "\uE000", FileMode.EXECUTABLE_FILE, "nested/\uE000", FileMode.EXECUTABLE_FILE,
+                "\uD800\uDC00", FileMode.SYMLINK, "nested/\uD800\uDC00", FileMode.SYMLINK);
         try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository")) {
-            ObjectId executableId = write(repository, GitObjectType.BLOB, executable.content());
-            ObjectId linkId = write(repository, GitObjectType.BLOB, link.content());
+            ObjectId executableId = write(repository, GitObjectType.BLOB, executable);
+            ObjectId linkId = write(repository, GitObjectType.BLOB, link);
             TreeFormatter nested = new TreeFormatter();
             nested.append("\uE000", FileMode.EXECUTABLE_FILE, executableId);
             nested.append("\uD800\uDC00", FileMode.SYMLINK, linkId);
@@ -189,18 +220,43 @@ class NativeGitFileModesTest {
                     + "\nauthor A <a@test> 0 +0000\ncommitter A <a@test> 0 +0000\n\nimported\n"));
             assertThat(repository.updateRef("refs/heads/main", "0".repeat(40), initial.name()).status())
                     .isEqualTo(RefUpdateResult.Status.APPLIED);
-            assertThat(repository.files().loadFiles(
-                    "main", new ArrayList<>(files.keySet()))).isEqualTo(files);
+            assertContents(repository, files, modes);
 
-            repository.files().saveFiles("main", Map.of("config.txt", configuration), Set.of(),
-                    "update", GitCommitAuthor.EMPTY);
+            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("config.txt", configuration);
+                fileAccess.apply();
+                return null;
+            });
             assertGitTreeOrdering(repository);
-            assertThat(repository.files().loadFiles("main", paths)).isEqualTo(expected);
+            assertContents(repository, expected, modes);
         }
 
         try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
                 .find("demo").valueOrFailure("repository")) {
-            assertThat(reopened.files().loadFiles("main", paths)).isEqualTo(expected);
+            assertContents(reopened, expected, modes);
+        }
+    }
+
+    private static void assertContents(NativeGitRepository repository, Map<String, byte[]> expected)
+            throws Exception {
+        for (Map.Entry<String, byte[]> entry : expected.entrySet()) {
+            assertThat(repository.files().readBytes("main", entry.getKey())).isEqualTo(entry.getValue());
+        }
+    }
+
+    private static void assertContents(NativeGitRepository repository, Map<String, byte[]> expected,
+            Map<String, FileMode> modes) throws Exception {
+        assertContents(repository, expected);
+        try (InMemoryRepository observed = new InMemoryRepository(new DfsRepositoryDescription())) {
+            copyPacks(repository, observed);
+            try (RevWalk walk = new RevWalk(observed)) {
+                RevCommit commit = walk.parseCommit(ObjectId.fromString(repository.refs().get("refs/heads/main")));
+                for (String path : expected.keySet()) {
+                    try (TreeWalk tree = TreeWalk.forPath(observed, path, commit.getTree())) {
+                        assertThat(tree.getFileMode(0)).isEqualTo(modes.getOrDefault(path, FileMode.REGULAR_FILE));
+                    }
+                }
+            }
         }
     }
 

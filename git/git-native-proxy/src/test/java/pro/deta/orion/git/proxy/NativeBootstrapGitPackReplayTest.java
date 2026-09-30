@@ -14,7 +14,6 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -43,6 +42,7 @@ import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPackReplayTest {
     private static final String ZERO = "0".repeat(40);
@@ -128,13 +128,17 @@ class NativeBootstrapGitPackReplayTest {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
                 "proxy", storage, new InMemoryIndex(), "refs/heads/main");
-        repository.files().saveFiles(
-                "main", Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(), "local",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "local", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         String commit = repository.refs().get("refs/heads/main");
-        var unrelated = FileUpdateFixture.prepare(repository.files(), "other",
-                Map.of("other.txt", GitFile.regular(new byte[]{2})), Set.of(),
-                "unrelated", GitCommitAuthor.EMPTY);
+        var unrelated = FileTestSupport.prepared(repository.files(), "other", "unrelated",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("other.txt", new byte[]{2});
+            return null;
+        });
         Optional<PackChecksum> received = ingest(repository, unrelated.pack());
         Path bare = directory.resolve("missing-objects.git");
 

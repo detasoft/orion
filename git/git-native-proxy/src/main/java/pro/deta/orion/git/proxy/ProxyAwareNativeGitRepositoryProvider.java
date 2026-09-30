@@ -9,8 +9,6 @@ import pro.deta.orion.decision.DecisionRequiredException;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -619,27 +617,6 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     @Override
     public Result<NativeGitRepository> openForWrite(String repositoryName) {
         return policyBound(repositoryName);
-    }
-
-    @Override
-    @Deprecated(forRemoval = true)
-    public void saveFiles(
-            String repositoryName,
-            String refName,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        String canonicalName = repositoryName(repositoryName);
-        BootstrapGitRuntimeProxy proxy = binding(canonicalName);
-        if (proxy == null) {
-            NativeGitRepositoryProvider.super.saveFiles(canonicalName, refName, files, deletedPaths, message, author);
-            return;
-        }
-        NativeGitRepository repository = backend.find(proxy.repositoryName())
-                .valueOrFailure("Cannot open native repository " + canonicalName);
-        new PolicyBoundNativeGitRepository(this, canonicalName, repository)
-                .files().saveFiles(refName, files, deletedPaths, message, author);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {

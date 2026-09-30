@@ -8,7 +8,6 @@ import pro.deta.orion.git.client.GitReceivePackRequest;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -36,6 +35,7 @@ import pro.deta.orion.git.workflow.GitScenarioContext;
 import pro.deta.orion.git.workflow.GitWorkTree;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
+import pro.deta.orion.net.io.BufferedByteInputV2;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -151,36 +151,39 @@ final class OrionGitWorkTree implements GitWorkTree {
         if (stagedPaths.isEmpty()) {
             throw new IllegalStateException("Orion native commit requires staged files");
         }
-        Map<String, GitFile> files = new LinkedHashMap<>();
-        Set<String> deletedPaths = new LinkedHashSet<>();
-        for (String path : stagedPaths) {
-            Path source = directory.resolve(path);
-            if (Files.isSymbolicLink(source)) {
-                files.put(path, new GitFile(FileMode.SYMLINK,
-                        Files.readSymbolicLink(source).toString().getBytes(StandardCharsets.UTF_8)));
-                continue;
-            }
-            boolean deleted = Files.notExists(source) || Files.isDirectory(source);
-            for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
-                 parent = parent.getParent()) {
-                deleted = Files.isRegularFile(parent);
-            }
-            if (deleted) {
-                try {
-                    repository.files().loadFiles(currentBranch, List.of(path));
-                } catch (GitOperationException failure) {
-                    throw new IOException("Staged Git path is not tracked: " + path, failure);
+        repository.files().withAccess(currentBranch, message, PARITY_AUTHOR, access -> {
+            for (String path : stagedPaths) {
+                Path source = directory.resolve(path);
+                if (Files.isSymbolicLink(source)) {
+                    byte[] target = Files.readSymbolicLink(source).toString().getBytes(StandardCharsets.UTF_8);
+                    access.write(path, FileMode.SYMLINK, target);
+                    continue;
                 }
-                deletedPaths.add(path);
-                continue;
+                boolean deleted = Files.notExists(source) || Files.isDirectory(source);
+                for (Path parent = source.getParent(); !deleted && parent != null && parent.startsWith(directory);
+                     parent = parent.getParent()) {
+                    deleted = Files.isRegularFile(parent);
+                }
+                if (deleted) {
+                    try {
+                        repository.files().readFile(currentBranch, path, (type, size, base, input) -> size);
+                    } catch (GitOperationException failure) {
+                        throw new IOException("Staged Git path is not tracked: " + path, failure);
+                    }
+                    access.delete(path);
+                    continue;
+                }
+                if (!Files.isRegularFile(source)) {
+                    throw new IOException("Staged Git path is not a regular file: " + path);
+                }
+                FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
+                try (BufferedByteInputV2 input = new BufferedByteInputV2(Files.newInputStream(source))) {
+                    access.write(path, mode, Files.size(source), input);
+                }
             }
-            if (!Files.isRegularFile(source)) {
-                throw new IOException("Staged Git path is not a regular file: " + path);
-            }
-            FileMode mode = Files.isExecutable(source) ? FileMode.EXECUTABLE_FILE : FileMode.REGULAR_FILE;
-            files.put(path, new GitFile(mode, Files.readAllBytes(source)));
-        }
-        repository.files().saveFiles(currentBranch, files, deletedPaths, message, PARITY_AUTHOR);
+            access.apply();
+            return null;
+        });
         stagedPaths.clear();
     }
 

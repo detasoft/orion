@@ -9,7 +9,6 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -64,10 +63,13 @@ class RemoteBootstrapConfigurationIT {
             byte[] material = materialBytes(target, environment);
             var repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("native bootstrap repository");
-            repository.files().saveFiles("refs/heads/bootstrap",
-                    Map.of("config/acl.xml", GitFile.regular(xml),
-                            "keys/server.p12", GitFile.regular(material)), Set.of(),
-                    "seed remote bootstrap inputs", GitCommitAuthor.EMPTY);
+            repository.files().withAccess("refs/heads/bootstrap", "seed remote bootstrap inputs",
+                    GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("config/acl.xml", xml);
+                fileAccess.write("keys/server.p12", material);
+                fileAccess.apply();
+                return null;
+            });
             target.getBootstrap().getAccessControl().setRef("refs/heads/bootstrap");
             target.getBootstrap().getAccessControl().setPath("config/acl.xml");
             target.getBootstrap().getKeyMaterial().setRef("refs/heads/bootstrap");
@@ -196,13 +198,19 @@ class RemoteBootstrapConfigurationIT {
                     .valueOrFailure("configuration upstream");
             var materialRepository = materialServer.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("material upstream");
-            configurationRepository.files().saveFiles(acl.getRef(),
-                    Map.of(acl.getPath(),
-                            GitFile.regular(configurationServer.accessControlService().accessControlConfigurationFile().content())), Set.of(),
-                    "seed configuration", GitCommitAuthor.EMPTY);
-            materialRepository.files().saveFiles(material.getRef(),
-                    Map.of(material.getPath(), GitFile.regular(materialBytes(target, environment))), Set.of(),
-                    "seed material", GitCommitAuthor.EMPTY);
+            configurationRepository.files().withAccess(acl.getRef(), "seed configuration",
+                    GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write(acl.getPath(),
+                        configurationServer.accessControlService().accessControlConfigurationFile().content());
+                fileAccess.apply();
+                return null;
+            });
+            materialRepository.files().withAccess(material.getRef(), "seed material", GitCommitAuthor.EMPTY,
+                    fileAccess -> {
+                fileAccess.write(material.getPath(), materialBytes(target, environment));
+                fileAccess.apply();
+                return null;
+            });
 
             String configurationRevision = null;
             String materialRevision = null;
@@ -241,21 +249,25 @@ class RemoteBootstrapConfigurationIT {
                             signature = bootstrap.serverIdentity().sign(payload);
                             var materialRefs = materialRepository.refs();
                             provider.openForWrite(configurationCache).valueOrFailure("configuration proxy")
-                                    .files().saveFiles(acl.getRef(),
-                                            Map.of("configuration-marker", GitFile.regular(payload)), Set.of(),
-                                            "write configuration upstream", GitCommitAuthor.EMPTY);
-                            assertThat(configurationRepository.files().loadFiles(
-                                    acl.getRef(), List.of("configuration-marker")))
-                                    .containsEntry("configuration-marker", GitFile.regular(payload));
+                                    .files().withAccess(acl.getRef(), "write configuration upstream",
+                                            GitCommitAuthor.EMPTY, fileAccess -> {
+                                fileAccess.write("configuration-marker", payload);
+                                fileAccess.apply();
+                                return null;
+                            });
+                            assertThat(configurationRepository.files().readBytes(acl.getRef(),
+                                    "configuration-marker")).isEqualTo(payload);
                             assertThat(materialRepository.refs()).isEqualTo(materialRefs);
                             var configurationRefs = configurationRepository.refs();
                             provider.openForWrite(materialCache).valueOrFailure("material proxy")
-                                    .files().saveFiles(material.getRef(),
-                                            Map.of("material-marker", GitFile.regular(payload)), Set.of(),
-                                            "write material upstream", GitCommitAuthor.EMPTY);
-                            assertThat(materialRepository.files().loadFiles(
-                                    material.getRef(), List.of("material-marker")))
-                                    .containsEntry("material-marker", GitFile.regular(payload));
+                                    .files().withAccess(material.getRef(), "write material upstream",
+                                            GitCommitAuthor.EMPTY, fileAccess -> {
+                                fileAccess.write("material-marker", payload);
+                                fileAccess.apply();
+                                return null;
+                            });
+                            assertThat(materialRepository.files().readBytes(material.getRef(),
+                                    "material-marker")).isEqualTo(payload);
                             assertThat(configurationRepository.refs()).isEqualTo(configurationRefs);
                             configurationRevision = configurationRepository.refs().get(acl.getRef());
                             materialRevision = materialRepository.refs().get(material.getRef());

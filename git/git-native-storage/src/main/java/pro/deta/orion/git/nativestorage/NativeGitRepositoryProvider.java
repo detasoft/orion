@@ -1,7 +1,5 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import java.util.Optional;
 import pro.deta.orion.util.Result;
@@ -38,19 +36,6 @@ public interface NativeGitRepositoryProvider extends AutoCloseable {
 
     default Result<NativeGitRepository> openForWrite(String repositoryName) {
         return find(repositoryName);
-    }
-
-    @Deprecated(forRemoval = true)
-    default void saveFiles(
-            String repositoryName,
-            String refName,
-            Map<String, GitFile> files,
-            Set<String> deletedPaths,
-            String message,
-            GitCommitAuthor author) throws GitOperationException {
-        openForWrite(repositoryName)
-                .valueOrFailure("Cannot open native repository " + repositoryName)
-                .files().saveFiles(refName, files, deletedPaths, message, author);
     }
 
     default List<RefUpdateResult> publishPack(

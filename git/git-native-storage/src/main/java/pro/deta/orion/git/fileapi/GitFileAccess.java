@@ -116,6 +116,17 @@ public final class GitFileAccess implements Modification {
         written.add(normalized);
     }
 
+    public void write(String path, byte[] content) throws IOException {
+        write(path, FileMode.REGULAR_FILE, content);
+    }
+
+    public void write(String path, FileMode mode, byte[] content) throws IOException {
+        Objects.requireNonNull(content, "content");
+        try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
+            write(path, mode, content.length, input);
+        }
+    }
+
     public void delete(String path) throws IOException {
         requireEditable();
         String normalized = gitPath(path);

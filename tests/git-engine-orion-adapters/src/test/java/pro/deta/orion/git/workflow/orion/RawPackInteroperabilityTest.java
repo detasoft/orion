@@ -92,8 +92,7 @@ class RawPackInteroperabilityTest {
                 source.push("origin", "main");
                 fetch(client, remote, source.head(), List.of(common), copy);
                 copy.updateRef("refs/heads/main", "0".repeat(40), source.head());
-                assertThat(new String(copy.files().loadFiles("main",
-                        List.of("README.md")).get("README.md").content(),
+                assertThat(new String(copy.files().readBytes("main", "README.md"),
                         StandardCharsets.UTF_8)).isEqualTo("updated\n");
             }
         }

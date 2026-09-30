@@ -13,7 +13,6 @@ import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitTcpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -29,7 +28,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -79,11 +77,12 @@ class SmartHttpGitRemoteGatewayTest {
 
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().saveFiles(
-                        "main",
-                        Map.of("orion.txt", GitFile.regular("outbound\n".getBytes())), Set.of(),
-                        "Orion outbound",
-                        new GitCommitAuthor("Orion", "orion@example.invalid"));
+                local.files().withAccess("main", "Orion outbound", new GitCommitAuthor("Orion",
+                        "orion@example.invalid"), fileAccess -> {
+                    fileAccess.write("orion.txt", "outbound\n".getBytes());
+                    fileAccess.apply();
+                    return null;
+                });
                 String desired = local.refs().get("refs/heads/main");
 
                 assertThat(gateway.pushHead(
@@ -131,9 +130,12 @@ class SmartHttpGitRemoteGatewayTest {
                 gateway.fetchHeads(local);
                 assertThat(local.updateRef("refs/heads/main", NULL_ID, seed.main()).status())
                         .isEqualTo(RefUpdateResult.Status.APPLIED);
-                local.files().saveFiles(
-                        "main", Map.of("outbound.txt", GitFile.regular("outbound\n".getBytes())), Set.of(),
-                        "Outbound", new GitCommitAuthor("Orion", "orion@example.invalid"));
+                local.files().withAccess("main", "Outbound", new GitCommitAuthor("Orion",
+                        "orion@example.invalid"), fileAccess -> {
+                    fileAccess.write("outbound.txt", "outbound\n".getBytes());
+                    fileAccess.apply();
+                    return null;
+                });
                 String desired = local.refs().get("refs/heads/main");
                 String trackingRef = "refs/remotes/upstream/main";
                 if (remoteAlreadyCurrent) {

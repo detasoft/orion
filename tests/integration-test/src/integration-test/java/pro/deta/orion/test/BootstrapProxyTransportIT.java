@@ -11,7 +11,6 @@ import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -44,6 +43,7 @@ import static pro.deta.orion.test.RemoteBootstrapTestSupport.PASSWORD_ENV;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.configureSources;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.materialBytes;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.runtimeComponent;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class BootstrapProxyTransportIT {
     private static final String REF = "refs/heads/main";
@@ -68,10 +68,12 @@ class BootstrapProxyTransportIT {
             NativeGitRepository repository = upstream.repositoryProvider().create("bootstrap-inputs")
                     .valueOrFailure("upstream repository");
             byte[] originalConfiguration = upstream.accessControlService().accessControlConfigurationFile().content();
-            repository.files().saveFiles(REF, Map.of(
-                    "orion.xml", GitFile.regular(originalConfiguration),
-                    "material.p12", GitFile.regular(materialBytes(configuration, environment))), Set.of(),
-                    "bootstrap inputs", GitCommitAuthor.EMPTY);
+            repository.files().withAccess(REF, "bootstrap inputs", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("orion.xml", originalConfiguration);
+                fileAccess.write("material.p12", materialBytes(configuration, environment));
+                fileAccess.apply();
+                return null;
+            });
 
             var upstreamProvider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
                     new FileNativeGitRepositoryProvider(
@@ -118,12 +120,15 @@ class BootstrapProxyTransportIT {
                         ByteArrayOutputStream xml = new ByteArrayOutputStream();
                         OrionXml.write(current.get(), xml);
                         byte[] updatedConfiguration = bytes(xml.toString(StandardCharsets.UTF_8) + "\n");
-                        repository.files().saveFiles(
-                                REF, Map.of("orion.xml", GitFile.regular(updatedConfiguration)), Set.of(),
-                                "upstream edit", GitCommitAuthor.EMPTY);
+                        repository.files().withAccess(REF, "upstream edit", GitCommitAuthor.EMPTY,
+                                fileAccess -> {
+                            fileAccess.write("orion.xml", updatedConfiguration);
+                            fileAccess.apply();
+                            return null;
+                        });
                         provider.openForRead(cache).valueOrFailure("refreshed proxy");
-                        assertThat(retained.files().loadFiles(REF, List.of("orion.xml")))
-                                .containsEntry("orion.xml", GitFile.regular(updatedConfiguration));
+                        assertThat(retained.files().readBytes(REF, "orion.xml"))
+                                .isEqualTo(updatedConfiguration);
 
                         Path credentialFile = Path.of(URI.create(configuration.getBootstrap()
                                 .getAccessControl().getAuth().get("credential")));
@@ -158,27 +163,33 @@ class BootstrapProxyTransportIT {
                         current.set(rotated);
                         provider.openForRead(cache).valueOrFailure("rotated credential");
 
-                        retained.files().saveFiles(
-                                REF, Map.of("marker.txt", GitFile.regular(bytes("proxy edit"))), Set.of(),
-                                "proxy edit", GitCommitAuthor.EMPTY);
-                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")))
-                                .containsEntry("marker.txt", GitFile.regular(bytes("proxy edit")));
+                        retained.files().withAccess(REF, "proxy edit", GitCommitAuthor.EMPTY, fileAccess -> {
+                            fileAccess.write("marker.txt", bytes("proxy edit"));
+                            fileAccess.apply();
+                            return null;
+                        });
+                        assertThat(repository.files().readBytes(REF, "marker.txt"))
+                                .isEqualTo(bytes("proxy edit"));
 
-                        var stale = FileUpdateFixture.prepare(retained.files(),
-                                REF, Map.of("marker.txt", GitFile.regular(bytes("stale edit"))), Set.of(),
-                                "stale candidate", GitCommitAuthor.EMPTY);
-                        repository.files().saveFiles(REF,
-                                Map.of("marker.txt", GitFile.regular(bytes("concurrent upstream edit"))), Set.of(),
-                                "concurrent edit", GitCommitAuthor.EMPTY);
+                        var stale = FileTestSupport.prepared(retained.files(), REF, "stale candidate",
+                                GitCommitAuthor.EMPTY, fileAccess -> {
+                            fileAccess.write("marker.txt", bytes("stale edit"));
+                            return null;
+                        });
+                        repository.files().withAccess(REF, "concurrent edit", GitCommitAuthor.EMPTY,
+                                fileAccess -> {
+                            fileAccess.write("marker.txt", bytes("concurrent upstream edit"));
+                            fileAccess.apply();
+                            return null;
+                        });
                         String upstreamRevision = repository.refs().get(REF);
                         assertThat(provider.publishPack(cache, stale.pack(), stale.refUpdates(), true,
                                 GitNativeRepositoryAccessHook.ALLOW_ALL))
                                 .extracting(RefUpdateResult::status)
                                 .containsExactly(RefUpdateResult.Status.EXPECTED_OLD_MISMATCH);
                         assertThat(repository.refs()).containsEntry(REF, upstreamRevision);
-                        assertThat(repository.files().loadFiles(REF, List.of("marker.txt")))
-                                .containsEntry("marker.txt",
-                                        GitFile.regular(bytes("concurrent upstream edit")));
+                        assertThat(repository.files().readBytes(REF, "marker.txt"))
+                                .isEqualTo(bytes("concurrent upstream edit"));
                     } finally {
                         lifecycle.shutdownApplication();
                     }

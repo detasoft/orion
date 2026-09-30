@@ -21,7 +21,6 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -95,10 +94,12 @@ class BootstrapProxyEndpointIT {
             }
             var xml = new ByteArrayOutputStream();
             OrionXml.write(document.replaceAccessControl(aclDraft.toAccessControl()), xml);
-            repository.files().saveFiles(REF, Map.of(
-                    "orion.xml", GitFile.regular(xml.toByteArray()),
-                    "material.p12", GitFile.regular(materialBytes(target, environment))), Set.of(),
-                    "seed inputs", GitCommitAuthor.EMPTY);
+            repository.files().withAccess(REF, "seed inputs", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("orion.xml", xml.toByteArray());
+                fileAccess.write("material.p12", materialBytes(target, environment));
+                fileAccess.apply();
+                return null;
+            });
             for (int launch = 0; launch < 2; launch++) {
                 try (var bootstrap = BootstrapContext.open(target, environment)) {
                     var component = runtimeComponent(target, bootstrap);
@@ -118,9 +119,12 @@ class BootstrapProxyEndpointIT {
                             }
                             acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
-                                    .files().saveFiles(
-                                            REF, Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
-                                            "ordinary seed", GitCommitAuthor.EMPTY);
+                                    .files().withAccess(REF, "ordinary seed", GitCommitAuthor.EMPTY,
+                                            fileAccess -> {
+                                fileAccess.write("file", new byte[]{1});
+                                fileAccess.apply();
+                                return null;
+                            });
                         }
                         String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                                 .repositoryName().orElseThrow();
@@ -174,9 +178,8 @@ class BootstrapProxyEndpointIT {
                                             .extracting(RemoteRefUpdate::getStatus).isEqualTo(RemoteRefUpdate.Status.OK);
                                 }
                                 assertThat(repository.refs()).containsEntry(REF, commit.name());
-                                assertThat(repository.files().loadFiles(REF, List.of("client-marker")))
-                                        .containsEntry("client-marker",
-                                                GitFile.regular(("launch " + launch).getBytes(StandardCharsets.UTF_8)));
+                                assertThat(repository.files().readBytes(REF, "client-marker"))
+                                        .isEqualTo(("launch " + launch).getBytes(StandardCharsets.UTF_8));
                                 assertThat(Git.lsRemoteRepository().setRemote(reader.uri(ENDPOINT))
                                         .setTransportConfigCallback(reader.callback()).call())
                                         .anySatisfy(ref -> {

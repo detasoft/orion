@@ -7,7 +7,6 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientFailure;
 import pro.deta.orion.git.client.GitClientTransportException;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -48,6 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
     @Test
@@ -65,9 +65,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var repository = provider.openForWrite(endpoint).valueOrFailure("public proxy");
         assertThat(repository.name()).isEqualTo(endpoint);
         assertThat(refreshes).hasValue(2);
-        var update = FileUpdateFixture.prepare(repository.files(), "refs/heads/main",
-                Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
-                "public push", GitCommitAuthor.EMPTY);
+        var update = FileTestSupport.prepared(repository.files(), "refs/heads/main", "public push",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file", new byte[]{1});
+            return null;
+        });
         var authorizedNames = new ArrayList<String>();
         var statuses = provider.publishPack(endpoint, update.pack(), update.refUpdates(), true,
                 new GitNativeRepositoryAccessHook() {
@@ -79,8 +81,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(statuses).extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
         assertThat(authorizedNames).containsExactly(endpoint);
         assertThat(pushes).hasValue(1);
-        assertThat(repository.files().loadFiles("refs/heads/main", List.of("file")))
-                .containsEntry("file", GitFile.regular(new byte[]{1}));
+        assertThat(repository.files().readBytes("refs/heads/main", "file")).isEqualTo(new byte[]{1});
         assertThat(provider.isPublicRepositoryName(
                 BootstrapGitLocation.persistent(document.system().proxies().getFirst(), document.system()).proxyName())).isFalse();
     }
@@ -95,9 +96,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var second = proxyDocument("configuration", "file:///second.git");
         provider.retry(new RemoteAlias("configuration"), () -> second, secrets(second));
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> retained.files().saveFiles("refs/heads/main",
-                Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
-                "stale handle", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> retained.files().withAccess("refs/heads/main", "stale handle",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        })).isInstanceOf(IllegalStateException.class);
         var replacement = provider.openForRead(endpoint).valueOrFailure("rebound proxy");
         var empty = OrionDocument.withAccessControl(new AccessControl());
         provider.activate(() -> empty, secrets(empty));
@@ -118,9 +122,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.activate(() -> first, secrets(first));
         var retained = provider.openForRead("proxy/system/first").valueOrFailure("active proxy");
         var local = backend.create("proxy/system/occupied").valueOrFailure("existing local repository");
-        local.files().saveFiles("refs/heads/main", Map.of("local", GitFile.regular(new byte[]{2})), Set.of(),
-                "local content",
-                GitCommitAuthor.EMPTY);
+        local.files().withAccess("refs/heads/main", "local content", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("local", new byte[]{2});
+            fileAccess.apply();
+            return null;
+        });
         var collision = proxyDocument("occupied", "file:///other.git");
 
         assertThatThrownBy(() -> provider.activate(() -> collision, secrets(collision)))
@@ -129,8 +135,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("already exists");
         assertThat(provider.exists("proxy/system/first")).isTrue();
         assertThat(retained.refs()).isEmpty();
-        assertThat(local.files().loadFiles("refs/heads/main", List.of("local")))
-                .containsEntry("local", GitFile.regular(new byte[]{2}));
+        assertThat(local.files().readBytes("refs/heads/main", "local")).isEqualTo(new byte[]{2});
     }
 
     @Test
@@ -249,9 +254,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 });
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
-        var prepared = FileUpdateFixture.prepare(repository.files(),
-                "main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
-                "prepared", GitCommitAuthor.EMPTY);
+        var prepared = FileTestSupport.prepared(repository.files(), "main", "prepared", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("orion.xml", new byte[]{1});
+            return null;
+        });
 
         GitOperationException.requireSuccess(provider.publishPack(
                 name, prepared.pack(), prepared.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL));
@@ -266,9 +273,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), pushes);
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
-        var prepared = FileUpdateFixture.prepare(repository.files(), "refs/heads/main",
-                Map.of("orion.xml", GitFile.regular("updated".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "update", GitCommitAuthor.EMPTY);
+        var prepared = FileTestSupport.prepared(repository.files(), "refs/heads/main", "update",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
+            return null;
+        });
         Map<String, String> initialRefs = repository.refs();
         GitNativeRepositoryAccessHook denied = new GitNativeRepositoryAccessHook() {
             @Override
@@ -312,12 +321,22 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
         NativeGitRepository repository = provider.openForRead(name.replace("/", "%2F"))
                 .valueOrFailure("proxy repository");
-        provider.saveFiles(name.replace("/", "%5C"), "refs/heads/main",
-                Map.of("orion.xml", GitFile.regular("configuration".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "save through proxy", GitCommitAuthor.EMPTY);
+        assertThat(refreshes).hasValue(1);
+        NativeGitRepository writable = provider.openForWrite(name.replace("/", "%5C"))
+                .valueOrFailure("repository");
+        assertThat(refreshes).hasValue(2);
+        writable.files()
+                .withAccess("refs/heads/main", "save through proxy", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
+            assertThat(refreshes).hasValue(2);
+            assertThat(publishes).hasValue(0);
+            fileAccess.apply();
+            return null;
+        });
 
         assertThat(repository.name()).isEqualTo(name);
-        assertThat(refreshes).hasValue(2);
+        assertThat(writable.name()).isEqualTo(name);
+        assertThat(refreshes).hasValue(3);
         assertThat(publishes).hasValue(1);
     }
 
@@ -440,23 +459,34 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 "configuration",
                 remoteSource("orion.xml"));
 
-        provider.saveFiles(
-                repositoryName,
-                "refs/heads/main",
-                Map.of("orion.xml", GitFile.regular("configuration".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "initialize configuration",
-                GitCommitAuthor.EMPTY);
+        assertThat(refreshes).hasValue(1);
+        NativeGitRepository writable = provider.openForWrite(repositoryName).valueOrFailure("repository");
+        assertThat(refreshes).hasValue(2);
+        writable.files().withAccess("refs/heads/main",
+                "initialize configuration", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8));
+            assertThat(refreshes).hasValue(2);
+            assertThat(pushes).hasValue(0);
+            fileAccess.apply();
+            return null;
+        });
+        assertThat(refreshes).hasValue(3);
+        assertThat(pushes).hasValue(1);
 
         NativeGitRepository repository = provider.openForRead(repositoryName)
                 .valueOrFailure("open local proxy");
         assertThat(pushes).hasValue(1);
-        assertThat(refreshes).hasValue(3);
-        assertThat(repository.files().loadFiles("refs/heads/main", List.of("orion.xml")))
-                .containsEntry("orion.xml", GitFile.regular("configuration".getBytes(StandardCharsets.UTF_8)));
-        provider.saveFiles(repositoryName, "refs/heads/main", Map.of(), Set.of("orion.xml"),
-                "delete configuration", GitCommitAuthor.EMPTY);
+        assertThat(refreshes).hasValue(4);
+        assertThat(repository.files().readBytes("refs/heads/main", "orion.xml"))
+                .isEqualTo("configuration".getBytes(StandardCharsets.UTF_8));
+        provider.openForWrite(repositoryName).valueOrFailure("repository").files().withAccess("refs/heads/main",
+                "delete configuration", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.delete("orion.xml");
+            fileAccess.apply();
+            return null;
+        });
         assertThat(pushes).hasValue(2);
-        assertThatThrownBy(() -> repository.files().loadFiles("refs/heads/main", List.of("orion.xml")))
+        assertThatThrownBy(() -> repository.files().readBytes("refs/heads/main", "orion.xml"))
                 .isInstanceOf(GitOperationException.class);
     }
 
@@ -494,17 +524,22 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         String repositoryName = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository repository = provider.find(repositoryName).valueOrFailure("find proxy alias");
 
-        repository.files().saveFiles(
-                "refs/heads/main",
-                Map.of("orion.xml", GitFile.regular("updated".getBytes(StandardCharsets.UTF_8))), Set.of(),
-                "update configuration",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/main", "update configuration", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("orion.xml", "updated".getBytes(StandardCharsets.UTF_8));
+            fileAccess.apply();
+            return null;
+        });
 
         assertThat(pushes).hasValue(1);
-        repository.files().saveFiles("refs/heads/main", Map.of(), Set.of("orion.xml"),
-                "delete configuration", GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/main", "delete configuration", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.delete("orion.xml");
+            fileAccess.apply();
+            return null;
+        });
         assertThat(pushes).hasValue(2);
-        assertThatThrownBy(() -> repository.files().loadFiles("refs/heads/main", List.of("orion.xml")))
+        assertThatThrownBy(() -> repository.files().readBytes("refs/heads/main", "orion.xml"))
                 .isInstanceOf(GitOperationException.class);
     }
 
@@ -513,19 +548,17 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         backend.create("local").valueOrFailure("create local");
         AtomicInteger refreshes = new AtomicInteger();
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
-                backend,
-                new BootstrapSecretResolver(Map.of()),
-                (location, transport, repository) -> refreshes.incrementAndGet(),
-                (location, transport, repository, received, updates, atomic) ->
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend, new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> refreshes.incrementAndGet(), (location, transport,
+                repository, received, updates, atomic) ->
                         Collections.nCopies(updates.size(), true));
 
-        provider.saveFiles(
-                "local",
-                "refs/heads/main",
-                Map.of("file.txt", GitFile.regular(new byte[]{1})), Set.of(),
-                "direct",
-                GitCommitAuthor.EMPTY);
+        provider.openForWrite("local").valueOrFailure("repository").files().withAccess("refs/heads/main",
+                "direct", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file.txt", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
 
         assertThat(refreshes).hasValue(0);
         assertThat(provider.openForRead("local")).isNotNull();
@@ -618,9 +651,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.activate(() -> empty, secrets(empty));
 
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> retained.files().saveFiles(
-                "refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "save",
-                        GitCommitAuthor.EMPTY))
+        assertThatThrownBy(() -> retained.files().withAccess("refs/heads/main", "save", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("orion.xml", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        }))
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> retained.publishRefs(List.of(), true))
                 .isInstanceOf(IllegalStateException.class);
@@ -723,9 +759,11 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         BootstrapSourceConfig source = remoteSource("orion.xml");
         String name = BootstrapGitLocation.parse(source).proxyName();
         NativeGitRepository repository = backend.create(name).valueOrFailure("cache");
-        repository.files().saveFiles(
-                "main", Map.of("other.xml", GitFile.regular(new byte[]{1})), Set.of(), "seed",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "seed", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("other.xml", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         ProxyAwareNativeGitRepositoryProvider provider = provider(backend);
 
         assertThatThrownBy(() -> provider.resolveProvisional("configuration", source, false))
@@ -738,10 +776,13 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThatThrownBy(() -> provider.resolveProvisional("configuration", replacement, false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source ref is unavailable: configuration");
-        repository.files().saveFiles(
-                "main", Map.of("orion.xml", GitFile.regular(new byte[]{2})), Set.of(), "repair",
-                GitCommitAuthor.EMPTY);
-        assertThat(provider.resolveProvisional("configuration", source, false).revision()).isPresent();
+        repository.files().withAccess("main", "repair", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", new byte[]{2});
+            fileAccess.apply();
+            return null;
+        });
+        provider.resolveProvisional("configuration", source, false);
+        assertThat(repository.refs()).containsKey("refs/heads/main");
     }
 
     @Test
@@ -749,9 +790,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         BootstrapSourceConfig configuration = remoteSource("orion.xml");
         String name = BootstrapGitLocation.parse(configuration).proxyName();
-        backend.create(name).valueOrFailure("cache").files().saveFiles(
-                "main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
-                        "seed", GitCommitAuthor.EMPTY);
+        backend.create(name).valueOrFailure("cache").files().withAccess("main", "seed",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         ProxyAwareNativeGitRepositoryProvider provider = provider(backend);
         ResolvedBootstrapSource resolved = provider.resolveProvisional("configuration", configuration, false);
         NativeGitRepository retained = provider.openForRead(name).valueOrFailure("proxy handle");
@@ -780,9 +824,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
             assertThat(provider.openForWrite(spelling)).isInstanceOf(Result.Failure.class);
             assertThat(provider.create(spelling)).isEqualTo(new Result.Failure<>(
                     Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal"));
-            assertThatThrownBy(() -> provider.saveFiles(
-                    spelling, "refs/heads/main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(),
-                    "save", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> provider.openForWrite(spelling).valueOrFailure("repository").files()
+                    .withAccess("refs/heads/main", "save", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("orion.xml", new byte[]{1});
+                fileAccess.apply();
+                return null;
+            })).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> provider.resolveProvisional("local", localSource(spelling), true))
                     .isInstanceOfAny(IllegalArgumentException.class, IllegalStateException.class);
         }
@@ -807,11 +854,9 @@ class ProxyAwareNativeGitRepositoryProviderTest {
             AtomicInteger refreshes,
             AtomicInteger pushes,
             Map<String, String> environment) {
-        return new ProxyAwareNativeGitRepositoryProvider(
-                new InMemoryNativeGitRepositoryProvider(),
-                new BootstrapSecretResolver(environment),
-                (location, transport, repository) -> refreshes.incrementAndGet(),
-                (location, transport, repository, received, updates, atomic) -> {
+        return new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(environment), (location,
+                transport, repository) -> refreshes.incrementAndGet(), (location, transport, repository,
+                received, updates, atomic) -> {
                     pushes.incrementAndGet();
                     return Collections.nCopies(updates.size(), true);
                 });

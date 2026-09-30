@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
@@ -21,8 +20,6 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,10 +45,12 @@ class PlaywrightTransportTest {
 
             orion.repositoryProvider().create("transport-check")
                     .valueOrFailure("test Git repository")
-                    .files().saveFiles("refs/heads/main",
-                            Map.of("README.md", GitFile.regular(
-                                    "transport check\n".getBytes(StandardCharsets.UTF_8))),
-                            Set.of(), "seed transport check", new GitCommitAuthor("Test", "test@orion.test"));
+                    .files().withAccess("refs/heads/main", "seed transport check", new GitCommitAuthor("Test",
+                            "test@orion.test"), fileAccess -> {
+                fileAccess.write("README.md", "transport check\n".getBytes(StandardCharsets.UTF_8));
+                fileAccess.apply();
+                return null;
+            });
             String gitUrl = "git://127.0.0.1:" + orion.gitPort();
             assertThat(Git.lsRemoteRepository().setRemote(gitUrl + "/transport-check.git")
                     .setTimeout(10).call())

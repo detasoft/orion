@@ -432,9 +432,7 @@ class RuntimeHttpAdminAclUpdateIT {
         return orion.repositoryProvider()
                 .openForRead("orion")
                 .valueOrFailure("ACL repository should exist")
-                .files().loadFiles(
-                        orion.configuration().getBootstrap().getAccessControl().selectedRef(),
-                        List.of(ACL_FILE))
-                .get(ACL_FILE).content();
+                .files().readBytes(orion.configuration().getBootstrap().getAccessControl().selectedRef(),
+                        ACL_FILE);
     }
 }

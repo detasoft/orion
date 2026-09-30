@@ -6,7 +6,6 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -98,9 +97,11 @@ class PersistentProxyActivationTest {
 
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.authorization.clear();
-            retained.files().saveFiles(
-                    "main", Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "save",
-                    GitCommitAuthor.EMPTY);
+            retained.files().withAccess("main", "save", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("orion.xml", new byte[]{1});
+                fileAccess.apply();
+                return null;
+            });
             assertThat(fixture.authorization).containsExactly("Bearer stored-token", "Bearer stored-token");
 
             fixture.rotate("rotated-token");
@@ -253,9 +254,12 @@ class PersistentProxyActivationTest {
 
             assertThat(provider.openForRead(name)).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> retained.files().saveFiles(
-                    "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
-                    "save", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> retained.files().withAccess("main", "save", GitCommitAuthor.EMPTY,
+                    fileAccess -> {
+                fileAccess.write("file", new byte[]{1});
+                fileAccess.apply();
+                return null;
+            })).isInstanceOf(IllegalStateException.class);
             assertThat(provider.repositoryNames()).doesNotContain(name);
             assertThat(provider.isPublicRepositoryName(name)).isFalse();
         }

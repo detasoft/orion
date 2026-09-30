@@ -25,7 +25,6 @@ import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.client.GitUploadPackResult;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -106,10 +105,14 @@ class OrionGitHttpInteroperabilityTest {
             URI remote = URI.create("http://127.0.0.1:" + connector.getLocalPort() + "/r/project.git");
             if (divergence > 0) {
                 for (int number = 0; number < 64; number++) {
-                    repository.files().saveFiles("main",
-                            Map.of("README.md", GitFile.regular(("history " + number).getBytes(
-                                    StandardCharsets.UTF_8))), Set.of(),
-                                            "history " + number, GitCommitAuthor.EMPTY);
+                    String version = "history " + number;
+                    repository.files().withAccess("main", "history " + number, GitCommitAuthor.EMPTY,
+                            fileAccess -> {
+                        fileAccess.write("README.md", version.getBytes(
+                                    StandardCharsets.UTF_8));
+                        fileAccess.apply();
+                        return null;
+                    });
                     history.addFirst(repository.refs().get("refs/heads/main"));
                 }
             }
@@ -117,9 +120,11 @@ class OrionGitHttpInteroperabilityTest {
             List<String> updates = divergence > 0 ? List.of("base\n", "initial\n", "updated\n")
                     : List.of("initial\n", "updated\n");
             for (String content : updates) {
-                repository.files().saveFiles("main",
-                        Map.of("README.md", GitFile.regular(content.getBytes(StandardCharsets.UTF_8))), Set.of(),
-                        "update", GitCommitAuthor.EMPTY);
+                repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, fileAccess -> {
+                    fileAccess.write("README.md", content.getBytes(StandardCharsets.UTF_8));
+                    fileAccess.apply();
+                    return null;
+                });
                 String commit = repository.refs().get("refs/heads/main");
                 history.addFirst(commit);
                 int requestsBeforeFetch = uploadRequests.get();
@@ -185,8 +190,7 @@ class OrionGitHttpInteroperabilityTest {
                         result).value().pack();
                 received.publishPack(pack).packChecksum();
                 received.updateRef("refs/heads/main", "0".repeat(40), commit);
-                assertThat(new String(received.files().loadFiles("main",
-                        List.of("README.md")).get("README.md").content(),
+                assertThat(new String(received.files().readBytes("main", "README.md"),
                         StandardCharsets.UTF_8)).isEqualTo(content);
             }
         }

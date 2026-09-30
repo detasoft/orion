@@ -1,9 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -12,11 +10,10 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeGitReceivePackTest {
     private static final String ZERO = "0".repeat(40);
@@ -27,7 +24,7 @@ class NativeGitReceivePackTest {
     void authorizesEachRefAndHonorsAtomicAndIndependentUpdates() throws Exception {
         for (boolean atomic : List.of(true, false)) {
             NativeGitRepository repository = repository();
-            FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
+            FileTestSupport.Prepared prepared = prepare(repository, "initial");
             String newId = prepared.refUpdates().getFirst().newId().orElseThrow().toHex();
             List<String> calls = new ArrayList<>();
             GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
@@ -70,7 +67,7 @@ class NativeGitReceivePackTest {
     @Test
     void checksRepositoryAccessBeforeIngestingThePack() throws Exception {
         NativeGitRepository repository = repository();
-        FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
+        FileTestSupport.Prepared prepared = prepare(repository, "initial");
         GitNativeRepositoryAccessHook denied = new GitNativeRepositoryAccessHook() {
             @Override
             public void beforeWrite(String name) {
@@ -91,9 +88,17 @@ class NativeGitReceivePackTest {
     @Test
     void allowAllStillRejectsAStaleOldId() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
-        FileUpdateFixture.Prepared stale = prepare(repository, "stale");
-        repository.files().saveFiles(MAIN, files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
+        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("initial"));
+            fileAccess.apply();
+            return null;
+        });
+        FileTestSupport.Prepared stale = prepare(repository, "stale");
+        repository.files().withAccess(MAIN, "concurrent", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("concurrent"));
+            fileAccess.apply();
+            return null;
+        });
         String current = repository.refs().get(MAIN);
 
         assertThat(repository.publishPack(stale.pack(), stale.refUpdates(), true,
@@ -106,7 +111,7 @@ class NativeGitReceivePackTest {
     @Test
     void rejectsMissingObjectClosureWithAllowAll() throws Exception {
         NativeGitRepository repository = repository();
-        FileUpdateFixture.Prepared prepared = prepare(repository, "initial");
+        FileTestSupport.Prepared prepared = prepare(repository, "initial");
 
         assertThat(repository.publishPack(prepared.pack(),
                 List.of(RefUpdate.fromWire(MAIN, ZERO, "1".repeat(40))), true,
@@ -119,14 +124,26 @@ class NativeGitReceivePackTest {
     @Test
     void checksAllCommitParentsAndRejectsForcedRewrites() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
+        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("initial"));
+            fileAccess.apply();
+            return null;
+        });
         String initial = repository.refs().get(MAIN);
         for (int index = 0; index < 8; index++) {
-            repository.files().saveFiles(
-                    MAIN, files("next" + index), Set.of(), "next" + index, GitCommitAuthor.EMPTY);
+            String next = "next" + index;
+            repository.files().withAccess(MAIN, "next" + index, GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("config.txt", bytes(next));
+                fileAccess.apply();
+                return null;
+            });
         }
         String descendant = repository.refs().get(MAIN);
-        repository.files().saveFiles("side", files("side"), Set.of(), "side", GitCommitAuthor.EMPTY);
+        repository.files().withAccess("side", "side", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("side"));
+            fileAccess.apply();
+            return null;
+        });
         String side = repository.refs().get("refs/heads/side");
         String treeLine = new String(repository.readObject(new ObjectId(descendant)).orElseThrow().data(),
                 java.nio.charset.StandardCharsets.UTF_8).split("\n")[0];
@@ -166,11 +183,18 @@ class NativeGitReceivePackTest {
     @Test
     void comparesOldIdAgainAfterAuthorization() throws Exception {
         NativeGitRepository repository = repository();
-        repository.files().saveFiles(MAIN, files("initial"), Set.of(), "initial", GitCommitAuthor.EMPTY);
-        FileUpdateFixture.Prepared prepared = prepare(repository, "prepared");
+        repository.files().withAccess(MAIN, "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("initial"));
+            fileAccess.apply();
+            return null;
+        });
+        FileTestSupport.Prepared prepared = prepare(repository, "prepared");
         String expected = repository.refs().get(MAIN);
-        repository.files().saveFiles(
-                "side", files("concurrent"), Set.of(), "concurrent", GitCommitAuthor.EMPTY);
+        repository.files().withAccess("side", "concurrent", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes("concurrent"));
+            fileAccess.apply();
+            return null;
+        });
         String concurrent = repository.refs().get("refs/heads/side");
         GitNativeRepositoryAccessHook hook = new GitNativeRepositoryAccessHook() {
             @Override
@@ -189,12 +213,15 @@ class NativeGitReceivePackTest {
         return new InMemoryNativeGitRepositoryProvider().create("demo").valueOrFailure("repository");
     }
 
-    private static FileUpdateFixture.Prepared prepare(NativeGitRepository repository, String value)
-            throws GitOperationException {
-        return FileUpdateFixture.prepare(repository.files(), MAIN, files(value), Set.of(), value, GitCommitAuthor.EMPTY);
+    private static FileTestSupport.Prepared prepare(NativeGitRepository repository, String value)
+            throws Exception {
+        return FileTestSupport.prepared(repository.files(), MAIN, value, GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", bytes(value));
+            return null;
+        });
     }
 
-    private static Map<String, GitFile> files(String value) {
-        return Map.of("config.txt", GitFile.regular(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    private static byte[] bytes(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 }

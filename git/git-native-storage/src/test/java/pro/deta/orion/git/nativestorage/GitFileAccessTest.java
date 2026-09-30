@@ -5,7 +5,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
@@ -20,8 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,17 +31,19 @@ class GitFileAccessTest {
     void streamsOneFileAndReusesUntouchedTrees() throws Exception {
         try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
                 .create("demo").valueOrFailure("repository")) {
-            repository.files().saveFiles("main", Map.of("nested/keep", GitFile.regular(new byte[]{7})),
-                    Set.of(), "initial", GitCommitAuthor.EMPTY);
+            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("nested/keep", new byte[]{7});
+                fileAccess.apply();
+                return null;
+            });
             repository.files().withAccess("main", "config", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
                 assertThat(access.pack().objectCount()).isEqualTo(3);
                 access.apply();
                 return null;
             });
-            assertThat(repository.files().loadFiles("main", List.of("nested/keep", "orion.xml")))
-                    .containsEntry("nested/keep", GitFile.regular(new byte[]{7}))
-                    .containsEntry("orion.xml", GitFile.regular(new byte[]{1, 2, 3}));
+            assertThat(repository.files().readBytes("main", "nested/keep")).isEqualTo(new byte[]{7});
+            assertThat(repository.files().readBytes("main", "orion.xml")).isEqualTo(new byte[]{1, 2, 3});
         }
     }
 
@@ -77,13 +76,15 @@ class GitFileAccessTest {
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "stale", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
-                repository.files().saveFiles("main", Map.of("orion.xml", GitFile.regular(new byte[]{2})),
-                        Set.of(), "winner", GitCommitAuthor.EMPTY);
+                repository.files().withAccess("main", "winner", GitCommitAuthor.EMPTY, fileAccess -> {
+                    fileAccess.write("orion.xml", new byte[]{2});
+                    fileAccess.apply();
+                    return null;
+                });
                 assertThatThrownBy(access::apply).isInstanceOf(GitRefConflictException.class);
                 return null;
             });
-            assertThat(repository.files().loadFiles("main", List.of("orion.xml")))
-                    .containsEntry("orion.xml", GitFile.regular(new byte[]{2}));
+            assertThat(repository.files().readBytes("main", "orion.xml")).isEqualTo(new byte[]{2});
         }
     }
 
@@ -124,7 +125,7 @@ class GitFileAccessTest {
                 access.apply();
                 return null;
             });
-            byte[] content = repository.files().loadFiles("main", List.of("second")).get("second").content();
+            byte[] content = repository.files().readBytes("main", "second");
             assertThat(content).hasSize(8192 * 512).containsOnly((byte) 37);
         }
     }

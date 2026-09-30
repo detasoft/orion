@@ -12,17 +12,13 @@ import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.internal.CheckedFunction;
-import pro.deta.orion.net.io.BufferedByteInputV2;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -33,7 +29,7 @@ import java.util.Set;
  * preparing an update does not publish objects or move refs. An explicit null revision expects a new branch.
  * Local updates initialize an absent default branch; proxy updates leave unrelated refs unchanged.
  * Streaming read callbacks borrow the inflated file input. WithAccess requires explicit apply and
- * always discards on exit. The deprecated bulk methods retain the old materialized-file contract.
+ * always discards on exit. Byte-array reads explicitly materialize a single file.
  */
 public final class GitFileApi {
     private final NativeGitRepository repository;
@@ -46,33 +42,6 @@ public final class GitFileApi {
     public GitFileApi(NativeGitRepository repository, boolean initializeDefaultHead) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.initializeDefaultHead = initializeDefaultHead;
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, GitFile> loadFiles(String branch, List<String> paths) throws GitOperationException {
-        return readFiles(resolveBranch(branch), paths);
-    }
-
-    @Deprecated(forRemoval = true)
-    public Map<String, GitFile> readFiles(ObjectId commitId, List<String> paths)
-            throws GitOperationException {
-        Objects.requireNonNull(paths, "paths");
-        LooseObject commit = readObject(commitId);
-        ObjectId rootTreeId = rootTreeId(commitId, commit);
-        Map<String, GitFile> files = new LinkedHashMap<>();
-        for (String path : paths) {
-            String gitPath = gitPath(path);
-            TreeEntry entry = resolvePath(rootTreeId, gitPath);
-            if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
-                throw new GitOperationException("Path is not a file: " + gitPath);
-            }
-            LooseObject object = readObject(entry.objectId());
-            if (object.type() != GitObjectType.BLOB) {
-                throw new GitOperationException("File target is not a blob: " + gitPath);
-            }
-            files.put(gitPath, new GitFile(entry.mode(), object.data()));
-        }
-        return Map.copyOf(files);
     }
 
     public <T> T readFile(ObjectId commitId, String path, GitObjectRead<T> reader)
@@ -93,6 +62,19 @@ public final class GitFileApi {
                     return reader.read(type, size, base, input);
                 })));
         return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
+    }
+
+    public <T> T readFile(String branch, String path, GitObjectRead<T> reader)
+            throws IOException, GitOperationException {
+        return readFile(resolveBranch(branch), path, reader);
+    }
+
+    public byte[] readBytes(String branch, String path) throws IOException, GitOperationException {
+        return readBytes(resolveBranch(branch), path);
+    }
+
+    public byte[] readBytes(ObjectId commitId, String path) throws IOException, GitOperationException {
+        return readFile(commitId, path, (type, size, base, input) -> input.newInputStream().readAllBytes());
     }
 
     public <T> T withAccess(String branch, String message, GitCommitAuthor author,
@@ -141,30 +123,6 @@ public final class GitFileApi {
                 }
                 primary.addSuppressed(cleanup);
             }
-        }
-    }
-
-    @Deprecated(forRemoval = true)
-    public void saveFiles(String branch, Map<String, GitFile> files, Set<String> deletedPaths,
-                          String message, GitCommitAuthor author) throws GitOperationException {
-        try {
-            withAccess(branch, message, author, access -> {
-                for (String path : deletedPaths) {
-                    access.delete(path);
-                }
-                for (Map.Entry<String, GitFile> entry : files.entrySet()) {
-                    byte[] content = entry.getValue().content();
-                    try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(content))) {
-                        access.write(entry.getKey(), entry.getValue().mode(), content.length, input);
-                    }
-                }
-                access.apply();
-                return null;
-            });
-        } catch (RuntimeException failure) {
-            throw failure;
-        } catch (Exception failure) {
-            throw new GitOperationException("Cannot save Git files", failure);
         }
     }
 

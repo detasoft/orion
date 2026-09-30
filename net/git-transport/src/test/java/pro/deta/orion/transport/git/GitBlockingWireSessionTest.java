@@ -3,7 +3,6 @@ package pro.deta.orion.transport.git;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -38,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class GitBlockingWireSessionTest {
     private static final String MAIN_ID = "88d050b1908057b53d38b42702ebc659e3d7f696";
@@ -48,9 +48,11 @@ class GitBlockingWireSessionTest {
     void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
-        FileUpdateFixture.Prepared prepared = FileUpdateFixture.prepare(repository.files(), "main",
-                Map.of("config.txt", GitFile.regular(new byte[]{1})), Set.of(),
-                "prepared", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "main", "prepared",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("config.txt", new byte[]{1});
+            return null;
+        });
         byte[] original = prepared.pack();
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
         @Override
@@ -244,11 +246,11 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("payload".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "initial",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "payload".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String mainId = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -444,17 +446,17 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "base",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "base", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String have = repository.refs().get("refs/heads/main");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "next",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "next", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -480,11 +482,16 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles("main", Map.of("first", GitFile.regular(new byte[]{1})), Set.of(), "first",
-                GitCommitAuthor.EMPTY);
-        repository.files().saveFiles(
-                "second", Map.of("second", GitFile.regular(new byte[]{2})), Set.of(), "second",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("first", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
+        repository.files().withAccess("second", "second", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("second", new byte[]{2});
+            fileAccess.apply();
+            return null;
+        });
         ObjectId firstWant = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId secondWant = new ObjectId(repository.refs().get("refs/heads/second"));
         try (QueueByteSource input = new QueueByteSource(
@@ -513,17 +520,17 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("base".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "base",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "base", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "base".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String have = repository.refs().get("refs/heads/main");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("next".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "next",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "next", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "next".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String want = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {
@@ -655,16 +662,16 @@ class GitBlockingWireSessionTest {
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("root".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "root",
-                GitCommitAuthor.EMPTY);
-        repository.files().saveFiles(
-                "main",
-                Map.of("README.md", GitFile.regular("tip".getBytes(StandardCharsets.US_ASCII))), Set.of(),
-                "tip",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "root", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "root".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
+        repository.files().withAccess("main", "tip", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("README.md", "tip".getBytes(StandardCharsets.US_ASCII));
+            fileAccess.apply();
+            return null;
+        });
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(
                 Duration.ofSeconds(1))) {

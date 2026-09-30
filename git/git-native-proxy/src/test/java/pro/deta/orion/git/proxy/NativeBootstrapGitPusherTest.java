@@ -10,7 +10,6 @@ import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
@@ -33,6 +32,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPusherTest {
     private static final String NULL_ID = "0".repeat(40);
@@ -47,13 +47,13 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
-                location.refName(),
-                Map.of("orion.xml", GitFile.regular("from proxy".getBytes()),
-                        "run.sh", new GitFile(FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes()),
-                        "link", new GitFile(FileMode.SYMLINK, "run.sh".getBytes())), Set.of(),
-                "proxy update",
-                GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+                "proxy update", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "from proxy".getBytes());
+            fileAccess.write("run.sh", FileMode.EXECUTABLE_FILE, "#!/bin/sh\n".getBytes());
+            fileAccess.write("link", FileMode.SYMLINK, "run.sh".getBytes());
+            return null;
+        });
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
                 repository,
@@ -92,11 +92,11 @@ class NativeBootstrapGitPusherTest {
         NativeGitRepository repository = repository(location);
         new NativeBootstrapGitFetcher().fetch(location, new GitFileClientTransport(), repository);
         String localOldId = repository.refs().get(location.refName());
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
-                location.refName(),
-                Map.of("orion.xml", GitFile.regular("proxy change".getBytes())), Set.of(),
-                "proxy update",
-                GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+                "proxy update", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "proxy change".getBytes());
+            return null;
+        });
         Optional<PackChecksum> received = ingest(repository, update);
         Files.writeString(upstream.worktree().resolve("orion.xml"), "upstream change");
         upstream.git().add().addFilepattern("orion.xml").call();
@@ -128,8 +128,11 @@ class NativeBootstrapGitPusherTest {
     void runtimeRecordsNativePushAuthenticationFailureAndPreservesItsCause() throws Exception {
         BootstrapGitLocation location = location(tempDir.resolve("upstream.git"));
         NativeGitRepository repository = repository(location);
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), location.refName(),
-                Map.of("orion.xml", GitFile.regular(new byte[]{1})), Set.of(), "update", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+                "update", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", new byte[]{1});
+            return null;
+        });
         var proxy = new BootstrapGitRuntimeProxy(location, repository,
                 new BootstrapGitTransportFactory(new BootstrapSecretResolver(Map.of()), ignored -> List.of()),
                 (selected, transport, target) -> { },
@@ -215,7 +218,7 @@ class NativeBootstrapGitPusherTest {
     }
 
     private static Optional<PackChecksum> ingest(
-            NativeGitRepository repository, FileUpdateFixture.Prepared update) throws IOException {
+            NativeGitRepository repository, FileTestSupport.Prepared update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             PackMetadata pack = repository.ingest(input);
             return Optional.of(repository.publishPack(pack).packChecksum());

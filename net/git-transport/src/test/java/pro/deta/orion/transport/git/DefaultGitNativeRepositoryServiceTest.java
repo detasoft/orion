@@ -7,7 +7,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -52,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvider, GitNativeRepositoryAccessHook {
     @Override
@@ -138,9 +138,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void publishesIndependentUpdatesAndAbortsAtomicGroupOnStaleRef(boolean atomic) throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        FileUpdateFixture.Prepared prepared = FileUpdateFixture.prepare(repository.files(), "feature",
-                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
-                "update", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared prepared = FileTestSupport.prepared(repository.files(), "feature", "update",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            return null;
+        });
         RefUpdate feature = prepared.refUpdates().getFirst();
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results;
@@ -162,12 +164,17 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
         backend = new FileNativeGitRepositoryProvider(directory);
         NativeGitRepository repository = createRepository(backend, "demo");
-        repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{0})), Set.of(), "initial",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{0});
+            fileAccess.apply();
+            return null;
+        });
         String initial = repository.refs().get("refs/heads/main");
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), "main",
-                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
-                "update", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            return null;
+        });
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results;
             PackMetadata pack = ingest(repository, update.pack());
@@ -189,9 +196,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void publishesThroughProviderAndRetainsProviderRejection() throws Exception {
         NativeGitRepository repository = createRepository(backend, "demo");
         rejectPublication = true;
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), "main",
-                Map.of("a", GitFile.regular(new byte[]{1})), Set.of(),
-                "update", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "update",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            return null;
+        });
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results;
             PackMetadata pack = ingest(repository, update.pack());
@@ -232,12 +241,17 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void distinguishesFastForwardAndForcedUpdatesForAuthorization() throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "first",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         String first = repository.refs().get("refs/heads/main");
-        FileUpdateFixture.Prepared next = FileUpdateFixture.prepare(repository.files(), "main",
-                Map.of("a", GitFile.regular(new byte[]{2})), Set.of(),
-                "next", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared next = FileTestSupport.prepared(repository.files(), "main", "next",
+                GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{2});
+            return null;
+        });
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             PackMetadata pack = ingest(repository, next.pack());
             assertThat(context.publish(Optional.of(pack), next.refUpdates(), true))
@@ -301,10 +315,16 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     void keepsAuthorizedTargetWhenWantedRefMovesDuringAccessCheck(String wantedRef, boolean detached)
             throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "allowed",
-                GitCommitAuthor.EMPTY);
-        repository.files().saveFiles("secret", Map.of("a", GitFile.regular(new byte[]{2})), Set.of(), "denied",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "allowed", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
+        repository.files().withAccess("secret", "denied", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{2});
+            fileAccess.apply();
+            return null;
+        });
         ObjectId allowed = new ObjectId(repository.refs().get("refs/heads/main"));
         ObjectId denied = new ObjectId(repository.refs().get("refs/heads/secret"));
         if (!wantedRef.equals("HEAD")) {
@@ -365,8 +385,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @ValueSource(booleans = {false, true})
     void authorizesNestedTagByItsTargetAndPreservesAccessDenial(boolean v2) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "initial",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         String target = repository.refs().get("refs/heads/main");
         ObjectId inner = repository.writeObject(GitObjectType.TAG,
                 ("object " + target + "\ntype commit\ntag inner\n\nmessage\n")
@@ -412,8 +435,11 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @CsvSource({"false,main", "true,main", "false,tag", "false,HEAD"})
     void authorizesReachableBlobsAndPreservesAccessDenial(boolean v2, String ref) throws Exception {
         NativeGitRepository repository = backend.create("demo").valueOrFailure("repository");
-        repository.files().saveFiles("main", Map.of("a", GitFile.regular(new byte[]{1})), Set.of(), "initial",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("a", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         if (!ref.equals("main")) {
             String tip = repository.refs().get("refs/heads/main");
             if (ref.equals("tag")) {

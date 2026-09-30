@@ -10,7 +10,6 @@ import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequiredException;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -37,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class BootstrapGitRuntimeProxyTest {
     @Test
@@ -44,17 +44,17 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.files().saveFiles(
-                location.refName(),
-                Map.of("orion.xml", GitFile.regular("first".getBytes())), Set.of(),
-                "first",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "first".getBytes());
+            fileAccess.apply();
+            return null;
+        });
         String oldId = repository.refs().get(location.refName());
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(),
-                location.refName(),
-                Map.of("orion.xml", GitFile.regular("second".getBytes())), Set.of(),
-                "second",
-                GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+                "second", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("orion.xml", "second".getBytes());
+            return null;
+        });
         AtomicInteger refreshes = new AtomicInteger();
         BootstrapGitRuntimeProxy proxy = new BootstrapGitRuntimeProxy(
                 location,
@@ -80,12 +80,17 @@ class BootstrapGitRuntimeProxyTest {
         BootstrapGitLocation location = fileLocation();
         NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
                 .create(location.proxyName()).valueOrFailure("create proxy");
-        repository.files().saveFiles(
-                location.refName(), Map.of("file", GitFile.regular(new byte[]{1})), Set.of(),
-                "first", GitCommitAuthor.EMPTY);
+        repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         String previous = repository.refs().get(location.refName());
-        FileUpdateFixture.Prepared update = FileUpdateFixture.prepare(repository.files(), location.refName(),
-                Map.of("file", GitFile.regular(new byte[]{2})), Set.of(), "second", GitCommitAuthor.EMPTY);
+        FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), location.refName(),
+                "second", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file", new byte[]{2});
+            return null;
+        });
         GitProxyBinding binding = new GitProxyBinding(new RemoteAlias("upstream"),
                 new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), Optional.empty(),
                         Optional.empty()), location.refName());
@@ -131,7 +136,7 @@ class BootstrapGitRuntimeProxyTest {
     }
 
     private static Optional<PackChecksum> ingest(
-            NativeGitRepository repository, FileUpdateFixture.Prepared update) throws IOException {
+            NativeGitRepository repository, FileTestSupport.Prepared update) throws IOException {
         try (BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(update.pack()))) {
             PackMetadata pack = repository.ingest(input);
             return Optional.of(repository.publishPack(pack).packChecksum());

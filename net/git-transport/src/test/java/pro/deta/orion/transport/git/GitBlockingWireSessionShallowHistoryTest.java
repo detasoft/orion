@@ -3,7 +3,6 @@ package pro.deta.orion.transport.git;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -148,9 +147,11 @@ class GitBlockingWireSessionShallowHistoryTest {
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "main", Map.of("file", GitFile.regular(new byte[]{1})), Set.of(), "initial",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write("file", new byte[]{1});
+            fileAccess.apply();
+            return null;
+        });
         String tip = repository.refs().get("refs/heads/main");
         try (QueueByteSource input = new QueueByteSource(Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();

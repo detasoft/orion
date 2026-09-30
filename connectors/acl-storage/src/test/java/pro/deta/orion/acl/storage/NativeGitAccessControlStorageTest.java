@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.fileapi.GitFile;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -44,13 +43,12 @@ class NativeGitAccessControlStorageTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("bootstrap/proxy-alias")
                 .valueOrFailure("create proxy alias");
-        repository.files().saveFiles(
-                "refs/heads/main",
-                Map.of(
-                        ACL_PATH, GitFile.regular(bytes("resolved acl")),
-                        secondaryPath, GitFile.regular(bytes("resolved roles"))), Set.of(),
-                "seed",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/main", "seed", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("resolved acl"));
+            fileAccess.write(secondaryPath, bytes("resolved roles"));
+            fileAccess.apply();
+            return null;
+        });
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 BootstrapRepositorySources.CONFIGURATION,
                 "git+https://sensitive.example/private.git",
@@ -78,9 +76,11 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(root);
         NativeGitRepository selected = backend.create("team/repo").valueOrFailure("selected repository");
         String ref = "refs/heads/configuration";
-        selected.files().saveFiles(
-                ref, Map.of(ACL_PATH, GitFile.regular(bytes("selected ACL"))), Set.of(), "seed",
-                GitCommitAuthor.EMPTY);
+        selected.files().withAccess(ref, "seed", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("selected ACL"));
+            fileAccess.apply();
+            return null;
+        });
         BootstrapConfigurationSourceConfig configuration = config();
         configuration.setLocation("local:team%2Frepo");
         configuration.setRef("configuration");
@@ -101,8 +101,7 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSnapshot(Map.of(ACL_PATH, bytes("versioned update")), loaded.version()),
                 new AccessControlSaveRequest("versioned update", UserEmail.EMPTY));
 
-        assertThat(selected.files().loadFiles(ref, List.of(ACL_PATH)))
-                .containsEntry(ACL_PATH, GitFile.regular(bytes("versioned update")));
+        assertThat(selected.files().readBytes(ref, ACL_PATH)).isEqualTo(bytes("versioned update"));
         assertThat(backend.repositoryNames()).containsExactly("team/repo");
     }
 
@@ -155,11 +154,12 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
-        repository.files().saveFiles(
-                "refs/heads/configuration",
-                Map.of("README.md", GitFile.regular(bytes("not an ACL"))), Set.of(),
-                "add readme",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/configuration", "add readme", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("README.md", bytes("not an ACL"));
+            fileAccess.apply();
+            return null;
+        });
         AccessControlStorage storage = preparedStorage(provider);
 
         Result<AccessControlSnapshot> result = storage.load();
@@ -173,11 +173,12 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
-        repository.files().saveFiles(
-                "refs/heads/configuration",
-                Map.of(ACL_PATH, GitFile.regular(bytes("primary ACL"))), Set.of(),
-                "add primary ACL",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/configuration", "add primary ACL", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("primary ACL"));
+            fileAccess.apply();
+            return null;
+        });
         AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH, "config/roles.xml"));
 
         Result<AccessControlSnapshot> result = storage.load();
@@ -197,11 +198,12 @@ class NativeGitAccessControlStorageTest {
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("first")),
                 new AccessControlSaveRequest("first", UserEmail.EMPTY));
-        provider.find("internal/configuration").valueOrFailure("repository").files().saveFiles(
-                "refs/heads/other",
-                Map.of(ACL_PATH, GitFile.regular(bytes("other"))), Set.of(),
-                "other branch",
-                GitCommitAuthor.EMPTY);
+        provider.find("internal/configuration").valueOrFailure("repository").files()
+                .withAccess("refs/heads/other", "other branch", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("other"));
+            fileAccess.apply();
+            return null;
+        });
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("second")),
                 new AccessControlSaveRequest("second", UserEmail.EMPTY));
@@ -222,12 +224,13 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSaveRequest("version one", UserEmail.EMPTY));
         AccessControlSnapshot stale = storage.load().valueOrFailure("version one");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "refs/heads/configuration",
-                Map.of(ACL_PATH, GitFile.regular(bytes("version two")),
-                        "winner.txt", GitFile.regular(bytes("winner"))), Set.of(),
-                "version two",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/configuration", "version two", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("version two"));
+            fileAccess.write("winner.txt", bytes("winner"));
+            fileAccess.apply();
+            return null;
+        });
         String winningVersion = repository.refs().get("refs/heads/configuration");
 
         assertThatThrownBy(() -> storage.save(
@@ -236,33 +239,32 @@ class NativeGitAccessControlStorageTest {
                 .isInstanceOf(AccessControlConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/configuration")).isEqualTo(winningVersion);
-        assertThat(repository.files().loadFiles(
-                "refs/heads/configuration",
-                List.of(ACL_PATH, "winner.txt")))
-                .containsEntry(ACL_PATH, GitFile.regular(bytes("version two")))
-                .containsEntry("winner.txt", GitFile.regular(bytes("winner")));
+        assertThat(repository.files().readBytes("refs/heads/configuration", ACL_PATH))
+                .isEqualTo(bytes("version two"));
+        assertThat(repository.files().readBytes("refs/heads/configuration", "winner.txt"))
+                .isEqualTo(bytes("winner"));
     }
 
     @Test
     void versionlessSaveRetainsUnconditionalInitialCreationPath(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = provider.create("internal/configuration").valueOrFailure("repository");
-        repository.files().saveFiles(
-                "refs/heads/configuration",
-                Map.of("winner.txt", GitFile.regular(bytes("winner"))), Set.of(),
-                "winner",
-                GitCommitAuthor.EMPTY);
+        repository.files().withAccess("refs/heads/configuration", "winner", GitCommitAuthor.EMPTY,
+                fileAccess -> {
+            fileAccess.write("winner.txt", bytes("winner"));
+            fileAccess.apply();
+            return null;
+        });
         AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH));
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
                 new AccessControlSaveRequest("created", UserEmail.EMPTY));
 
-        assertThat(repository.files().loadFiles(
-                "refs/heads/configuration",
-                List.of(ACL_PATH, "winner.txt")))
-                .containsEntry(ACL_PATH, GitFile.regular(bytes("created")))
-                .containsEntry("winner.txt", GitFile.regular(bytes("winner")));
+        assertThat(repository.files().readBytes("refs/heads/configuration", ACL_PATH))
+                .isEqualTo(bytes("created"));
+        assertThat(repository.files().readBytes("refs/heads/configuration", "winner.txt"))
+                .isEqualTo(bytes("winner"));
     }
 
     @Test
@@ -270,11 +272,12 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(rootDirectory);
         RecordingProvider provider = new RecordingProvider(backend);
         AccessControlStorage storage = preparedStorage(provider);
-        backend.find("internal/configuration").valueOrFailure("repository").files().saveFiles(
-                "refs/heads/configuration",
-                Map.of(ACL_PATH, GitFile.regular(bytes("provider acl"))), Set.of(),
-                "seed",
-                GitCommitAuthor.EMPTY);
+        backend.find("internal/configuration").valueOrFailure("repository").files()
+                .withAccess("refs/heads/configuration", "seed", GitCommitAuthor.EMPTY, fileAccess -> {
+            fileAccess.write(ACL_PATH, bytes("provider acl"));
+            fileAccess.apply();
+            return null;
+        });
 
         AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load through provider");
 
