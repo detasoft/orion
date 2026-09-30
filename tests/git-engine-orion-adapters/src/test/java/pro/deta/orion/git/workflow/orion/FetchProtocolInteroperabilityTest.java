@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -44,6 +45,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -211,7 +213,7 @@ class FetchProtocolInteroperabilityTest {
         if (!packfile) {
             throw new IOException("Fetch ended without a packfile section");
         }
-        GitIndexAccess index = new InMemoryIndex().createAccess();
+        GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
         try (InMemoryStorage storage = new InMemoryStorage();
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()));
              PackIngestor ingestor = new PackIngestor(input, storage, index)) {

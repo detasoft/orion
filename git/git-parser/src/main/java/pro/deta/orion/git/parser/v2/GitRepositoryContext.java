@@ -5,6 +5,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
@@ -42,7 +43,7 @@ public class GitRepositoryContext implements AutoCloseable {
     public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) throws IOException {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.indexApi = Objects.requireNonNull(index, "index");
-        this.index = index.createAccess();
+        this.index = index.createAccess(Optional.of(PackId.create()));
     }
 
     public final GitStorageApi storage() {

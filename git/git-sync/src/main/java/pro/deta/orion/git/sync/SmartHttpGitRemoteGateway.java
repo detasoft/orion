@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 
 import java.io.IOException;
@@ -51,7 +52,7 @@ public final class SmartHttpGitRemoteGateway implements GitRemoteGateway {
         Set<String> wants = new LinkedHashSet<>(heads.heads().values());
         Set<String> haves = new LinkedHashSet<>(checked.refs().values());
         try {
-            return checked.index().<GitHeads, GitRemoteException>withAccess(access -> {
+            return checked.index().<GitHeads, GitRemoteException>withAccess(Optional.of(PackId.create()), access -> {
                 GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
                         List.copyOf(wants),
                         List.copyOf(haves),

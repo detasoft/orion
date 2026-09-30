@@ -38,6 +38,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
@@ -55,7 +56,7 @@ public final class LocalGitIndex implements GitIndexApi {
     private static final String REFS_SNAPSHOT = "snapshot";
     private final Path path;
     private MVStore store;
-    private int accesses;
+    private final Set<GitIndexAccess> accesses = ConcurrentHashMap.newKeySet();
     private volatile boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
 
@@ -69,22 +70,22 @@ public final class LocalGitIndex implements GitIndexApi {
 
     private LocalGitIndex(Path repository, Optional<GitHashAlgorithm> requestedAlgorithm) throws IOException {
         path = repository.toRealPath().resolve("refs.mv");
-        MVStore store = acquireStore(true, requestedAlgorithm);
+        MVStore store = acquireStore(true, requestedAlgorithm, null);
         try {
             hashAlgorithm = readHashAlgorithm(store);
             readHead(readRefs(store));
         } finally {
-            releaseStore();
+            releaseStore(null);
         }
     }
 
-    private synchronized MVStore acquireStore(boolean create, Optional<GitHashAlgorithm> requested)
+    private synchronized MVStore acquireStore(boolean create, Optional<GitHashAlgorithm> requested, Access access)
             throws IOException {
         checkInterrupted();
         if (closed) throw new IOException("Repository index is closed");
         if (store != null) {
             if (store.isClosed()) throw new IOException("Repository index is closed");
-            accesses++;
+            if (access != null) accesses.add(access);
             return store;
         }
         boolean missing = Files.notExists(path);
@@ -112,7 +113,7 @@ public final class LocalGitIndex implements GitIndexApi {
                     }
                 }
                 store = opened;
-                accesses = 1;
+                if (access != null) accesses.add(access);
                 return opened;
             } catch (IOException | RuntimeException | Error failure) {
                 opened.closeImmediately();
@@ -123,8 +124,9 @@ public final class LocalGitIndex implements GitIndexApi {
         }
     }
 
-    private synchronized void releaseStore() {
-        if (--accesses != 0) return;
+    private synchronized void releaseStore(Access access) {
+        if (access != null) accesses.remove(access);
+        if (!accesses.isEmpty()) return;
         MVStore released = store;
         store = null;
         try {
@@ -144,15 +146,25 @@ public final class LocalGitIndex implements GitIndexApi {
 
     @Override
     public GitIndexAccess createAccess(Set<RefId> refs) throws IOException {
+        return createAccess(refs, Optional.empty());
+    }
+
+    @Override
+    public GitIndexAccess createAccess(Set<RefId> refs, Optional<PackId> packId) throws IOException {
         Set<RefId> names = Set.copyOf(refs);
         for (RefId ref : names) {
             ref.requireFullName();
         }
-        return createAccess(names, List.of());
+        return createAccess(names, List.of(), packId);
     }
 
     @Override
     public GitIndexAccess createAccess(List<RefUpdate> updates) throws IOException {
+        return createAccess(updates, Optional.empty());
+    }
+
+    @Override
+    public GitIndexAccess createAccess(List<RefUpdate> updates, Optional<PackId> packId) throws IOException {
         updates = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();
         for (RefUpdate update : updates) {
@@ -163,12 +175,13 @@ public final class LocalGitIndex implements GitIndexApi {
                 throw new IllegalArgumentException("Duplicate ref update: " + update.ref());
             }
         }
-        return createAccess(names, updates);
+        return createAccess(names, updates, packId);
     }
 
-    private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates) throws IOException {
-        acquireStore(false, Optional.of(hashAlgorithm));
-        Access access = new Access();
+    private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates, Optional<PackId> packId)
+            throws IOException {
+        Access access = new Access(packId);
+        acquireStore(false, Optional.of(hashAlgorithm), access);
         try {
             Map<String, String> refs = readRefs(store);
             for (RefId ref : names) {
@@ -195,17 +208,33 @@ public final class LocalGitIndex implements GitIndexApi {
         closed = true;
     }
 
+    @Override
+    public Set<GitIndexAccess> activeAccesses() {
+        return Set.copyOf(accesses);
+    }
+
     private final class Access implements GitIndexAccess {
+        private final Optional<PackId> packId;
         private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
         private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
         private String originalHead;
         private String changedHead;
         private boolean closed;
 
+        private Access(Optional<PackId> packId) {
+            this.packId = Objects.requireNonNull(packId, "packId");
+        }
+
+        @Override
+        public Optional<PackId> packId() {
+            return packId;
+        }
+
         @Override
         public void addObject(IndexedObject object) throws IOException {
             hashAlgorithm.requireLength(object.objectId().byteLength());
             object.delta().ifPresent(delta -> hashAlgorithm.requireLength(delta.baseId().byteLength()));
+            requirePack(object.packId());
             withStore(false, store -> {
                 MVMap<String, String> objects = map(store, "objects");
                 String key = objectKey(object);
@@ -305,6 +334,7 @@ public final class LocalGitIndex implements GitIndexApi {
         @Override
         public PackMetadata publishIndex(PackMetadata pack) throws IOException {
             hashAlgorithm.requireLength(pack.packChecksum().byteLength());
+            requirePack(pack.packId());
             return withStore(true, store -> {
                 pack.validateObjects(LocalGitIndex.objects(store, pack.packId()));
                 MVMap<String, String> packs = map(store, "packs");
@@ -503,7 +533,13 @@ public final class LocalGitIndex implements GitIndexApi {
             closed = true;
             changedRefs.clear();
             changedHead = null;
-            releaseStore();
+            releaseStore(this);
+        }
+
+        private void requirePack(PackId candidate) throws IOException {
+            if (!packId.equals(Optional.ofNullable(candidate))) {
+                throw new IOException("Access does not own pack: " + candidate);
+            }
         }
 
         private <T> T withStore(boolean durable, Operation<T> operation) throws IOException {

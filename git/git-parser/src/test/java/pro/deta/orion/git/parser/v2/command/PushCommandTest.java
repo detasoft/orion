@@ -62,7 +62,7 @@ class PushCommandTest {
         {
             try (GitStorageApi storage = new InMemoryStorage()) {
                 indexApi.withAccess(index -> {
-                    ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+                    ObjectId base = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
                     ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
                     byte[] response = execute(storage, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
                             ZERO + " " + result + " " + REF + "\0report-status"));
@@ -81,7 +81,7 @@ class PushCommandTest {
     void publishesAThinPackWithItsExternalBaseAndLeavesTheInputOpen() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId base = store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
+            ObjectId base = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1, 2, 3});
             byte[] source = pack(delta(base, new byte[]{3, 4, (byte) 0x90, 3, 1, 4}));
             ObjectId result = objectId(GitObjectType.BLOB, new byte[]{1, 2, 3, 4});
             byte[] request = request(source, ZERO + " " + result + " " + REF + "\0report-status\n");
@@ -167,7 +167,7 @@ class PushCommandTest {
     void consumesEmptyPackWhenCreatingARefToAnExistingObject() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId id = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
             byte[] request = request(pack(), ZERO + " " + id + " " + REF + "\0report-status");
             try (BufferedByteInputV2 input = new BufferedByteInputV2(
                     new ByteArrayInputStream(join(request, new byte[]{42})))) {
@@ -184,7 +184,7 @@ class PushCommandTest {
     void preservesExpectedOldAndAtomicSemantics(boolean atomic) throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId first = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
             ObjectId stale = objectId(GitObjectType.BLOB, new byte[]{2});
             ObjectId next = objectId(GitObjectType.BLOB, new byte[]{3});
             publishRefs(
@@ -224,7 +224,7 @@ class PushCommandTest {
     void reportsUnpackFailureAndDoesNotApplyEvenADeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId first = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
             publishRefs(
                     storage, indexApi,
                     List.of(new RefUpdate(REF, Optional.empty(), Optional.of(first))), false);
@@ -246,7 +246,7 @@ class PushCommandTest {
     void sendsOnlyTheNegotiatedResponseAndAcceptsCancellation() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+            ObjectId id = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
             assertThat(execute(storage, request(pack(), ZERO + " " + id + " " + REF))).isEmpty();
             assertThat(execute(storage, request(new byte[0], id + " " + ZERO + " " + REF + "\0side-band-64k")))
                     .isEqualTo("0000".getBytes(StandardCharsets.US_ASCII));
@@ -260,7 +260,7 @@ class PushCommandTest {
     void rejectsMalformedRequestsWithoutChangingExistingRefs() throws Exception {
         GitStorageApi storage = new LocalGitStorage(directory);
         indexApi.withAccess(index -> {
-            ObjectId existing = store(storage, index, GitObjectType.BLOB, new byte[]{2});
+            ObjectId existing = store(storage, indexApi, GitObjectType.BLOB, new byte[]{2});
             publishRefs(
                     storage, indexApi,
                     List.of(new RefUpdate(REF, Optional.empty(), Optional.of(existing))), false);

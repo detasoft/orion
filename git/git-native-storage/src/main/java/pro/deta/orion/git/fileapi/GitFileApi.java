@@ -6,6 +6,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
@@ -81,8 +82,9 @@ public final class GitFileApi {
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
-        return repository.index().withAccess(writableRefs(ref), index -> run(index, branch,
-                Optional.ofNullable(index.snapshotRefs().refs().get(ref)), message, author, operation));
+        return repository.index().withAccess(writableRefs(ref), Optional.of(PackId.create()),
+                index -> run(index, branch,
+                        Optional.ofNullable(index.snapshotRefs().refs().get(ref)), message, author, operation));
     }
 
     private Set<RefId> writableRefs(RefId ref) {
@@ -99,7 +101,7 @@ public final class GitFileApi {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Optional<ObjectId> expected = Optional.ofNullable(expectedRevision).map(ObjectId::new);
-        return repository.index().withAccess(writableRefs(ref),
+        return repository.index().withAccess(writableRefs(ref), Optional.of(PackId.create()),
                 index -> run(index, branch, expected, message, author, operation));
     }
 

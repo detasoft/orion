@@ -32,6 +32,7 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 /** In-memory repository index; pending objects become visible together when their pack is published. */
 public final class InMemoryIndex implements GitIndexApi {
+    private final Set<GitIndexAccess> accesses = new HashSet<>();
     private boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
     private final Map<PackId, NavigableMap<Long, IndexedObject>> objects = new LinkedHashMap<>();
@@ -61,18 +62,30 @@ public final class InMemoryIndex implements GitIndexApi {
 
     @Override
     public GitIndexAccess createAccess(Set<RefId> requested) {
+        return createAccess(requested, Optional.empty());
+    }
+
+    @Override
+    public GitIndexAccess createAccess(Set<RefId> requested, Optional<PackId> packId) {
         Set<RefId> names = Set.copyOf(requested);
         for (RefId ref : names) {
             ref.requireFullName();
         }
         synchronized (this) {
             requireFactoryOpen();
-            return new Access(names);
+            Access access = new Access(names, packId);
+            accesses.add(access);
+            return access;
         }
     }
 
     @Override
     public GitIndexAccess createAccess(List<RefUpdate> updates) throws IOException {
+        return createAccess(updates, Optional.empty());
+    }
+
+    @Override
+    public GitIndexAccess createAccess(List<RefUpdate> updates, Optional<PackId> packId) throws IOException {
         updates = List.copyOf(updates);
         Set<RefId> names = new HashSet<>();
         for (RefUpdate update : updates) {
@@ -91,10 +104,11 @@ public final class InMemoryIndex implements GitIndexApi {
                     throw new GitRefConflictException(update, actual);
                 }
             }
-            Access access = new Access(names);
+            Access access = new Access(names, packId);
             for (RefUpdate update : updates) {
                 access.changedRefs.put(update.ref(), update.newId());
             }
+            accesses.add(access);
             return access;
         }
     }
@@ -108,17 +122,29 @@ public final class InMemoryIndex implements GitIndexApi {
         if (closed) throw new IllegalStateException("Repository index is closed");
     }
 
+    @Override
+    public synchronized Set<GitIndexAccess> activeAccesses() {
+        return Set.copyOf(accesses);
+    }
+
     private final class Access implements GitIndexAccess {
+        private final Optional<PackId> packId;
         private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
         private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
         private Head originalHead;
         private Head changedHead;
         private boolean closed;
 
-        private Access(Set<RefId> names) {
+        private Access(Set<RefId> names, Optional<PackId> packId) {
+            this.packId = Objects.requireNonNull(packId, "packId");
             for (RefId ref : names) {
                 originalRefs.put(ref, Optional.ofNullable(refs.get(ref)));
             }
+        }
+
+        @Override
+        public Optional<PackId> packId() {
+            return packId;
         }
 
         @Override
@@ -127,6 +153,7 @@ public final class InMemoryIndex implements GitIndexApi {
                 requireOpen();
                 hashAlgorithm.requireLength(object.objectId().byteLength());
                 object.delta().ifPresent(delta -> hashAlgorithm.requireLength(delta.baseId().byteLength()));
+                requirePack(object.packId());
                 NavigableMap<Long, IndexedObject> entries = objects.get(object.packId());
                 IndexedObject previous = entries == null ? null : entries.get(object.packOffset());
                 if (object.equals(previous)) {
@@ -210,6 +237,7 @@ public final class InMemoryIndex implements GitIndexApi {
             synchronized (InMemoryIndex.this) {
                 requireOpen();
                 hashAlgorithm.requireLength(pack.packChecksum().byteLength());
+                requirePack(pack.packId());
                 PackMetadata previous = packs.get(pack.packId());
                 if (previous != null) {
                     if (!previous.equals(pack)) {
@@ -350,8 +378,15 @@ public final class InMemoryIndex implements GitIndexApi {
         public void discard() {
             synchronized (InMemoryIndex.this) {
                 closed = true;
+                accesses.remove(this);
                 changedRefs.clear();
                 changedHead = null;
+            }
+        }
+
+        private void requirePack(PackId candidate) throws IOException {
+            if (!packId.equals(Optional.ofNullable(candidate))) {
+                throw new IOException("Access does not own pack: " + candidate);
             }
         }
     }

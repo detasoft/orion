@@ -50,8 +50,8 @@ class InMemoryStorageTest {
         {
             try (GitStorageApi storage = new InMemoryStorage()) {
                 indexApi.withAccess(index -> {
-                    ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
-                    ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
+                    ObjectId old = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
+                    ObjectId next = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{2});
                     ObjectId absent = new ObjectId("a".repeat(40));
                     assertThat(publishRefs(
                             storage, indexApi, List.of(update(FIRST, null, old)), true).getFirst().status())
@@ -90,8 +90,8 @@ class InMemoryStorageTest {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                        ObjectId old = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
-                        ObjectId next = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
+                        ObjectId old = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
+                        ObjectId next = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{2});
                         publishRefs(storage, indexApi, List.of(update(FIRST, null, old)), true);
                         CyclicBarrier start = new CyclicBarrier(2);
                         List<Future<RefUpdateResult.Status>> attempts = new ArrayList<>();
@@ -119,8 +119,8 @@ class InMemoryStorageTest {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                        ObjectId first = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
-                        ObjectId second = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{2});
+                        ObjectId first = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
+                        ObjectId second = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{2});
                         publishRefs(
                                 storage, indexApi, List.of(update(FIRST, null, first), update(SECOND, null, first)), true);
                         CountDownLatch start = new CountDownLatch(1);
@@ -161,7 +161,7 @@ class InMemoryStorageTest {
                 GitIndexAccess index = indexApi.createAccess();
                 try {
                     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                        ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+                        ObjectId object = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
                         PackMetadata published = index.packs().getFirst();
                         assertThat(GitObjectRead.read(storage, index, object, (type, size, base, input) -> {
                             try {
@@ -172,8 +172,8 @@ class InMemoryStorageTest {
                                 throw new IOException(failure);
                             }
                         })).contains(APPLIED);
-                        assertThatThrownBy(() -> PackTestData.ingest(new byte[0], storage, index))
-                                .isInstanceOf(IOException.class);
+                        assertThatThrownBy(() -> indexApi.withAccess(Optional.of(PackId.create()), writer ->
+                                PackTestData.ingest(new byte[0], storage, writer))).isInstanceOf(IOException.class);
                         assertThat(index.packs()).containsExactly(published);
                         assertThat(GitObjectRead.exists(storage, index, object)).isTrue();
                     }
@@ -187,14 +187,16 @@ class InMemoryStorageTest {
     @Test
     void isolatesRepositoriesAndConsumesPublicationAfterClose() throws Exception {
         InMemoryStorage first = new InMemoryStorage();
-        new InMemoryIndex().withAccess(firstIndex -> {
+        InMemoryIndex firstOwner = new InMemoryIndex();
+        firstOwner.withAccess(firstIndex -> {
             {
                 try (first) {
                     try {
                         try (GitStorageApi second = new InMemoryStorage()) {
                             GitIndexAccess secondIndex = new InMemoryIndex().createAccess();
                             try {
-                                ObjectId object = PackTestData.store(first, firstIndex, GitObjectType.BLOB, new byte[]{1});
+                                ObjectId object = PackTestData.store(first, firstOwner, GitObjectType.BLOB,
+                                        new byte[]{1});
                                 Head detached = new Head.Detached(new CommitId(object.toBytes()));
                                 firstIndex.updateHead(detached);
                                 assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
@@ -204,8 +206,9 @@ class InMemoryStorageTest {
                                 assertThat(secondIndex.packs()).isEmpty();
                                 assertThatThrownBy(() -> firstIndex.updateHead(new Head.Symbolic(new RefId("HEAD"))))
                                         .isInstanceOf(IllegalArgumentException.class);
-                                PackMetadata attempt = PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
-                                        first, firstIndex);
+                                PackMetadata attempt = firstOwner.withAccess(Optional.of(PackId.create()), writer ->
+                                        PackTestData.ingest(PackTestData.pack(PackTestData.blob(new byte[]{2})),
+                                                first, writer));
                                 first.close();
                                 assertThatThrownBy(() -> first.exists(attempt.packId())).isInstanceOf(ClosedChannelException.class);
                                 assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
@@ -231,7 +234,7 @@ class InMemoryStorageTest {
         {
             try (GitStorageApi storage = new InMemoryStorage()) {
                 indexApi.withAccess(index -> {
-                    ObjectId object = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1});
+                    ObjectId object = PackTestData.store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
                     assertThat(publishRefs(
                             storage, indexApi, List.of(update(FIRST, null, object)), true).getFirst().status())
                             .isEqualTo(APPLIED);

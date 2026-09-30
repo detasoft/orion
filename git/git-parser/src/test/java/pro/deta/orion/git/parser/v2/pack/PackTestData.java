@@ -3,7 +3,9 @@ package pro.deta.orion.git.parser.v2.pack;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -18,6 +20,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.zip.DeflaterOutputStream;
 
 public final class PackTestData {
@@ -70,7 +73,7 @@ public final class PackTestData {
     }
 
     public static GitIndexAccess inspect(byte[] bytes) throws IOException {
-        GitIndexAccess index = new InMemoryIndex().createAccess();
+        GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
         try (GitStorageApi storage = new InMemoryStorage()) {
             publish(bytes, storage, index);
         }
@@ -88,9 +91,19 @@ public final class PackTestData {
         return index.publishIndex(ingest(bytes, storage, index));
     }
 
+    public static PackMetadata publish(byte[] bytes, GitStorageApi storage, GitIndexApi owner) throws IOException {
+        return owner.withAccess(Optional.of(PackId.create()), access -> publish(bytes, storage, access));
+    }
+
     public static ObjectId store(GitStorageApi storage, GitIndexAccess index,
                                  GitObjectType type, byte[] content) throws IOException {
         publish(pack(entry(type, content)), storage, index);
+        return objectId(type, content);
+    }
+
+    public static ObjectId store(GitStorageApi storage, GitIndexApi owner,
+                                 GitObjectType type, byte[] content) throws IOException {
+        publish(pack(entry(type, content)), storage, owner);
         return objectId(type, content);
     }
 
@@ -98,6 +111,13 @@ public final class PackTestData {
                                       GitObjectType type, byte[] base, byte[] instructions, byte[] result)
             throws IOException {
         publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, index);
+        return objectId(type, result);
+    }
+
+    public static ObjectId storeDelta(GitStorageApi storage, GitIndexApi owner,
+                                      GitObjectType type, byte[] base, byte[] instructions, byte[] result)
+            throws IOException {
+        publish(pack(entry(type, base), delta(objectId(type, base), instructions)), storage, owner);
         return objectId(type, result);
     }
 

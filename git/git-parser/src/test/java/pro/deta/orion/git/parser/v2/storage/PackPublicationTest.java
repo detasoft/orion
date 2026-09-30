@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -21,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +41,7 @@ class PackPublicationTest {
         ObjectId id = objectId(GitObjectType.BLOB, new byte[]{1});
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                GitIndexAccess index = new LocalGitIndex(directory).createAccess();
+                GitIndexAccess index = new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
                     metadata = ingest(pack(blob(new byte[]{1})), storage, index);
                 } finally {
@@ -49,7 +51,7 @@ class PackPublicationTest {
         }
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                new LocalGitIndex(directory).withAccess(index -> {
+                new LocalGitIndex(directory).withAccess(Optional.of(metadata.packId()), index -> {
                     assertThat(storage.exists(metadata.packId())).isTrue();
                     assertThat(index.findObject(metadata.packId(), id)).isPresent();
                     assertThat(index.locations(id)).isEmpty();
@@ -83,21 +85,16 @@ class PackPublicationTest {
                         CyclicBarrier start = new CyclicBarrier(2);
                         var first = executor.submit(() -> {
                             start.await(5, TimeUnit.SECONDS);
-                            return publish(input, storage, index);
+                            return publish(input, storage, factory);
                         });
                         var second = executor.submit(() -> {
                             start.await(5, TimeUnit.SECONDS);
                             if (memory) {
-                                return publish(input, storage, index);
+                                return publish(input, storage, factory);
                             }
                             {
                                 try (GitStorageApi otherStorage = new LocalGitStorage(directory)) {
-                                    GitIndexAccess otherIndex = factory.createAccess();
-                                    try {
-                                        return publish(input, otherStorage, otherIndex);
-                                    } finally {
-                                        otherIndex.discard();
-                                    }
+                                    return publish(input, otherStorage, factory);
                                 }
                             }
                         });
@@ -119,8 +116,9 @@ class PackPublicationTest {
     void missingPhysicalPackIsNotAnExistingRefTargetAndReadReportsFailure() throws Exception {
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                new LocalGitIndex(directory).withAccess(index -> {
-                    ObjectId id = store(storage, index, GitObjectType.BLOB, new byte[]{1});
+                LocalGitIndex owner = new LocalGitIndex(directory);
+                owner.withAccess(index -> {
+                    ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
                     PackMetadata metadata = index.packs().getFirst();
                     Files.delete(directory.resolve("packs").resolve("pack-" + metadata.packId() + ".data"));
                     assertThat(index.locations(id)).hasSize(1);
@@ -137,16 +135,17 @@ class PackPublicationTest {
     void resolvesTwoExternalBasesAndReadsDeepPublishedChains(boolean memory) throws Exception {
         {
             try (GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
+                GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexAccess index = owner.createAccess();
                 try {
-                    ObjectId first = store(storage, index, GitObjectType.BLOB, new byte[]{1});
-                    ObjectId second = store(storage, index, GitObjectType.BLOB, new byte[]{2});
+                    ObjectId first = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
+                    ObjectId second = store(storage, owner, GitObjectType.BLOB, new byte[]{2});
                     PackMetadata thin = publish(pack(delta(first, new byte[]{1, 1, 1, 3}),
-                            delta(second, new byte[]{1, 1, 1, 4})), storage, index);
+                            delta(second, new byte[]{1, 1, 1, 4})), storage, owner);
                     assertThat(thin.objectCount()).isEqualTo(4);
                     {
                         try (GitStorageApi receiver = new InMemoryStorage()) {
-                            new InMemoryIndex().withAccess(received -> {
+                            new InMemoryIndex().withAccess(Optional.of(PackId.create()), received -> {
                                 PackMetadata replay = publish(bytes(thin, storage, index), receiver, received);
                                 assertThat(replay.packChecksum()).isEqualTo(thin.packChecksum());
                                 assertThat(read(receiver, received, objectId(GitObjectType.BLOB, new byte[]{4})))
@@ -164,7 +163,7 @@ class PackPublicationTest {
                         entries.add(delta(previous, join(new byte[]{4, 4, 4}, value)));
                         previous = objectId(GitObjectType.BLOB, value);
                     }
-                    publish(pack(entries.toArray(byte[][]::new)), storage, index);
+                    publish(pack(entries.toArray(byte[][]::new)), storage, owner);
                     assertThat(read(storage, index, previous)).containsExactly(value);
                 } finally {
                     index.discard();

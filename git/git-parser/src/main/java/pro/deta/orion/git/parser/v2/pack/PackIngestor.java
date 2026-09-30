@@ -37,12 +37,14 @@ public final class PackIngestor implements AutoCloseable {
     private final BufferedByteInputV2 input;
     private final GitStorageApi storage;
     private final GitIndexAccess index;
+    private final PackId packId;
     private boolean started;
 
     public PackIngestor(BufferedByteInputV2 input, GitStorageApi storage, GitIndexAccess index) {
         this.input = Objects.requireNonNull(input, "input");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
+        this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
     }
 
     public PackMetadata ingest() throws IOException {
@@ -50,7 +52,6 @@ public final class PackIngestor implements AutoCloseable {
             throw new IllegalStateException("Pack ingestion has already started or closed");
         }
         started = true;
-        PackId packId = PackId.create();
         Map<Long, ObjectId> offsets = new HashMap<>();
         List<Pending> pending = new ArrayList<>();
         try (PackDataStorage bytes = storage.newPack(packId); PackReader reader = new PackReader(input)) {

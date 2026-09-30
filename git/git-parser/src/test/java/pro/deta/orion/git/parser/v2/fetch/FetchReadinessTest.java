@@ -33,14 +33,14 @@ class FetchReadinessTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
-    private final GitIndexAccess index =
-            new InMemoryIndex().createAccess();
+    private final InMemoryIndex owner = new InMemoryIndex();
+    private final GitIndexAccess index = owner.createAccess();
     private ObjectId tree;
 
     @BeforeEach
     void setup() throws Exception {
         storage = new LocalGitStorage(directory);
-        tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
+        tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
     }
 
     @AfterEach
@@ -156,7 +156,7 @@ class FetchReadinessTest {
                 .getBytes(StandardCharsets.US_ASCII);
         byte[] instructions = PackTestData.join(
                 new byte[]{(byte) base.length, (byte) content.length, (byte) content.length}, content);
-        ObjectId tip = PackTestData.storeDelta(storage, index, GitObjectType.COMMIT, base, instructions, content);
+        ObjectId tip = PackTestData.storeDelta(storage, owner, GitObjectType.COMMIT, base, instructions, content);
         NegotiationContext context = context(tip);
         context.addCommon(root);
         assertThat(context.isReady()).isTrue();
@@ -172,7 +172,7 @@ class FetchReadinessTest {
             entries.add(PackTestData.entry(GitObjectType.COMMIT, bytes));
             tip = PackTestData.objectId(GitObjectType.COMMIT, bytes);
         }
-        PackTestData.publish(PackTestData.pack(entries.toArray(byte[][]::new)), storage, index);
+        PackTestData.publish(PackTestData.pack(entries.toArray(byte[][]::new)), storage, owner);
         NegotiationContext context = context(tip);
         context.addCommon(root);
         assertThat(context.isReady()).isTrue();
@@ -216,6 +216,6 @@ class FetchReadinessTest {
     }
 
     private ObjectId put(GitObjectType type, String content) throws Exception {
-        return PackTestData.store(storage, index, type, content.getBytes(StandardCharsets.US_ASCII));
+        return PackTestData.store(storage, owner, type, content.getBytes(StandardCharsets.US_ASCII));
     }
 }

@@ -252,8 +252,9 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
-                PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+            InMemoryIndex owner = new InMemoryIndex();
+            owner.withAccess(index -> {
+                PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
                 var plan = negotiate(command, protocol).orElseThrow();
                 assertThat(plan.capabilities()).contains(value(GitCapability.WAIT_FOR_DONE));
@@ -271,8 +272,9 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
-                PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+            InMemoryIndex owner = new InMemoryIndex();
+            owner.withAccess(index -> {
+                PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities());
                 assertThat(negotiate(command, protocol)).isEmpty();
                 assertThat(bytes.toString(StandardCharsets.UTF_8))

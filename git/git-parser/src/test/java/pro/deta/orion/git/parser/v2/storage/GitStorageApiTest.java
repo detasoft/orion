@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -42,7 +43,8 @@ class GitStorageApiTest {
     void readsExactCompressedRangesFromRepositoryLocations(boolean disk) throws Exception {
         {
             try (GitStorageApi storage = disk ? new LocalGitStorage(directory) : new InMemoryStorage()) {
-                GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess();
+                GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()))
+                        : new InMemoryIndex().createAccess(Optional.of(PackId.create()));
                 try {
                     byte[] first = {1, 2, 3};
                     byte[] second = {4, 5};
@@ -122,7 +124,7 @@ class GitStorageApiTest {
     void rawReadRemainsAvailableAfterIndexClosesAndMissingObjectsDoNotInvokeReader() throws Exception {
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                new LocalGitIndex(directory).withAccess(index -> {
+                new LocalGitIndex(directory).withAccess(Optional.of(PackId.create()), index -> {
                     ObjectId absent = new ObjectId("1".repeat(40));
                     assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
                     assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {

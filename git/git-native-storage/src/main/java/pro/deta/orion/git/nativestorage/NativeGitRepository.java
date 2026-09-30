@@ -12,6 +12,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
@@ -162,7 +163,7 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public PackMetadata ingest(BufferedByteInputV2 input) throws IOException {
-        return index.withAccess(access -> {
+        return index.withAccess(Optional.of(PackId.create()), access -> {
             try (PackIngestor ingestor = new PackIngestor(input, storage(), access)) {
                 return ingestor.ingest();
             }
@@ -173,7 +174,7 @@ public class NativeGitRepository implements AutoCloseable {
         if (!storage().exists(pack.packId())) {
             throw new IOException("Cannot publish missing pack: " + pack.packId());
         }
-        return index.withAccess(access -> {
+        return index.withAccess(Optional.of(pack.packId()), access -> {
             return access.publishIndex(pack);
         });
     }

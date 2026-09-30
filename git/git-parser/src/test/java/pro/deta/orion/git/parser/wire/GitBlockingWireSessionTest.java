@@ -187,9 +187,9 @@ class GitBlockingWireSessionTest {
     @Test
     void legacyAdvertisementsPeelAnnotatedTagsOnlyForUploadPack() throws Exception {
         ObjectId target = publish();
-        ObjectId inner = PackTestData.store(storage, index, GitObjectType.TAG,
+        ObjectId inner = PackTestData.store(storage, factory, GitObjectType.TAG,
                 ("object " + target + "\ntype blob\ntag annotated\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
-        ObjectId outer = PackTestData.store(storage, index, GitObjectType.TAG,
+        ObjectId outer = PackTestData.store(storage, factory, GitObjectType.TAG,
                 ("object " + inner + "\ntype tag\ntag nested\n\nmessage\n").getBytes(StandardCharsets.US_ASCII));
         publishRefs(storage, factory, List.of(
                 new RefUpdate(new RefId("refs/tags/annotated"), Optional.empty(), Optional.of(inner)),
@@ -269,7 +269,7 @@ class GitBlockingWireSessionTest {
     }
 
     private ObjectId publish() throws Exception {
-        ObjectId id = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{1, 2, 3});
+        ObjectId id = PackTestData.store(storage, factory, GitObjectType.BLOB, new byte[]{1, 2, 3});
         publishRefs(
                 storage, factory,
                 List.of(new RefUpdate(MAIN, Optional.empty(), Optional.of(id))), true);

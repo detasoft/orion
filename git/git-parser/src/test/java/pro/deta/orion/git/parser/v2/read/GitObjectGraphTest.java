@@ -28,15 +28,15 @@ class GitObjectGraphTest {
     }
 
     private final GitStorageApi objects = new InMemoryStorage();
-    private final GitIndexAccess index =
-            new InMemoryIndex().createAccess();
+    private final InMemoryIndex owner = new InMemoryIndex();
+    private final GitIndexAccess index = owner.createAccess();
     private final GitObjectGraph graph = new GitObjectGraph(objects, index);
 
     @Test
     void traversesCommitTreeAndBlob() throws Exception {
-        ObjectId blob = store(objects, index, GitObjectType.BLOB, "hello\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "hello.txt", blob));
-        ObjectId commit = store(objects, index,
+        ObjectId blob = store(objects, owner, GitObjectType.BLOB, "hello\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId tree = store(objects, owner, GitObjectType.TREE, treeEntry("100644", "hello.txt", blob));
+        ObjectId commit = store(objects, owner,
                 GitObjectType.COMMIT,
                 ("tree " + tree + "\n"
                         + "author Test <test@example.com> 0 +0000\n"
@@ -52,12 +52,12 @@ class GitObjectGraphTest {
 
     @Test
     void excludesObjectsReachableFromHaves() throws Exception {
-        ObjectId baseBlob = store(objects, index, GitObjectType.BLOB, "base\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId baseTree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "file.txt", baseBlob));
+        ObjectId baseBlob = store(objects, owner, GitObjectType.BLOB, "base\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId baseTree = store(objects, owner, GitObjectType.TREE, treeEntry("100644", "file.txt", baseBlob));
         ObjectId baseCommit = writeCommit(baseTree, null, "base");
 
-        ObjectId tipBlob = store(objects, index, GitObjectType.BLOB, "tip\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tipTree = store(objects, index, GitObjectType.TREE, treeEntry("100644", "file.txt", tipBlob));
+        ObjectId tipBlob = store(objects, owner, GitObjectType.BLOB, "tip\n".getBytes(StandardCharsets.UTF_8));
+        ObjectId tipTree = store(objects, owner, GitObjectType.TREE, treeEntry("100644", "file.txt", tipBlob));
         ObjectId tipCommit = writeCommit(tipTree, baseCommit, "tip");
 
         Set<ObjectId> result =
@@ -70,10 +70,10 @@ class GitObjectGraphTest {
 
     @Test
     void followsAnnotatedTagTargets() throws Exception {
-        ObjectId blob = store(objects, index,
+        ObjectId blob = store(objects, owner,
                 GitObjectType.BLOB,
                 "tagged\n".getBytes(StandardCharsets.UTF_8));
-        ObjectId tree = store(objects, index,
+        ObjectId tree = store(objects, owner,
                 GitObjectType.TREE,
                 treeEntry("100644", "tagged.txt", blob));
         ObjectId commit = writeCommit(tree, null, "tagged");
@@ -88,7 +88,7 @@ class GitObjectGraphTest {
 
     @Test
     void ignoresUnknownHaveRoots() throws Exception {
-        ObjectId wanted = store(objects, index,
+        ObjectId wanted = store(objects, owner,
                 GitObjectType.BLOB,
                 "wanted\n".getBytes(StandardCharsets.UTF_8));
         ObjectId unknownHave = new ObjectId("f".repeat(40));
@@ -127,7 +127,7 @@ class GitObjectGraphTest {
         assertThatThrownBy(() -> graph.reachableObjects(Set.of(incomplete), false))
                 .isInstanceOf(FileNotFoundException.class);
 
-        ObjectId tree = store(objects, index, GitObjectType.TREE, treeEntry("160000", "submodule", missing));
+        ObjectId tree = store(objects, owner, GitObjectType.TREE, treeEntry("160000", "submodule", missing));
         ObjectId complete = writeCommit(tree, null, "submodule");
         assertThat(graph.hasCompleteClosure(complete)).isTrue();
         assertThat(graph.reachableObjects(Set.of(complete), false)).containsExactly(complete, tree);
@@ -148,7 +148,7 @@ class GitObjectGraphTest {
 
     @Test
     void malformedGraphDataIsAnErrorInsteadOfAnAbsentObject() throws Exception {
-        ObjectId malformed = store(objects, index, GitObjectType.COMMIT,
+        ObjectId malformed = store(objects, owner, GitObjectType.COMMIT,
                 "not a commit\n\n".getBytes(StandardCharsets.US_ASCII));
         assertThatThrownBy(() -> graph.hasCompleteClosure(malformed)).isInstanceOf(IOException.class);
     }
@@ -177,20 +177,20 @@ class GitObjectGraphTest {
                 .append('\n')
                 .append(message)
                 .append('\n');
-        return store(objects, index, GitObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
+        return store(objects, owner, GitObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private ObjectId writeBlobTree(String name, String content) throws IOException {
-        ObjectId blob = store(objects, index,
+        ObjectId blob = store(objects, owner,
                 GitObjectType.BLOB,
                 (content + "\n").getBytes(StandardCharsets.UTF_8));
-        return store(objects, index,
+        return store(objects, owner,
                 GitObjectType.TREE,
                 treeEntry("100644", name, blob));
     }
 
     private ObjectId writeTag(ObjectId target, String name) throws IOException {
-        return store(objects, index,
+        return store(objects, owner,
                 GitObjectType.TAG,
                 ("object " + target + "\n"
                         + "type commit\n"

@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationContext;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
@@ -46,7 +47,7 @@ class FetchCommandTest {
         request.wants().add(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1}));
         request.initialMessages().add(new NegotiationMessage.Have(PackTestData.objectId(GitObjectType.BLOB, new byte[]{2})));
         request.initialMessages().add(NegotiationMessage.Control.DONE);
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
 
@@ -66,7 +67,7 @@ class FetchCommandTest {
         var request = new FetchRequest();
         request.capabilities().add(value(GitCapability.THIN_PACK));
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                     .isInstanceOf(IOException.class).hasMessageContaining("thin-pack");
@@ -80,7 +81,7 @@ class FetchCommandTest {
         request.setMode(FetchRequest.Mode.PROTOCOL_V2);
         request.wantRefs().add("refs/heads/main");
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, HTTP))
                     .isInstanceOf(IOException.class).hasMessageContaining("ref-in-want");
@@ -91,7 +92,7 @@ class FetchCommandTest {
     @Test
     void separateRequestsGetIndependentNegotiationState() throws Exception {
         GitStorageApi storage = FetchTestSupport.storage(directory);
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var command = new FetchCommand(storage, index, capabilities());
             var first = command.prepareNegotiation(new FetchRequest(), SSH);
             first.next(NegotiationMessage.Control.DONE);
@@ -109,7 +110,7 @@ class FetchCommandTest {
     void defaultAccessAllowsAnExistingObjectWithoutRequiringAnAdvertisedRef() throws Exception {
         var request = new FetchRequest();
         request.wants().add(FIRST);
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities());
             var iterator = command.prepareNegotiation(request, SSH);
@@ -125,7 +126,7 @@ class FetchCommandTest {
         request.wants().add(FIRST);
         request.wantRefs().addAll(List.of(MAIN.value(), "HEAD"));
         InMemoryIndex indexApi = new InMemoryIndex();
-        indexApi.withAccess(index -> {
+        indexApi.withAccess(Optional.of(PackId.create()), index -> {
             var storage = storage(Set.of(FIRST), index);
             publishRefs(
                     storage, indexApi,
@@ -144,7 +145,7 @@ class FetchCommandTest {
     void missingExplicitObjectFailsBeforeNegotiation() throws Exception {
         var request = new FetchRequest();
         request.wants().addAll(List.of(FIRST, SECOND));
-        new InMemoryIndex().withAccess(index -> {
+        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
             var storage = storage(Set.of(FIRST), index);
             var command = new FetchCommand(storage, index, capabilities());
             assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
@@ -160,7 +161,7 @@ class FetchCommandTest {
         request.wantRefs().add(MAIN.value());
         request.wants().add(SECOND);
         InMemoryIndex indexApi = new InMemoryIndex();
-        indexApi.withAccess(index -> {
+        indexApi.withAccess(Optional.of(PackId.create()), index -> {
             GitStorageApi storage = storage(Set.of(FIRST), index);
             publishRefs(
                     storage, indexApi,

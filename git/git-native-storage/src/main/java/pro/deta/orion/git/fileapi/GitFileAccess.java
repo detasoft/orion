@@ -55,7 +55,7 @@ import static pro.deta.orion.git.fileapi.GitFileApi.*;
 public final class GitFileAccess implements Modification {
     private final NativeGitRepository repository;
     private final GitIndexAccess index;
-    private final PackId packId = PackId.create();
+    private final PackId packId;
     private final PackDataStorage bytes;
     private final RefId ref;
     private final Optional<ObjectId> parent;
@@ -76,6 +76,7 @@ public final class GitFileAccess implements Modification {
             throws IOException, GitOperationException {
         this.repository = repository;
         this.index = index;
+        this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         this.ref = new RefId(branchRefName(branch));
         this.parent = parent;
         this.message = message;

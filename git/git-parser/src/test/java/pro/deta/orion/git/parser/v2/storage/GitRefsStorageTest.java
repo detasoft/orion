@@ -12,6 +12,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.local.LocalGitIndex;
@@ -69,8 +70,8 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
             assertThat(index.snapshotRefs()).isEqualTo(new RefsSnapshot(Map.of(), new Head.Symbolic(MAIN)));
-            ObjectId first = publish(storage, index, "first");
-            ObjectId second = publish(storage, index, "second");
+            ObjectId first = publish(storage, "first");
+            ObjectId second = publish(storage, "second");
             assertThat(publishRefs(storage, factory, List.of(create(MAIN, first)), true))
                     .extracting(RefUpdateResult::status).containsExactly(APPLIED);
             RefsSnapshot before = index.snapshotRefs();
@@ -106,8 +107,8 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     void atomicBatchAbortsWhileNonAtomicBatchAppliesValidUpdates() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId first = publish(storage, index, "first");
-            ObjectId second = publish(storage, index, "second");
+            ObjectId first = publish(storage, "first");
+            ObjectId second = publish(storage, "second");
             publishRefs(storage, factory, List.of(create(MAIN, first)), true);
             List<RefUpdate> updates = List.of(
                     new RefUpdate(MAIN, Optional.of(second), Optional.of(first)), create(OTHER, second));
@@ -131,7 +132,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     void missingObjectsAbortAtomicBatchAndDuplicateRefsAreRejected() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId first = publish(storage, index, "first");
+            ObjectId first = publish(storage, "first");
             assertThat(publishRefs(
                     storage, factory, List.of(create(MAIN, first), create(OTHER, MISSING)), true))
                     .extracting(RefUpdateResult::status).containsExactly(ATOMIC_ABORTED, OBJECT_NOT_FOUND);
@@ -155,8 +156,8 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     void objectValidationPreservesResultOrderAndDoesNotRequireObjectsForDeletion() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId first = publish(storage, index, "first");
-            ObjectId second = publish(storage, index, "second");
+            ObjectId first = publish(storage, "first");
+            ObjectId second = publish(storage, "second");
             RefId stale = new RefId("refs/heads/stale");
             RefId created = new RefId("refs/heads/created");
             publishRefs(
@@ -188,7 +189,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     void rejectsDuplicateRefsEvenWhenOneTargetObjectIsMissing() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId first = publish(storage, index, "first");
+            ObjectId first = publish(storage, "first");
             assertThatThrownBy(() -> publishRefs(
                     storage, factory, List.of(create(MAIN, MISSING), create(MAIN, first)), false))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -207,9 +208,9 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                 {
                     GitIndexAccess secondStorageIndex = factory.createAccess();
                     try {
-                        ObjectId first = publish(firstStorage, firstStorageIndex, "first");
-                        ObjectId second = publish(firstStorage, firstStorageIndex, "second");
-                        ObjectId third = publish(firstStorage, firstStorageIndex, "third");
+                        ObjectId first = publish(firstStorage, "first");
+                        ObjectId second = publish(firstStorage, "second");
+                        ObjectId third = publish(firstStorage, "third");
                         publishRefs(firstStorage, factory, List.of(create(MAIN, first)), true);
                         CountDownLatch start = new CountDownLatch(1);
                         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -249,8 +250,8 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
                 {
                     GitIndexAccess readerIndex = factory.createAccess();
                     try {
-                        ObjectId first = publish(writer, writerIndex, "first");
-                        ObjectId second = publish(writer, writerIndex, "second");
+                        ObjectId first = publish(writer, "first");
+                        ObjectId second = publish(writer, "second");
                         assertThat(publishRefs(
                                 writer, factory,
                                 List.of(create(MAIN, first), create(OTHER, first)), true))
@@ -296,7 +297,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
     void unreadableStoreIsReportedWhenOpeningAccess() throws Exception {
         try (GitStorageApi storage = new LocalGitStorage(repository)) {
             factory.withAccess(index -> {
-                publish(storage, index, "first");
+                publish(storage, "first");
                 return null;
             });
             Files.delete(repository.resolve("refs.mv"));
@@ -318,7 +319,7 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
         return new RefUpdate(ref, Optional.empty(), Optional.of(id));
     }
 
-    private ObjectId publish(GitStorageApi storage, GitIndexAccess index, String message) throws Exception {
+    private ObjectId publish(GitStorageApi storage, String message) throws Exception {
         byte[] content = ("tree " + "0".repeat(40) + "\n\n" + message + "\n")
                 .getBytes(StandardCharsets.US_ASCII);
         MessageDigest digest = GitHashAlgorithm.SHA1.newDigest();
@@ -332,10 +333,13 @@ class GitRefsStorageTest implements BufferedByteInputV2.Source {
             writer.finish();
         }
         source = ByteBuffer.wrap(bytes.toByteArray());
-        try (BufferedByteInputV2 input = new BufferedByteInputV2(this);
-             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-            index.publishIndex(ingestor.ingest());
-        }
+        factory.withAccess(Optional.of(PackId.create()), access -> {
+            try (BufferedByteInputV2 input = new BufferedByteInputV2(this);
+                 PackIngestor ingestor = new PackIngestor(input, storage, access)) {
+                access.publishIndex(ingestor.ingest());
+            }
+            return null;
+        });
         return id;
     }
 

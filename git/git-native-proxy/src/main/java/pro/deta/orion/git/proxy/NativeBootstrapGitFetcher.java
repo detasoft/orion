@@ -12,10 +12,12 @@ import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
     private static final String NULL_ID = "0".repeat(40);
@@ -87,7 +89,7 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             String oldId,
             String newId) {
         try {
-            repository.index().withAccess(access -> {
+            repository.index().withAccess(Optional.of(PackId.create()), access -> {
                 GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
                         List.of(newId),
                         NULL_ID.equals(oldId) ? List.of() : List.of(oldId),

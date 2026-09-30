@@ -45,7 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class FetchCommandPackUriTest {
     private final InMemoryStorage storage = new InMemoryStorage();
-    private final GitIndexAccess index = new InMemoryIndex().createAccess();
+    private final InMemoryIndex owner = new InMemoryIndex();
+    private final GitIndexAccess index = owner.createAccess();
     private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
         @Override
         public Optional<URI> packUri(PackChecksum id) {
@@ -182,7 +183,7 @@ class FetchCommandPackUriTest {
             }
             writer.finish();
         }
-        PackMetadata pack = PackTestData.publish(bytes.toByteArray(), storage, index);
+        PackMetadata pack = PackTestData.publish(bytes.toByteArray(), storage, owner);
         List<ObjectId> ids = new ArrayList<>();
         for (IndexedObject object : index.objects(pack.packId())) {
             ids.add(object.objectId());

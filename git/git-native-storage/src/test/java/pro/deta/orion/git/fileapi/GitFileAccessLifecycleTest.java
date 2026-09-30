@@ -3,6 +3,7 @@ package pro.deta.orion.git.fileapi;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -29,7 +30,7 @@ class GitFileAccessLifecycleTest {
         IOException packFailure = new IOException("pack close failed");
         IOException indexFailure = new IOException("index discard failed");
         try (InMemoryStorage storage = new InMemoryStorage(); InMemoryIndex owner = new InMemoryIndex()) {
-            GitIndexAccess delegate = owner.createAccess();
+            GitIndexAccess delegate = owner.createAccess(Optional.of(PackId.create()));
             GitIndexAccess index = proxy(GitIndexAccess.class, (ignored, method, args) -> {
                 if (method.getName().equals("discard")) {
                     calls.add("index");

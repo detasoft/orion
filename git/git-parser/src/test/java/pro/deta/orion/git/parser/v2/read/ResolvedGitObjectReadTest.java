@@ -32,8 +32,8 @@ class ResolvedGitObjectReadTest {
     @TempDir
     Path directory;
     private GitStorageApi storage;
-    private final GitIndexAccess index =
-            new InMemoryIndex().createAccess();
+    private final InMemoryIndex owner = new InMemoryIndex();
+    private final GitIndexAccess index = owner.createAccess();
 
     @BeforeEach
     void setup() throws Exception {
@@ -58,7 +58,7 @@ class ResolvedGitObjectReadTest {
 
     @Test
     void resolvesRefDeltaChainsAndPassesTheRestoredTypeAndSize() throws Exception {
-        ObjectId deltaId = PackTestData.storeDelta(storage, index, GitObjectType.TREE, new byte[]{10, 20, 30},
+        ObjectId deltaId = PackTestData.storeDelta(storage, owner, GitObjectType.TREE, new byte[]{10, 20, 30},
                 new byte[]{3, 4, (byte) 0x90, 3, 1, 40}, new byte[]{10, 20, 30, 40});
         var reader = new ResolvedGitObjectRead<>(storage, index, (type, size, baseId, content) -> {
             assertThat(type).isEqualTo(GitObjectType.TREE);
@@ -83,7 +83,7 @@ class ResolvedGitObjectReadTest {
             ObjectId offsetId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{20});
             ObjectId referenceId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{30});
             PackTestData.publish(PackTestData.pack(full, offsetDelta,
-                    PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api, index);
+                    PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api, owner);
             ResolvedGitObjectRead<byte[]> reader = new ResolvedGitObjectRead<>(api, index, (type, size, base, content) -> {
                 assertThat(type).isEqualTo(GitObjectType.BLOB);
                 assertThat(size).isEqualTo(1);
@@ -99,7 +99,7 @@ class ResolvedGitObjectReadTest {
     void handlesDefaultCopyLengthAndEmptyResult() throws Exception {
         byte[] base = new byte[65536];
         base[65535] = 42;
-        ObjectId storedBase = PackTestData.store(storage, index, GitObjectType.BLOB, base);
+        ObjectId storedBase = PackTestData.store(storage, owner, GitObjectType.BLOB, base);
         var reader = bytesReader();
         assertThat(read(GitObjectType.REF_DELTA, Optional.of(storedBase),
                 new byte[]{(byte) 0x80, (byte) 0x80, 4, (byte) 0x80, (byte) 0x80, 4, (byte) 0x80}, reader))
@@ -124,7 +124,7 @@ class ResolvedGitObjectReadTest {
 
     @Test
     void rejectsInvalidInstructionsEvenWhenConsumerDoesNotRead() throws Exception {
-        ObjectId storedBase = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+        ObjectId storedBase = PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
         byte[][] invalid = {
                 {2, 0},                         // wrong base size
                 {1, 1, 0},                      // reserved opcode
@@ -144,7 +144,7 @@ class ResolvedGitObjectReadTest {
 
     @Test
     void closesUnreturnedResourceWhenLateDeltaValidationFails() throws Exception {
-        ObjectId storedBase = PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+        ObjectId storedBase = PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
         boolean[] closed = {false};
         var reader = new ResolvedGitObjectRead<>(storage, index, (type, size, baseId, content) -> {
             assertThat(content.readUnsignedByte()).isEqualTo(43);

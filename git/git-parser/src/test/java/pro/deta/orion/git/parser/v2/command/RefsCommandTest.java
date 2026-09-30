@@ -7,7 +7,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
-import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.GitProtocolVersion;
 import pro.deta.orion.git.parser.v2.data.GitTransport;
@@ -19,8 +18,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.local.LocalGitIndex;
-import pro.deta.orion.git.parser.v2.pack.PackIngestor;
-import pro.deta.orion.git.parser.v2.pack.PackWriter;
+import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -29,17 +27,14 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,7 +61,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void listsRefsWithSymbolicHeadAndFiltersByAnyRequestedPrefix() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+            ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             addRef("refs/heads/main", commit);
             addRef("refs/heads/ветка", commit);
             addRef("refs/tags/lightweight", commit);
@@ -85,7 +80,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void writesEveryRefAndFlushesAResponseLargerThanTheOutputBuffer() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+            ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             List<RefUpdate> updates = new ArrayList<>();
             List<String> expected = new ArrayList<>();
             for (int number = 0; number < 2_000; number++) {
@@ -128,7 +123,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
             assertThat(execute(storage, index, "unborn", "symrefs"))
                     .containsExactly("unborn HEAD symref-target:refs/heads/main");
             assertThat(execute(storage, index, "unborn", "symrefs", "ref-prefix refs/")).isEmpty();
-            ObjectId commit = publish(storage, index, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
+            ObjectId commit = publish(storage, GitObjectType.COMMIT, "tree " + "0".repeat(40) + "\n\nmessage\n");
             index.updateHead(new Head.Detached(new CommitId(commit.toBytes())));
             assertThat(execute(storage, index, "symrefs", "unborn")).containsExactly(commit + " HEAD");
             return null;
@@ -139,9 +134,9 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
     void peelsNestedTagsIncludingRefsOutsideTheTagsNamespace() throws Exception {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
-            ObjectId blob = publish(storage, index, GitObjectType.BLOB, "content");
-            ObjectId inner = publish(storage, index, GitObjectType.TAG, tag(blob, "blob", "inner"));
-            ObjectId outer = publish(storage, index, GitObjectType.TAG, tag(inner, "tag", "outer"));
+            ObjectId blob = publish(storage, GitObjectType.BLOB, "content");
+            ObjectId inner = publish(storage, GitObjectType.TAG, tag(blob, "blob", "inner"));
+            ObjectId outer = publish(storage, GitObjectType.TAG, tag(inner, "tag", "outer"));
             addRef("refs/tags/nested", outer);
             addRef("refs/tags/lightweight", blob);
             addRef("refs/custom/tag", inner);
@@ -225,7 +220,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         GitStorageApi storage = new LocalGitStorage(repository);
         factory.withAccess(index -> {
             ObjectId missing = new ObjectId("f".repeat(40));
-            ObjectId tag = publish(storage, index, GitObjectType.TAG, tag(missing, "blob", "broken"));
+            ObjectId tag = publish(storage, GitObjectType.TAG, tag(missing, "blob", "broken"));
             addRef("refs/tags/broken", tag);
             assertThat(execute(storage, index)).containsExactly(tag + " refs/tags/broken");
             assertThat(execute(storage, index, "peel")).containsExactly(tag + " refs/tags/broken");
@@ -297,24 +292,8 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
         });
     }
 
-    private ObjectId publish(GitStorageApi storage, GitIndexAccess index, GitObjectType type, String text) throws Exception {
-        byte[] content = text.getBytes(StandardCharsets.UTF_8);
-        MessageDigest digest = GitHashAlgorithm.SHA1.newDigest();
-        digest.update((type.name().toLowerCase(Locale.ROOT) + " " + content.length + "\0")
-                .getBytes(StandardCharsets.US_ASCII));
-        ObjectId id = new ObjectId(digest.digest(content));
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        try (PackWriter writer = new PackWriter(new OutputStreamBufferedByteOutput(bytes), 1);
-             BufferedByteInputV2 input = new BufferedByteInputV2(
-                     new ByteArrayInputStream(content))) {
-            writer.writeObject(type, content.length, input);
-            writer.finish();
-        }
-        try (BufferedByteInputV2 input = input(bytes.toByteArray());
-             PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-            index.publishIndex(ingestor.ingest());
-        }
-        return id;
+    private ObjectId publish(GitStorageApi storage, GitObjectType type, String text) throws Exception {
+        return PackTestData.store(storage, factory, type, text.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String tag(ObjectId target, String type, String name) {

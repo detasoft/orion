@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -19,6 +20,7 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,7 +42,8 @@ class PackIndexStorageTest {
         AtomicReference<PackId> packId = new AtomicReference<>();
         {
             try (GitStorageApi backend = memory ? new InMemoryStorage() : new LocalGitStorage(directory)) {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess() : new LocalGitIndex(directory).createAccess();
+                GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
                 try {
                         GitStorageApi recording = new GitStorageApi() {
                             public PackDataStorage newPack(PackId id) throws IOException {
@@ -75,7 +78,7 @@ class PackIndexStorageTest {
                         assertThat(index.objects(packId.get())).hasSize(1);
                         assertThat(index.locations(base)).isEmpty();
                         assertThat(backend.exists(packId.get())).isTrue();
-                        publish(pack(full), backend, index);
+                        publish(pack(full), backend, owner);
                         assertThat(index.locations(base)).hasSize(1);
                         assertThat(index.locations(base).getFirst().packId()).isNotEqualTo(packId.get());
                 } finally {

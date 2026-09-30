@@ -46,7 +46,7 @@ class FetchPlanTest {
         storage = new LocalGitStorage(directory);
         factory = new LocalGitIndex(directory);
         index = factory.createAccess();
-        PackTestData.store(storage, index, GitObjectType.BLOB, new byte[]{42});
+        PackTestData.store(storage, factory, GitObjectType.BLOB, new byte[]{42});
         command = new FetchCommand(storage, index, capabilities(GitCapability.values()));
     }
 

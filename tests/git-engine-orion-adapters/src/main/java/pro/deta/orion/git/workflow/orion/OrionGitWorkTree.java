@@ -21,6 +21,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.fetch.FetchPack;
 import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.local.LocalGitIndex;
@@ -380,7 +381,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         for (String objectId : repository.refs().values()) {
             haves.add(new ObjectId(objectId));
         }
-        repository.index().withAccess(access -> {
+        repository.index().withAccess(Optional.of(PackId.create()), access -> {
             GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
                     List.of(wantedId),
                     haves.stream().map(ObjectId::toHex).toList(),

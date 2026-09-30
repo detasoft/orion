@@ -22,8 +22,12 @@ import java.util.Optional;
  * Each ingestion owns a distinct PackId, even for identical content. Finish its object writes before
  * publishing its index; callers must not write and publish the same PackId concurrently.
  * A ref conflict does not remove ingested objects or published packs.
+ * An access created for a pack owns that pack until apply or discard. Close the pack's storage
+ * before finishing the access.
  */
 public interface GitIndexAccess extends Modification {
+    Optional<PackId> packId();
+
     void addObject(IndexedObject object) throws IOException;
 
     List<IndexedObject> objects(PackId packId) throws IOException;

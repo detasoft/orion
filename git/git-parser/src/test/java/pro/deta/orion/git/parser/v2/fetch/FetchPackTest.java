@@ -41,12 +41,13 @@ class FetchPackTest {
     void readsCommonHistoryOnlyOnceAndKeepsItsChildUnshallowed() throws Exception {
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                new LocalGitIndex(directory).withAccess(index -> {
-                    ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
+                LocalGitIndex owner = new LocalGitIndex(directory);
+                owner.withAccess(index -> {
+                    ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
                     byte[] rootBytes = commit(tree);
-                    ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, rootBytes);
+                    ObjectId root = PackTestData.store(storage, owner, GitObjectType.COMMIT, rootBytes);
                     byte[] tipBytes = commit(tree, root);
-                    ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, tipBytes);
+                    ObjectId tip = PackTestData.store(storage, owner, GitObjectType.COMMIT, tipBytes);
                     Path rootPath = directory.resolve("packs")
                             .resolve("pack-" + index.locations(root).getFirst().packId() + ".data");
                     FetchPlan commonOnly = plan(Set.of(), Set.of(root), Set.of(), OptionalInt.empty());
@@ -75,12 +76,13 @@ class FetchPackTest {
     void preservesShallowBoundaryAndDeepensThroughCommonCommits() throws Exception {
         {
             try (GitStorageApi storage = new InMemoryStorage()) {
-                new InMemoryIndex().withAccess(index -> {
-                    ObjectId tree = PackTestData.store(storage, index, GitObjectType.TREE, new byte[0]);
-                    ObjectId root = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree));
-                    ObjectId boundary = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, root));
-                    ObjectId common = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, boundary));
-                    ObjectId tip = PackTestData.store(storage, index, GitObjectType.COMMIT, commit(tree, common));
+                InMemoryIndex owner = new InMemoryIndex();
+                owner.withAccess(index -> {
+                    ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
+                    ObjectId root = PackTestData.store(storage, owner, GitObjectType.COMMIT, commit(tree));
+                    ObjectId boundary = PackTestData.store(storage, owner, GitObjectType.COMMIT, commit(tree, root));
+                    ObjectId common = PackTestData.store(storage, owner, GitObjectType.COMMIT, commit(tree, boundary));
+                    ObjectId tip = PackTestData.store(storage, owner, GitObjectType.COMMIT, commit(tree, common));
                     FetchPack ordinary = FetchPack.prepare(storage, index,
                             plan(Set.of(tip), Set.of(common), Set.of(boundary), OptionalInt.empty()));
                     assertThat(ordinary.objectCount()).isEqualTo(1);
@@ -149,11 +151,12 @@ class FetchPackTest {
     void writesPreparedEntriesInOrderWithoutReopeningTheirIndexes() throws Exception {
         {
             try (GitStorageApi storage = new LocalGitStorage(directory)) {
-                new LocalGitIndex(directory).withAccess(index -> {
+                LocalGitIndex owner = new LocalGitIndex(directory);
+                owner.withAccess(index -> {
                     byte[] first = {1, 2, 3};
                     byte[] second = {4, 5};
-                    ObjectId firstId = PackTestData.store(storage, index, GitObjectType.BLOB, first);
-                    ObjectId secondId = PackTestData.store(storage, index, GitObjectType.BLOB, second);
+                    ObjectId firstId = PackTestData.store(storage, owner, GitObjectType.BLOB, first);
+                    ObjectId secondId = PackTestData.store(storage, owner, GitObjectType.BLOB, second);
                     FetchPlan plan = new FetchPlan(new LinkedHashSet<>(List.of(secondId, firstId)), Map.of(),
                             Set.of(), Set.of(), OptionalInt.empty(), OptionalLong.empty(), Set.of(), Optional.empty(),
                             new GitCapabilities(), Set.of());
