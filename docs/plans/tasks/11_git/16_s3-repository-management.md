@@ -2,13 +2,13 @@
 
 - Owner: codex, session 01a0f177-8697-7993-a635-8992bcdf75cf,
   branch `codex/s3-management-01a0f177`,
-  worktree `/private/tmp/orion-s3-management-01a0f177`, resumed 2026-09-30 14:50 Europe/Amsterdam;
-  next: verify the restored task correction and return an updated reviewed commit.
-  Rebased onto `fa760bd0fe9652e082283a0be3017353a9ec6d57`; correction remains unstaged.
+  worktree `/private/tmp/orion-s3-management-01a0f177`, paused 2026-09-30 14:59 Europe/Amsterdam;
+  next: authorize integration of reviewed commit `d1f57b697c112e8a5d63abfe379ee4b32b18e620`,
+  based on `fa760bd0fe9652e082283a0be3017353a9ec6d57`. Task worktree is clean.
+  CONNECTION_USE correction and provider-lifecycle adaptation are verified;
+  schema generation, focused checks, real MinIO and final full make test passed.
   Same Git worktree moved outside the project tree to avoid recurring external writes.
-  Authorized restoration is complete; only the seven intended correction files differ.
-  External changes were preserved at `/tmp/s3-management-isolated-20260930`.
-  Own seven-file correction is preserved at `/tmp/s3-management-connection-use-own.patch`.
+  Authorized restoration is complete; backups remain under `/tmp/s3-management-isolated-20260930`.
   No UI/SSH implementation changes have been transferred to main yet.
 
 ## Required result
