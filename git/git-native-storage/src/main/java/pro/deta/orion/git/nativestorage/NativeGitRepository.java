@@ -2,6 +2,7 @@ package pro.deta.orion.git.nativestorage;
 
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitFileApi;
+import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
@@ -14,6 +15,7 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -21,6 +23,9 @@ import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
+import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -30,6 +35,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,6 +63,22 @@ public class NativeGitRepository implements AutoCloseable {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
         this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
+    }
+
+    public static NativeGitRepository createInMemory(RepositoryName name) {
+        return new NativeGitRepository(name.value(), new InMemoryStorage(),
+                new InMemoryIndex(), "refs/heads/main");
+    }
+
+    public static NativeGitRepository openLocal(RepositoryName name, Path directory, String defaultHead) {
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(defaultHead, "defaultHead");
+        try {
+            GitStorageApi storage = new LocalGitStorage(directory);
+            return new NativeGitRepository(name.value(), storage, new LocalGitIndex(directory), defaultHead);
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Cannot open repository " + name.value(), failure);
+        }
     }
 
     public GitStorageApi storage() {

@@ -1,7 +1,5 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
-import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
@@ -33,8 +31,6 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
         repositories.clear();
         if (failure != null) throw failure;
     }
-
-    private static final String DEFAULT_HEAD = "refs/heads/main";
 
     private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
 
@@ -69,9 +65,7 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
     public synchronized Result<NativeGitRepository> create(String repositoryName) {
         requireOpen();
         String name = requireName(repositoryName);
-        InMemoryStorage storage = new InMemoryStorage();
-        NativeGitRepository repository = new NativeGitRepository(
-                name, storage, new InMemoryIndex(), DEFAULT_HEAD);
+        NativeGitRepository repository = NativeGitRepository.createInMemory(RepositoryName.parse(name));
         NativeGitRepository previous = repositories.putIfAbsent(
                 name,
                 repository);
