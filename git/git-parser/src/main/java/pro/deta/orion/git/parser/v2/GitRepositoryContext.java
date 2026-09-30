@@ -43,7 +43,7 @@ public class GitRepositoryContext implements AutoCloseable {
     public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) throws IOException {
         this.storage = Objects.requireNonNull(storage, "storage");
         this.indexApi = Objects.requireNonNull(index, "index");
-        this.index = index.createAccess(Optional.of(PackId.create()));
+        this.index = index.createAccess();
     }
 
     public final GitStorageApi storage() {
@@ -66,17 +66,16 @@ public class GitRepositoryContext implements AutoCloseable {
     public void checkFetchAccess(NegotiationContext context, RefsSnapshot snapshot) throws IOException {
     }
 
-    public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
-            throws IOException {
+    public <T> T withPackAccess(GitIndexApi.Operation<T, IOException> operation) throws IOException {
+        if (indexApi == null) {
+            throw new IllegalStateException("Pack ingestion requires an index factory");
+        }
+        return indexApi.withAccess(Optional.of(PackId.create()), operation);
+    }
+
+    public List<RefUpdateResult> publish(List<RefUpdate> updates, boolean atomic) {
         if (indexApi == null) {
             throw new IllegalStateException("Ref publication requires an index factory");
-        }
-        if (pack.isPresent()) {
-            PackMetadata metadata = pack.orElseThrow();
-            if (!storage.exists(metadata.packId())) {
-                throw new IOException("Cannot publish missing pack: " + metadata.packId());
-            }
-            index.publishIndex(metadata);
         }
         return publishRefs(storage, indexApi, updates, atomic);
     }

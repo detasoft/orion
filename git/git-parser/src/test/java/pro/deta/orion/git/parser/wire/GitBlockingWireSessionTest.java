@@ -230,12 +230,16 @@ class GitBlockingWireSessionTest {
                 PackTestData.pack(PackTestData.blob(content)));
         ByteArrayOutputStream response = new ByteArrayOutputStream();
         session(request, response).serveSmartHttpPost(initial(GitProtocolVersion.V2, InitialRequestService.RECEIVE_PACK));
+        assertThat(servedAccess.packId()).isEmpty();
+        assertThat(factory.activeAccesses()).containsExactly(index);
         assertThat(index.snapshotRefs().refs()).containsEntry(MAIN, id);
         assertThat(response.toString(StandardCharsets.US_ASCII))
                 .isEqualTo("000eunpack ok\n0017ok refs/heads/main\n0000");
         response.reset();
         session(packets(id + " " + ZERO + " " + MAIN + "\0report-status", "FLUSH"), response)
                 .serveSmartHttpPost(initial(GitProtocolVersion.V0, InitialRequestService.RECEIVE_PACK));
+        assertThat(servedAccess.packId()).isEmpty();
+        assertThat(factory.activeAccesses()).containsExactly(index);
         assertThat(index.snapshotRefs().refs()).isEmpty();
         assertThat(response.toString(StandardCharsets.US_ASCII))
                 .isEqualTo("000eunpack ok\n0017ok refs/heads/main\n0000");
