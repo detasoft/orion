@@ -101,6 +101,9 @@
 
 ## Implementation rules
 
+- Do not add a new script to the repository without explicitly asking the user
+  and receiving approval. First check whether an existing Make goal or a simple
+  Makefile recipe can do the job without extra dependencies.
 - When creating new entities, always define their interfaces first to make the
   contract explicit. Present those interfaces separately from their implementations;
   add implementations in a subsequent step.
