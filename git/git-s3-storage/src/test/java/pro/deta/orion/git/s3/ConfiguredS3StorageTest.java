@@ -3,6 +3,14 @@ package pro.deta.orion.git.s3;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.config.ConfigurationSecrets;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.PackChecksum;
+import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.IndexedObject;
+import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -10,6 +18,9 @@ import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,6 +32,85 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(30)
 class ConfiguredS3StorageTest {
+    @Test
+    void retainsTheIndexOwnerThroughCredentialRotationAndSeparatesChangedLocations() throws Exception {
+        try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+            String endpoint = "http://127.0.0.1:" + wire.server.getAddress().getPort();
+            fixture.connection(true, "archive", endpoint, "us-east-1", "old-id", "old-key", null);
+            fixture.bind("repo", true, "archive", "s3://bucket/prefix");
+            NativeGitRepository first = fixture.provider.create("acme/dev/repo").valueOrFailure("create");
+            GitIndexAccess reader = first.index().createAccess();
+            PackId pack = PackId.create();
+            GitIndexAccess writer = first.index().createAccess(Optional.of(pack));
+            try (AutoCloseable completion = () -> { reader.discard(); writer.discard(); }) {
+                assertThat(reader.packs()).isEmpty();
+                IndexedObject object = new IndexedObject(pack, new ObjectId("a".repeat(40)),
+                        GitObjectType.BLOB, 1, 0, 4, Optional.empty());
+                writer.addObject(object);
+                fixture.connection(true, "archive", endpoint, "eu-west-1", "new-id", "new-key", "new-token");
+                fixture.bind("repo", true, "archive", "s3://bucket/prefix/");
+                NativeGitRepository next = fixture.provider.find("acme%2Fdev%2Frepo").valueOrFailure("find");
+                assertThat(next).isSameAs(first);
+                assertThat(next.index().withAccess(access -> access.packs()).isEmpty()).isTrue();
+                writer.publishIndex(new PackMetadata(pack, new PackChecksum("b".repeat(40)),
+                        pack.toString(), 1, 40));
+                assertThat(wire.authorizations.getLast()).contains("Credential=new-id/", "/eu-west-1/s3/");
+                assertThat(reader.locations(object.objectId())).containsExactly(object);
+                List<IndexedObject> locations = next.index().withAccess(
+                        access -> access.locations(object.objectId()));
+                assertThat(locations).containsExactly(object);
+                assertThat(wire.indexLists).hasValue(1);
+                assertThat(wire.indexGets).hasValue(0);
+                PackId laterPack = PackId.create();
+                GitIndexAccess laterWriter = first.index().createAccess(Optional.of(laterPack));
+                fixture.bind("repo", true, "archive", "s3://bucket/other");
+                NativeGitRepository other = fixture.provider.create("acme/dev/repo").valueOrFailure("other");
+                assertThat(other).isNotSameAs(first);
+                IndexedObject later = new IndexedObject(laterPack, new ObjectId("c".repeat(40)),
+                        GitObjectType.BLOB, 1, 0, 4, Optional.empty());
+                try (AutoCloseable laterCompletion = laterWriter::discard) {
+                    laterWriter.addObject(later);
+                    laterWriter.publishIndex(new PackMetadata(laterPack, new PackChecksum("d".repeat(40)),
+                            laterPack.toString(), 1, 40));
+                }
+                fixture.bind("repo", true, "archive", "s3://bucket/prefix");
+                assertThat(fixture.provider.find("acme/dev/repo").valueOrFailure("return to first"))
+                        .isSameAs(first);
+                first.index().withAccess(access -> {
+                    assertThat(access.locations(later.objectId())).containsExactly(later);
+                    return null;
+                });
+                assertThat(reader.locations(object.objectId())).containsExactly(object);
+                assertThat(other.index().withAccess(access -> access.packs()).isEmpty()).isTrue();
+                fixture.provider.close();
+                assertThatThrownBy(other.index()::createAccess).isInstanceOf(IOException.class);
+                assertThatThrownBy(first.index()::createAccess).isInstanceOf(IOException.class);
+            }
+        }
+    }
+
+    @Test
+    void removingABindingStopsRoutingAndReaddingItReusesTheOwner() throws Exception {
+        for (boolean listing : List.of(false, true)) {
+            try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
+                 S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+                String endpoint = "http://127.0.0.1:" + wire.server.getAddress().getPort();
+                fixture.connection(true, "archive", endpoint, "us-east-1", "id", "key", null);
+                fixture.bind("repo", true, "archive", "s3://bucket/prefix");
+                NativeGitRepository repository = fixture.provider.create("acme/dev/repo").valueOrFailure("create");
+                OrionDocument bound = fixture.current.get();
+                fixture.current.set(new OrionDocument(bound.system(), List.of()));
+                if (listing) assertThat(fixture.provider.repositoryNames()).isEmpty();
+                else assertThat(fixture.provider.exists("acme/dev/repo")).isFalse();
+                assertThat(fixture.provider.find("acme/dev/repo").isFailure()).isTrue();
+                fixture.current.set(bound);
+                assertThat(fixture.provider.find("acme/dev/repo").valueOrFailure("readd binding"))
+                        .isSameAs(repository);
+            }
+        }
+    }
+
     @Test
     void changedEndpointRegionAndEncryptedCredentialsApplyOnlyToSubsequentOperations() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);

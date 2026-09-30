@@ -59,7 +59,7 @@ class S3GitTransportIT {
             source.add().addFilepattern("file.txt").call();
             source.commit().setMessage("first").setAuthor("Tester", "test@example.com").call();
             try (S3NativeGitRepositoryProvider provider = provider(minio); Http server = new Http(provider)) {
-                provider.create("repo").valueOrFailure("create").close();
+                provider.create("repo").valueOrFailure("create");
                 push(source, server.url());
                 try (Git clone = Git.cloneRepository().setURI(server.url())
                         .setDirectory(directory.resolve("clone").toFile()).call()) {

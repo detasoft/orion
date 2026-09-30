@@ -16,6 +16,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -30,13 +31,19 @@ import java.util.function.Supplier;
 /** Routes XML-bound repositories through the application-owned shared S3 transport. */
 public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        for (S3NativeGitRepositoryProvider provider : providers.values()) provider.close();
+        providers.clear();
         bootstrap.close();
     }
 
     private final NativeGitRepositoryProvider bootstrap;
     private final S3Transport client;
-    private volatile RuntimeConfiguration runtime;
+    private RuntimeConfiguration runtime;
+    private final Map<RepositoryLocation, S3NativeGitRepositoryProvider> providers = new HashMap<>();
+    private boolean closed;
 
     public ConfiguredNativeGitRepositoryProvider(NativeGitRepositoryProvider bootstrap, S3Transport client) {
         this.bootstrap = Objects.requireNonNull(bootstrap, "bootstrap repository provider");
@@ -48,8 +55,11 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
         RuntimeConfiguration configured = new RuntimeConfiguration(Objects.requireNonNull(current),
                 Objects.requireNonNull(secrets), Objects.requireNonNull(bootstrapRepository));
         client.operation(() -> {
-            bindings(current.get(), bootstrapRepository);
-            runtime = configured;
+            synchronized (this) {
+                requireOpen();
+                bindings(current.get(), bootstrapRepository);
+                runtime = configured;
+            }
             return null;
         });
     }
@@ -57,16 +67,11 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
     @Override
     public List<String> repositoryNames() {
         return client.operation(() -> {
-            RuntimeConfiguration configured = runtime;
-            OrionDocument document = configured == null ? null : configured.current().get();
-            Map<String, Binding> bindings = document == null ? Map.of()
-                    : bindings(document, configured.bootstrapRepository());
+            Map<String, NativeGitRepositoryProvider> providers = configuredProviders();
             TreeSet<String> names = new TreeSet<>(bootstrap.repositoryNames());
-            for (Map.Entry<String, Binding> entry : bindings.entrySet()) {
+            for (Map.Entry<String, NativeGitRepositoryProvider> entry : providers.entrySet()) {
                 names.remove(entry.getKey());
-                if (provider(document, configured.secrets(), entry.getValue()).exists(entry.getKey())) {
-                    names.add(entry.getKey());
-                }
+                if (entry.getValue().exists(entry.getKey())) names.add(entry.getKey());
             }
             return List.copyOf(names);
         });
@@ -99,12 +104,28 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
 
     private <T> T withProvider(String repositoryName, Function<NativeGitRepositoryProvider, T> operation) {
         String name = RepositoryName.parse(repositoryName).value();
-        return client.operation(() -> {
-            RuntimeConfiguration configured = runtime;
-            OrionDocument document = configured == null ? null : configured.current().get();
-            Binding binding = document == null ? null : bindings(document, configured.bootstrapRepository()).get(name);
-            return operation.apply(binding == null ? bootstrap : provider(document, configured.secrets(), binding));
-        });
+        return client.operation(() -> operation.apply(provider(name)));
+    }
+
+    private synchronized NativeGitRepositoryProvider provider(String name) {
+        requireOpen();
+        RuntimeConfiguration configured = runtime;
+        OrionDocument document = configured == null ? null : configured.current().get();
+        Binding binding = document == null ? null : bindings(document, configured.bootstrapRepository()).get(name);
+        return provider(document, configured == null ? null : configured.secrets(), name, binding);
+    }
+
+    private synchronized Map<String, NativeGitRepositoryProvider> configuredProviders() {
+        requireOpen();
+        RuntimeConfiguration configured = runtime;
+        OrionDocument document = configured == null ? null : configured.current().get();
+        Map<String, Binding> bindings = document == null ? Map.of()
+                : bindings(document, configured.bootstrapRepository());
+        Map<String, NativeGitRepositoryProvider> result = new HashMap<>();
+        for (Map.Entry<String, Binding> entry : bindings.entrySet()) {
+            result.put(entry.getKey(), provider(document, configured.secrets(), entry.getKey(), entry.getValue()));
+        }
+        return result;
     }
 
     private static Map<String, Binding> bindings(OrionDocument document, Predicate<String> bootstrapRepository) {
@@ -131,8 +152,14 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
         return result;
     }
 
-    private S3NativeGitRepositoryProvider provider(OrionDocument document, ConfigurationSecrets secrets,
-            Binding binding) {
+    private void requireOpen() {
+        if (closed) throw new IllegalStateException("Configured repository provider is closed");
+    }
+
+    private NativeGitRepositoryProvider provider(OrionDocument document, ConfigurationSecrets secrets,
+            String name, Binding binding) {
+        requireOpen();
+        if (binding == null) return bootstrap;
         Connection.S3 definition = binding.connection();
         Optional<AwsCredentialsProvider> credentials = Optional.empty();
         if (definition.secretKey().isPresent()) {
@@ -145,16 +172,28 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
                     credentials = Optional.of(StaticCredentialsProvider.create(
                             AwsSessionCredentials.create(id, new String(key), new String(token))));
                 } else {
-                    credentials = Optional.of(StaticCredentialsProvider.create(AwsBasicCredentials.create(id, new String(key))));
+                    credentials = Optional.of(StaticCredentialsProvider.create(
+                            AwsBasicCredentials.create(id, new String(key))));
                 }
             } finally {
                 Arrays.fill(key, '\0');
                 Arrays.fill(token, '\0');
             }
         }
-        return client.repositories(binding.storage().location().toString(),
-                definition.endpoint().map(Object::toString).orElse(null), definition.region(),
+        String location = binding.storage().location().toString();
+        S3NativeGitRepositoryProvider.Location parsed = S3NativeGitRepositoryProvider.parseLocation(location);
+        String endpoint = definition.endpoint().map(Object::toString).orElse(null);
+        RepositoryLocation key = new RepositoryLocation(name, definition.endpoint(), parsed);
+        S3NativeGitRepositoryProvider provider = providers.get(key);
+        if (provider != null) {
+            provider.configure(client.overrides(endpoint, definition.region(),
+                    definition.pathStyleAccess(), credentials));
+            return provider;
+        }
+        provider = client.repositories(location, endpoint, definition.region(),
                 definition.pathStyleAccess(), credentials);
+        providers.put(key, provider);
+        return provider;
     }
 
     private static char[] resolve(OrionDocument document, ConfigurationSecrets secrets,
@@ -162,6 +201,9 @@ public final class ConfiguredNativeGitRepositoryProvider implements NativeGitRep
         return owner.isEmpty() ? secrets.resolveSystem(document, id)
                 : secrets.resolveOrganization(document, owner.orElseThrow(), id);
     }
+
+    private record RepositoryLocation(String name, Optional<URI> endpoint,
+            S3NativeGitRepositoryProvider.Location location) {}
 
     private record RuntimeConfiguration(Supplier<OrionDocument> current, ConfigurationSecrets secrets,
             Predicate<String> bootstrapRepository) {}

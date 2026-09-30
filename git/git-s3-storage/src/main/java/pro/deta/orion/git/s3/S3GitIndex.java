@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,16 +28,14 @@ import java.util.Set;
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
 /**
- * One index access. Immutable manifests are cached only for this access; listing on each published lookup
- * observes publication by other servers. One conditional refs object write atomically applies refs and HEAD.
+ * One index access borrowing the owner's shared published manifests.
+ * One conditional refs object write atomically applies refs and HEAD.
  */
 final class S3GitIndex implements GitIndexAccess {
     private final S3GitIndexApi owner;
     private final Optional<PackId> packId;
     private final Map<RefId, Optional<ObjectId>> originalRefs = new LinkedHashMap<>();
     private final Map<RefId, Optional<ObjectId>> changedRefs = new LinkedHashMap<>();
-    private final Map<PackId, S3GitIndexApi.Manifest> manifests = new HashMap<>();
-    private final Map<ObjectId, List<IndexedObject>> locations = new HashMap<>();
     private Head originalHead;
     private Head changedHead;
     private boolean closed;
@@ -66,7 +63,7 @@ final class S3GitIndex implements GitIndexAccess {
         owner.hashAlgorithm().requireLength(object.objectId().byteLength());
         object.delta().ifPresent(delta -> owner.hashAlgorithm().requireLength(delta.baseId().byteLength()));
         if (!owner.hasPending(object.packId())) {
-            Optional<S3GitIndexApi.Manifest> published = manifest(object.packId());
+            Optional<S3GitIndexApi.Manifest> published = owner.manifest(object.packId());
             if (published.isPresent()) {
                 if (published.orElseThrow().entries().contains(object)) return;
                 throw new IOException("Cannot change a published pack index");
@@ -81,7 +78,7 @@ final class S3GitIndex implements GitIndexAccess {
         Objects.requireNonNull(id, "packId");
         Optional<List<IndexedObject>> pending = owner.pending(id);
         if (pending.isPresent()) return pending.orElseThrow();
-        return manifest(id).map(S3GitIndexApi.Manifest::entries).orElse(List.of());
+        return owner.manifest(id).map(S3GitIndexApi.Manifest::entries).orElse(List.of());
     }
 
     @Override
@@ -92,31 +89,28 @@ final class S3GitIndex implements GitIndexAccess {
         Optional<IndexedObject> pending = owner.findPending(pack, id);
         if (pending.isPresent()) return pending;
         if (owner.hasPending(pack)) return Optional.empty();
-        manifest(pack);
-        for (IndexedObject object : locations.getOrDefault(id, List.of())) {
-            if (object.packId().equals(pack)) return Optional.of(object);
-        }
-        return Optional.empty();
+        return owner.findObject(pack, id);
     }
 
     @Override
     public List<IndexedObject> locations(ObjectId id) throws IOException {
         Objects.requireNonNull(id, "objectId");
-        published();
-        return List.copyOf(locations.getOrDefault(id, List.of()));
+        requireOpen();
+        return owner.locations(id);
     }
 
     @Override
     public Optional<PackMetadata> findPack(PackId id) throws IOException {
         requireOpen();
-        return manifest(Objects.requireNonNull(id, "packId")).map(S3GitIndexApi.Manifest::pack);
+        return owner.manifest(Objects.requireNonNull(id, "packId")).map(S3GitIndexApi.Manifest::pack);
     }
 
     @Override
     public List<PackMetadata> packs(PackChecksum checksum) throws IOException {
+        requireOpen();
         Objects.requireNonNull(checksum, "checksum");
         List<PackMetadata> packs = new ArrayList<>();
-        for (S3GitIndexApi.Manifest manifest : published()) {
+        for (S3GitIndexApi.Manifest manifest : owner.published()) {
             if (manifest.pack().packChecksum().equals(checksum)) packs.add(manifest.pack());
         }
         return List.copyOf(packs);
@@ -124,40 +118,10 @@ final class S3GitIndex implements GitIndexAccess {
 
     @Override
     public List<PackMetadata> packs() throws IOException {
-        List<PackMetadata> packs = new ArrayList<>();
-        for (S3GitIndexApi.Manifest manifest : published()) packs.add(manifest.pack());
-        return List.copyOf(packs);
-    }
-
-    private Optional<S3GitIndexApi.Manifest> manifest(PackId id) throws IOException {
-        S3GitIndexApi.Manifest cached = manifests.get(id);
-        if (cached != null) return Optional.of(cached);
-        Optional<S3GitIndexApi.Manifest> loaded = owner.manifest(id);
-        loaded.ifPresent(this::cache);
-        return loaded;
-    }
-
-    private void cache(S3GitIndexApi.Manifest manifest) {
-        if (manifests.putIfAbsent(manifest.pack().packId(), manifest) != null) return;
-        for (IndexedObject object : manifest.entries()) {
-            locations.computeIfAbsent(object.objectId(), ignored -> new ArrayList<>()).add(object);
-        }
-    }
-
-    private List<S3GitIndexApi.Manifest> published() throws IOException {
         requireOpen();
-        List<S3GitIndexApi.Manifest> result = new ArrayList<>();
-        for (String key : owner.objects.list("indexes/")) {
-            if (!key.endsWith(".index")) continue;
-            PackId id;
-            try {
-                id = new PackId(key.substring("indexes/".length(), key.length() - ".index".length()));
-            } catch (IllegalArgumentException failure) {
-                throw new IOException("Invalid S3 pack index key", failure);
-            }
-            result.add(manifest(id).orElseThrow(() -> new IOException("Missing published S3 pack index")));
-        }
-        return List.copyOf(result);
+        List<PackMetadata> packs = new ArrayList<>();
+        for (S3GitIndexApi.Manifest manifest : owner.published()) packs.add(manifest.pack());
+        return List.copyOf(packs);
     }
 
     @Override
@@ -165,24 +129,7 @@ final class S3GitIndex implements GitIndexAccess {
         requireOpen();
         requirePack(pack.packId());
         owner.hashAlgorithm().requireLength(pack.packChecksum().byteLength());
-        Optional<S3GitIndexApi.Manifest> previous = manifest(pack.packId());
-        if (previous.isPresent()) return samePack(pack, previous.orElseThrow());
-        List<IndexedObject> entries = objects(pack.packId());
-        pack.validateObjects(entries);
-        S3GitIndexApi.Manifest next = new S3GitIndexApi.Manifest(pack, entries);
-        if (!owner.objects.put(S3GitIndexApi.key(pack.packId()), S3GitIndexApi.encode(next), null)) {
-            S3GitIndexApi.Manifest actual = owner.manifest(pack.packId())
-                    .orElseThrow(() -> new IOException("Concurrent S3 pack publication failed"));
-            if (!actual.equals(next)) throw new IOException("Cannot change published pack metadata or entries");
-        }
-        cache(next);
-        owner.published(pack.packId());
-        return pack;
-    }
-
-    private PackMetadata samePack(PackMetadata expected, S3GitIndexApi.Manifest actual) throws IOException {
-        if (!expected.equals(actual.pack())) throw new IOException("Cannot change published pack metadata");
-        return actual.pack();
+        return owner.publish(pack);
     }
 
     @Override
@@ -298,7 +245,5 @@ final class S3GitIndex implements GitIndexAccess {
         owner.release(this);
         changedRefs.clear();
         changedHead = null;
-        manifests.clear();
-        locations.clear();
     }
 }

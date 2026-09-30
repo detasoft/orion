@@ -34,11 +34,15 @@ import java.util.TreeMap;
 
 /**
  * S3 index owner. Pending pack entries are shared across accesses until immutable manifest publication.
+ * Published manifests load once per owner; successful local publication updates every access immediately.
  * Only published entries survive reopening the owner; bytes, manifests and refs have independent durability.
  */
 final class S3GitIndexApi implements GitIndexApi {
     final S3RepositoryObjects objects;
     private final Map<PackId, Pending> pending = new HashMap<>();
+    private Map<PackId, Manifest> manifests;
+    private final Map<ObjectId, List<IndexedObject>> locations = new HashMap<>();
+    private final Object lifecycle = new Object();
     private boolean closed;
     private final Set<GitIndexAccess> accesses = new HashSet<>();
 
@@ -79,25 +83,29 @@ final class S3GitIndexApi implements GitIndexApi {
 
     private GitIndexAccess open(Set<RefId> names, List<RefUpdate> updates, Optional<PackId> packId)
             throws IOException {
-        synchronized (this) {
+        synchronized (lifecycle) {
             if (closed) throw new ClosedChannelException();
         }
         S3GitIndex access = new S3GitIndex(this, names, updates, Objects.requireNonNull(packId, "packId"));
-        synchronized (this) {
+        synchronized (lifecycle) {
             if (closed) throw new ClosedChannelException();
             accesses.add(access);
             return access;
         }
     }
 
-    synchronized void release(GitIndexAccess access) {
-        accesses.remove(access);
-        if (closed && accesses.isEmpty()) pending.clear();
+    void release(GitIndexAccess access) {
+        synchronized (lifecycle) {
+            accesses.remove(access);
+            if (closed && accesses.isEmpty()) clear();
+        }
     }
 
     @Override
-    public synchronized Set<GitIndexAccess> activeAccesses() {
-        return Set.copyOf(accesses);
+    public Set<GitIndexAccess> activeAccesses() {
+        synchronized (lifecycle) {
+            return Set.copyOf(accesses);
+        }
     }
 
     static void validate(RefUpdate update) {
@@ -107,9 +115,11 @@ final class S3GitIndexApi implements GitIndexApi {
     }
 
     @Override
-    public synchronized void close() {
-        closed = true;
-        if (accesses.isEmpty()) pending.clear();
+    public void close() {
+        synchronized (lifecycle) {
+            closed = true;
+            if (accesses.isEmpty()) clear();
+        }
     }
 
     synchronized boolean hasPending(PackId id) { return pending.containsKey(id); }
@@ -134,7 +144,80 @@ final class S3GitIndexApi implements GitIndexApi {
                 (left, right) -> left.packOffset() <= right.packOffset() ? left : right);
     }
 
-    synchronized void published(PackId id) { pending.remove(id); }
+    private synchronized void clear() {
+        pending.clear();
+        manifests = null;
+        locations.clear();
+    }
+
+    synchronized Optional<Manifest> manifest(PackId id) throws IOException {
+        load();
+        return Optional.ofNullable(manifests.get(id));
+    }
+
+    synchronized List<Manifest> published() throws IOException {
+        load();
+        return List.copyOf(manifests.values());
+    }
+
+    synchronized List<IndexedObject> locations(ObjectId id) throws IOException {
+        load();
+        return List.copyOf(locations.getOrDefault(id, List.of()));
+    }
+
+    synchronized Optional<IndexedObject> findObject(PackId pack, ObjectId id) throws IOException {
+        load();
+        for (IndexedObject object : locations.getOrDefault(id, List.of())) {
+            if (object.packId().equals(pack)) return Optional.of(object);
+        }
+        return Optional.empty();
+    }
+
+    private void load() throws IOException {
+        if (manifests != null) return;
+        Map<PackId, Manifest> loaded = new LinkedHashMap<>();
+        for (String key : objects.list("indexes/")) {
+            if (!key.endsWith(".index")) continue;
+            PackId id;
+            try {
+                id = new PackId(key.substring("indexes/".length(), key.length() - ".index".length()));
+            } catch (IllegalArgumentException failure) {
+                throw new IOException("Invalid S3 pack index key", failure);
+            }
+            loaded.put(id, readManifest(id)
+                    .orElseThrow(() -> new IOException("Missing published S3 pack index")));
+        }
+        for (Manifest manifest : loaded.values()) cacheLocations(manifest);
+        manifests = loaded;
+    }
+
+    private void cacheLocations(Manifest manifest) {
+        for (IndexedObject object : manifest.entries()) {
+            locations.computeIfAbsent(object.objectId(), ignored -> new ArrayList<>()).add(object);
+        }
+    }
+
+    synchronized PackMetadata publish(PackMetadata pack) throws IOException {
+        Optional<Manifest> previous = manifest(pack.packId());
+        if (previous.isPresent()) {
+            if (!pack.equals(previous.orElseThrow().pack())) {
+                throw new IOException("Cannot change published pack metadata");
+            }
+            return previous.orElseThrow().pack();
+        }
+        List<IndexedObject> entries = pending(pack.packId()).orElse(List.of());
+        pack.validateObjects(entries);
+        Manifest next = new Manifest(pack, entries);
+        if (!objects.put(key(pack.packId()), encode(next), null)) {
+            Manifest actual = readManifest(pack.packId())
+                    .orElseThrow(() -> new IOException("Concurrent S3 pack publication failed"));
+            if (!actual.equals(next)) throw new IOException("Cannot change published pack metadata or entries");
+        }
+        manifests.put(pack.packId(), next);
+        cacheLocations(next);
+        pending.remove(pack.packId());
+        return pack;
+    }
 
     private static final class Pending {
         private final NavigableMap<Long, IndexedObject> entries = new TreeMap<>();
@@ -144,7 +227,7 @@ final class S3GitIndexApi implements GitIndexApi {
     record Manifest(PackMetadata pack, List<IndexedObject> entries) {}
     record Refs(RefsSnapshot snapshot, String etag) {}
 
-    Optional<Manifest> manifest(PackId id) throws IOException {
+    private Optional<Manifest> readManifest(PackId id) throws IOException {
         return objects.read(key(id), (stream, length, etag) -> {
             try {
                 DataInputStream input = new DataInputStream(stream);

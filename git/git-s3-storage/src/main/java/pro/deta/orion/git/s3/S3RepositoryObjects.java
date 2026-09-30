@@ -15,10 +15,13 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /** Repository request binding borrowing the application's transport and its per-request configuration. */
-record S3RepositoryObjects(S3Transport transport, AwsRequestOverrideConfiguration overrides,
+record S3RepositoryObjects(S3Transport transport, Supplier<AwsRequestOverrideConfiguration> requestConfiguration,
                            String bucket, String prefix) {
+    AwsRequestOverrideConfiguration overrides() { return requestConfiguration.get(); }
+
     @FunctionalInterface
     interface Reader<T> {
         T read(InputStream input, long length, String etag) throws IOException;
@@ -48,7 +51,7 @@ record S3RepositoryObjects(S3Transport transport, AwsRequestOverrideConfiguratio
     <T> Optional<T> read(String key, Reader<T> reader) throws IOException {
         return operation(() -> {
             try (ResponseInputStream<GetObjectResponse> input = transport.client().getObject(request -> request
-                    .overrideConfiguration(overrides).bucket(bucket).key(prefix + key))) {
+                    .overrideConfiguration(overrides()).bucket(bucket).key(prefix + key))) {
                 boolean consumed = false;
                 try {
                     T value = reader.read(input, input.response().contentLength(), input.response().eTag());
@@ -67,7 +70,7 @@ record S3RepositoryObjects(S3Transport transport, AwsRequestOverrideConfiguratio
     boolean put(String key, byte[] bytes, String expectedEtag) throws IOException {
         return operation(() -> {
             try {
-                transport.client().putObject(request -> request.overrideConfiguration(overrides).bucket(bucket)
+                transport.client().putObject(request -> request.overrideConfiguration(overrides()).bucket(bucket)
                         .key(prefix + key).ifMatch(expectedEtag).ifNoneMatch(expectedEtag == null ? "*" : null),
                         RequestBody.fromBytes(bytes));
                 return true;
@@ -82,7 +85,7 @@ record S3RepositoryObjects(S3Transport transport, AwsRequestOverrideConfiguratio
         return operation(() -> {
             List<String> keys = new ArrayList<>();
             for (ListObjectsV2Response page : transport.client().listObjectsV2Paginator(request -> request
-                    .overrideConfiguration(overrides).bucket(bucket).prefix(prefix + keyPrefix))) {
+                    .overrideConfiguration(overrides()).bucket(bucket).prefix(prefix + keyPrefix))) {
                 for (S3Object object : page.contents()) keys.add(object.key().substring(prefix.length()));
             }
             return List.copyOf(keys);

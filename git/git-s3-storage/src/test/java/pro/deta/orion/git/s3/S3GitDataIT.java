@@ -127,12 +127,11 @@ class S3GitDataIT {
     }
 
     @Test
-    void existingAccessSeesOtherProvidersPublishAnotherLocationForTheSameObject() throws Exception {
+    void existingAccessSeesPublicationThroughAnotherHandleOfTheSameProvider() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-publication-" + UUID.randomUUID());
              S3NativeGitRepositoryProvider first = provider(server);
-             S3NativeGitRepositoryProvider second = provider(server);
              NativeGitRepository writer = first.create("repo").valueOrFailure("create");
-             NativeGitRepository reader = second.find("repo").valueOrFailure("open")) {
+             NativeGitRepository reader = first.find("repo").valueOrFailure("open")) {
             reader.index().withAccess(access -> {
                 assertThat(access.packs()).isEmpty();
                 ObjectId id = writer.writeObject(GitObjectType.BLOB, new byte[]{7});

@@ -99,7 +99,13 @@ class S3GitStorageTest {
                     return null;
                 });
                 wire.contents.put("/bucket/repo/indexes/" + id + ".index", new byte[]{1, 2, 3, 4});
-                assertThatThrownBy(() -> reopened.withAccess(access -> access.packs()))
+                reopened.withAccess(access -> {
+                    assertThat(access.packs()).containsExactly(pack);
+                    return null;
+                });
+            }
+            try (S3GitIndexApi corrupted = new S3GitIndexApi(objects)) {
+                assertThatThrownBy(() -> corrupted.withAccess(access -> access.packs()))
                         .isInstanceOf(IOException.class);
             }
         }

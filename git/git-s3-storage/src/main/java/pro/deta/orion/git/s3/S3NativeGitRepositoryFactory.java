@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 
-/** Opens repositories borrowing the shared S3 transport; factory metadata calls are guarded by its caller. */
+/** Opens repository owners borrowing the shared S3 transport and current request settings. */
 final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
     private static final String METADATA_FILE = "orion-native-repository.properties";
     private static final String DEFAULT_HEAD = "refs/heads/main";
@@ -32,13 +32,17 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
     private final String bucket;
     private final String prefix;
     private final S3Transport transport;
-    private final AwsRequestOverrideConfiguration overrides;
+    private volatile AwsRequestOverrideConfiguration overrides;
 
     S3NativeGitRepositoryFactory(String bucket, String prefix, S3Transport transport,
             AwsRequestOverrideConfiguration overrides) {
         this.bucket = Objects.requireNonNull(bucket, "bucket");
         this.prefix = Objects.requireNonNull(prefix, "prefix");
         this.transport = Objects.requireNonNull(transport, "transport");
+        this.overrides = Objects.requireNonNull(overrides, "request configuration");
+    }
+
+    void configure(AwsRequestOverrideConfiguration overrides) {
         this.overrides = Objects.requireNonNull(overrides, "request configuration");
     }
 
@@ -156,7 +160,7 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
 
     private NativeGitRepository repository(String name) {
         String metadataKey = key(name);
-        S3RepositoryObjects objects = new S3RepositoryObjects(transport, overrides, bucket,
+        S3RepositoryObjects objects = new S3RepositoryObjects(transport, () -> overrides, bucket,
                 metadataKey.substring(0, metadataKey.length() - METADATA_FILE.length()));
         return new NativeGitRepository(name, new S3GitStorageApi(objects), new S3GitIndexApi(objects), DEFAULT_HEAD);
     }

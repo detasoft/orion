@@ -15,6 +15,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,12 +25,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * S3 owns repository metadata; each lookup reads it afresh. Standalone providers own their connection;
  * shared providers borrow their connection and closing them does not close it. Repository handles own no S3
- * resources. Pack bytes, index manifests and refs are persisted independently in S3.
+ * resources; this provider retains and closes their index/storage owners. Pack bytes, index manifests and refs
+ * are persisted independently in S3.
  */
 public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     private final S3NativeGitRepositoryFactory factory;
     private final S3Transport owner;
     private final boolean ownsConnection;
+    private final Map<String, NativeGitRepository> repositories = new HashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean();
 
     S3NativeGitRepositoryProvider(String location, S3Transport owner,
@@ -55,13 +58,13 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
 
     private record Standalone(S3Transport owner, AwsRequestOverrideConfiguration overrides) {}
 
-    private record Location(String bucket, String prefix) {}
+    record Location(String bucket, String prefix) {}
 
     public static void validateLocation(String location) {
         parseLocation(location);
     }
 
-    private static Location parseLocation(String location) {
+    static Location parseLocation(String location) {
         URI uri = uri(location, "storage location");
         String host = uri.getHost();
         if (!"s3".equalsIgnoreCase(uri.getScheme()) || host == null
@@ -112,6 +115,11 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
         }
     }
 
+    void configure(AwsRequestOverrideConfiguration overrides) {
+        requireOpen();
+        factory.configure(overrides);
+    }
+
     @Override
     public List<String> repositoryNames() {
         return owner.operation(() -> {
@@ -132,7 +140,7 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
     public Result<NativeGitRepository> find(String repositoryName) {
         return owner.operation(() -> {
             requireOpen();
-            return factory.open(RepositoryName.parse(repositoryName));
+            return retain(factory.open(RepositoryName.parse(repositoryName)));
         });
     }
 
@@ -140,8 +148,24 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
     public Result<NativeGitRepository> create(String repositoryName) {
         return owner.operation(() -> {
             requireOpen();
-            return factory.create(RepositoryName.parse(repositoryName));
+            return retain(factory.create(RepositoryName.parse(repositoryName)));
         });
+    }
+
+    private synchronized Result<NativeGitRepository> retain(Result<NativeGitRepository> result) {
+        if (result instanceof Result.Success<NativeGitRepository> success) {
+            NativeGitRepository repository = success.value();
+            if (closed.get()) {
+                repository.close();
+                throw new IllegalStateException("S3 repository provider is closed");
+            }
+            NativeGitRepository previous = repositories.putIfAbsent(repository.name(), repository);
+            if (previous != null) {
+                repository.close();
+                return new Result.Success<>(previous);
+            }
+        }
+        return result;
     }
 
     private void requireOpen() {
@@ -152,7 +176,16 @@ public final class S3NativeGitRepositoryProvider implements NativeGitRepositoryP
 
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true) && ownsConnection) owner.close();
+        if (!closed.compareAndSet(false, true)) return;
+        try {
+            synchronized (this) {
+                for (NativeGitRepository repository : repositories.values()) repository.close();
+                repositories.clear();
+            }
+            factory.close();
+        } finally {
+            if (ownsConnection) owner.close();
+        }
     }
 
     private static URI uri(String value, String label) {

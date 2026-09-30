@@ -201,7 +201,7 @@ Creation uses S3 `If-None-Match: *`; the server must support conditional writes.
 A duplicate reports `FILE_ALREADY_EXISTS` without replacing any metadata. Other
 service failures, including a missing bucket or denied access, remain failures;
 only `NoSuchKey` means an absent repository. Independent instances reread S3
-without a local authoritative cache. Empty repositories use an unborn `refs/heads/main` HEAD.
+repository metadata on every lookup. Empty repositories use an unborn `refs/heads/main` HEAD.
 
 Under the same repository prefix, `packs/<PackId>.data` holds internal compressed
 pack bytes and `indexes/<PackId>.index` holds one immutable, versioned manifest.
@@ -222,11 +222,25 @@ Incomplete index entries are shared across accesses of one index owner but are l
 when that owner is reopened; interrupted pushes can be retried. Published bytes and
 manifests require no local state after restart.
 
-Each index access caches immutable manifests and their derived object locations.
-Published lookups refresh the paginated manifest list so other servers' publications
-are visible. This first implementation trades one LIST per lookup and index memory
-proportional to the repository's published objects for a simple publication model;
-it does not write a repository-wide index or a remote object record per added object.
+One server retains one index owner per repository. Its first published lookup loads
+all immutable manifests with a paginated LIST and GETs; later lookups use the shared
+in-memory manifests and object locations. Successful index publication updates this
+cache before returning, including for accesses opened earlier. Failed initial loads
+leave no partial cache and may be retried. Recreating the owner reloads durable S3
+state; publications from independent servers or providers are not refreshed live.
+Memory is proportional to the repository's published objects. No repository-wide
+index or remote object record is written per added object.
+
+Configured repositories retain their owner across credentials, region and addressing
+changes at the same endpoint and normalized location. Each provider operation still
+resolves current XML credentials, and subsequent S3 requests from existing accesses
+use the updated request settings. Endpoint/location changes select a separate owner;
+returning to a previously used location reuses its owner, including publications by
+accesses that were still active there. Removing a binding stops routing to its S3
+owner. Opened physical repositories stay owned until the configured provider closes,
+so their existing accesses may finish. Closing a provider prevents new accesses and
+releases its cache after active accesses finish; a standalone provider also closes
+its transport.
 
 SDK transport limits are 5 seconds for connection/acquisition, 10 seconds for
 socket I/O, 15 seconds per attempt and 30 seconds per API call (including retries).

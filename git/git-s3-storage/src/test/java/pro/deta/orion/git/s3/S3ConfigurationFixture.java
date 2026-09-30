@@ -111,6 +111,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
     @Override
     public void close() {
         try {
+            provider.close();
             transport.close();
         } finally {
             material.close();
