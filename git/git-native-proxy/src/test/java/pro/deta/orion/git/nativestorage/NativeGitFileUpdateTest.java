@@ -101,27 +101,27 @@ class NativeGitFileUpdateTest {
 
     @Test
     void fileSavePublishesAReadablePack() throws Exception {
-        NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
-                .create("demo").valueOrFailure("repository");
-
-        repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
-            fileAccess.write("config.txt", bytes("first"));
-            fileAccess.apply();
-            return null;
-        });
-        repository.index().withAccess(access2 -> {
-            assertThat(access2.packs()).hasSize(1);
-            PackMetadata metadata = access2.packs().getFirst();
-            ByteArrayOutputStream exported = new ByteArrayOutputStream();
-            repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
-            assertThat(Arrays.copyOf(exported.toByteArray(), 4))
-                    .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
-            NativeGitRepository reopened = new FileNativeGitRepositoryProvider(directory)
-                    .find("demo").valueOrFailure("repository");
-            assertThat(reopened.files().readBytes("main", "config.txt"))
-                    .isEqualTo(bytes("first"));
-            return null;
-        });
+        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+            NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
+            repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
+                fileAccess.write("config.txt", bytes("first"));
+                fileAccess.apply();
+                return null;
+            });
+            repository.index().withAccess(access -> {
+                assertThat(access.packs()).hasSize(1);
+                PackMetadata metadata = access.packs().getFirst();
+                ByteArrayOutputStream exported = new ByteArrayOutputStream();
+                repository.writePack(metadata, new OutputStreamBufferedByteOutput(exported));
+                assertThat(Arrays.copyOf(exported.toByteArray(), 4))
+                        .isEqualTo("PACK".getBytes(StandardCharsets.US_ASCII));
+                return null;
+            });
+        }
+        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+            NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
+            assertThat(reopened.files().readBytes("main", "config.txt")).isEqualTo(bytes("first"));
+        }
     }
 
     @Test
