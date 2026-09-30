@@ -33,6 +33,12 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
                 client.discover(location.remoteUri(), OPTIONS), "upstream discovery");
         GitRemoteAdvertisement.Ref remoteRef = findRef(advertisement, location.refName());
         String oldId = repository.refs().getOrDefault(location.refName(), NULL_ID);
+        if (remoteRef == null) {
+            if (NULL_ID.equals(oldId)) {
+                return;
+            }
+            throw new BootstrapGitProxyException("required ref lookup");
+        }
         if (oldId.equals(remoteRef.objectId())) {
             return;
         }
@@ -71,7 +77,7 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
                 return candidate;
             }
         }
-        throw new BootstrapGitProxyException("required ref lookup");
+        return null;
     }
 
     private static void fetchPack(

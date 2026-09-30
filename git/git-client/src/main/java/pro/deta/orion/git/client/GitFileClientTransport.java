@@ -12,9 +12,56 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Native Git client transport for a local repository through Git's upload-pack process.
+ * Local Git repository initialization and protocol transport through Git processes.
  */
 public final class GitFileClientTransport implements GitClientTransport {
+    public static void openOrInitialize(Path directory, boolean createIfMissing) throws IOException {
+        Path repository = directory.toAbsolutePath().normalize();
+        if (Files.exists(repository.resolve(".git"))) {
+            runGit("-C", repository.toString(), "rev-parse", "--git-dir");
+            return;
+        }
+        if (Files.isRegularFile(repository.resolve("HEAD"))) {
+            runGit("--git-dir=" + repository, "rev-parse", "--is-bare-repository");
+            return;
+        }
+        if (!createIfMissing) {
+            throw new IOException("Local Git repository does not exist");
+        }
+        if (Files.exists(repository)) {
+            try (var entries = Files.newDirectoryStream(repository)) {
+                if (entries.iterator().hasNext()) {
+                    throw new IOException("Cannot initialize Git in a nonempty configuration directory");
+                }
+            }
+        }
+        runGit("init", "--bare", "--quiet", "--initial-branch=main", repository.toString());
+    }
+
+    private static void runGit(String... arguments) throws IOException {
+        java.util.List<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.addAll(java.util.List.of(arguments));
+        Process process = new ProcessBuilder(command)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                throw new IOException("Local Git repository initialization timed out");
+            }
+            if (process.exitValue() != 0) {
+                throw new IOException("Cannot open or initialize local Git repository");
+            }
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Local Git repository initialization interrupted", failure);
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
     @Override
     public GitClientTransportSession open(
             GitClientService service,

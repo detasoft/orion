@@ -5,7 +5,6 @@ import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
-import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
@@ -113,16 +112,11 @@ public final class BootstrapContext implements AutoCloseable {
             ProxyAwareNativeGitRepositoryProvider provider =
                     ProxyAwareNativeGitRepositoryProvider.bootstrap(backend, environment);
             BootstrapConfigurationSourceConfig configuredConfiguration =
-                    configuration.getBootstrap().getAccessControl();
+                    repositoryConfiguration(configuration, environment);
             ResolvedBootstrapSource configurationSource = provider.resolveProvisional(
                     BootstrapRepositorySources.CONFIGURATION,
                     configuredConfiguration,
                     configuredConfiguration.isCreateDefaultIfMissing());
-            configurationSource = validateDirectConfiguration(
-                    configuration,
-                    environment,
-                    configuredConfiguration,
-                    configurationSource);
 
             KeyMaterialConfig configuredMaterial = configuration.getBootstrap().getKeyMaterial();
             ResolvedBootstrapSource materialSource = provider.resolveProvisional(
@@ -330,41 +324,27 @@ public final class BootstrapContext implements AutoCloseable {
         keyMaterial.close();
     }
 
-    private static ResolvedBootstrapSource validateDirectConfiguration(
-            OrionConfiguration configuration,
-            Map<String, String> environment,
-            BootstrapConfigurationSourceConfig configured,
-            ResolvedBootstrapSource resolved) {
-        if (resolved.repositoryName().isPresent()) {
-            return resolved;
+    private static BootstrapConfigurationSourceConfig repositoryConfiguration(
+            OrionConfiguration configuration, Map<String, String> environment) throws IOException {
+        BootstrapConfigurationSourceConfig configured = configuration.getBootstrap().getAccessControl();
+        ResourceLocation location = ResourceLocation.parse(configured.getLocation(), "ACL repository");
+        if (!(location.scheme() instanceof ResourceScheme.File)
+                && !(location.scheme() instanceof ResourceScheme.Empty)) {
+            return configured;
         }
-        Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
-        Path root = directFileRoot(configured.getLocation(), baseDirectory, "Configuration location");
-        BootstrapConfigurationSourceConfig local = new BootstrapConfigurationSourceConfig();
-        local.setLocation(root.toUri().toString());
-        local.setPaths(resolved.paths());
-        Result<AccessControlSnapshot> loaded = new LocalAccessControlStorage(local).load();
-        if (loaded instanceof Result.Failure<AccessControlSnapshot> failure) {
-            if (failure.code() == Result.FailureCode.NOT_FOUND && configured.isCreateDefaultIfMissing()
-                    && (failure.message() == null || failure.message().equals(local.primaryPath()))) {
-                return resolvedDirectSource(resolved, root);
-            }
-            throw new IllegalStateException(FAILURE_MESSAGE);
+        if (location.uri().getRawAuthority() != null || location.uri().getRawQuery() != null
+                || location.uri().getRawFragment() != null) {
+            throw new IllegalArgumentException("ACL file location must contain only a local repository path");
         }
-        return resolvedDirectSource(resolved, root);
-    }
-
-    private static ResolvedBootstrapSource resolvedDirectSource(
-            ResolvedBootstrapSource resolved,
-            Path root) {
-        return new ResolvedBootstrapSource(
-                resolved.sourceId(),
-                root.toUri().toString(),
-                resolved.repositoryName(),
-                resolved.refName(),
-                resolved.paths(),
-                resolved.revision(),
-                resolved.createIfMissing());
+        Path directory = directFileRoot(configured.getLocation(),
+                ConfigurationContext.baseDirectory(configuration, environment), "ACL repository");
+        BootstrapConfigurationSourceConfig source = new BootstrapConfigurationSourceConfig();
+        source.setLocation(directory.toUri().toString());
+        source.setRef(configured.selectedRef());
+        source.setPaths(configured.selectedPaths());
+        source.setAuth(configured.getAuth());
+        source.setCreateDefaultIfMissing(configured.isCreateDefaultIfMissing());
+        return source;
     }
 
     private static OrionKeyMaterial openKeyMaterial(

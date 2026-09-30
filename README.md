@@ -90,26 +90,22 @@ The protected `material.p12` key-material store is created in the local
 `ORION_KEY_MATERIAL_PASSWORD`. SSH commands use the client's normal SSH
 configuration and agent, so the administrator chooses which key to use.
 
-For filesystem-backed ACL configuration, Orion publishes the complete configured file set
-as one generation. `.orion-acl-current` names the active `.orion-acl-generation-<UUID>`
-directory beneath the configured root. Initial files at the configured relative paths
-are read until the first changed save; after publication, only the selected generation
-is authoritative. Bootstrap validation uses the same snapshot reader.
+ACL configuration is always versioned in a Git repository. `local:orion` selects
+an internal Orion repository. A `file:/absolute/path/acl.git` location or a plain
+filesystem path selects an external local Git repository through the same Git
+file API and fetch/push boundary used for other external repositories. Relative
+paths resolve against the configured bootstrap base directory.
 
-Use Orion's ACL operations to update the set atomically. For offline manual edits, stop
-Orion and edit the files inside the directory named by `.orion-acl-current`; editing the
-initial files after publication has no effect. Back up the pointer and its complete
-selected directory together while Orion is stopped. Do not delete the pointer or use
-the reserved `.orion-*` names for configured documents.
-
-A save prepares and flushes every document before atomically replacing the pointer.
-Readers hold the shared configuration lock while loading the entire set. Failed saves
-can leave the old or the complete new generation, never a mixture; a failure after the
-pointer replacement requires reloading before retrying. File permissions and unchanged
-file modification times are preserved. Obsolete and interrupted generations are cleaned
-under the exclusive lock. Directory flushes are performed on POSIX filesystems; this
-is not a claim of power-loss durability on other providers. Atomic rename support is
-required; Orion does not fall back to a sequence of document replacements.
+When `createDefaultIfMissing` is enabled, a missing or empty directory is initialized
+as a bare Git repository. Existing repositories retain their history. A nonempty
+ordinary directory is rejected rather than importing or overwriting its files.
+The configured `ref` and `paths` select the ACL revision and documents; saves create
+commits and atomically update the ref, with revision checks for concurrent changes.
+Prefer bare repositories for writable ACL sources; Git's normal restrictions on
+pushing to a checked-out branch still apply. Ordinary ACL files and the former
+`.orion-acl-current` generation layout are no longer configuration sources. Existing
+file-based installations must commit their desired ACL documents into a Git
+repository before switching to this configuration.
 
 On first startup Orion creates a default ACL in the `orion` repository and
 prints the generated `root` password:

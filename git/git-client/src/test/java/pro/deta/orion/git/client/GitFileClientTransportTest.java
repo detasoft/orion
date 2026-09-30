@@ -9,10 +9,36 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFileClientTransportTest {
     @TempDir
     private Path tempDir;
+
+    @Test
+    void initializesAnEmptyBareRepositoryAndReopensIt() throws Exception {
+        Path directory = tempDir.resolve("new.git");
+        GitFileClientTransport.openOrInitialize(directory, true);
+        GitFileClientTransport.openOrInitialize(directory, false);
+        try (Git git = Git.open(directory.toFile())) {
+            assertThat(git.getRepository().isBare()).isTrue();
+            assertThat(git.getRepository().getFullBranch()).isEqualTo("refs/heads/main");
+        }
+    }
+
+    @Test
+    void rejectsOrdinaryFilesAndDoesNotCreateWhenDisabled() throws Exception {
+        Path directory = tempDir.resolve("ordinary");
+        Files.createDirectories(directory);
+        Files.writeString(directory.resolve("orion.xml"), "preserve");
+        assertThatThrownBy(() -> GitFileClientTransport.openOrInitialize(directory, true))
+                .isInstanceOf(java.io.IOException.class);
+        assertThat(Files.readString(directory.resolve("orion.xml"))).isEqualTo("preserve");
+        Path absent = tempDir.resolve("absent.git");
+        assertThatThrownBy(() -> GitFileClientTransport.openOrInitialize(absent, false))
+                .isInstanceOf(java.io.IOException.class);
+        assertThat(absent).doesNotExist();
+    }
 
     @Test
     void discoversRefsThroughLocalUploadPackProcess() throws Exception {

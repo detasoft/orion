@@ -22,7 +22,6 @@ import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
-import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
@@ -269,20 +268,30 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void fileAclStartsFromLocalDirectory() throws Exception {
+    void fileAclStartsFromExternalRepository() throws Exception {
         Path aclDirectory = tempDir.resolve("acl-directory");
-        Files.createDirectories(aclDirectory);
-        Files.write(aclDirectory.resolve(ACL_FILE), aclBytes("file-user"));
+        Path seed = tempDir.resolve("acl-seed");
+        try (org.eclipse.jgit.api.Git git = org.eclipse.jgit.api.Git.init()
+                .setDirectory(seed.toFile()).setInitialBranch("main").call()) {
+            Files.write(seed.resolve(ACL_FILE), aclBytes("file-user"));
+            git.add().addFilepattern(ACL_FILE).call();
+            git.commit().setMessage("initial ACL").setAuthor("Test", "test@example.test").call();
+            git.branchCreate().setName(BRANCH.replace("refs/heads/", "")).call();
+            try (org.eclipse.jgit.api.Git bare = org.eclipse.jgit.api.Git.cloneRepository()
+                    .setURI(seed.toUri().toString()).setDirectory(aclDirectory.toFile()).setBare(true).call()) {
+                assertThat(bare.getRepository().isBare()).isTrue();
+            }
+        }
         OrionConfiguration configuration = configurationWithAcl(aclDirectory.toUri().toString());
 
         AccessControlStorage storage = runtimeAccessControlStorage(configuration);
 
-        assertInstanceOf(LocalAccessControlStorage.class, storage);
+        assertInstanceOf(NativeGitAccessControlStorage.class, storage);
         assertStorageLoadsUser(storage, "file-user");
     }
 
     @Test
-    void localAclSavesToLocalDirectory() {
+    void localAclSavesToExternalRepository() {
         OrionConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
         AccessControlStorage storage = runtimeAccessControlStorage(configuration);
 
@@ -321,7 +330,7 @@ class OrionRuntimeModuleTest {
                 IllegalArgumentException.class,
                 () -> runtimeAccessControlStorage(configuration));
 
-        assertEquals("Unsupported ACL location: ssh://git@example.test/acl.git", error.getMessage());
+        assertEquals("ACL configuration requires a resolved Git repository", error.getMessage());
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration) {

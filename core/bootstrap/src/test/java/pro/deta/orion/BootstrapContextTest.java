@@ -14,7 +14,6 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
-import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -517,6 +516,53 @@ class BootstrapContextTest {
                 .hasMessage("Environment variable is not set: " + PASSWORD_ENV);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void initializesExternalLocalConfigurationAndKeepsCommitHistory(boolean fileUri) throws Exception {
+        OrionConfiguration configuration = configuration();
+        Path directory = tempDir.resolve("external-acl.git");
+        configuration.getBootstrap().getAccessControl().setLocation(
+                fileUri ? directory.toUri().toString() : directory.toString());
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(configuration,
+                Map.of("material.p12", GitFile.regular(materialBytes(configuration))));
+        String firstRevision;
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
+                    .repositoryName()).isPresent();
+            AccessControlStorage storage = new AccessControlStorageResolver(
+                    context.repositorySources(), context.repositoryProvider()).resolve();
+            storage.save(AccessControlSnapshot.singleFile("orion.xml", xml()),
+                    new AccessControlSaveRequest("initial ACL", UserEmail.EMPTY));
+            AccessControlSnapshot first = storage.load().valueOrFailure("initial ACL");
+            firstRevision = first.version().orElseThrow();
+            storage.save(new AccessControlSnapshot(Map.of("orion.xml", xml(),
+                            "roles.xml", xml()), first.version()),
+                    new AccessControlSaveRequest("add roles", UserEmail.EMPTY));
+            assertThat(storage.load().valueOrFailure("updated ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
+            assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
+                            Map.of("orion.xml", bytes("stale replacement")), first.version()),
+                    new AccessControlSaveRequest("stale update", UserEmail.EMPTY)))
+                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
+        }
+        try (Git git = Git.open(directory.toFile())) {
+            assertThat(git.log().add(git.getRepository().resolve("refs/heads/main")).call()).hasSize(2);
+        }
+        try (BootstrapContext reopened = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+            AccessControlStorage storage = new AccessControlStorageResolver(
+                    reopened.repositorySources(), reopened.repositoryProvider()).resolve();
+            assertThat(storage.load().valueOrFailure("reopened ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file://other-host/acl.git", "file:/acl.git?ref=main", "file:/acl.git#main"})
+    void rejectsAmbiguousExternalFileLocationsBeforeOpeningTheRepository(String location) {
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getAccessControl().setLocation(location);
+        assertBootstrapFailure(() -> BootstrapContext.open(configuration, ENVIRONMENT,
+                new InMemoryNativeGitRepositoryProvider()));
+    }
+
     @Test
     void rejectsMissingDirectConfigurationBeforeRuntimeConstruction() {
         OrionConfiguration configuration = configuration();
@@ -536,7 +582,7 @@ class BootstrapContextTest {
         Path baseDirectory = tempDir.toRealPath().resolve("runtime");
         Path configurationRoot = baseDirectory.resolve("configuration");
         Files.createDirectories(configurationRoot);
-        Files.writeString(configurationRoot.resolve("orion.xml"), "configuration");
+        seedExternalConfiguration(configurationRoot, bytes("configuration"));
         configuration.getBootstrap().setBaseDir(baseDirectory.toString());
         configuration.getBootstrap().getAccessControl().setLocation("configuration");
         configuration.getBootstrap().getAccessControl().setPath("./orion.xml");
@@ -548,8 +594,7 @@ class BootstrapContextTest {
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
 
-            assertThat(source.repositoryName()).isEmpty();
-            assertThat(source.location()).isEqualTo(configurationRoot.toUri().toString());
+            assertThat(source.repositoryName()).isPresent();
             assertThat(source.paths()).containsExactly("orion.xml");
         }
     }
@@ -1092,11 +1137,11 @@ class BootstrapContextTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void runtimeKeepsAPlainConfigurationDirectoryUsable(boolean remoteMaterial) throws Exception {
+    void runtimeKeepsAnExternalConfigurationRepositoryUsable(boolean remoteMaterial) throws Exception {
         OrionConfiguration configuration = configuration();
         Path directory = tempDir.resolve("plain-configuration");
         Files.createDirectories(directory);
-        Files.write(directory.resolve("orion.xml"), xml());
+        seedExternalConfiguration(directory, xml());
         configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
         Upstream upstream = remoteMaterial
                 ? upstream("remote-material", Map.of("material.p12", materialBytes(configuration))) : null;
@@ -1110,32 +1155,17 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                LocalAccessControlStorage local = new LocalAccessControlStorage(
-                        configuration.getBootstrap().getAccessControl());
+                AccessControlStorage local = new AccessControlStorageResolver(
+                        context.repositorySources(), context.repositoryProvider()).resolve();
                 assertThat(OrionXml.read(new ByteArrayInputStream(
                         local.load().valueOrFailure("published configuration").files().get("orion.xml")))
-                        .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
+                        .system().proxies()).hasSize(remoteMaterial ? 2 : 1);
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("provisional phase");
             } finally {
                 lifecycle.shutdownApplication();
             }
-        }
-    }
-
-    @Test
-    void opensPublishedLocalConfigurationWithoutTheInitialFiles() throws Exception {
-        OrionConfiguration configuration = configuration();
-        Path directory = tempDir.resolve("published-configuration");
-        configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
-        LocalAccessControlStorage storage = new LocalAccessControlStorage(
-                configuration.getBootstrap().getAccessControl());
-        storage.save(AccessControlSnapshot.singleFile("orion.xml", xml()),
-                new AccessControlSaveRequest("publish", UserEmail.EMPTY));
-        assertThat(directory.resolve("orion.xml")).doesNotExist();
-        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, true)) {
-            assertThat(context).isNotNull();
         }
     }
 
@@ -1147,9 +1177,9 @@ class BootstrapContextTest {
         OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(new ConfigurationSecret("bad", "invalid")),
                 List.of()), List.of());
-        try (var output = Files.newOutputStream(directory.resolve("orion.xml"))) {
-            OrionXml.write(invalid, output);
-        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        OrionXml.write(invalid, output);
+        seedExternalConfiguration(directory, output.toByteArray());
         configuration.getBootstrap().getAccessControl().setLocation(directory.toString());
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, true)) {
             var component = runtimeComponent(configuration, context);
@@ -1163,6 +1193,19 @@ class BootstrapContextTest {
                 }
             } finally {
                 lifecycle.shutdownApplication();
+            }
+        }
+    }
+
+    private static void seedExternalConfiguration(Path directory, byte[] content) throws Exception {
+        Path worktree = directory.resolveSibling(directory.getFileName() + "-seed");
+        try (Git git = Git.init().setDirectory(worktree.toFile()).setInitialBranch("main").call()) {
+            Files.write(worktree.resolve("orion.xml"), content);
+            git.add().addFilepattern("orion.xml").call();
+            git.commit().setMessage("initial configuration").setAuthor("Test", "test@example.test").call();
+            try (Git bare = Git.cloneRepository().setURI(worktree.toUri().toString())
+                    .setDirectory(directory.toFile()).setBare(true).call()) {
+                assertThat(bare.getRepository().isBare()).isTrue();
             }
         }
     }

@@ -26,6 +26,10 @@ import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
+import java.io.IOException;
+import pro.deta.orion.git.client.GitFileClientTransport;
+import pro.deta.orion.util.ResourceLocation;
+import pro.deta.orion.util.ResourceScheme;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -106,6 +110,28 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         Objects.requireNonNull(source, "source");
         String location = Objects.requireNonNull(source.getLocation(), "location");
         List<String> paths = repositoryPaths(source);
+        if (BootstrapRepositorySources.CONFIGURATION.equals(id)) {
+            ResourceLocation parsed = ResourceLocation.parse(location, "ACL repository");
+            if (parsed.scheme() instanceof ResourceScheme.File || parsed.scheme() instanceof ResourceScheme.Empty) {
+                if (parsed.uri().getRawAuthority() != null || parsed.uri().getRawQuery() != null
+                        || parsed.uri().getRawFragment() != null) {
+                    throw new IllegalArgumentException("ACL file location must contain only a local repository path");
+                }
+                Path directory = Path.of(parsed.pathOrSchemeSpecificPart("ACL repository path is required"))
+                        .toAbsolutePath().normalize();
+                try {
+                    GitFileClientTransport.openOrInitialize(directory, allowMissing);
+                } catch (IOException failure) {
+                    throw new IllegalStateException("Cannot initialize external ACL repository", failure);
+                }
+                BootstrapSourceConfig external = new BootstrapSourceConfig();
+                external.setLocation("git+" + directory.toUri());
+                external.setRef(source.selectedRef());
+                external.setAuth(source.getAuth());
+                source = external;
+                location = external.getLocation();
+            }
+        }
         if (!BootstrapGitLocation.isRemote(location) && !location.startsWith("local:")) {
             return new ResolvedBootstrapSource(
                     id,
