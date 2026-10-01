@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.internal.UserEmail;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.auth.SshCredentialListResult;
@@ -61,8 +65,8 @@ final class RemoteBootstrapTestSupport {
         String credentialReference = credentialFile.toUri().toString();
         Map<String, String> authentication;
         if ("http".equals(transport)) {
-            credential = TestBearerTokens.issueRootToken(
-                    upstream.accessControlService(), 600);
+            credential = TestBearerTokens.issueRootToken(upstream.accessControlService(),
+                    upstream.component().configurationEditor(), 600);
             location = "git+" + upstream.httpUrl("/r/bootstrap-inputs.git");
             authentication = Map.of("credentialKind", "token", "credential", credentialReference);
         } else {
@@ -72,11 +76,15 @@ final class RemoteBootstrapTestSupport {
             SshCredentialListResult listed = upstream.accessControlService().listSshCredentials("root");
             assertThat(listed).isInstanceOf(SshCredentialListResult.Success.class);
             if (((SshCredentialListResult.Success) listed).credentials().isEmpty()) {
-                TestBearerTokens.enrollRootKey(upstream.accessControlService(), key);
+                TestBearerTokens.enrollRootKey(upstream.accessControlService(), upstream.component().configurationEditor(), key);
             } else {
-                assertThat(upstream.accessControlService().addSshCredentials(
-                        "root", List.of(PublicKeyEntry.toString(key.getPublic()))))
-                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                try (OrionConfigurationEdit edit =
+                        upstream.component().configurationEditor().edit()) {
+                    assertThat(upstream.accessControlService().addSshCredentials(
+                            edit, "root", List.of(PublicKeyEntry.toString(key.getPublic()))))
+                            .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                    edit.apply("add root test key", UserEmail.EMPTY);
+                }
             }
             credential = "-----BEGIN PRIVATE KEY-----\n"
                     + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())

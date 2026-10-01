@@ -357,7 +357,7 @@ final class OrionGitServer implements GitServer {
             });
             executor = new OrionExecutor(4, new OrionThreadFactory());
             ssh.setCommandFactory(new SshCommandFactory(
-                    executor, null, null, repositories, new GitTransportConfig(), null));
+                    executor, null, null, repositories, new GitTransportConfig(), null, null));
             ssh.start();
             boundPort = ssh.getPort();
         }

@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import pro.deta.orion.util.LogScope;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -90,7 +90,7 @@ public final class AcmeCommandCatalog {
                     try (LogScope ignored = LogScope.user(invocation.context().securityContext()
                             .getUserIdentity().getUserId())) {
                         return handler.handle(invocation);
-                    } catch (AccessControlConcurrentUpdateException conflict) {
+                    } catch (OrionConfigurationConcurrentUpdateException conflict) {
                         return failure("Configuration changed. Run /acme show and retry with its revision.");
                     } catch (AcmeCertificateService.IssuanceBusyException busy) {
                         return failure("Certificate issuance is already in progress.");

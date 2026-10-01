@@ -3,7 +3,7 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.Session;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
@@ -38,18 +38,18 @@ public final class AcmeConfigurationService {
             new Preset("custom", "Other ACME server", "", false));
     private final OrionDesiredState desired;
     private final ConfigurationSecrets secrets;
-    private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final AcmeCertificateService certificates;
     private final ConfigurationMaterialCapability material;
     private final KeyMaterialScope scope;
 
     @Inject
     public AcmeConfigurationService(OrionDesiredState desired, ConfigurationSecrets secrets,
-            OrionAccessControlServiceImpl acl, AcmeCertificateService certificates,
+            OrionConfigurationEditor editor, AcmeCertificateService certificates,
             ConfigurationMaterialCapability material, OrionConfiguration bootstrap) {
         this.desired = desired;
         this.secrets = secrets;
-        this.acl = acl;
+        this.editor = editor;
         this.certificates = certificates;
         this.material = material;
         this.scope = KeyMaterialScope.cluster(bootstrap.getBootstrap().getKeyMaterial().getClusterId());
@@ -76,12 +76,11 @@ public final class AcmeConfigurationService {
             if (settings.revision() == null || settings.revision().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
             }
-            acl.updatePrimaryConfiguration(settings.revision(), document -> {
+            editor.edit(settings.revision()).update(document -> {
                 OrionDocument candidate = updated(document, settings);
                 certificates.prepareMaterial(candidate.system().https().orElseThrow());
                 return candidate;
-            },
-                    "Configure ACME certificate issuance", new UserEmail(userId, ""));
+            }).apply("Configure ACME certificate issuance", new UserEmail(userId, ""));
             return view();
         } finally {
             if (settings.eabHmacKey() != null) Arrays.fill(settings.eabHmacKey(), '\0');

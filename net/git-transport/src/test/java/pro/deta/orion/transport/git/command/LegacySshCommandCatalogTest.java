@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.git.command;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -75,13 +79,14 @@ class LegacySshCommandCatalogTest {
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
     private final DecisionRegistry decisions = new DecisionRegistry(8, Runnable::run, (actor, scope) -> true);
-    private final CommandNode commandTree = new LegacySshCommandCatalog(
-            accessControl,
+    private final CommandNode commandTree = new LegacySshCommandCatalog(accessControl,
+            pro.deta.orion.transport.git.TestConfigurationEditor.create(),
             new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
             new RepositoryProvider(),
             () -> shutdown.set(true),
             new ReadOnlyDomainCommandCatalog(new DomainSource()),
-            new DecisionCommandCatalog(decisions), () -> agentServer)
+            new DecisionCommandCatalog(decisions),
+            () -> agentServer)
             .commandTree();
     private final CommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
@@ -412,18 +417,9 @@ class LegacySshCommandCatalogTest {
             return new TokenRefreshResult.Success("issued-secret", 1_000L);
         }
 
-        @Override
-        public void addKeyToUser(String username, String publicKey) {
-            throw new UnsupportedOperationException();
-        }
 
         @Override
-        public void addSshKeysToUser(String username, List<String> publicKeys) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
             throw new UnsupportedOperationException();
         }
 

@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AccessControlValidationException;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
@@ -18,10 +21,13 @@ import java.util.Map;
 public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     private final ObjectMapper objectMapper;
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public OrionAdminCreateOrUpdateUserRoute(OrionAccessControlService accessControlService, ObjectMapper objectMapper) {
+    public OrionAdminCreateOrUpdateUserRoute(OrionAccessControlService accessControlService,
+            OrionConfigurationEditor editor, ObjectMapper objectMapper) {
         super(OrionAdminPaths.USERS, OrionHttpRouteDefinition.Method.POST);
+        this.editor = editor;
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
     }
@@ -32,8 +38,9 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
         if (request == null) {
             throw new HttpRequestValidationException("User request is required");
         }
-        try {
-            accessControlService.createOrUpdateUser(request.toUserUpdate());
+        try (OrionConfigurationEdit edit = editor.edit()) {
+            accessControlService.createOrUpdateUser(edit, request.toUserUpdate());
+            edit.apply("createOrUpdateUser() " + request.id(), new UserEmail(request.id(), request.email()));
         } catch (AccessControlValidationException failure) {
             throw new HttpRequestValidationException(failure.getMessage());
         }

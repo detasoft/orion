@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import org.eclipse.jgit.api.Git;
 import com.sun.net.httpserver.HttpServer;
 import pro.deta.orion.config.LocationConfigurationProvider;
@@ -14,13 +16,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
-import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.acl.storage.AccessControlStorageResolver;
+import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
@@ -68,7 +69,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -690,7 +690,7 @@ class BootstrapContextTest {
             try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, borrow(backend))) {
                 assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                         .repositoryName()).isPresent();
-                AccessControlStorage storage = new AccessControlStorageResolver(
+                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                         context.repositorySources(), context.repositoryProvider()).resolve();
                 storage.save(new ConfigurationFile(xml(), Optional.empty()),
                         "initial ACL", UserEmail.EMPTY);
@@ -704,13 +704,13 @@ class BootstrapContextTest {
                 assertThatThrownBy(() -> storage.save(new ConfigurationFile(
                                 bytes("stale replacement"), first.revision()),
                         "stale update", UserEmail.EMPTY))
-                        .isInstanceOf(AccessControlConcurrentUpdateException.class);
+                        .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             }
             try (Git git = Git.open(directory.toFile())) {
                 assertThat(git.log().add(git.getRepository().resolve("refs/heads/main")).call()).hasSize(2);
             }
             try (BootstrapContext reopened = BootstrapContext.open(configuration, ENVIRONMENT, borrow(backend))) {
-                AccessControlStorage storage = new AccessControlStorageResolver(
+                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                         reopened.repositorySources(), reopened.repositoryProvider()).resolve();
                 assertThat(storage.load().valueOrFailure("reopened ACL").revision().orElseThrow())
                         .isNotEqualTo(firstRevision);
@@ -907,7 +907,7 @@ class BootstrapContextTest {
             Optional<String> adoptedRevision;
             try (BootstrapContext first = BootstrapContext.open(configuration, ENVIRONMENT,
                     new InMemoryNativeGitRepositoryProvider())) {
-                AccessControlStorage storage = new AccessControlStorageResolver(
+                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                         first.repositorySources(), first.repositoryProvider()).resolve();
                 Optional<String> initialRevision = storage.load().valueOrFailure("configuration").revision();
                 adopted = adopt(first, storage);
@@ -917,7 +917,7 @@ class BootstrapContextTest {
             }
             try (BootstrapContext restarted = BootstrapContext.open(configuration, ENVIRONMENT,
                     new InMemoryNativeGitRepositoryProvider())) {
-                AccessControlStorage storage = new AccessControlStorageResolver(
+                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                         restarted.repositorySources(), restarted.repositoryProvider()).resolve();
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
                 assertThat(storage.load().valueOrFailure("configuration").revision()).isEqualTo(adoptedRevision);
@@ -976,6 +976,11 @@ class BootstrapContextTest {
     }
 
     @Test
+    void doesNotRetryASavedAdoptionWhenActivationFails() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.FAIL_RELOAD, false);
+    }
+
+    @Test
     void recognizesASavedAdoptionAfterItsResponseWasLost() throws Exception {
         exerciseAdoptionSave(AdoptionStorage.Mode.LOST_RESPONSE, true);
     }
@@ -1020,7 +1025,14 @@ class BootstrapContextTest {
              BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             OrionDesiredState.Snapshot approved = approved(storage);
             storage.mode = mode;
-            if (mode == AdoptionStorage.Mode.CONCURRENT_WINNER
+            if (mode == AdoptionStorage.Mode.FAIL_RELOAD) {
+                assertThatThrownBy(() -> adoptApproved(context, storage, approved))
+                        .isInstanceOf(OrionConfigurationEditor.ActivationFailedException.class);
+                assertThat(storage.saves).isEqualTo(1);
+                storage.mode = AdoptionStorage.Mode.NORMAL;
+                assertThat(adopt(context, storage).system().proxies()).hasSize(1);
+                assertThat(storage.saves).isEqualTo(1);
+            } else if (mode == AdoptionStorage.Mode.CONCURRENT_WINNER
                     || mode == AdoptionStorage.Mode.LOST_RESPONSE
                     || mode == AdoptionStorage.Mode.CONCURRENT_EDIT
                     || mode == AdoptionStorage.Mode.REPEATED_CONFLICT) {
@@ -1069,9 +1081,9 @@ class BootstrapContextTest {
         return output.toByteArray();
     }
 
-    private static final class AdoptionStorage implements AccessControlStorage {
+    private static final class AdoptionStorage implements OrionConfigurationStorage {
         enum Mode {
-            NORMAL, CONCURRENT_WINNER, CONCURRENT_EDIT, LOST_RESPONSE, FAIL_SAVE,
+            NORMAL, CONCURRENT_WINNER, CONCURRENT_EDIT, LOST_RESPONSE, FAIL_SAVE, FAIL_RELOAD,
             REPEATED_CONFLICT, UNVERSIONED, INVALID_CONFIGURATION
         }
 
@@ -1087,6 +1099,9 @@ class BootstrapContextTest {
 
         @Override
         public Result<ConfigurationFile> load() {
+            if (mode == Mode.FAIL_RELOAD && saves > 0) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL, "reload failed");
+            }
             var revision = mode == Mode.UNVERSIONED
                     ? Optional.<String>empty() : Optional.of(Integer.toString(version));
             byte[] loaded = mode == Mode.INVALID_CONFIGURATION ? bytes("invalid") : content;
@@ -1108,19 +1123,19 @@ class BootstrapContextTest {
             }
             if (mode == Mode.REPEATED_CONFLICT) {
                 version++;
-                throw new AccessControlConcurrentUpdateException("concurrent edit", null);
+                throw new OrionConfigurationConcurrentUpdateException("concurrent edit", null);
             }
             if (mode == Mode.CONCURRENT_EDIT) {
                 content = (new String(content, StandardCharsets.UTF_8) + "\n<!-- concurrent edit -->")
                         .getBytes(StandardCharsets.UTF_8);
                 version++;
                 mode = Mode.NORMAL;
-                throw new AccessControlConcurrentUpdateException("concurrent edit", null);
+                throw new OrionConfigurationConcurrentUpdateException("concurrent edit", null);
             }
             content = snapshot.content();
             version++;
             if (mode == Mode.CONCURRENT_WINNER) {
-                throw new AccessControlConcurrentUpdateException("another bootstrap won", null);
+                throw new OrionConfigurationConcurrentUpdateException("another bootstrap won", null);
             }
             if (mode == Mode.LOST_RESPONSE) {
                 throw new IllegalStateException("response lost");
@@ -1143,7 +1158,7 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                var storage = new AccessControlStorageResolver(context.repositorySources(),
+                var storage = new OrionConfigurationStorageResolver(context.repositorySources(),
                         context.repositoryProvider()).resolve();
                 var snapshot = storage.load().valueOrFailure("runtime configuration");
                 assertThat(OrionXml.read(new ByteArrayInputStream(snapshot.content()))
@@ -1319,7 +1334,7 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                AccessControlStorage local = new AccessControlStorageResolver(
+                OrionConfigurationStorage local = new OrionConfigurationStorageResolver(
                         context.repositorySources(), context.repositoryProvider()).resolve();
                 assertThat(OrionXml.read(new ByteArrayInputStream(
                         local.load().valueOrFailure("published configuration").content()))
@@ -1374,17 +1389,22 @@ class BootstrapContextTest {
         }
     }
 
-    private static OrionDocument adopt(BootstrapContext context, AccessControlStorage storage) {
+    private static OrionDocument adopt(BootstrapContext context, OrionConfigurationStorage storage) {
         return adoptApproved(context, storage, approved(storage)).orElseThrow();
     }
 
-    private static Optional<OrionDocument> adoptApproved(BootstrapContext context, AccessControlStorage storage,
+    private static Optional<OrionDocument> adoptApproved(BootstrapContext context, OrionConfigurationStorage storage,
             OrionDesiredState.Snapshot approved) {
         return BootstrapContext.adoptProxies(
-                storage, context.repositoryProvider(), context.configurationCipher(), approved);
+                storage, new OrionConfigurationEditor(storage,
+                new OrionConfiguration(),
+                context.configurationCipher(),
+                context.configurationMaterial(),
+                new pro.deta.orion.config.OrionDesiredState()),
+                context.repositoryProvider(), context.configurationCipher(), approved);
     }
 
-    private static OrionDesiredState.Snapshot approved(AccessControlStorage storage) {
+    private static OrionDesiredState.Snapshot approved(OrionConfigurationStorage storage) {
         ConfigurationFile snapshot = storage.load().valueOrFailure("configuration for adoption");
         try {
             OrionDocument document = OrionXml.read(new ByteArrayInputStream(snapshot.content()));

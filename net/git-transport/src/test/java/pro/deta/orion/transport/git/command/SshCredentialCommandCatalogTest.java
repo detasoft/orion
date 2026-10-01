@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.git.command;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -19,7 +23,6 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandContext;
@@ -44,7 +47,7 @@ class SshCredentialCommandCatalogTest {
     private final RecordingService service = new RecordingService();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            new SshCredentialCommandCatalog(service).commandTree(),
+            new SshCredentialCommandCatalog(service, pro.deta.orion.transport.git.TestConfigurationEditor.create()).commandTree(),
             new pro.deta.orion.command.CommandRowQuery());
 
     @Test
@@ -246,27 +249,23 @@ class SshCredentialCommandCatalogTest {
         }
 
         @Override
-        public SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+        public SshCredentialUpdateResult addSshCredentials(OrionConfigurationEdit edit, String userId, List<String> publicKeys) {
             updateUsers.add(userId);
             addedKeys.add(List.copyOf(publicKeys));
             return updateResult;
         }
 
         @Override
-        public SshCredentialUpdateResult removeSshCredential(String userId, String prefix, boolean force) {
+        public SshCredentialUpdateResult removeSshCredential(OrionConfigurationEdit edit, String userId,
+                String prefix, boolean force) {
             updateUsers.add(userId);
             removals.add(userId + "|" + prefix + "|" + force);
             return updateResult;
         }
 
-        @Override
-        public void addKeyToUser(String username, String publicKey) {}
 
         @Override
-        public void addSshKeysToUser(String username, List<String> publicKeys) {}
-
-        @Override
-        public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {}
+        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {}
 
         @Override
         public boolean userExists(String userName) {

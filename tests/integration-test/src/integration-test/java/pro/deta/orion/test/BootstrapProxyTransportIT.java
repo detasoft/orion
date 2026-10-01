@@ -5,7 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.acl.storage.AccessControlStorageResolver;
+import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -100,7 +100,7 @@ class BootstrapProxyTransportIT {
 
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
-                    var storage = new AccessControlStorageResolver(bootstrap.repositorySources(), provider).resolve();
+                    var storage = new OrionConfigurationStorageResolver(bootstrap.repositorySources(), provider).resolve();
                     var component = runtimeComponent(configuration, bootstrap);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -182,7 +182,7 @@ class BootstrapProxyTransportIT {
                     String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                             .repositoryName().orElseThrow();
                     var provider = restarted.repositoryProvider();
-                    var storage = new AccessControlStorageResolver(restarted.repositorySources(), provider).resolve();
+                    var storage = new OrionConfigurationStorageResolver(restarted.repositorySources(), provider).resolve();
                     var before = storage.load().valueOrFailure("configuration before adoption").revision();
                     var component = runtimeComponent(configuration, restarted);
                     var lifecycle = component.orionApplicationLifecycle();

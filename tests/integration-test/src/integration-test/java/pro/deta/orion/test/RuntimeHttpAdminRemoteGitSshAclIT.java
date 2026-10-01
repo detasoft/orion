@@ -117,9 +117,8 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                             var updated = current.replaceAccessControl(
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
-                            component.orionAccessControlService().updatePrimaryConfiguration(
-                                    initialAcl.etag().replace("\"", ""), ignored -> updated,
-                                    "Update remote configuration", UserEmail.EMPTY);
+                            component.configurationEditor().edit(initialAcl.etag().replace("\"", ""))
+                                    .update(ignored -> updated).apply("Update remote configuration", UserEmail.EMPTY);
                             assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
                             assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
                                     .isEqualTo(materialBeforeUpdate);

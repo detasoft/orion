@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
@@ -27,16 +27,16 @@ import java.util.UUID;
 /** Admin-only provider editing; secrets stay encrypted and are omitted from all responses. */
 public final class OrionAdminOidcRoute extends BaseAdminRoute {
     private final OrionDesiredState desired;
-    private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminOidcRoute(OrionDesiredState desired, OrionAccessControlServiceImpl acl,
+    public OrionAdminOidcRoute(OrionDesiredState desired, OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper) {
         super("/api/admin/oidc", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.desired = desired;
-        this.acl = acl;
+        this.editor = editor;
         this.secrets = secrets;
         this.mapper = mapper;
     }
@@ -82,12 +82,11 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             char[] suppliedSecret = secret;
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-            acl.updatePrimaryConfiguration(revision,
-                    document -> save(document, id, provider, suppliedSecret),
-                    "Configure organization OIDC provider",
-                    new UserEmail(context.getUserIdentity().getUserId(), ""));
+            editor.edit(revision).update(document -> save(document, id, provider, suppliedSecret))
+                    .apply("Configure organization OIDC provider",
+                            new UserEmail(context.getUserIdentity().getUserId(), ""));
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
-        } catch (AccessControlConcurrentUpdateException conflict) {
+        } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload providers and try again.");
         } catch (IllegalArgumentException invalid) {
             return OrionHttpResponse.text(400, "Check provider settings. New or changed clients require a secret.");

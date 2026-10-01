@@ -74,7 +74,7 @@ class PlaywrightExternalServicesIT {
                 assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
                 lifecycle.waitForStarting();
                 OrionAccessControlServiceImpl accessControl = component.orionAccessControlService();
-                TestBearerTokens.enrollRootKey(accessControl, rootKey);
+                TestBearerTokens.enrollRootKey(accessControl, component.configurationEditor(), rootKey);
                 configureAcme(component, accessControl, configuration);
                 String token = OrionTestRootAccess.issueToken(accessControl, rootKey.getPublic(), 600);
                 runPlaywright(fixtureRoot, caRoot, token);
@@ -127,12 +127,11 @@ class PlaywrightExternalServicesIT {
                 false, "0.0.0.0", 9443, URI.create("https://orion.test:9443"),
                 Optional.of(new OrionMaterialReference("acme-identity", 1)), Optional.empty(),
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.of(acme));
-        accessControl.updatePrimaryConfiguration(revision, document -> new OrionDocument(
+        component.configurationEditor().edit(revision).update(document -> new OrionDocument(
                         new OrionDocument.SystemConfiguration(
                                 document.system().accessControl(), Optional.of(https),
                                 document.system().secrets(), document.system().proxies(), document.system().connections()),
-                        document.organizations()),
-                "configure test ACME", UserEmail.EMPTY);
+                        document.organizations())).apply("configure test ACME", UserEmail.EMPTY);
     }
 
     private void runPlaywright(Path fixtureRoot, Path caRoot, String token) throws Exception {

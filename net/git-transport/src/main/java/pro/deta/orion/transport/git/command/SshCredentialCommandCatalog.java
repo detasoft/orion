@@ -4,7 +4,12 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialFailureCode;
@@ -39,9 +44,11 @@ public final class SshCredentialCommandCatalog {
     private static final Set<String> REMOVE_PARAMETERS = Set.of("force");
 
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService) {
+    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
+        this.editor = editor;
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
     }
 
@@ -131,12 +138,38 @@ public final class SshCredentialCommandCatalog {
         if (publicKeys == null || publicKeys.isEmpty()) {
             return invalid("Candidate selection is invalid");
         }
-        return switch (accessControlService.addSshCredentials(userId(invocation), publicKeys)) {
+        return switch (mutate(invocation, "add SSH credentials", edit ->
+                accessControlService.addSshCredentials(edit, userId(invocation), publicKeys))) {
             case SshCredentialUpdateResult.Success(var credentials, var changed) -> new CommandResult.Message(
                     changed ? "SSH credentials added" : "SSH credential already exists");
             case SshCredentialUpdateResult.Failure(var code, var reason, var candidates, var throwable) ->
                     failure(code, safeCandidates(code, candidates));
         };
+    }
+
+    private SshCredentialUpdateResult mutate(CommandInvocation invocation, String operation,
+            java.util.function.Function<OrionConfigurationEdit, SshCredentialUpdateResult> mutation) {
+        String userId = userId(invocation);
+        try (OrionConfigurationEdit edit = editor.edit()) {
+            SshCredentialUpdateResult result = mutation.apply(edit);
+            if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+                String email = "";
+                for (AccessControl.User user : edit.document().system().accessControl().getUsers()) {
+                    if (user.getId().equalsIgnoreCase(userId)) {
+                        email = Objects.requireNonNullElse(user.getEmail(), "");
+                        break;
+                    }
+                }
+                edit.apply(operation + " for " + userId, new UserEmail(userId, email));
+            }
+            return result;
+        } catch (OrionConfigurationConcurrentUpdateException failure) {
+            return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
+                    "Access control changed concurrently", List.of(), failure);
+        } catch (RuntimeException failure) {
+            return SshCredentialUpdateResult.failure(SshCredentialFailureCode.PERSISTENCE_FAILED,
+                    "Cannot save SSH credentials", List.of(), failure);
+        }
     }
 
     private static List<String> selectedCandidates(CommandInvocation invocation, String selection) {
@@ -199,7 +232,8 @@ public final class SshCredentialCommandCatalog {
             return invalid("SSH credential fingerprint prefix is required");
         }
         boolean force = Boolean.parseBoolean(invocation.arguments().named().getOrDefault("force", "false"));
-        return switch (accessControlService.removeSshCredential(userId(invocation), prefix, force)) {
+        return switch (mutate(invocation, "remove SSH credential", edit ->
+                accessControlService.removeSshCredential(edit, userId(invocation), prefix, force))) {
             case SshCredentialUpdateResult.Success(var credentials, var changed) -> {
                 boolean current = connectionCredentials(invocation)
                         .authenticatedKeyFingerprint()

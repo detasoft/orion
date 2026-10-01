@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
@@ -22,13 +26,10 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
-import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
@@ -268,21 +269,23 @@ class GitSshTransportStateMachineTest {
         };
         CommandDispatcher dispatcher = new DefaultCommandDispatcher(
                 new CommandLineParser(),
-                new SshCredentialCommandCatalog(accessControlService).commandTree(),
+                new SshCredentialCommandCatalog(accessControlService,
+                        pro.deta.orion.transport.git.TestConfigurationEditor.create()).commandTree(),
                 new pro.deta.orion.command.CommandRowQuery());
         executor = new OrionExecutor(2, new OrionThreadFactory());
-        SshCommandFactory commandFactory = new SshCommandFactory(
-                executor,
+        SshCommandFactory commandFactory = new SshCommandFactory(executor,
                 dispatcher,
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService);
+                accessControlService,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
         OrionShell shell = new OrionShell(
                 dispatcher,
                 new CommandNavigator(CommandNode.builder().build()),
                 executor);
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService);
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
         return new GitSshTransportService(
                 configuration,
                 commandFactory,
@@ -357,18 +360,9 @@ class GitSshTransportStateMachineTest {
                     org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(acceptedKey.getPublic()))));
         }
 
-        @Override
-        public void addKeyToUser(String username, String publicKey) {
-            throw new UnsupportedOperationException();
-        }
 
         @Override
-        public void addSshKeysToUser(String username, List<String> publicKeys) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
             throw new UnsupportedOperationException();
         }
 

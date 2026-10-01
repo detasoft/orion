@@ -1,5 +1,11 @@
 package pro.deta.orion.transport.git.auth;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.auth.SshCredentialUpdateResult;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
 import org.apache.sshd.client.auth.keyboard.UserInteraction;
@@ -28,7 +34,6 @@ import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.auth.UserIdentity;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -262,7 +267,8 @@ class OrionSshAuthenticatorTest {
         KeyPair secondCandidate = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice", current.getPublic());
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
         ServerSession session = serverSession();
 
         assertThat(authenticator.authenticate("alice", firstCandidate.getPublic(), session)).isTrue();
@@ -292,7 +298,8 @@ class OrionSshAuthenticatorTest {
         KeyPair unselected = keyPair();
         RecordingAccessControlService accessControl = new RecordingAccessControlService();
         accessControl.addUser("alice");
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
         ServerSession session = serverSession();
         for (KeyPair candidate : List.of(selected, unselected)) {
             assertThat(authenticator.authenticate("alice", candidate.getPublic(), session)).isTrue();
@@ -424,7 +431,8 @@ class OrionSshAuthenticatorTest {
         private final SshServer server = SshServer.setUpDefaultServer();
 
         private Fixture() throws Exception {
-            OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+            OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl,
+                    pro.deta.orion.transport.git.TestConfigurationEditor.create());
             KeyPair hostKey = keyPair();
             server.setHost("127.0.0.1");
             server.setPort(0);
@@ -514,13 +522,10 @@ class OrionSshAuthenticatorTest {
             return List.copyOf(keysByUser.getOrDefault(username, new LinkedHashMap<>()).values());
         }
 
-        @Override
-        public void addKeyToUser(String username, String publicKey) {
-            addSshKeysToUser(username, List.of(publicKey));
-        }
 
         @Override
-        public void addSshKeysToUser(String username, List<String> publicKeys) {
+        public SshCredentialUpdateResult addSshCredentials(
+                OrionConfigurationEdit edit, String username, List<String> publicKeys) {
             LinkedHashMap<String, PublicKey> userKeys = keysByUser.get(username);
             if (userKeys == null) {
                 throw new IllegalStateException("unknown user");
@@ -529,10 +534,12 @@ class OrionSshAuthenticatorTest {
                 PublicKey parsed = pro.deta.orion.util.KeyUtils.readPublicKeyFromString(publicKey);
                 userKeys.putIfAbsent(fingerprint(parsed), parsed);
             }
+
+            return SshCredentialUpdateResult.success(List.of(), true);
         }
 
         @Override
-        public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
             throw new UnsupportedOperationException();
         }
 

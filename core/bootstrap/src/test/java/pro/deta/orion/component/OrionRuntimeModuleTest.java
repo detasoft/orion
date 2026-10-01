@@ -1,5 +1,7 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,10 +20,10 @@ import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.TeamId;
 import pro.deta.orion.schema.orion.RepositoryId;
 import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
-import pro.deta.orion.acl.storage.AccessControlStorage;
-import pro.deta.orion.acl.storage.AccessControlStorageResolver;
-import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationStorage;
+import pro.deta.orion.config.OrionConfigurationStorageResolver;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
@@ -165,10 +167,14 @@ class OrionRuntimeModuleTest {
     }
 
     private static OrionAccessControlServiceImpl decisionAcl(OrionDesiredState desired) {
-        return new OrionAccessControlServiceImpl(null, null, null,
-                ServerIdentityCapability.unavailable(), desired, new OrionConfiguration(),
-                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+        return new OrionAccessControlServiceImpl(null,
+                null,
+                null,
+                ServerIdentityCapability.unavailable(),
+                desired,
+                new OrionConfigurationEditor(null, new OrionConfiguration(),
+                        pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                        pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired),
                 java.util.Optional.empty());
     }
 
@@ -283,16 +289,16 @@ class OrionRuntimeModuleTest {
         }
         OrionConfiguration configuration = configurationWithAcl(aclDirectory.toUri().toString());
 
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration);
+        OrionConfigurationStorage storage = runtimeOrionConfigurationStorage(configuration);
 
-        assertInstanceOf(NativeGitAccessControlStorage.class, storage);
+        assertInstanceOf(NativeGitOrionConfigurationStorage.class, storage);
         assertStorageLoadsUser(storage, "file-user");
     }
 
     @Test
     void localAclSavesToExternalRepository() {
         OrionConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration);
+        OrionConfigurationStorage storage = runtimeOrionConfigurationStorage(configuration);
 
         storage.save(
                 new ConfigurationFile("native acl".getBytes(StandardCharsets.UTF_8), Optional.empty()),
@@ -308,12 +314,12 @@ class OrionRuntimeModuleTest {
         OrionConfiguration configuration = configurationWithAcl("local:internal/settings");
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
 
-        AccessControlStorage storage = resolvedStorage(configuration, provider);
+        OrionConfigurationStorage storage = resolvedStorage(configuration, provider);
         storage.save(
                 new ConfigurationFile("versioned acl".getBytes(StandardCharsets.UTF_8), Optional.empty()),
                 "versioned acl", UserEmail.EMPTY);
 
-        assertInstanceOf(NativeGitAccessControlStorage.class, storage);
+        assertInstanceOf(NativeGitOrionConfigurationStorage.class, storage);
         assertEquals(List.of("internal/settings"), provider.repositoryNames());
         assertEquals(
                 "versioned acl",
@@ -327,16 +333,16 @@ class OrionRuntimeModuleTest {
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> runtimeAccessControlStorage(configuration));
+                () -> runtimeOrionConfigurationStorage(configuration));
 
-        assertEquals("ACL configuration requires a resolved Git repository", error.getMessage());
+        assertEquals("Orion configuration requires a resolved Git repository", error.getMessage());
     }
 
-    private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration) {
+    private OrionConfigurationStorage runtimeOrionConfigurationStorage(OrionConfiguration configuration) {
         return resolvedStorage(configuration, new InMemoryNativeGitRepositoryProvider());
     }
 
-    private static AccessControlStorage resolvedStorage(
+    private static OrionConfigurationStorage resolvedStorage(
             OrionConfiguration configuration,
             InMemoryNativeGitRepositoryProvider backend) {
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
@@ -344,7 +350,7 @@ class OrionRuntimeModuleTest {
                 BootstrapRepositorySources.CONFIGURATION,
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
-        return new AccessControlStorageResolver(
+        return new OrionConfigurationStorageResolver(
                 new BootstrapRepositorySources(List.of(resolved)),
                 provider).resolve();
     }
@@ -362,7 +368,7 @@ class OrionRuntimeModuleTest {
         return draft.toAccessControl();
     }
 
-    private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {
+    private void assertStorageLoadsUser(OrionConfigurationStorage storage, String userId) throws Exception {
         ConfigurationFile snapshot = storage.load().valueOrFailure("ACL should load from storage");
         AccessControl accessControl =
                 OrionXml.read(new ByteArrayInputStream(snapshot.content()))

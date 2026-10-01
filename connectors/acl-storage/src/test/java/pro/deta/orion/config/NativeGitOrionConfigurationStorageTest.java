@@ -1,6 +1,5 @@
-package pro.deta.orion.acl.storage;
+package pro.deta.orion.config;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,12 +27,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class NativeGitAccessControlStorageTest {
+class NativeGitOrionConfigurationStorageTest {
     private static final String ACL_PATH = "config/orion.xml";
 
     @Test
     void resolverRequiresConfigurationRepositoryBootstrap() {
-        assertThatThrownBy(() -> new AccessControlStorageResolver(
+        assertThatThrownBy(() -> new OrionConfigurationStorageResolver(
                 new BootstrapRepositorySources(List.of()),
                 new pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider()).resolve())
                 .isInstanceOf(IllegalStateException.class)
@@ -61,11 +60,11 @@ class NativeGitAccessControlStorageTest {
                 Optional.of(repository.refs().get("refs/heads/main")),
                 false);
 
-        AccessControlStorage storage = new AccessControlStorageResolver(
+        OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                 new BootstrapRepositorySources(List.of(source)),
                 provider).resolve();
 
-        assertThat(storage).isInstanceOf(NativeGitAccessControlStorage.class);
+        assertThat(storage).isInstanceOf(NativeGitOrionConfigurationStorage.class);
         assertThat(storage.createIfMissing()).isFalse();
         assertThat(storage.load().valueOrFailure("resolved ACL").content()).isEqualTo(bytes("resolved acl"));
         storage.save(new ConfigurationFile(bytes("updated ACL"),
@@ -95,7 +94,7 @@ class NativeGitAccessControlStorageTest {
         ResolvedBootstrapSource source = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION, configuration, false);
         assertThat(source.repositoryName()).contains("team/repo");
-        AccessControlStorage storage = new AccessControlStorageResolver(
+        OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
                 new BootstrapRepositorySources(List.of(source)), provider).resolve();
 
         ConfigurationFile loaded = storage.load().valueOrFailure("selected ACL");
@@ -122,7 +121,7 @@ class NativeGitAccessControlStorageTest {
     @ValueSource(booleans = {false, true})
     void createsConfiguredRepositoryAndCommitsInitialAcl(boolean useDefaults, @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
 
         assertThat(storage.load()).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) storage.load()).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
@@ -148,13 +147,13 @@ class NativeGitAccessControlStorageTest {
 
     @Test
     void reusesExistingRepositoryAndConfiguredRefAfterRestart(@TempDir Path rootDirectory) {
-        AccessControlStorage first = preparedStorage(
+        OrionConfigurationStorage first = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
         first.save(
                 new ConfigurationFile(bytes("persisted acl"), Optional.empty()),
                 "bootstrap ACL", UserEmail.EMPTY);
 
-        AccessControlStorage restarted = preparedStorage(
+        OrionConfigurationStorage restarted = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
 
         assertThat(restarted.load().valueOrFailure("ACL should survive restart").content())
@@ -172,7 +171,7 @@ class NativeGitAccessControlStorageTest {
             fileAccess.apply();
             return null;
         });
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
 
         Result<ConfigurationFile> result = storage.load();
 
@@ -191,7 +190,7 @@ class NativeGitAccessControlStorageTest {
             fileAccess.apply();
             return null;
         });
-        AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
+        OrionConfigurationStorage storage = resolvedStorage(provider, ACL_PATH);
 
         Result<ConfigurationFile> result = storage.load();
 
@@ -201,9 +200,9 @@ class NativeGitAccessControlStorageTest {
     @Test
     void reportsOnlyAcceptedUpdatesToConfiguredRef(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
         AtomicInteger changes = new AtomicInteger();
-        AccessControlStorage.ChangeSubscription subscription = storage.onChange(
+        OrionConfigurationStorage.ChangeSubscription subscription = storage.onChange(
                 ignored -> changes.incrementAndGet());
 
         storage.save(
@@ -229,7 +228,7 @@ class NativeGitAccessControlStorageTest {
     @Test
     void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
         storage.save(
                 new ConfigurationFile(bytes("version one"), Optional.empty()),
                 "version one", UserEmail.EMPTY);
@@ -247,7 +246,7 @@ class NativeGitAccessControlStorageTest {
         assertThatThrownBy(() -> storage.save(
                 stale,
                 "stale", UserEmail.EMPTY))
-                .isInstanceOf(AccessControlConcurrentUpdateException.class);
+                .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
 
         assertThat(repository.refs().get("refs/heads/configuration")).isEqualTo(winningVersion);
         assertThat(repository.files().readBytes("refs/heads/configuration", ACL_PATH))
@@ -266,7 +265,7 @@ class NativeGitAccessControlStorageTest {
             fileAccess.apply();
             return null;
         });
-        AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
+        OrionConfigurationStorage storage = resolvedStorage(provider, ACL_PATH);
 
         storage.save(
                 new ConfigurationFile(bytes("created"), Optional.empty()),
@@ -282,7 +281,7 @@ class NativeGitAccessControlStorageTest {
     void loadsThroughProviderReadOperation(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(rootDirectory);
         RecordingProvider provider = new RecordingProvider(backend);
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
         backend.find("internal/configuration").valueOrFailure("repository").files()
                 .withAccess("refs/heads/configuration", "seed", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write(ACL_PATH, bytes("provider acl"));
@@ -300,7 +299,7 @@ class NativeGitAccessControlStorageTest {
     void savesConfiguredRefThroughProviderOperation(@TempDir Path rootDirectory) {
         RecordingProvider provider = new RecordingProvider(
                 new FileNativeGitRepositoryProvider(rootDirectory));
-        AccessControlStorage storage = preparedStorage(provider);
+        OrionConfigurationStorage storage = preparedStorage(provider);
 
         storage.save(
                 new ConfigurationFile(bytes("provider acl"), Optional.empty()),
@@ -319,7 +318,7 @@ class NativeGitAccessControlStorageTest {
         return config;
     }
 
-    private static AccessControlStorage preparedStorage(
+    private static OrionConfigurationStorage preparedStorage(
             NativeGitRepositoryProvider provider) {
         if (!provider.exists("internal/configuration")) {
             provider.create("internal/configuration").valueOrFailure("repository");
@@ -327,7 +326,7 @@ class NativeGitAccessControlStorageTest {
         return resolvedStorage(provider, ACL_PATH);
     }
 
-    private static AccessControlStorage resolvedStorage(
+    private static OrionConfigurationStorage resolvedStorage(
             NativeGitRepositoryProvider provider, String path) {
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 BootstrapRepositorySources.CONFIGURATION,
@@ -337,7 +336,7 @@ class NativeGitAccessControlStorageTest {
                 path,
                 Optional.empty(),
                 true);
-        return new AccessControlStorageResolver(new BootstrapRepositorySources(List.of(source)), provider)
+        return new OrionConfigurationStorageResolver(new BootstrapRepositorySources(List.of(source)), provider)
                 .resolve();
     }
 

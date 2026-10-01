@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.ConfigurationFile;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,7 +49,7 @@ class OrionAdminAccessControlRouteTest {
                 OrionAccessControlService.class.getClassLoader(), new Class<?>[]{OrionAccessControlService.class},
                 (proxy, method, arguments) -> {
                     if (method.getName().equals("accessControlConfigurationFile")) {
-                        return new OrionAccessControlService.ConfigurationFile(content, Optional.of("revision-1"));
+                        return new ConfigurationFile(content, Optional.of("revision-1"));
                     }
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });

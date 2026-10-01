@@ -1,6 +1,7 @@
 package pro.deta.orion.component;
 
 import dagger.Module;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import dagger.Provides;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
@@ -17,7 +18,7 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -36,8 +37,8 @@ import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlStorage;
-import pro.deta.orion.acl.storage.AccessControlStorageResolver;
+import pro.deta.orion.config.OrionConfigurationStorage;
+import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -69,26 +70,23 @@ public class OrionRuntimeModule {
 
     @Provides
     @Named("bootstrap-proxies")
-    static Runnable bootstrapProxies(AccessControlStorage storage,
+    static Runnable bootstrapProxies(OrionConfigurationStorage storage,
             ConfiguredNativeGitRepositoryProvider configured, BootstrapRepositorySources sources,
             ProxyAwareNativeGitRepositoryProvider provider, ConfigurationCipherCapability cipher,
-            ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionAccessControlServiceImpl acl,
+            ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
             BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         return () -> {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
-                    storage, provider, cipher, desiredState.current());
-            if (adopted.isPresent() && !adopted.orElseThrow().equals(desiredState.current().document())) {
-                acl.reload("bootstrap proxy adoption");
-            }
+                    storage, editor, provider, cipher, desiredState.current());
             configured.activate(() -> desiredState.current().document(), secrets, sources::referencesRepository);
             provider.activate(() -> desiredState.current().document(), secrets, adopted.isEmpty());
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             for (BootstrapChange change : provider.bootstrapChanges(snapshot.document())) {
                 Decision decision = bootstrapDecision(change,
-                        actor -> saveBootstrapConnection(acl, desiredState.current(), change, actor));
+                        actor -> saveBootstrapConnection(editor, desiredState.current(), change, actor));
                 decisions.register(decision).valueOrFailure("Cannot register bootstrap connection decision");
             }
         };
@@ -118,14 +116,14 @@ public class OrionRuntimeModule {
         return connection.map(value -> String.join("\n", new TreeSet<>(value.knownHosts()))).orElse("");
     }
 
-    private static Result<Void> saveBootstrapConnection(OrionAccessControlServiceImpl acl,
+    private static Result<Void> saveBootstrapConnection(OrionConfigurationEditor editor,
             OrionDesiredState.Snapshot snapshot, BootstrapChange change, PrincipalAddress actor) {
         try {
-            acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
+            editor.edit(snapshot.revision().orElseThrow()).update(document -> {
                 if (!document.system().proxies().contains(change.previous())
                         || change.previousConnection().filter(value -> !document.system().connections().contains(value))
                             .isPresent()) {
-                    throw new AccessControlConcurrentUpdateException("Bootstrap connection changed", null);
+                    throw new OrionConfigurationConcurrentUpdateException("Bootstrap connection changed", null);
                 }
                 List<GitProxyBinding> bindings = new ArrayList<>(document.system().proxies());
                 bindings.set(bindings.indexOf(change.previous()), change.replacement());
@@ -137,7 +135,7 @@ public class OrionRuntimeModule {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), bindings, connections), document.organizations());
-            }, "Reconcile bootstrap connection " + change.previous().alias().value()
+            }).apply("Reconcile bootstrap connection " + change.previous().alias().value()
                     + " approved by " + actor, UserEmail.EMPTY);
             return Result.of(null);
         } catch (RuntimeException failure) {
@@ -155,7 +153,7 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     public static BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> proxyHostKeyDecisions(
-            OrionDesiredState desiredState, OrionAccessControlServiceImpl acl, CommandAuditSink audit) {
+            OrionDesiredState desiredState, OrionConfigurationEditor editor, CommandAuditSink audit) {
         return (selected, rejected) -> {
             Connection.Ssh connection = selected.connection();
             GitProxyBinding binding = selected.binding();
@@ -165,17 +163,17 @@ public class OrionRuntimeModule {
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             if (!snapshot.document().system().proxies().contains(binding)
                     || !snapshot.document().system().connections().contains(connection)) {
-                throw new AccessControlConcurrentUpdateException("Connection configuration changed", rejected);
+                throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", rejected);
             }
             String key = PublicKeyEntry.toString(rejected.serverKey());
             return SshHostKeyDecision.create(binding.alias(), Optional.empty(),
                     rejected.host(), rejected.port(), rejected.serverKey(),
-                    new DecisionAction("Add and trust", true, actor -> trust(acl, audit, snapshot, selected, key, actor)))
+                    new DecisionAction("Add and trust", true, actor -> trust(editor, audit, snapshot, selected, key, actor)))
                     .valueOrFailure("Could not prepare SSH host key decision");
         };
     }
 
-    private static Result<Void> trust(OrionAccessControlServiceImpl acl, CommandAuditSink audit,
+    private static Result<Void> trust(OrionConfigurationEditor editor, CommandAuditSink audit,
             OrionDesiredState.Snapshot snapshot,
             ProxySshConnection selected, String key, PrincipalAddress actor) {
         GitProxyBinding binding = selected.binding();
@@ -185,21 +183,21 @@ public class OrionRuntimeModule {
             keys.add(key);
             Connection.Ssh replacement = new Connection.Ssh(connection.name(), connection.host(), connection.port(),
                     connection.username(), connection.credentialKind(), connection.secret(), keys);
-            acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
+            editor.edit(snapshot.revision().orElseThrow()).update(document -> {
                 if (!document.system().proxies().contains(binding)
                         || !document.system().connections().contains(connection)) {
-                    throw new AccessControlConcurrentUpdateException("Connection configuration changed", null);
+                    throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", null);
                 }
                 List<Connection> connections = new ArrayList<>(document.system().connections());
                 connections.set(connections.indexOf(connection), replacement);
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), system.proxies(), connections), document.organizations());
-            }, "Trust SSH host key for " + binding.alias().value()
+            }).apply("Trust SSH host key for " + binding.alias().value()
                     + " approved by " + actor, UserEmail.EMPTY);
             recordTrustAudit(audit, binding, actor, "saved");
             return Result.of(null);
-        } catch (AccessControlConcurrentUpdateException failure) {
+        } catch (OrionConfigurationConcurrentUpdateException failure) {
             recordTrustAudit(audit, binding, actor, "configuration-conflict");
             return new Result.Failure<>(Result.FailureCode.GENERAL, "Connection configuration changed", failure);
         } catch (RuntimeException failure) {
@@ -264,8 +262,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static AccessControlStorage accessControlStorage(
-            AccessControlStorageResolver accessControlStorageResolver) {
-        return accessControlStorageResolver.resolve();
+    static OrionConfigurationStorage configurationStorage(
+            OrionConfigurationStorageResolver configurationStorageResolver) {
+        return configurationStorageResolver.resolve();
     }
 }

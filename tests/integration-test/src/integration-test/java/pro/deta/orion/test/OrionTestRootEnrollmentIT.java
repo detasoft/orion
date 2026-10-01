@@ -24,7 +24,7 @@ class OrionTestRootEnrollmentIT {
         KeyPair key = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            TestBearerTokens.enrollRootKey(orion.accessControlService(), key);
+            TestBearerTokens.enrollRootKey(orion.accessControlService(), orion.component().configurationEditor(), key);
             assertAdminTokenWorks(orion, key);
         }
         try (RuntimeHttpTestSupport.StartedOrion restarted = RuntimeHttpTestSupport.start(configuration)) {

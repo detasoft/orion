@@ -1,11 +1,12 @@
 package pro.deta.orion;
 
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
-import pro.deta.orion.acl.storage.AccessControlStorage;
-import pro.deta.orion.acl.storage.AccessControlStorageResolver;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationStorage;
+import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
@@ -37,10 +38,7 @@ import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
@@ -226,7 +224,7 @@ public final class BootstrapContext implements AutoCloseable {
     private static Optional<ConfigurationFile> loadInitialConfiguration(
             BootstrapRepositorySources sources,
             ProxyAwareNativeGitRepositoryProvider provider) {
-        AccessControlStorage storage = new AccessControlStorageResolver(sources, provider).resolve();
+        OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(sources, provider).resolve();
         return switch (storage.load()) {
             case Result.Success<ConfigurationFile>(var file) -> Optional.of(file);
             case Result.Failure<ConfigurationFile> failure -> {
@@ -238,7 +236,7 @@ public final class BootstrapContext implements AutoCloseable {
         };
     }
 
-    public static Optional<OrionDocument> adoptProxies(AccessControlStorage storage,
+    public static Optional<OrionDocument> adoptProxies(OrionConfigurationStorage storage, OrionConfigurationEditor editor,
             ProxyAwareNativeGitRepositoryProvider repositoryProvider, ConfigurationCipherCapability cipher,
             OrionDesiredState.Snapshot approved) {
         Objects.requireNonNull(storage, "configuration storage");
@@ -262,7 +260,7 @@ public final class BootstrapContext implements AutoCloseable {
             if (candidate == current) {
                 return Optional.of(current);
             }
-            if (lastSaveFailure != null && !(lastSaveFailure instanceof AccessControlConcurrentUpdateException)) {
+            if (lastSaveFailure != null && !(lastSaveFailure instanceof OrionConfigurationConcurrentUpdateException)) {
                 throw lastSaveFailure;
             }
             if (attempt == 3) {
@@ -277,17 +275,12 @@ public final class BootstrapContext implements AutoCloseable {
                     || !Arrays.equals(file.content(), preparedFile.content())) {
                 return Optional.empty();
             }
-            byte[] updated;
-            try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                OrionXml.write(candidate, output);
-                updated = output.toByteArray();
-            } catch (IOException failure) {
-                throw new IllegalStateException("Cannot serialize proxy configuration", failure);
-            }
             try {
-                storage.save(new ConfigurationFile(updated, preparedFile.revision()),
-                        "Adopt bootstrap Git proxies", UserEmail.EMPTY);
+                editor.edit(preparedFile).update(ignored -> candidate)
+                        .apply("Adopt bootstrap Git proxies", UserEmail.EMPTY);
                 return Optional.of(candidate);
+            } catch (OrionConfigurationEditor.ActivationFailedException failure) {
+                throw failure;
             } catch (RuntimeException failure) {
                 lastSaveFailure = failure;
             }

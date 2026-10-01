@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 
 import java.util.Arrays;
@@ -43,7 +43,7 @@ public final class OrionAdminAcmeConfigurationRoute extends BaseAdminRoute {
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
             return OrionHttpResponse.ok(configuration.save(settings, context.getUserIdentity().getUserId()))
                     .withHeader("Cache-Control", "no-store");
-        } catch (AccessControlConcurrentUpdateException conflict) {
+        } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload ACME settings and try again.");
         } catch (IllegalArgumentException | JsonProcessingException invalid) {
             return OrionHttpResponse.text(400, "Check ACME settings, account key and any required EAB credentials.");

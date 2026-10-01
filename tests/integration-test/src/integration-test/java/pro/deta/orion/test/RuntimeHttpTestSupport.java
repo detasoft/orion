@@ -54,6 +54,7 @@ final class RuntimeHttpTestSupport {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
             lifecycle.waitForStarting();
             return new StartedOrion(
+                    orionComponent,
                     orionConfiguration,
                     lifecycle,
                     orionComponent.orionAccessControlService(),
@@ -73,8 +74,8 @@ final class RuntimeHttpTestSupport {
 
     static void updateConfiguration(StartedOrion orion, byte[] content, String etag) throws IOException {
         OrionDocument document = OrionXml.read(new ByteArrayInputStream(content));
-        orion.accessControlService().updatePrimaryConfiguration(
-                etag.replace("\"", ""), ignored -> document, "Update test configuration", UserEmail.EMPTY);
+        orion.component().configurationEditor().edit(etag.replace("\"", "")).update(ignored -> document)
+                .apply("Update test configuration", UserEmail.EMPTY);
     }
 
     static String aclEtag(StartedOrion orion, String token) throws IOException {
@@ -137,6 +138,7 @@ final class RuntimeHttpTestSupport {
     }
 
     record StartedOrion(
+            OrionComponent component,
             OrionConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,

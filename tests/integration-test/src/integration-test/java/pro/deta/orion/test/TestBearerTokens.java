@@ -1,5 +1,9 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.config.OrionConfigurationEdit;
+
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AuthenticationResult;
@@ -25,20 +29,22 @@ final class TestBearerTokens {
     private TestBearerTokens() {
     }
 
-    static String issueRootToken(OrionAccessControlServiceImpl accessControlService, long expiresInSeconds) {
+    static String issueRootToken(OrionAccessControlServiceImpl accessControlService,
+            OrionConfigurationEditor editor, long expiresInSeconds) {
         AuthenticationResult authentication = accessControlService.authenticateSshUser(
                 ROOT_USER, ROOT_KEY.getPublic().getEncoded());
         if (authentication instanceof AuthenticationResult.Failure) {
-            enrollRootKey(accessControlService, ROOT_KEY);
+            enrollRootKey(accessControlService, editor, ROOT_KEY);
         }
         return OrionTestRootAccess.issueToken(accessControlService, ROOT_KEY.getPublic(), expiresInSeconds);
     }
 
-    static void enrollRootKey(OrionAccessControlServiceImpl accessControlService, KeyPair key) {
+    static void enrollRootKey(OrionAccessControlServiceImpl accessControlService,
+            OrionConfigurationEditor editor, KeyPair key) {
         char[] password = accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
         byte[] credential = new String(password).getBytes(StandardCharsets.UTF_8);
-        try {
-            OrionTestRootAccess.enroll(accessControlService, key.getPublic(), credential);
+        try (OrionConfigurationEdit edit = editor.edit()) {
+            OrionTestRootAccess.enroll(accessControlService, edit, key.getPublic(), credential);
         } finally {
             Arrays.fill(password, '\0');
             Arrays.fill(credential, (byte) 0);

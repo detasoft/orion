@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -154,9 +154,9 @@ class S3BootstrapRestartIT {
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                             bootstrap.configurationCipher());
                     OrionDocument updated = secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray());
-                    component.orionAccessControlService().updatePrimaryConfiguration(
-                            current.revision().orElseThrow(), ignored -> updated,
-                            "Persist stateless bootstrap secret", UserEmail.EMPTY);
+                    component.configurationEditor().edit(current.revision().orElseThrow())
+                            .update(ignored -> updated)
+                            .apply("Persist stateless bootstrap secret", UserEmail.EMPTY);
                     savedConfiguration = component.orionAccessControlService()
                             .accessControlConfigurationFile().content();
                     assertThat(new String(savedConfiguration, StandardCharsets.UTF_8))

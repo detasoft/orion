@@ -1,12 +1,14 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import dagger.BindsInstance;
 import dagger.Component;
 
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -43,6 +45,9 @@ public interface OrionComponent {
     OrionApplicationLifecycle orionApplicationLifecycle();
 
     OrionAccessControlServiceImpl orionAccessControlService();
+
+    @TestOnly
+    OrionConfigurationEditor configurationEditor();
 
     @TestOnly
     ConfigurationSecrets configurationSecrets();

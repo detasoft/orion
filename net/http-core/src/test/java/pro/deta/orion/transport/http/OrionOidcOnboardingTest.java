@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.*;
@@ -19,13 +21,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.*;
+import pro.deta.orion.config.*;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
-import pro.deta.orion.config.*;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -316,7 +317,7 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("refresh", Map.of("organization", "default", "userId", "alice"), null).status)
                     .isEqualTo(401);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<AccessControl.User> users = new ArrayList<>();
@@ -332,7 +333,7 @@ class OrionOidcOnboardingTest {
                             removed.equals("provider") ? List.of() : org.oidcProviders(), org.invitations(), org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }, "remove account", null);
+            }).apply("remove account", null);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
         }
     }
@@ -345,7 +346,7 @@ class OrionOidcOnboardingTest {
             String invitation = f.invite("acme");
             assertThat(new String(f.storage.snapshot.content(), StandardCharsets.UTF_8))
                     .doesNotContain(invitation);
-            f.acl.reload("restart before accepting invitation");
+            f.editor.reload("restart before accepting invitation");
             Login login = f.start("acme", invitation);
             String ticket = f.callback(login);
             Reply profile = f.post("profile", Map.of("ticket", ticket), login.cookie);
@@ -382,7 +383,7 @@ class OrionOidcOnboardingTest {
                     .isEqualTo(400);
             assertThatThrownBy(() -> f.accounts.invitation(new OrganizationId("acme"), invitation))
                     .isInstanceOf(IllegalArgumentException.class);
-            f.acl.reload("restart after account creation");
+            f.editor.reload("restart after account creation");
             assertThat(f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
             Login returning = f.start("acme", "");
@@ -390,9 +391,9 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("profile", Map.of("ticket", returningTicket), returning.cookie)
                     .json.path("setup").asBoolean()).isFalse();
             assertThat(f.post("complete", Map.of("ticket", returningTicket), returning.cookie).status).isEqualTo(200);
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document ->
-                    new OrionDocument(document.system(), List.of(f.accounts.organization(new OrganizationId("default")))),
-                    "remove acme", null);
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document ->
+                    new OrionDocument(document.system(),
+                            List.of(f.accounts.organization(new OrganizationId("default"))))).apply("remove acme", null);
             assertThat(f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Failure.class);
         }
@@ -440,11 +441,11 @@ class OrionOidcOnboardingTest {
             OidcProvider provider = f.accounts.organization(id).oidcProviders().getFirst();
             f.storage.conflict = true;
             assertThatThrownBy(() -> f.accounts.accept(id, token, "alice@example.test", provider, "subject", "A", ""))
-                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
+                    .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             assertThat(f.accounts.organization(id).users()).isEmpty();
             assertThat(f.accounts.invitation(id, token)).isNotNull();
             f.storage.conflict = false;
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OrganizationInvitation> expired = new ArrayList<>();
@@ -455,7 +456,7 @@ class OrionOidcOnboardingTest {
                             org.grants(), org.roles(), org.teams(), org.secrets(), org.oidcProviders(), expired, org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }, "expire fixture invitation", null);
+            }).apply("expire fixture invitation", null);
             assertThatThrownBy(() -> f.accounts.accept(id, token, "alice@example.test", provider, "subject", "A", ""))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(f.accounts.organization(id).users()).isEmpty();
@@ -520,7 +521,7 @@ class OrionOidcOnboardingTest {
             input.put("issuer", "https://accounts.google.com");
             input.put("clientSecret", "rotated-secret");
             assertThat(f.request("POST", "/api/admin/oidc", input, Map.of(), null, f.admin).status).isEqualTo(200);
-            f.acl.reload("reload rotated provider");
+            f.editor.reload("reload rotated provider");
             assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
                     .isEqualTo("rotated-secret".toCharArray());
         }
@@ -530,7 +531,7 @@ class OrionOidcOnboardingTest {
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void rotatingSharedProviderSecretLeavesOtherConsumersAndOrganizationsUntouched(boolean connectionConsumer) throws Exception {
         try (Fixture f = new Fixture()) {
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OidcProvider> providers = new ArrayList<>(org.oidcProviders());
@@ -556,7 +557,7 @@ class OrionOidcOnboardingTest {
                             org.grants(), org.roles(), teams, org.secrets(), providers, org.invitations(), connections));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }, "share fixture secret", null);
+            }).apply("share fixture secret", null);
             Map<String, Object> input = Map.of("organization", "acme", "id", "corporate",
                     "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
                     "revision", f.desired.current().revision().orElseThrow());
@@ -594,6 +595,7 @@ class OrionOidcOnboardingTest {
         final MemoryStorage storage = new MemoryStorage();
         final OrionDesiredState desired = new OrionDesiredState();
         final OrionKeyMaterial material;
+        final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
         final OrganizationAccounts accounts;
         final HttpsServer provider;
@@ -709,12 +711,20 @@ class OrionOidcOnboardingTest {
             ByteArrayOutputStream xml = new ByteArrayOutputStream();
             OrionXml.write(document, xml);
             storage.snapshot = new ConfigurationFile(xml.toByteArray(), Optional.of("0"));
-            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
-                    OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
-                    new pro.deta.orion.schema.config.OrionConfiguration(),
-                    material.configurationCipher(), material.configurationMaterial(), java.util.Optional.empty());
-            acl.reload("fixture");
-            accounts = new OrganizationAccounts(acl, desired);
+            editor = new OrionConfigurationEditor(storage,
+                new pro.deta.orion.schema.config.OrionConfiguration(),
+                material.configurationCipher(),
+                material.configurationMaterial(),
+                desired);
+            acl = new OrionAccessControlServiceImpl(storage,
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                material.serverIdentity(),
+                desired,
+                editor,
+                java.util.Optional.empty());
+            acl.onStart();
+            accounts = new OrganizationAccounts(editor, desired);
             restart();
         }
 
@@ -724,7 +734,7 @@ class OrionOidcOnboardingTest {
             filter = new OrionAuthorizationFilter(acl, oidc);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
                     new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
-                    new OrionAdminOidcRoute(desired, acl, secrets, mapper))), new OrionHttpResponseWriter(mapper));
+                    new OrionAdminOidcRoute(desired, editor, secrets, mapper))), new OrionHttpResponseWriter(mapper));
         }
 
         String invite(String organization) throws Exception {
@@ -862,14 +872,14 @@ class OrionOidcOnboardingTest {
         return result;
     }
 
-    private static final class MemoryStorage implements AccessControlStorage {
+    private static final class MemoryStorage implements OrionConfigurationStorage {
         ConfigurationFile snapshot;
         int saves;
         boolean conflict;
         @Override public Result<ConfigurationFile> load() { return new Result.Success<>(snapshot); }
         @Override public void save(ConfigurationFile next, String message, UserEmail author) {
             if (conflict || !snapshot.revision().equals(next.revision())) {
-                throw new AccessControlConcurrentUpdateException("configuration conflict", null);
+                throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
             snapshot = new ConfigurationFile(next.content(), Optional.of(Integer.toString(++saves)));
         }

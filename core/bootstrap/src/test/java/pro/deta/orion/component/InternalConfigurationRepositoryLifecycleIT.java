@@ -1,5 +1,7 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,7 +59,6 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -75,6 +76,58 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @TempDir
     private Path tempDir;
+
+    private static void updateUser(OrionComponent component, AccessControlUserUpdate user) {
+        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+            component.orionAccessControlService().createOrUpdateUser(edit, user);
+            edit.apply("createOrUpdateUser() " + user.id(), new UserEmail(user.id(), user.email()));
+        }
+    }
+
+    private static SshKeyEnrollmentResult enroll(
+            OrionComponent component, String generation, List<String> keys) {
+        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+            SshKeyEnrollmentResult result =
+                    component.orionAccessControlService().completeRootSshKeyEnrollment(edit, generation, keys);
+            if (result instanceof SshKeyEnrollmentResult.Success) {
+                edit.apply("complete root SSH key enrollment", UserEmail.EMPTY);
+            }
+            return result;
+        }
+    }
+
+    private static SshCredentialUpdateResult addKeys(
+            OrionComponent component, String user, List<String> keys) {
+        return mutateKeys(component, edit -> component.orionAccessControlService().addSshCredentials(edit, user, keys));
+    }
+
+    private static void addKey(OrionComponent component, String user, String key) {
+        addKeysOrThrow(component, user, List.of(key));
+    }
+
+    private static void addKeysOrThrow(OrionComponent component, String user, List<String> keys) {
+        if (addKeys(component, user, keys) instanceof SshCredentialUpdateResult.Failure failure) {
+            throw new IllegalArgumentException(failure.reason(), failure.throwable());
+        }
+    }
+
+    private static SshCredentialUpdateResult removeKey(
+            OrionComponent component, String user, String prefix, boolean force) {
+        return mutateKeys(component,
+                edit -> component.orionAccessControlService().removeSshCredential(edit, user, prefix, force));
+    }
+
+    private static SshCredentialUpdateResult mutateKeys(OrionComponent component,
+            java.util.function.Function<OrionConfigurationEdit,
+                    SshCredentialUpdateResult> operation) {
+        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+            SshCredentialUpdateResult result = operation.apply(edit);
+            if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+                edit.apply("update test SSH credentials", UserEmail.EMPTY);
+            }
+            return result;
+        }
+    }
 
     @Test
     void bootstrapsOnceAndReusesTheCommittedAclOnRestart() throws Exception {
@@ -121,14 +174,12 @@ class InternalConfigurationRepositoryLifecycleIT {
                         restarted.orionAccessControlService().authenticateSshKeyEnrollment(
                                 "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8));
                 String generation = enrollment.rootRecoveryGeneration().orElseThrow();
-                assertThat(restarted.orionAccessControlService().completeRootSshKeyEnrollment(
-                        generation, List.of(PublicKeyEntry.toString(enrolledKey.getPublic()))))
+                assertThat(enroll(restarted, generation, List.of(PublicKeyEntry.toString(enrolledKey.getPublic()))))
                         .isInstanceOf(SshKeyEnrollmentResult.Success.class);
                 assertThat(restarted.orionAccessControlService().authenticateSshKeyEnrollment(
                         "root", new String(rootPassword).getBytes(StandardCharsets.UTF_8)))
                         .isInstanceOf(SshKeyEnrollmentAuthentication.Failure.class);
-                assertThat(restarted.orionAccessControlService().completeRootSshKeyEnrollment(
-                        generation, List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
+                assertThat(enroll(restarted, generation, List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
                         .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
                 assertSshAuthenticated(restarted, "root", enrolledKey);
             } finally {
@@ -203,12 +254,10 @@ class InternalConfigurationRepositoryLifecycleIT {
             SshKeyEnrollmentAuthentication.Success enrollment = (SshKeyEnrollmentAuthentication.Success)
                     first.orionAccessControlService().authenticateSshKeyEnrollment(
                             "root", oldPassword.getBytes(StandardCharsets.UTF_8));
-            assertThat(first.orionAccessControlService().completeRootSshKeyEnrollment(
-                    enrollment.rootRecoveryGeneration().orElseThrow(), List.of(rootOpenSshKey)))
+            assertThat(enroll(first, enrollment.rootRecoveryGeneration().orElseThrow(), List.of(rootOpenSshKey)))
                     .isInstanceOf(SshKeyEnrollmentResult.Success.class);
-            first.orionAccessControlService().createOrUpdateUser(user("alice"));
-            first.orionAccessControlService().addKeyToUser(
-                    "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
+            updateUser(first, user("alice"));
+            addKey(first, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
             AccessControlDraft draft = OrionXml.read(new ByteArrayInputStream(
@@ -234,9 +283,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
             OrionDocument replacement = OrionXml.read(
                     new ByteArrayInputStream(accessControlBytes(draft.toAccessControl())));
-            first.orionAccessControlService().updatePrimaryConfiguration(
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
-                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
+            first.configurationEditor().edit(first.orionAccessControlService()
+                    .accessControlConfigurationFile().revision().orElseThrow())
+                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
             beforeReset = OrionXml.read(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
@@ -330,16 +379,12 @@ class InternalConfigurationRepositoryLifecycleIT {
             String recoveryGeneration = ((SshKeyEnrollmentAuthentication.Success) enrollment)
                     .rootRecoveryGeneration()
                     .orElseThrow();
-            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
-                    recoveryGeneration,
-                    List.of("invalid public key")))
+            assertThat(enroll(reset, recoveryGeneration, List.of("invalid public key")))
                     .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
             assertThat(reset.orionAccessControlService().authenticateSshKeyEnrollment(
                     "root", newPassword.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(SshKeyEnrollmentAuthentication.Success.class);
-            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
-                    recoveryGeneration,
-                    List.of(PublicKeyEntry.toString(recoveredRootKey.getPublic()))))
+            assertThat(enroll(reset, recoveryGeneration, List.of(PublicKeyEntry.toString(recoveredRootKey.getPublic()))))
                     .isInstanceOf(SshKeyEnrollmentResult.Success.class);
             assertThat(reset.orionAccessControlService().authenticateUser(
                     "root", newPassword.getBytes(StandardCharsets.UTF_8)))
@@ -349,9 +394,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(reset.orionAccessControlService().verifyToken(
                     newRootToken.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
-            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
-                    "stale-generation",
-                    List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
+            assertThat(enroll(reset, "stale-generation", List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
                     .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
         } finally {
             System.setOut(originalOut);
@@ -382,9 +425,9 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(missingRootAclBytes()));
-            first.orionAccessControlService().updatePrimaryConfiguration(
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
-                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
+            first.configurationEditor().edit(first.orionAccessControlService()
+                    .accessControlConfigurationFile().revision().orElseThrow())
+                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {
@@ -595,9 +638,9 @@ class InternalConfigurationRepositoryLifecycleIT {
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
-            first.orionAccessControlService().updatePrimaryConfiguration(
-                    first.orionAccessControlService().accessControlConfigurationFile().revision().orElseThrow(),
-                    ignored -> replacement, "Prepare configuration", UserEmail.EMPTY);
+            first.configurationEditor().edit(first.orionAccessControlService()
+                    .accessControlConfigurationFile().revision().orElseThrow())
+                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
             assertSshAuthenticated(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -701,17 +744,13 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            first.orionAccessControlService().createOrUpdateUser(user("alice"));
+            updateUser(first, user("alice"));
 
-            assertThatThrownBy(() -> first.orionAccessControlService().addSshKeysToUser(
-                    "alice",
-                    List.of(firstOpenSshKey, "not a public key")))
+            assertThatThrownBy(() -> addKeysOrThrow(first, "alice", List.of(firstOpenSshKey, "not a public key")))
                     .isInstanceOf(IllegalArgumentException.class);
             assertSshAuthenticationFailed(first, "alice", firstKey);
 
-            first.orionAccessControlService().addSshKeysToUser(
-                    "alice",
-                    List.of(
+            addKeysOrThrow(first, "alice", List.of(
                             firstOpenSshKey + " alice@first",
                             KeyUtils.publicKeyToString(firstKey.getPublic()),
                             secondOpenSshKey));
@@ -762,19 +801,15 @@ class InternalConfigurationRepositoryLifecycleIT {
             String generation = ((SshKeyEnrollmentAuthentication.Success) enrollment)
                     .rootRecoveryGeneration()
                     .orElseThrow();
-            assertThat(initial.orionAccessControlService().completeRootSshKeyEnrollment(
-                    generation,
-                    List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
+            assertThat(enroll(initial, generation, List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
                     .isInstanceOf(SshKeyEnrollmentResult.Success.class);
-            initial.orionAccessControlService().createOrUpdateUser(user("alice"));
-            initial.orionAccessControlService().addKeyToUser(
-                    "alice",
-                    PublicKeyEntry.toString(aliceKey.getPublic()));
+            updateUser(initial, user("alice"));
+            addKey(initial, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             rootToken = issueTokenForSshKey(initial, "root", rootKey);
             aliceToken = issueTokenForSshKey(initial, "alice", aliceKey);
 
             String rootFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(rootKey.getPublic());
-            assertThat(initial.orionAccessControlService().removeSshCredential("root", rootFingerprint, true))
+            assertThat(removeKey(initial, "root", rootFingerprint, true))
                     .isInstanceOf(SshCredentialUpdateResult.Success.class);
             assertSshAuthenticationFailed(initial, "root", rootKey);
             assertThat(initial.orionAccessControlService().verifyToken(
@@ -796,9 +831,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(restarted.orionAccessControlService().verifyToken(
                     aliceToken.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Success.class);
-            assertThat(restarted.orionAccessControlService().addSshCredentials(
-                    "root",
-                    List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
+            assertThat(addKeys(restarted, "root", List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
                     .isInstanceOfSatisfying(
                             SshCredentialUpdateResult.Failure.class,
                             failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.ROOT_LOCKED));
@@ -827,14 +860,10 @@ class InternalConfigurationRepositoryLifecycleIT {
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
         try {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
-            component.orionAccessControlService().createOrUpdateUser(user("alice"));
-            component.orionAccessControlService().createOrUpdateUser(user("bob"));
-            component.orionAccessControlService().addSshKeysToUser(
-                    "alice",
-                    List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
-            component.orionAccessControlService().addSshKeysToUser(
-                    "bob",
-                    List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
+            updateUser(component, user("alice"));
+            updateUser(component, user("bob"));
+            addKeysOrThrow(component, "alice", List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
+            addKeysOrThrow(component, "bob", List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
 
             assertSshAuthenticated(component, "alice", sharedKey);
             assertSshAuthenticated(component, "bob", sharedKey);

@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -39,6 +43,23 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 class OrionHttpRouteServletRoutingTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static OrionConfigurationEditor configurationEditor() throws IOException {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        pro.deta.orion.schema.orion.OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
+        pro.deta.orion.config.OrionConfigurationStorage storage =
+                stub(pro.deta.orion.config.OrionConfigurationStorage.class, (proxy, method, args) ->
+                        switch (method.getName()) {
+                            case "load" -> pro.deta.orion.util.Result.of(
+                                    new ConfigurationFile(output.toByteArray(), Optional.empty()));
+                            default -> null;
+                        });
+        return new OrionConfigurationEditor(storage,
+                new OrionConfiguration(),
+                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                new pro.deta.orion.config.OrionDesiredState());
+    }
 
     @Test
     void matchesRouteByUrlPattern() throws Exception {
@@ -227,7 +248,7 @@ class OrionHttpRouteServletRoutingTest {
                 }
                 throw new IllegalArgumentException("private persistence details");
             });
-            OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(service, OBJECT_MAPPER);
+            OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(service, configurationEditor(), OBJECT_MAPPER);
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
                     "{\"id\":\"alice\"}"), response.proxy());

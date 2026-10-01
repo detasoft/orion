@@ -1,6 +1,8 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -16,7 +18,7 @@ import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
 import org.apache.sshd.server.shell.ProcessShellFactory;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.OrionRuntimeModule;
-import pro.deta.orion.acl.storage.*;
+import pro.deta.orion.config.*;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
@@ -159,7 +161,7 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
 
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            f.acl.reload("verify host key persistence");
+            f.editor.reload("verify host key persistence");
             var binding = f.desired.current().document().system().proxies().getFirst();
             assertThat(binding.knownHosts(f.desired.current().document().system())).containsExactlyInAnyOrder(previous, f.hostKey());
             assertThat(f.sshAuthentications).hasValue(0);
@@ -205,8 +207,7 @@ class OrionAdminProxyMutationTest {
         try (Fixture f = new Fixture()) {
             f.createSsh(Set.of());
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> document,
-                    "concurrent update", null);
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> document).apply("concurrent update", null);
             int saves = f.storage.saves;
             f.work.remove().run();
             assertThat(f.storage.saves).isEqualTo(saves);
@@ -330,7 +331,7 @@ class OrionAdminProxyMutationTest {
             assertThat(replaced.status).isEqualTo(200);
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("second-private-token".toCharArray());
             assertThat(f.authorization).containsExactly("Bearer first-private-token", "Bearer second-private-token");
-            f.acl.reload("test persisted reload");
+            f.editor.reload("test persisted reload");
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("second-private-token".toCharArray());
             assertThat(f.audit).hasSize(2);
             assertThat(f.audit.toString()).doesNotContain("first-private-token", "second-private-token", f.upstream());
@@ -352,7 +353,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.secrets.resolveSystem(original)).isEqualTo("shared-private-token".toCharArray());
             var implicit = f.command("update", "first", null, "unapproved-replacement");
             assertThat(f.post(implicit).status).isEqualTo(400);
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 var first = document.system().proxies().getFirst();
                 var second = new pro.deta.orion.schema.orion.GitProxyBinding(
                         new pro.deta.orion.schema.orion.RemoteAlias("second"), first.source(), "third");
@@ -360,7 +361,7 @@ class OrionAdminProxyMutationTest {
                         document.system().https(), document.system().secrets(), List.of(first, second),
                                 document.system().connections()),
                         document.organizations());
-            }, "share fixture credential", null);
+            }).apply("share fixture credential", null);
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
@@ -474,7 +475,7 @@ class OrionAdminProxyMutationTest {
             create.put("credentialKind", "PASSWORD");
             create.put("knownHosts", Set.of(f.hostKey()));
             assertThat(f.post(create).status).isEqualTo(201);
-            f.acl.updatePrimaryConfiguration(f.desired.current().revision().orElseThrow(), document -> {
+            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 var first = document.system().proxies().getFirst();
                 var source = (pro.deta.orion.schema.orion.GitProxyBinding.Ssh) first.source();
                 var second = new pro.deta.orion.schema.orion.GitProxyBinding(
@@ -483,7 +484,7 @@ class OrionAdminProxyMutationTest {
                 var system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                         system.secrets(), List.of(first, second), system.connections()), document.organizations());
-            }, "share SSH connection", UserEmail.EMPTY);
+            }).apply("share SSH connection", UserEmail.EMPTY);
             OrionDocument original = f.desired.current().document();
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
             Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
@@ -534,6 +535,7 @@ class OrionAdminProxyMutationTest {
         final ProxyAwareNativeGitRepositoryProvider provider =
                 new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
         final ConfigurationSecrets secrets;
+        final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
         final HttpServer server;
         final List<String> authorization = new CopyOnWriteArrayList<>();
@@ -558,14 +560,22 @@ class OrionAdminProxyMutationTest {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
                         new SigningMaterialSet(signing, List.of()), 2048, true);
             }
-            acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
-                    OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
-                    new pro.deta.orion.schema.config.OrionConfiguration(),
-                    material.configurationCipher(), material.configurationMaterial(), java.util.Optional.empty());
-            acl.reload("fixture");
+            editor = new OrionConfigurationEditor(storage,
+                new pro.deta.orion.schema.config.OrionConfiguration(),
+                material.configurationCipher(),
+                material.configurationMaterial(),
+                desired);
+            acl = new OrionAccessControlServiceImpl(storage,
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                material.serverIdentity(),
+                desired,
+                editor,
+                java.util.Optional.empty());
+            acl.onStart();
             secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
             provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),
-                    OrionRuntimeModule.proxyHostKeyDecisions(desired, acl, audit::add));
+                    OrionRuntimeModule.proxyHostKeyDecisions(desired, editor, audit::add));
             provider.activate(() -> desired.current().document(), secrets);
             routes(new BootstrapRepositorySources(List.of()));
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -578,7 +588,7 @@ class OrionAdminProxyMutationTest {
         }
 
         void routes(BootstrapRepositorySources sources) {
-            var route = new OrionAdminProxiesRoute(desired, provider, acl, secrets, sources, audit::add, mapper);
+            var route = new OrionAdminProxiesRoute(desired, provider, editor, secrets, sources, audit::add, mapper);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(
                     Set.of(route, new OrionAdminDecisionsRoute(decisions, mapper))),
                     new OrionHttpResponseWriter(mapper));
@@ -670,7 +680,7 @@ class OrionAdminProxyMutationTest {
         }
     }
 
-    private static final class MemoryStorage implements AccessControlStorage {
+    private static final class MemoryStorage implements OrionConfigurationStorage {
         ConfigurationFile snapshot;
         int saves;
         boolean conflict;
@@ -685,7 +695,7 @@ class OrionAdminProxyMutationTest {
         @Override public void save(ConfigurationFile next, String message, UserEmail author) {
             if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.revision().equals(next.revision())) {
-                throw new AccessControlConcurrentUpdateException("configuration conflict", null);
+                throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);
             }
             snapshot = new ConfigurationFile(next.content(), Optional.of(Integer.toString(++saves)));
         }

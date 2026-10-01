@@ -1,5 +1,7 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
@@ -13,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
@@ -157,9 +159,8 @@ class OrionStartupIT {
 
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
                     accessControlWithUsers("root", "saved-remote-user"));
-            orion.accessControlService().updatePrimaryConfiguration(
-                    configurationFile.revision().orElseThrow(), ignored -> updatedDocument,
-                    "Update remote configuration", UserEmail.EMPTY);
+            orion.component().configurationEditor().edit(configurationFile.revision().orElseThrow())
+                    .update(ignored -> updatedDocument).apply("Update remote configuration", UserEmail.EMPTY);
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
@@ -221,8 +222,12 @@ class OrionStartupIT {
                     .contains("<orion schemaVersion=\"2\">")
                     .doesNotContain("<AccessControl");
 
-            orion.accessControlService().createOrUpdateUser(
-                    new AccessControlUserUpdate("new-user", "new@example.test", List.of(), List.of()));
+            try (OrionConfigurationEdit edit = orion.component().configurationEditor().edit()) {
+                AccessControlUserUpdate update = new AccessControlUserUpdate("new-user", "new@example.test", List.of(), List.of());
+                orion.accessControlService().createOrUpdateUser(edit, update);
+                edit.apply("createOrUpdateUser() " + update.id(),
+                        new UserEmail(update.id(), update.email()));
+            }
         }
 
         byte[] migratedAcl = Files.readAllBytes(legacyAclFile);
@@ -252,9 +257,7 @@ class OrionStartupIT {
         StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot));
         boolean shutdownCompleted = false;
         try {
-            String token = TestBearerTokens.issueRootToken(
-                    orion.accessControlService(),
-                    600);
+            String token = TestBearerTokens.issueRootToken(orion.accessControlService(), orion.component().configurationEditor(), 600);
 
             long startedAtNanos = System.nanoTime();
             int responseCode = postShutdown(orion, token);
@@ -334,6 +337,7 @@ class OrionStartupIT {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
             lifecycle.waitForStarting();
             return new StartedOrion(
+                    orionComponent,
                     orionConfiguration,
                     lifecycle,
                     orionComponent.orionAccessControlService(),
@@ -585,6 +589,7 @@ class OrionStartupIT {
     }
 
     private record StartedOrion(
+            OrionComponent component,
             OrionConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,

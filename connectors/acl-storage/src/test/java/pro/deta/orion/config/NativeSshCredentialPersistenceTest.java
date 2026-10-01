@@ -1,4 +1,8 @@
-package pro.deta.orion.acl.storage;
+package pro.deta.orion.config;
+
+import pro.deta.orion.internal.UserEmail;
+
+
 
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
@@ -12,7 +16,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -39,7 +42,7 @@ class NativeSshCredentialPersistenceTest {
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",
                 "users.xml", Optional.empty(), false);
-        AccessControlStorage storage = new NativeGitAccessControlStorage(source, provider);
+        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(source, provider);
         AccessControlDraft primary = new AccessControlDraft();
         AccessControlDraft.User alice = new AccessControlDraft.User();
         alice.setId("alice");
@@ -59,21 +62,29 @@ class NativeSshCredentialPersistenceTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         KeyPair key = generator.generateKeyPair();
-        OrionAccessControlServiceImpl service = service(storage);
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
+                new pro.deta.orion.schema.config.OrionConfiguration(),
+                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
+                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired);
+        OrionAccessControlServiceImpl service = service(storage, editor, desired);
         try {
             service.onStart();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
-            assertThat(service.addSshCredentials("alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
+            try (OrionConfigurationEdit edit = editor.edit()) {
+                assertThat(service.addSshCredentials(edit, "alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
                     .isInstanceOfSatisfying(SshCredentialUpdateResult.Success.class,
                             success -> assertThat(success.changed()).isTrue());
+                edit.apply("add SSH credentials for alice", new UserEmail("alice", "alice@example.test"));
+            }
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
         } finally {
             service.onStop();
         }
-        OrionAccessControlServiceImpl reopened = service(new NativeGitAccessControlStorage(source,
-                new FileNativeGitRepositoryProvider(root)));
+        OrionAccessControlServiceImpl reopened = service(new NativeGitOrionConfigurationStorage(source,
+                new FileNativeGitRepositoryProvider(root)), editor, desired);
         try {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))
@@ -86,14 +97,14 @@ class NativeSshCredentialPersistenceTest {
     }
 
     private static OrionAccessControlServiceImpl service(
-            AccessControlStorage storage
+            OrionConfigurationStorage storage, OrionConfigurationEditor editor, OrionDesiredState desired
     ) {
         return new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(), new OrionDesiredState(),
-                new pro.deta.orion.schema.config.OrionConfiguration(),
-                pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
-                pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
+                OrionRuntimeOptions.defaults(),
+                ServerIdentityCapability.unavailable(),
+                desired,
+                editor,
                 Optional.empty());
     }
 }

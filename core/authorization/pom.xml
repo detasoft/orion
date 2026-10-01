@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>schema</artifactId>
+            <artifactId>common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>

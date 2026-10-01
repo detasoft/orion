@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
@@ -61,7 +61,7 @@ public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
             return OrionHttpResponse.created(Map.of("url", origin + "#invite=" + invitation.token()
                             + "&organization=" + id.value(), "expiresAt", invitation.expiresAt()))
                     .withHeader("Cache-Control", "no-store");
-        } catch (AccessControlConcurrentUpdateException conflict) {
+        } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Please retry.");
         } catch (IllegalArgumentException invalid) {
             return OrionHttpResponse.text(400, "Check the email and organization's OIDC configuration.");

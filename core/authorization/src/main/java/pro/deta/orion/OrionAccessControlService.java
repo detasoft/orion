@@ -1,6 +1,9 @@
 package pro.deta.orion;
 
+import pro.deta.orion.config.ConfigurationFile;
+
 import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
@@ -12,15 +15,10 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 public interface OrionAccessControlService {
     long MAX_TOKEN_EXPIRES_IN_SECONDS = 3_600;
-
-    void addKeyToUser(String username, String publicKey);
-
-    void addSshKeysToUser(String username, List<String> publicKeys);
 
     default SshCredentialListResult listSshCredentials(String userId) {
         return SshCredentialListResult.failure(
@@ -28,13 +26,14 @@ public interface OrionAccessControlService {
                 "SSH credential listing is unavailable");
     }
 
-    default SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+    default SshCredentialUpdateResult addSshCredentials(OrionConfigurationEdit edit, String userId, List<String> publicKeys) {
         return SshCredentialUpdateResult.failure(
                 SshCredentialFailureCode.PERSISTENCE_FAILED,
                 "SSH credential addition is unavailable");
     }
 
     default SshCredentialUpdateResult removeSshCredential(
+            OrionConfigurationEdit edit,
             String userId,
             String fingerprintPrefix,
             boolean force) {
@@ -43,7 +42,7 @@ public interface OrionAccessControlService {
                 "SSH credential removal is unavailable");
     }
 
-    void createOrUpdateUser(AccessControlUserUpdate userUpdate);
+    void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate);
 
     boolean userExists(String userName);
 
@@ -56,6 +55,7 @@ public interface OrionAccessControlService {
     }
 
     default SshKeyEnrollmentResult completeRootSshKeyEnrollment(
+            OrionConfigurationEdit edit,
             String expectedGeneration,
             List<String> publicKeys) {
         return SshKeyEnrollmentResult.failure("key enrollment failed");
@@ -75,15 +75,4 @@ public interface OrionAccessControlService {
 
     ConfigurationFile accessControlConfigurationFile();
 
-    record ConfigurationFile(byte[] content, Optional<String> revision) {
-        public ConfigurationFile {
-            content = Objects.requireNonNull(content, "content").clone();
-            Objects.requireNonNull(revision, "revision");
-        }
-
-        @Override
-        public byte[] content() {
-            return content.clone();
-        }
-    }
 }

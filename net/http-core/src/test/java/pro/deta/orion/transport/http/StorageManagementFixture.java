@@ -1,9 +1,11 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.acl.storage.*;
+import pro.deta.orion.config.*;
 import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -35,22 +37,30 @@ final class StorageManagementFixture {
                 new AccessControl(List.of(root, admin), List.of(), List.of())), orgs);
         OrionDesiredState desired = new OrionDesiredState();
         desired.publish(document, Optional.of("v1"));
-        AccessControlStorage storage = new AccessControlStorage() {
+        OrionConfigurationStorage storage = new OrionConfigurationStorage() {
             private ConfigurationFile snapshot = snapshot(document, "v1");
             private int revision = 1;
             @Override public Result<ConfigurationFile> load() { return Result.of(snapshot); }
             @Override public void save(ConfigurationFile updated, String message, UserEmail author) {
                 if (!snapshot.revision().equals(updated.revision())) {
-                    throw new AccessControlConcurrentUpdateException("Changed", null);
+                    throw new OrionConfigurationConcurrentUpdateException("Changed", null);
                 }
                 snapshot = new ConfigurationFile(updated.content(), Optional.of("v" + ++revision));
             }
         };
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
+                new OrionConfiguration(),
+                cipher,
+                ConfigurationMaterialCapability.unavailable(),
+                desired);
         OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
-                new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(),
-                desired, new OrionConfiguration(), cipher,
-                ConfigurationMaterialCapability.unavailable(), Optional.empty());
-        return new State(new ConfiguredStorageManagement(acl, desired, cipher, repositories), desired);
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                ServerIdentityCapability.unavailable(),
+                desired,
+                editor,
+                Optional.empty());
+        return new State(new ConfiguredStorageManagement(acl, editor, desired, cipher, repositories), desired);
     }
 
     record State(StorageManagement management, OrionDesiredState desired) {

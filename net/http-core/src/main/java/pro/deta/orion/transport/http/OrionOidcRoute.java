@@ -8,7 +8,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -126,7 +126,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                 }
                 default -> OrionHttpResponse.empty(404);
             };
-        } catch (AccessControlConcurrentUpdateException conflict) {
+        } catch (OrionConfigurationConcurrentUpdateException conflict) {
             response = OrionHttpResponse.text(409, "Configuration changed. Please retry.");
         } catch (Exception failure) {
             response = OrionHttpResponse.text(400, "Sign-in is unavailable. Check your invitation or start again.");

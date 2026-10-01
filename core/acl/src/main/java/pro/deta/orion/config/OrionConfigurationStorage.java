@@ -1,13 +1,12 @@
-package pro.deta.orion.acl.storage;
+package pro.deta.orion.config;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.internal.UserEmail;
 
 import java.util.Objects;
 import java.util.function.Consumer;
 
-public interface AccessControlStorage {
+public interface OrionConfigurationStorage {
     Result<ConfigurationFile> load();
 
     void save(ConfigurationFile file, String message, UserEmail author);

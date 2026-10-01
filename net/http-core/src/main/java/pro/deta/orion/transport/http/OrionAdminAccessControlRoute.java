@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.ConfigurationFile;
+
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
@@ -19,7 +21,7 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        OrionAccessControlService.ConfigurationFile file = accessControlService.accessControlConfigurationFile();
+        ConfigurationFile file = accessControlService.accessControlConfigurationFile();
         String revision = file.revision().orElseThrow(() -> new IllegalStateException(
                 "Configuration revision is unavailable"));
         return OrionHttpResponse.resource(SC_OK, file.content(), OrionHttpResponse.XML_CONTENT_TYPE)

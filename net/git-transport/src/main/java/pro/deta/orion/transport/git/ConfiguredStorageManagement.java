@@ -1,9 +1,10 @@
 package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.StorageManagement;
@@ -35,14 +36,17 @@ import java.util.function.Supplier;
 @Singleton
 public final class ConfiguredStorageManagement implements StorageManagement {
     private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final OrionDesiredState desired;
     private final ConfigurationSecrets secrets;
     private final NativeGitRepositoryProvider repositories;
 
     @Inject
-    public ConfiguredStorageManagement(OrionAccessControlServiceImpl acl, OrionDesiredState desired,
+    public ConfiguredStorageManagement(OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
+            OrionDesiredState desired,
             ConfigurationCipherCapability cipher, NativeGitRepositoryProvider repositories) {
         this.acl = acl;
+        this.editor = editor;
         this.desired = desired;
         this.secrets = new ConfigurationSecrets(() -> desired.current().document(), cipher);
         this.repositories = repositories;
@@ -59,7 +63,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 if (name.startsWith("bootstrap/") || name.startsWith("proxy/")) throw new IllegalArgumentException();
                 S3StorageBinding binding = storage.orElseThrow();
                 pro.deta.orion.git.s3.S3NativeGitRepositoryProvider.validateLocation(binding.location().toString());
-                acl.updatePrimaryConfiguration(snapshot.revision().orElseThrow(), document -> {
+                editor.edit(snapshot.revision().orElseThrow()).update(document -> {
                     requireRepositoryCreate(actor, document, name);
                     Optional<OrganizationId> owner = binding.connection().scope() == ConnectionReference.Scope.SYSTEM
                             ? Optional.empty() : Optional.of(address.organizationId());
@@ -71,7 +75,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     // Organization-local grants never authorize the server's default credential chain.
                     if (s3.secretKey().isEmpty()) require(admin(actor, document));
                     return bind(document, address, binding);
-                }, "Create S3 repository", new UserEmail(actor.getUserIdentity().getUserId(), ""));
+                }).apply("Create S3 repository", new UserEmail(actor.getUserIdentity().getUserId(), ""));
             } else if (binding(snapshot.document(), name).isPresent()) {
                 throw new Conflict();
             }
@@ -109,7 +113,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 if (input == null) throw new IllegalArgumentException();
                 // Check scope before revision validation to avoid exposing another organization's configuration.
                 requireOwner(actor, desired.current().document(), owner);
-                OrionDesiredState.Snapshot saved = acl.updatePrimaryConfiguration(revision, document -> {
+                OrionDesiredState.Snapshot saved = editor.edit(revision).update(document -> {
                     require(connectionAllowed(actor, document, owner, input.name(), create
                             ? AccessControl.GrantKey.CREATE : AccessControl.GrantKey.READ_WRITE));
                     Connection existing = null;
@@ -155,8 +159,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     updatedConnections.removeIf(connection -> connection.name().equals(input.name()));
                     updatedConnections.add(replacement);
                     return withConnections(updated, owner, updatedConnections);
-                }, create ? "Create S3 connection" : "Update S3 connection",
-                        new UserEmail(actor.getUserIdentity().getUserId(), ""));
+                }).apply(create ? "Create S3 connection" : "Update S3 connection", new UserEmail(actor.getUserIdentity().getUserId(),
+                        ""));
                 return new Success<>(view(actor, owner, saved));
             });
         } finally {
@@ -312,7 +316,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             return operation.get();
         } catch (SecurityException denied) {
             return new Failure<>(FailureCode.DENIED, "Access denied");
-        } catch (AccessControlConcurrentUpdateException | Conflict conflict) {
+        } catch (OrionConfigurationConcurrentUpdateException | Conflict conflict) {
             return new Failure<>(FailureCode.CONFLICT, "Configuration or binding changed; reload before retrying");
         } catch (IllegalArgumentException invalid) {
             return new Failure<>(FailureCode.INVALID, "Invalid storage request or unavailable organization/team");

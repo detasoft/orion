@@ -1,5 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.ConfigurationFile;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -19,7 +23,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-import pro.deta.orion.auth.UserIdentity;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -219,18 +222,9 @@ class OrionAuthorizationFilterTest {
         private String lastToken;
         private boolean adminGrant = true;
 
-        @Override
-        public void addKeyToUser(String username, String publicKey) {
-            throw new UnsupportedOperationException();
-        }
 
         @Override
-        public void addSshKeysToUser(String username, List<String> publicKeys) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
             throw new UnsupportedOperationException();
         }
 

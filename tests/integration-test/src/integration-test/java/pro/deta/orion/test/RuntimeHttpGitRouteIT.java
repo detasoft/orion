@@ -37,7 +37,6 @@ import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -67,7 +66,8 @@ class RuntimeHttpGitRouteIT {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
              Git acmeSource = initRepository(tempDir.resolve("acme-source"));
              Git otherSource = initRepository(tempDir.resolve("other-source"))) {
-            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.component().configurationEditor(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
             OrionDocument base = OrionXml.read(new ByteArrayInputStream(
@@ -216,9 +216,8 @@ class RuntimeHttpGitRouteIT {
                         .isInstanceOf(TransportException.class);
                 assertRepositoryDoesNotExist(repositoryRoot, repositoryName);
 
-                String rootToken = TestBearerTokens.issueRootToken(
-                        orion.accessControlService(),
-                        600);
+                String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                        orion.component().configurationEditor(), 600);
                 RuntimeHttpTestSupport.updateConfiguration(orion,
                         serialize(accessControlForHttpGitUser(repositoryName)),
                         RuntimeHttpTestSupport.aclEtag(orion, rootToken));
@@ -297,9 +296,8 @@ class RuntimeHttpGitRouteIT {
 
             try (Git source = initRepository(sourceDirectory)) {
                 ObjectId initialCommit = createCommit(source, "README.md", "seeded for read-only http\n", "seed http commit");
-                String rootToken = TestBearerTokens.issueRootToken(
-                        orion.accessControlService(),
-                        600);
+                String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                        orion.component().configurationEditor(), 600);
                 TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
 
                 Iterable<PushResult> seedPushResults = source.push()
@@ -380,9 +378,8 @@ class RuntimeHttpGitRouteIT {
 
             try (Git source = initRepository(sourceDirectory)) {
                 ObjectId masterCommit = createCommit(source, "README.md", "master over http\n", "seed master");
-                String rootToken = TestBearerTokens.issueRootToken(
-                        orion.accessControlService(),
-                        600);
+                String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                        orion.component().configurationEditor(), 600);
                 TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
 
                 assertPushStatus(

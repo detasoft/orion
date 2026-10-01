@@ -1,6 +1,7 @@
 package pro.deta.orion.acl;
 
 import jakarta.inject.Inject;
+import pro.deta.orion.config.OrionConfigurationEditor;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
@@ -26,14 +27,14 @@ import java.util.function.UnaryOperator;
 /** Stores invitations and consumes them atomically with account creation in the configuration repository. */
 @Singleton
 public final class OrganizationAccounts {
-    private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final OrionDesiredState desired;
     private final Clock clock = Clock.systemUTC();
     private final SecureRandom random = new SecureRandom();
 
     @Inject
-    public OrganizationAccounts(OrionAccessControlServiceImpl acl, OrionDesiredState desired) {
-        this.acl = acl;
+    public OrganizationAccounts(OrionConfigurationEditor editor, OrionDesiredState desired) {
+        this.editor = editor;
         this.desired = desired;
     }
 
@@ -162,7 +163,7 @@ public final class OrganizationAccounts {
     private void update(OrganizationId id, UnaryOperator<OrionDocument.Organization> operation,
             String message, UserEmail author) {
         String revision = desired.current().revision().orElseThrow();
-        acl.updatePrimaryConfiguration(revision, document -> {
+        editor.edit(revision).update(document -> {
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             boolean found = false;
             for (OrionDocument.Organization organization : document.organizations()) {
@@ -177,7 +178,7 @@ public final class OrganizationAccounts {
                 throw new IllegalArgumentException("Organization is unavailable");
             }
             return new OrionDocument(document.system(), organizations);
-        }, message, author);
+        }).apply(message, author);
     }
 
     private static OrionDocument.Organization replaceAccounts(OrionDocument.Organization organization,

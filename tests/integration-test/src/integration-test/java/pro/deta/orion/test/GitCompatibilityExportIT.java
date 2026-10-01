@@ -49,7 +49,8 @@ class GitCompatibilityExportIT {
              RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             ObjectId head = git.getRepository().resolve("HEAD");
             assertThat(head.name()).isEqualTo(expectedHead);
-            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(), 600);
+            String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
+                    orion.component().configurationEditor(), 600);
             TransportConfigCallback authorization = transport -> {
                 if (transport instanceof TransportHttp http) {
                     http.setAdditionalHeaders(Map.of("Authorization", TestBearerTokens.bearer(rootToken)));

@@ -7,7 +7,12 @@ import org.apache.sshd.server.auth.keyboard.InteractiveChallenge;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.SshCredentialUpdateResult;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.UserIdentity;
@@ -38,9 +43,11 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             new AttributeRepository.AttributeKey<>();
 
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
-    public OrionSshAuthenticator(OrionAccessControlService accessControlService) {
+    public OrionSshAuthenticator(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
+        this.editor = editor;
         this.accessControlService = accessControlService;
     }
 
@@ -141,7 +148,22 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (authentication.rootRecoveryGeneration() == null) {
-            accessControlService.addSshKeysToUser(username, selectedKeys);
+            try (OrionConfigurationEdit edit = editor.edit()) {
+                SshCredentialUpdateResult result = accessControlService.addSshCredentials(edit, username, selectedKeys);
+                if (!(result instanceof SshCredentialUpdateResult.Success success)) {
+                    return false;
+                }
+                if (success.changed()) {
+                    String email = "";
+                    for (AccessControl.User user : edit.document().system().accessControl().getUsers()) {
+                        if (user.getId().equalsIgnoreCase(username)) {
+                            email = java.util.Objects.requireNonNullElse(user.getEmail(), "");
+                            break;
+                        }
+                    }
+                    edit.apply("add SSH credentials for " + username, new UserEmail(username, email));
+                }
+            }
         } else {
             RootSshKeyEnrollmentSession.begin(
                     session,

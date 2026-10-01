@@ -1,5 +1,11 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.internal.UserEmail;
+
+import pro.deta.orion.auth.SshCredentialUpdateResult;
+
+import pro.deta.orion.config.OrionConfigurationEdit;
+
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
@@ -40,7 +46,6 @@ import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -112,7 +117,12 @@ class BootstrapProxyEndpointIT {
                                 ? component.httpTransport().boundHttpPort() : component.sshTransport().boundPort();
                         if (launch == 0) {
                             var acl = component.orionAccessControlService();
-                            acl.addKeyToUser("root", PublicKeyEntry.toString(rootKey.getPublic()));
+                            try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+                                assertThat(acl.addSshCredentials(edit, "root",
+                                        List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
+                                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                                edit.apply("add root test key", UserEmail.EMPTY);
+                            }
                             URL proxyApi = URI.create("http://127.0.0.1:"
                                     + component.httpTransport().boundHttpPort() + "/api/admin/proxies").toURL();
                             String token = pro.deta.orion.test.integration.OrionTestRootAccess.issueToken(
@@ -147,7 +157,11 @@ class BootstrapProxyEndpointIT {
                                     user("writer", writerKey, ENDPOINT, true),
                                     user("reader", readerKey, ENDPOINT, false),
                                     user("outsider", outsiderKey, "ordinary", true))) {
-                                acl.createOrUpdateUser(user);
+                                try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+                                    acl.createOrUpdateUser(edit, user);
+                                    edit.apply("createOrUpdateUser() " + user.id(),
+                                            new UserEmail(user.id(), user.email()));
+                                }
                             }
                             bootstrap.repositoryProvider().create("ordinary").valueOrFailure("ordinary repository")
                                     .files().withAccess(REF, "ordinary seed", GitCommitAuthor.EMPTY,

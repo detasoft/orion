@@ -8,6 +8,9 @@ import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.UserIdentity;
@@ -61,6 +64,7 @@ public class SshCommandFactory implements CommandFactory {
     private final DefaultGitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final OrionAccessControlService accessControlService;
+    private final OrionConfigurationEditor editor;
 
     @Inject
     public SshCommandFactory(
@@ -69,12 +73,13 @@ public class SshCommandFactory implements CommandFactory {
             PlainCommandRenderer commandRenderer,
             DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
-            OrionAccessControlService accessControlService) {
+            OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
         this.orionExecutor = orionExecutor;
         this.commandDispatcher = commandDispatcher;
         this.commandRenderer = commandRenderer;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
+        this.editor = editor;
         this.accessControlService = accessControlService;
     }
 
@@ -122,9 +127,24 @@ public class SshCommandFactory implements CommandFactory {
                 finish(1, "Root SSH key enrollment failed.\n", errorStream);
                 return;
             }
-            SshKeyEnrollmentResult result = accessControlService.completeRootSshKeyEnrollment(
-                    pending.expectedGeneration(),
-                    pending.publicKeys());
+            SshKeyEnrollmentResult result;
+            try (OrionConfigurationEdit edit = editor.edit()) {
+                result = accessControlService.completeRootSshKeyEnrollment(
+                        edit, pending.expectedGeneration(), pending.publicKeys());
+                if (result instanceof SshKeyEnrollmentResult.Success) {
+                    String email = "root@orion.pro";
+                    for (pro.deta.orion.schema.acl.AccessControl.User user
+                            : edit.document().system().accessControl().getUsers()) {
+                        if (user.getId().equalsIgnoreCase("root")) {
+                            email = java.util.Objects.requireNonNullElse(user.getEmail(), email);
+                            break;
+                        }
+                    }
+                    edit.apply("complete root SSH key enrollment", new UserEmail("root", email));
+                }
+            } catch (RuntimeException failure) {
+                result = SshKeyEnrollmentResult.failure("key enrollment failed", failure);
+            }
             if (result instanceof SshKeyEnrollmentResult.Success) {
                 RootSshKeyEnrollmentSession.complete(channel.getSession());
                 finish(0, "Root SSH key enrolled. Reconnect with the enrolled key.\n", outputStream);

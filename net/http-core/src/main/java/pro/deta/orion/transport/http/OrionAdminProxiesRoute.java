@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.LoggerFactory;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
+import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
@@ -40,7 +40,7 @@ import java.util.UUID;
 public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final OrionDesiredState desiredState;
     private final ProxyAwareNativeGitRepositoryProvider provider;
-    private final OrionAccessControlServiceImpl acl;
+    private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final BootstrapRepositorySources sources;
     private final CommandAuditSink audit;
@@ -48,12 +48,12 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminProxiesRoute(OrionDesiredState desiredState, ProxyAwareNativeGitRepositoryProvider provider,
-            OrionAccessControlServiceImpl acl, ConfigurationSecrets secrets, BootstrapRepositorySources sources,
+            OrionConfigurationEditor editor, ConfigurationSecrets secrets, BootstrapRepositorySources sources,
             CommandAuditSink audit, ObjectMapper mapper) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.desiredState = desiredState;
         this.provider = provider;
-        this.acl = acl;
+        this.editor = editor;
         this.secrets = secrets;
         this.sources = sources;
         this.audit = audit;
@@ -96,15 +96,15 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     throw new IllegalArgumentException("Retry accepts no configuration changes");
                 }
                 if (!desiredState.current().revision().equals(Optional.of(request.revision()))) {
-                    throw new AccessControlConcurrentUpdateException("Configuration revision changed", null);
+                    throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
                 }
             } else {
                 MutationRequest mutation = request;
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-                acl.updatePrimaryConfiguration(request.revision(), document -> update(document, selected, mutation),
-                        "proxy " + action + " " + alias,
-                        new UserEmail(context.getUserIdentity().getUserId(), ""));
+                editor.edit(request.revision()).update(document -> update(document, selected, mutation))
+                        .apply("proxy " + action + " " + alias,
+                                new UserEmail(context.getUserIdentity().getUserId(), ""));
             }
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             GitProxyBinding binding = find(snapshot.document(), selected);
@@ -114,9 +114,9 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             response = OrionHttpResponse.json(action.equals("create") ? 201 : 200,
                     new MutationResponse(status, project(binding, snapshot.document().system(), observation),
                             snapshot.revision().orElse(null)));
-        } catch (AccessControlConcurrentUpdateException failure) {
+        } catch (OrionConfigurationConcurrentUpdateException failure) {
             try {
-                acl.reload("proxy configuration conflict");
+                editor.reload("proxy configuration conflict");
             } catch (RuntimeException reloadFailure) {
                 LoggerFactory.getLogger(OrionAdminProxiesRoute.class).warn("Could not reload proxy configuration");
             }
@@ -142,12 +142,12 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
 
     private SyncObservation retry(OrionDesiredState.Snapshot snapshot, GitProxyBinding binding) {
         if (!desiredState.current().revision().equals(snapshot.revision())) {
-            throw new AccessControlConcurrentUpdateException("Configuration changed before retry", null);
+            throw new OrionConfigurationConcurrentUpdateException("Configuration changed before retry", null);
         }
         Result<SyncObservation> result = provider.retry(binding.alias(),
                 () -> desiredState.current().document(), secrets);
         if (!desiredState.current().revision().equals(snapshot.revision())) {
-            throw new AccessControlConcurrentUpdateException("Configuration changed during retry", null);
+            throw new OrionConfigurationConcurrentUpdateException("Configuration changed during retry", null);
         }
         if (result instanceof Result.Success<SyncObservation> success) return success.value();
         return provider.syncObservation(binding, snapshot.document().system());

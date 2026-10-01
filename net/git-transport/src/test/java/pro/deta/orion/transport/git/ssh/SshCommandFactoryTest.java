@@ -405,8 +405,8 @@ class SshCommandFactoryTest {
                 (proxy, method, args) -> {
                     if ("completeRootSshKeyEnrollment".equals(method.getName())) {
                         enrollments.incrementAndGet();
-                        assertEquals("generation-1", args[0]);
-                        assertEquals(List.of("ssh-rsa candidate"), args[1]);
+                        assertEquals("generation-1", args[1]);
+                        assertEquals(List.of("ssh-rsa candidate"), args[2]);
                         return SshKeyEnrollmentResult.success();
                     }
                     return defaultValue(method.getReturnType());
@@ -590,8 +590,13 @@ class SshCommandFactoryTest {
     private SshCommandFactory gitFactory(NativeGitRepositoryProvider provider) {
         OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
         executors.add(executor);
-        return new SshCommandFactory(executor, null, new PlainCommandRenderer(),
-                new DefaultGitNativeRepositoryService(provider), null, null);
+        return new SshCommandFactory(executor,
+                null,
+                new PlainCommandRenderer(),
+                new DefaultGitNativeRepositoryService(provider),
+                null,
+                null,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
     }
 
     private static Environment environment(Map<String, String> values) {
@@ -617,13 +622,13 @@ class SshCommandFactoryTest {
             OrionAccessControlService accessControlService) {
         OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
         executors.add(executor);
-        return new SshCommandFactory(
-                executor,
+        return new SshCommandFactory(executor,
                 dispatcher,
                 new PlainCommandRenderer(),
                 null,
                 null,
-                accessControlService);
+                accessControlService,
+                pro.deta.orion.transport.git.TestConfigurationEditor.create());
     }
 
     private static ExitOutcome run(

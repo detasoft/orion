@@ -1,14 +1,15 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.acl.storage.*;
-import pro.deta.orion.auth.*;
 import pro.deta.orion.config.*;
+import pro.deta.orion.auth.*;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
@@ -30,6 +31,7 @@ class ConfiguredStorageManagementTest {
     private KeyMaterialService material;
     private ConfigurationCipherCapability cipher;
     private ConfiguredStorageManagement management;
+    private OrionConfigurationEditor editor;
     private OrionAccessControlServiceImpl acl;
     private SecurityContext actor;
 
@@ -51,12 +53,20 @@ class ConfiguredStorageManagementTest {
                 List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("team"), "Team", List.of(),
                 List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(org)));
-        acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(), ServerIdentityCapability.unavailable(), desired,
-                new OrionConfiguration(), cipher, ConfigurationMaterialCapability.unavailable(), Optional.empty());
-        // Reload validates and publishes the real persisted XML without initializing root credentials.
-        acl.reload("test");
-        management = new ConfiguredStorageManagement(acl, desired, cipher, repositories);
+        editor = new OrionConfigurationEditor(storage,
+                new OrionConfiguration(),
+                cipher,
+                ConfigurationMaterialCapability.unavailable(),
+                desired);
+        acl = new OrionAccessControlServiceImpl(storage,
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                ServerIdentityCapability.unavailable(),
+                desired,
+                editor,
+                Optional.empty());
+        acl.onStart();
+        management = new ConfiguredStorageManagement(acl, editor, desired, cipher, repositories);
         actor = SecurityContext.createContext().withUserIdentity(
                 new InternalUserImpl("alice", organization, () -> desired.current().document()));
     }
@@ -115,7 +125,7 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(before.system(), List.of(new OrionDocument.Organization(org.id(),
                 org.displayName(), org.users(), org.grants(), org.roles(), org.teams(), org.secrets(),
                 org.oidcProviders(), org.invitations(), List.of(original, shared)))));
-        acl.reload("shared credential fixture");
+        editor.reload("shared credential fixture");
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("replacement-secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
         OrionDocument replaced = desired.current().document();
@@ -170,7 +180,7 @@ class ConfiguredStorageManagementTest {
         // A matching revision from storage with a stale identity still cannot authorize the revoked change.
         assertFailure(management.saveConnection(actor, Optional.of(organization), "v0", false,
                 input("replacement".toCharArray())), StorageManagement.FailureCode.DENIED);
-        acl.reload("revoked");
+        editor.reload("revoked");
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(
                 actor, Optional.of(organization))).value().connections()).isEmpty();
         setGrants(List.of(grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CONNECTION_USE)), true);
@@ -205,7 +215,7 @@ class ConfiguredStorageManagementTest {
                 return repositories.create(name);
             }
         };
-        ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, desired, cipher, observed);
+        ConfiguredStorageManagement operation = new ConfiguredStorageManagement(acl, editor, desired, cipher, observed);
         StorageManagement.Outcome<?> failed = operation.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
         assertFailure(failed, StorageManagement.FailureCode.STORAGE_RETRY);
         assertThat(failed.toString()).doesNotContain("credential-should-not-leak");
@@ -279,7 +289,7 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                 List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                 org.invitations(), org.connections()))));
-        acl.reload("deny use");
+        editor.reload("deny use");
         int saves = storage.saves;
         assertFailure(management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.DENIED);
@@ -306,7 +316,7 @@ class ConfiguredStorageManagementTest {
             storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                     List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                     org.invitations(), org.connections()))));
-            acl.reload("deny connection mutation");
+            editor.reload("deny connection mutation");
             int saves = storage.saves;
             boolean create = action == AccessControl.GrantKey.CREATE;
             char[] secret = "replacement".toCharArray();
@@ -341,7 +351,7 @@ class ConfiguredStorageManagementTest {
                         new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")))));
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(adminUser), List.of(), List.of())), document.organizations()));
-        acl.reload("system administrator");
+        editor.reload("system administrator");
         SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("operator", List.of()));
         StorageManagement.S3Input defaults = new StorageManagement.S3Input("archive", null, "us-east-1", false,
                 null, null, null, true);
@@ -373,7 +383,7 @@ class ConfiguredStorageManagementTest {
         storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(),
                 org.displayName(), List.of(user), org.grants(), org.roles(), org.teams(), org.secrets(),
                 org.oidcProviders(), org.invitations(), org.connections()))));
-        if (reload) acl.reload("test grant change");
+        if (reload) editor.reload("test grant change");
     }
 
     private String revision() { return desired.current().revision().orElseThrow(); }
@@ -394,7 +404,7 @@ class ConfiguredStorageManagementTest {
                 failure -> assertThat(failure.code()).isEqualTo(code));
     }
 
-    private static final class MemoryStorage implements AccessControlStorage {
+    private static final class MemoryStorage implements OrionConfigurationStorage {
         private ConfigurationFile snapshot;
         private int saves;
 
@@ -409,7 +419,7 @@ class ConfiguredStorageManagementTest {
         @Override
         public void save(ConfigurationFile updated, String message, UserEmail author) {
             if (!snapshot.revision().equals(updated.revision())) {
-                throw new AccessControlConcurrentUpdateException("Changed", null);
+                throw new OrionConfigurationConcurrentUpdateException("Changed", null);
             }
             snapshot = new ConfigurationFile(updated.content(), Optional.of("v" + ++saves));
         }

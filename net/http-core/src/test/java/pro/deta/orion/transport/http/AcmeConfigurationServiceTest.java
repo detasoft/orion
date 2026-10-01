@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.config.OrionConfigurationEditor;
+
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
@@ -17,9 +19,9 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
-import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
+import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
 import pro.deta.orion.command.CommandResult;
@@ -60,11 +62,19 @@ class AcmeConfigurationServiceTest {
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
             ConfigurationSecrets secrets = new ConfigurationSecrets(
                     () -> desired.current().document(), owner.configurationCipher());
+            OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
+                bootstrap,
+                owner.configurationCipher(),
+                owner.configurationMaterial(),
+                desired);
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
-                    new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
-                    owner.serverIdentity(), desired, bootstrap, owner.configurationCipher(),
-                    owner.configurationMaterial(), Optional.empty());
-            acl.reload("test");
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                owner.serverIdentity(),
+                desired,
+                editor,
+                Optional.empty());
+            acl.onStart();
             List<KeyPair> issuedKeys = new ArrayList<>();
             AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
                 @Override
@@ -80,14 +90,18 @@ class AcmeConfigurationServiceTest {
             };
             AcmeCertificateService certificates = new AcmeCertificateService(
                     bootstrap, desired, owner.acme(), issuer, secrets);
-            AcmeConfigurationService service = new AcmeConfigurationService(desired, secrets, acl,
-                    certificates, owner.configurationMaterial(), bootstrap);
+            AcmeConfigurationService service = new AcmeConfigurationService(desired,
+                    secrets,
+                    editor,
+                    certificates,
+                    owner.configurationMaterial(),
+                    bootstrap);
             AcmeConfigurationService.View view = service.save(new AcmeConfigurationService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
             assertThat(view.accountMaterial()).isEqualTo(reference);
             assertThat(OrionXml.read(new java.io.ByteArrayInputStream(storage.snapshot.content()))
                     .system().https().orElseThrow().acme().orElseThrow().accountMaterial()).contains(reference);
-            acl.reload("restart");
+            editor.reload("restart");
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
             DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(
                     new AcmeCommandCatalog(service, certificates));
@@ -181,11 +195,19 @@ class AcmeConfigurationServiceTest {
                     () -> desired.current().document(), owner.configurationCipher());
             OrionConfiguration bootstrap = new OrionConfiguration();
             bootstrap.getBootstrap().getKeyMaterial().setClusterId("test");
+            OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
+                bootstrap,
+                owner.configurationCipher(),
+                owner.configurationMaterial(),
+                desired);
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
-                    new OrionPasswordHashingService(),
-                    OrionRuntimeOptions.defaults(), owner.serverIdentity(), desired,
-                    bootstrap, owner.configurationCipher(), owner.configurationMaterial(), Optional.empty());
-            acl.reload("test");
+                new OrionPasswordHashingService(),
+                OrionRuntimeOptions.defaults(),
+                owner.serverIdentity(),
+                desired,
+                editor,
+                Optional.empty());
+            acl.onStart();
             List<KeyPair> accountKeys = new ArrayList<>();
             AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(new AcmeHttpChallengeService()) {
                 @Override
@@ -207,8 +229,12 @@ class AcmeConfigurationServiceTest {
             };
             AcmeCertificateService certificates = new AcmeCertificateService(
                     bootstrap, desired, owner.acme(), issuer, secrets);
-            AcmeConfigurationService service = new AcmeConfigurationService(desired, secrets, acl, certificates,
-                    owner.configurationMaterial(), bootstrap);
+            AcmeConfigurationService service = new AcmeConfigurationService(desired,
+                    secrets,
+                    editor,
+                    certificates,
+                    owner.configurationMaterial(),
+                    bootstrap);
 
             AcmeConfigurationService.View result = service.save(settings("zerossl", "key-id", EAB_KEY), "root");
 
@@ -216,10 +242,10 @@ class AcmeConfigurationServiceTest {
             assertThat(result.eabConfigured()).isTrue();
             assertThat(storage.snapshot.content())
                     .asString(StandardCharsets.UTF_8).doesNotContain(EAB_KEY);
-            acl.reload("restart");
+            editor.reload("restart");
             assertThat(service.view()).isEqualTo(result);
             assertThatThrownBy(() -> service.save(settings("letsencrypt", "", ""), "root"))
-                    .isInstanceOf(AccessControlConcurrentUpdateException.class);
+                    .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             DefaultCommandDispatcher dispatcher = AcmeAdministrationTest.dispatcher(new AcmeCommandCatalog(service, certificates));
             assertThat(dispatcher.dispatch(AcmeAdministrationTest.request(
                     "/acme configure revision=r2 provider=zerossl email=admin@example.test "
@@ -361,7 +387,7 @@ class AcmeConfigurationServiceTest {
                 "admin@example.test", List.of("example.test"), kid, key.toCharArray(), null);
     }
 
-    private static final class MemoryStorage implements AccessControlStorage {
+    private static final class MemoryStorage implements OrionConfigurationStorage {
         private ConfigurationFile snapshot;
 
         private MemoryStorage() throws Exception {

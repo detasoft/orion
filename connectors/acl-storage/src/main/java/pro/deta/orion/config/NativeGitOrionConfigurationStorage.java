@@ -1,6 +1,5 @@
-package pro.deta.orion.acl.storage;
+package pro.deta.orion.config;
 
-import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.fileapi.GitFileAccess;
@@ -20,14 +19,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 
-public final class NativeGitAccessControlStorage implements AccessControlStorage {
+public final class NativeGitOrionConfigurationStorage implements OrionConfigurationStorage {
     private final NativeGitRepositoryProvider repositoryProvider;
     private final String repositoryName;
     private final String configurationRef;
     private final String path;
     private final boolean createIfMissing;
 
-    NativeGitAccessControlStorage(
+    NativeGitOrionConfigurationStorage(
             ResolvedBootstrapSource source,
             NativeGitRepositoryProvider repositoryProvider) {
         Objects.requireNonNull(source, "source");
@@ -96,9 +95,9 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                 repository.files().withAccess(configurationRef, message, commitAuthor, update);
             }
         } catch (GitRefConflictException error) {
-            throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", error);
+            throw new OrionConfigurationConcurrentUpdateException("Orion configuration changed concurrently", error);
         } catch (Exception error) {
-            throw new IllegalStateException("Cannot save ACL to native repository " + repositoryName, error);
+            throw new IllegalStateException("Cannot save configuration to native repository " + repositoryName, error);
         }
     }
 
