@@ -261,6 +261,7 @@ make test MODULE=git/git-s3-storage TEST='S3*Test,ConfiguredS3StorageTest'
 make test-all MODULE=git/git-s3-storage TEST='S3*IT'
 make test-all MODULE=net/http-core TEST=S3GitTransportIT
 make test-all MODULE=tests/integration-test TEST=S3BootstrapRestartIT
+make test-all MODULE=tests/integration-test TEST=S3BootstrapProxyColdStartIT
 make test
 ```
 
@@ -277,6 +278,10 @@ thin delta and clones through a fresh S3 provider.
 The cold-start test seeds configuration and key material directly in MinIO, then
 starts the real runtime once from an empty local directory with creation disabled.
 It verifies the loaded configuration, signing identity and encrypted secret.
+The proxy cold-start test seeds an HTTP Git upstream, starts one target runtime
+from an empty local directory and S3 cache, and verifies configuration, signing
+identity and secret decryption. It refreshes an upstream change, then reopens the
+S3 cache after both runtimes stop to verify persisted content and refs.
 The restart test starts the real runtime twice against MinIO, using a
 new empty local directory after deleting the first, with creation disabled. It checks
 unchanged configuration and key-material bytes, Git refs, signing identity, SSH
