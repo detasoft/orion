@@ -31,7 +31,7 @@ import java.util.TreeMap;
 
 import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 
-/** In-memory repository index; pending objects become visible together when their pack is published. */
+/** In-memory repository index with an explicit initial HEAD; pending objects become visible on publication. */
 public final class InMemoryIndex implements GitIndexApi {
     private final Set<GitIndexAccess> accesses = new HashSet<>();
     private boolean closed;
@@ -41,13 +41,15 @@ public final class InMemoryIndex implements GitIndexApi {
     private final Map<PackId, PackMetadata> packs = new LinkedHashMap<>();
     private final Map<PackChecksum, List<PackMetadata>> checksums = new LinkedHashMap<>();
     private final Map<RefId, ObjectId> refs = new LinkedHashMap<>();
-    private Head head = new Head.Symbolic(new RefId("refs/heads/main"));
+    private Head head;
 
-    public InMemoryIndex() {
-        this(GitHashAlgorithm.SHA1);
+    public InMemoryIndex(RefId initialHead) {
+        this(initialHead, GitHashAlgorithm.SHA1);
     }
 
-    public InMemoryIndex(GitHashAlgorithm hashAlgorithm) {
+    public InMemoryIndex(RefId initialHead, GitHashAlgorithm hashAlgorithm) {
+        Objects.requireNonNull(initialHead, "initialHead").requireFullName();
+        this.head = new Head.Symbolic(initialHead);
         this.hashAlgorithm = Objects.requireNonNull(hashAlgorithm, "hashAlgorithm");
     }
 

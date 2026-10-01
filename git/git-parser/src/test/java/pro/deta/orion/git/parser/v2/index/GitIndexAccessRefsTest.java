@@ -176,12 +176,12 @@ class GitIndexAccessRefsTest {
     }
 
     private GitIndexApi index(boolean local) throws IOException {
-        return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        return local ? new LocalGitIndex(directory, new RefId("refs/heads/main")) : new InMemoryIndex(new RefId("refs/heads/main"));
     }
 
     @Test
     void concurrentAccessesPublishOnlyOneCompleteBatch() throws Exception {
-        try (GitIndexApi firstIndex = new LocalGitIndex(directory);
+        try (GitIndexApi firstIndex = new LocalGitIndex(directory, new RefId("refs/heads/main"));
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             firstIndex.withAccess(reader -> {
                 for (int attempt = 0; attempt < 20; attempt++) {
@@ -222,7 +222,7 @@ class GitIndexAccessRefsTest {
 
     @Test
     void concurrentUnrelatedRefChangesBothApplyWithoutLosingEither() throws Exception {
-        try (GitIndexApi index = new LocalGitIndex(directory);
+        try (GitIndexApi index = new LocalGitIndex(directory, new RefId("refs/heads/main"));
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             index.withAccess(List.of(update(MAIN, null, FIRST)), first -> {
                 index.withAccess(List.of(update(OTHER, null, SECOND)), second -> {

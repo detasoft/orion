@@ -49,6 +49,7 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
  * Pack publication, apply and the last connection close commit and sync the store. Ref updates stay
  * private until apply atomically compares and updates the shared refs. Secondary maps contain lookup keys.
  * Refs are persisted as one snapshot replaced through MVMap CAS; unrelated ref changes are merged on retry.
+ * The initial HEAD name is required when creating a store; reopening uses its persisted HEAD.
  */
 public final class LocalGitIndex implements GitIndexApi {
     private static final RefId HEAD = new RefId("HEAD");
@@ -61,17 +62,19 @@ public final class LocalGitIndex implements GitIndexApi {
     private volatile boolean closed;
     private final GitHashAlgorithm hashAlgorithm;
 
-    public LocalGitIndex(Path repository) throws IOException {
-        this(repository, Optional.empty());
+    public LocalGitIndex(Path repository, RefId initialHead) throws IOException {
+        this(repository, initialHead, Optional.empty());
     }
 
-    public LocalGitIndex(Path repository, GitHashAlgorithm hashAlgorithm) throws IOException {
-        this(repository, Optional.of(hashAlgorithm));
+    public LocalGitIndex(Path repository, RefId initialHead, GitHashAlgorithm hashAlgorithm) throws IOException {
+        this(repository, initialHead, Optional.of(hashAlgorithm));
     }
 
-    private LocalGitIndex(Path repository, Optional<GitHashAlgorithm> requestedAlgorithm) throws IOException {
+    private LocalGitIndex(Path repository, RefId initialHead,
+                          Optional<GitHashAlgorithm> requestedAlgorithm) throws IOException {
+        Objects.requireNonNull(initialHead, "initialHead").requireFullName();
         path = repository.toRealPath().resolve("refs.mv");
-        MVStore store = acquireStore(true, requestedAlgorithm, null);
+        MVStore store = acquireStore(true, requestedAlgorithm, initialHead, null);
         try {
             hashAlgorithm = readHashAlgorithm(store);
             readHead(readRefs(store));
@@ -80,7 +83,8 @@ public final class LocalGitIndex implements GitIndexApi {
         }
     }
 
-    private synchronized MVStore acquireStore(boolean create, Optional<GitHashAlgorithm> requested, Access access)
+    private synchronized MVStore acquireStore(boolean create, Optional<GitHashAlgorithm> requested,
+                                               RefId initialHead, Access access)
             throws IOException {
         checkInterrupted();
         if (closed) throw new IOException("Repository index is closed");
@@ -101,7 +105,7 @@ public final class LocalGitIndex implements GitIndexApi {
                     map(opened, "settings").put("objectFormat",
                             requested.orElse(GitHashAlgorithm.SHA1).wireName());
                     map(opened, "refs").put(REFS_SNAPSHOT,
-                            encodeRefs(Map.of(HEAD.value(), SYMBOLIC + "refs/heads/main")));
+                            encodeRefs(Map.of(HEAD.value(), SYMBOLIC + initialHead.value())));
                 } else {
                     validateFormat(opened);
                     requireAlgorithm(requested, readHashAlgorithm(opened));
@@ -182,7 +186,7 @@ public final class LocalGitIndex implements GitIndexApi {
     private GitIndexAccess createAccess(Set<RefId> names, List<RefUpdate> updates, Optional<PackId> packId)
             throws IOException {
         Access access = new Access(packId);
-        acquireStore(false, Optional.of(hashAlgorithm), access);
+        acquireStore(false, Optional.of(hashAlgorithm), null, access);
         try {
             Map<String, String> refs = readRefs(store);
             for (RefId ref : names) {

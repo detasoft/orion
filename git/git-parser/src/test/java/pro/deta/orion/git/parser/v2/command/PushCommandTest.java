@@ -55,12 +55,12 @@ class PushCommandTest {
 
     @BeforeEach
     void openIndex() throws IOException {
-        indexApi = new LocalGitIndex(directory);
+        indexApi = new LocalGitIndex(directory, new RefId("refs/heads/main"));
     }
 
     @Test
     void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
-        indexApi = new InMemoryIndex();
+        indexApi = new InMemoryIndex(new RefId("refs/heads/main"));
         {
             try (GitStorageApi storageApi = new InMemoryStorage()) {
                 GitStorageAccess storage = storageApi.createAccess();

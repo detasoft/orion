@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -33,7 +34,7 @@ class PackCompletionTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, new RefId("refs/heads/main"));
                     for (byte[] wire : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
                         owner.withAccess(Optional.of(PackId.create()), index -> {
                             PackMetadata metadata = ingest(wire, storage, index);
@@ -60,7 +61,7 @@ class PackCompletionTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, new RefId("refs/heads/main"));
                     owner.withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId baseId = store(storage, owner, GitObjectType.BLOB, base);
                         byte[] original = pack(delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 4}),
@@ -94,7 +95,7 @@ class PackCompletionTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, new RefId("refs/heads/main"));
                     owner.withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId baseId = storeDelta(storage, owner, GitObjectType.BLOB, root,
                                 new byte[]{3, 3, 3, 1, 2, 4}, base);

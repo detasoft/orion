@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.fetch.FetchTestSupport;
@@ -25,7 +26,7 @@ class NegotiationContextTest {
         FetchRequest request = request(List.of(new NegotiationMessage.Have(FIRST),
                 NegotiationMessage.Control.DONE, NegotiationMessage.Control.END_ROUND));
         NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), capabilities());
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), capabilities());
         assertThat(context.commonObjects()).isEmpty();
         assertThat(context.lastCommon()).isEmpty();
         assertThat(context.doneReceived()).isFalse();
@@ -40,7 +41,7 @@ class NegotiationContextTest {
     void accumulatesConfirmedObjectsAcrossRoundsWithoutLeakingMutableState() {
         FetchRequest request = request(List.of());
         NegotiationContext context = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), capabilities());
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), capabilities());
         context.addCommon(FIRST);
         Set<ObjectId> firstRound = context.commonObjects();
         context.addCommon(SECOND);
@@ -53,7 +54,7 @@ class NegotiationContextTest {
         assertThat(context.ready()).isTrue();
         assertThat(context.doneReceived()).isFalse();
         assertThat(new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), capabilities()).commonObjects()).isEmpty();
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), capabilities()).commonObjects()).isEmpty();
     }
 
     private static FetchRequest request(List<NegotiationMessage> messages) {

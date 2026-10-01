@@ -33,7 +33,7 @@ class FetchReadinessTest {
     @TempDir
     Path directory;
     private GitStorageAccess storage;
-    private final InMemoryIndex owner = new InMemoryIndex();
+    private final InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
     private final GitIndexAccess index = owner.createAccess();
     private ObjectId tree;
 

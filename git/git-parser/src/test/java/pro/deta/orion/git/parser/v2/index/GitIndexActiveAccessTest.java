@@ -161,6 +161,6 @@ class GitIndexActiveAccessTest {
     }
 
     private GitIndexApi index(boolean local) throws IOException {
-        return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        return local ? new LocalGitIndex(directory, new RefId("refs/heads/main")) : new InMemoryIndex(new RefId("refs/heads/main"));
     }
 }

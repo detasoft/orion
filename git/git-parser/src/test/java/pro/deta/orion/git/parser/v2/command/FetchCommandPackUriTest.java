@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.command;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,7 @@ class FetchCommandPackUriTest {
     FetchCommandPackUriTest() throws IOException {}
 
     private final GitStorageAccess storage = new InMemoryStorage().createAccess();
-    private final InMemoryIndex owner = new InMemoryIndex();
+    private final InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
     private final GitIndexAccess index = owner.createAccess();
     private final GitRepositoryContext repository = new GitRepositoryContext(storage, index) {
         @Override

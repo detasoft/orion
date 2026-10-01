@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import jdk.jfr.Recording;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordedFrame;
@@ -43,7 +44,7 @@ class FetchPackTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, new RefId("refs/heads/main"));
                     owner.withAccess(index -> {
                         ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
                         byte[] rootBytes = commit(tree);
@@ -83,7 +84,7 @@ class FetchPackTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
                     owner.withAccess(index -> {
                         ObjectId tree = PackTestData.store(storage, owner, GitObjectType.TREE, new byte[0]);
                         ObjectId root = PackTestData.store(storage, owner, GitObjectType.COMMIT, commit(tree));
@@ -163,7 +164,7 @@ class FetchPackTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, new RefId("refs/heads/main"));
                     owner.withAccess(index -> {
                         byte[] first = {1, 2, 3};
                         byte[] second = {4, 5};

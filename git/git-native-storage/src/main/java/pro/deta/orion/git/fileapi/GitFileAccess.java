@@ -7,6 +7,8 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -63,7 +65,7 @@ public final class GitFileAccess implements Modification {
     private final RefId ref;
     private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
-    private final boolean initializeDefaultHead;
+    private final Optional<RefId> headToInitialize;
     private final String message;
     private final GitCommitAuthor author;
     private final Set<ObjectId> objects = new HashSet<>();
@@ -74,7 +76,7 @@ public final class GitFileAccess implements Modification {
     private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                  String message, GitCommitAuthor author, boolean initializeDefaultHead)
+                  String message, GitCommitAuthor author, boolean initializeHead, Head head)
             throws IOException, GitOperationException {
         this.repository = repository;
         this.index = index;
@@ -83,9 +85,15 @@ public final class GitFileAccess implements Modification {
         this.parent = parent;
         this.message = message;
         this.author = author;
-        this.initializeDefaultHead = initializeDefaultHead
-                && !ref.value().equals(repository.defaultHead())
-                && index.findRef(new RefId(repository.defaultHead())).isEmpty();
+        if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
+            throw new IOException("Repository HEAD changed while opening file access");
+        }
+        if (initializeHead && head instanceof Head.Symbolic symbolic
+                && !ref.equals(symbolic.target()) && index.findRef(symbolic.target()).isEmpty()) {
+            this.headToInitialize = Optional.of(symbolic.target());
+        } else {
+            this.headToInitialize = Optional.empty();
+        }
         rootEntries = parent.isPresent()
                 ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
         storage = repository.storage().createAccess();
@@ -150,9 +158,8 @@ public final class GitFileAccess implements Modification {
             ObjectId commit = writeCommit(tree, parent.orElse(null), message, author);
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
-            if (initializeDefaultHead) {
-                prepared.add(new RefUpdate(new RefId(repository.defaultHead()), Optional.empty(), Optional.of(commit)));
-            }
+            headToInitialize.ifPresent(target ->
+                    prepared.add(new RefUpdate(target, Optional.empty(), Optional.of(commit))));
             updates = List.copyOf(prepared);
             bytes.flush();
             List<IndexedObject> indexed = index.objects(packId);

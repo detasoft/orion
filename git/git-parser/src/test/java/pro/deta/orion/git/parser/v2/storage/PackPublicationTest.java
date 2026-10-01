@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class PackPublicationTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
@@ -43,7 +45,7 @@ class PackPublicationTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexAccess index = new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
+                GitIndexAccess index = new LocalGitIndex(directory, MAIN).createAccess(Optional.of(PackId.create()));
                 try {
                         metadata = ingest(pack(blob(new byte[]{1})), storage, index);
                         storage.apply();
@@ -59,7 +61,7 @@ class PackPublicationTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    new LocalGitIndex(directory).withAccess(Optional.of(metadata.packId()), index -> {
+                    new LocalGitIndex(directory, MAIN).withAccess(Optional.of(metadata.packId()), index -> {
                         assertThat(storage.exists(metadata.packId())).isTrue();
                         assertThat(index.findObject(metadata.packId(), id)).isPresent();
                         assertThat(index.locations(id)).isEmpty();
@@ -76,7 +78,7 @@ class PackPublicationTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    new LocalGitIndex(directory).withAccess(index -> {
+                    new LocalGitIndex(directory, MAIN).withAccess(index -> {
                         assertThat(index.packs(metadata.packChecksum())).containsExactly(metadata);
                         assertThat(read(storage, index, id)).containsExactly(1);
                         return null;
@@ -96,7 +98,7 @@ class PackPublicationTest {
                 GitStorageAccess storage = (memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess());
                 try {
-                GitIndexApi factory = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexApi factory = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
                 GitIndexAccess index = factory.createAccess();
                 try {
                         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -145,7 +147,7 @@ class PackPublicationTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
                     owner.withAccess(index -> {
                         ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
                         PackMetadata metadata = index.packs().getFirst();
@@ -170,7 +172,7 @@ class PackPublicationTest {
                 GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexApi owner = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
                 GitIndexAccess index = owner.createAccess();
                 try {
                         ObjectId first = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
@@ -182,7 +184,7 @@ class PackPublicationTest {
                             {
                                 GitStorageAccess receiver = new InMemoryStorage().createAccess();
                                 try {
-                                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), received -> {
+                                    new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), received -> {
                                         PackMetadata replay = publish(bytes(thin, storage, index), receiver, received);
                                         assertThat(replay.packChecksum()).isEqualTo(thin.packChecksum());
                                         assertThat(read(receiver, received, objectId(GitObjectType.BLOB, new byte[]{4})))

@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeGitRepositoryPackInventoryTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
@@ -32,9 +34,9 @@ class NativeGitRepositoryPackInventoryTest {
     @ValueSource(booleans = {false, true})
     void excludesPublishedAndActivePacksFromCleanupCandidates(boolean memory) throws Exception {
         GitStorageApi storage = memory ? new InMemoryStorage() : new LocalGitStorage(directory);
-        GitIndexApi index = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+        GitIndexApi index = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
         try (NativeGitRepository repository = new NativeGitRepository(
-                "project.git", storage, index, "refs/heads/main")) {
+                "project.git", storage, index)) {
             repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             PackId published = index.withAccess(access -> access.packs().getFirst().packId());
             PackId orphan = PackId.create();
@@ -77,7 +79,7 @@ class NativeGitRepositoryPackInventoryTest {
     @Test
     void deletesOnlyExpiredUnpublishedLocalPacksWhenIndexIsIdle() throws Exception {
         try (NativeGitRepository repository = new NativeGitRepository("project.git",
-                new LocalGitStorage(directory), new LocalGitIndex(directory), "refs/heads/main")) {
+                new LocalGitStorage(directory), new LocalGitIndex(directory, MAIN))) {
             repository.writeObject(GitObjectType.BLOB, new byte[]{1});
             PackId published = repository.index().withAccess(access -> access.packs().getFirst().packId());
             PackId expired = PackId.create();

@@ -42,7 +42,7 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 class InMemoryStorageTest {
     @TempDir
     Path directory;
-    private final InMemoryIndex indexApi = new InMemoryIndex();
+    private final InMemoryIndex indexApi = new InMemoryIndex(new RefId("refs/heads/main"));
     private static final RefId FIRST = new RefId("refs/heads/first");
     private static final RefId SECOND = new RefId("refs/heads/second");
 
@@ -208,12 +208,12 @@ class InMemoryStorageTest {
     @Test
     void isolatesRepositoriesAndConsumesPublicationAfterClose() throws Exception {
         GitStorageAccess first = new InMemoryStorage().createAccess();
-        InMemoryIndex firstOwner = new InMemoryIndex();
+        InMemoryIndex firstOwner = new InMemoryIndex(new RefId("refs/heads/main"));
         try {
             firstOwner.withAccess(firstIndex -> {
                 GitStorageAccess second = new InMemoryStorage().createAccess();
                 try {
-                    GitIndexAccess secondIndex = new InMemoryIndex().createAccess();
+                    GitIndexAccess secondIndex = new InMemoryIndex(new RefId("refs/heads/main")).createAccess();
                     try {
                         ObjectId object = PackTestData.store(first, firstOwner, GitObjectType.BLOB, new byte[]{1});
                         Head detached = new Head.Detached(new CommitId(object.toBytes()));

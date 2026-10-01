@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitStorageApiTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
@@ -113,8 +115,8 @@ class GitStorageApiTest {
             {
                 GitStorageAccess storage = disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess();
                 try {
-                GitIndexAccess index = disk ? new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()))
-                        : new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+                GitIndexAccess index = disk ? new LocalGitIndex(directory, MAIN).createAccess(Optional.of(PackId.create()))
+                        : new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()));
                 try {
                         byte[] first = {1, 2, 3};
                         byte[] second = {4, 5};
@@ -202,7 +204,7 @@ class GitStorageApiTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    new LocalGitIndex(directory).withAccess(Optional.of(PackId.create()), index -> {
+                    new LocalGitIndex(directory, MAIN).withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId absent = new ObjectId("1".repeat(40));
                         assertThat(GitObjectRead.exists(storage, index, absent)).isFalse();
                         assertThat(GitObjectRead.read(storage, index, absent, (type, size, base, input) -> {

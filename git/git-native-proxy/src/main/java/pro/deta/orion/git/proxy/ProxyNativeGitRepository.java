@@ -40,7 +40,7 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
             BootstrapGitTransportFactory transportFactory,
             BootstrapGitFetcher fetcher,
             BootstrapGitPusher pusher) {
-        super(name, repository.storage(), repository.index(), repository.defaultHead());
+        super(name, repository.storage(), repository.index());
         this.location = Objects.requireNonNull(location, "location");
         this.repository = Objects.requireNonNull(repository, "repository");
         this.transportFactory = Objects.requireNonNull(transportFactory, "transportFactory");

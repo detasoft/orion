@@ -7,6 +7,7 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -62,27 +63,26 @@ public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final GitStorageApi storage;
     private final GitIndexApi index;
-    private final String defaultHead;
     private final CopyOnWriteArrayList<Consumer<RefUpdateResult>> refUpdateListeners = new CopyOnWriteArrayList<>();
 
-    public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index, String defaultHead) {
+    public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index) {
         this.name = Objects.requireNonNull(name, "name");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.index = Objects.requireNonNull(index, "index");
-        this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
     }
 
     public static NativeGitRepository createInMemory(RepositoryName name) {
         return new NativeGitRepository(name.value(), new InMemoryStorage(),
-                new InMemoryIndex(), "refs/heads/main");
+                new InMemoryIndex(new RefId("refs/heads/main")));
     }
 
-    public static NativeGitRepository openLocal(RepositoryName name, Path directory, String defaultHead) {
+    public static NativeGitRepository openLocal(RepositoryName name, Path directory, String initialHead) {
         Objects.requireNonNull(name, "name");
-        Objects.requireNonNull(defaultHead, "defaultHead");
+        Objects.requireNonNull(initialHead, "initialHead");
         try {
             GitStorageApi storage = new LocalGitStorage(directory);
-            return new NativeGitRepository(name.value(), storage, new LocalGitIndex(directory), defaultHead);
+            return new NativeGitRepository(name.value(), storage,
+                    new LocalGitIndex(directory, new RefId(initialHead)));
         } catch (IOException failure) {
             throw new UncheckedIOException("Cannot open repository " + name.value(), failure);
         }
@@ -143,7 +143,14 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public String defaultHead() {
-        return defaultHead;
+        try {
+            return switch (index.getHEAD()) {
+                case Head.Symbolic symbolic -> symbolic.target().value();
+                case Head.Detached ignored -> "HEAD";
+            };
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
     }
 
     public Map<String, String> refs() {

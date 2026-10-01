@@ -45,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PackIngestorTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
@@ -56,14 +57,14 @@ class PackIngestorTest {
         }
         byte[] wire = PackTestData.pack(entries);
         ObjectId target = PackTestData.objectId(GitObjectType.BLOB, new byte[4]);
-        RefId ref = new RefId("refs/heads/main");
+        RefId ref = MAIN;
         List<RefUpdate> updates = List.of(new RefUpdate(ref, Optional.empty(), Optional.of(target)));
         AtomicInteger applied = new AtomicInteger();
         AtomicInteger conflicts = new AtomicInteger();
         CyclicBarrier ready = new CyclicBarrier(2);
         List<PackMetadata> uploaded = new ArrayList<>();
         LocalGitStorage storageApi = new LocalGitStorage(directory);
-        try (LocalGitIndex index = new LocalGitIndex(directory);
+        try (LocalGitIndex index = new LocalGitIndex(directory, MAIN);
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<PackMetadata>> uploads = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
@@ -100,7 +101,7 @@ class PackIngestorTest {
             assertThat(uploaded.get(0).packChecksum()).isEqualTo(uploaded.get(1).packChecksum());
         }
         GitStorageAccess storage = storageApi.createAccess();
-        try (LocalGitIndex index = new LocalGitIndex(directory)) {
+        try (LocalGitIndex index = new LocalGitIndex(directory, MAIN)) {
             index.withAccess(access -> {
                 assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsEntry(ref, target);
                 assertThat(access.packs(uploaded.getFirst().packChecksum()))
@@ -126,8 +127,8 @@ class PackIngestorTest {
                 GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create()))
-                        : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
+                GitIndexAccess index = memory ? new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()))
+                        : new LocalGitIndex(directory, MAIN).createAccess(Optional.of(PackId.create()));
                 try {
                         try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
                             PackMetadata pack;
@@ -176,7 +177,7 @@ class PackIngestorTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                    new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), index -> {
                         try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize)) {
                             try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                                 PackMetadata pack = ingestor.ingest();
@@ -209,7 +210,7 @@ class PackIngestorTest {
                 GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexApi owner = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
                 ObjectId previous = owner.withAccess(Optional.of(PackId.create()), writer ->
                         PackTestData.store(storage, writer, GitObjectType.BLOB, new byte[]{9}));
                 GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
@@ -245,7 +246,7 @@ class PackIngestorTest {
                 {
                     GitStorageAccess storage = new InMemoryStorage().createAccess();
                     try {
-                        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                        new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), index -> {
                             try (BufferedByteInputV2 input = input(ByteBuffer.wrap(prefix))) {
                                 try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                                     assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
@@ -289,7 +290,7 @@ class PackIngestorTest {
                 {
                     GitStorageAccess storage = new InMemoryStorage().createAccess();
                     try {
-                        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                        new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), index -> {
                             try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)))) {
                                 try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
                                     assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
@@ -312,7 +313,7 @@ class PackIngestorTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                    new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), index -> {
                         PackMetadata pack = PackTestData.ingest(PackTestData.pack(), storage, index);
                         assertThat(pack.objectCount()).isZero();
                         assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(PackTestData.pack());

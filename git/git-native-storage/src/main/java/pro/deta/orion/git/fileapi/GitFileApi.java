@@ -5,6 +5,7 @@ import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -28,21 +29,21 @@ import java.util.Set;
 /**
  * File operations borrowing a Git repository. Updates preserve omitted files and their modes;
  * preparing an update does not publish objects or move refs. An explicit null revision expects a new branch.
- * Local updates initialize an absent default branch; proxy updates leave unrelated refs unchanged.
+ * Local updates initialize an absent symbolic HEAD branch; proxy updates leave unrelated refs unchanged.
  * Streaming read callbacks borrow the inflated file input. WithAccess requires explicit apply and
  * always discards on exit. Byte-array reads explicitly materialize a single file.
  */
 public final class GitFileApi {
     private final NativeGitRepository repository;
-    private final boolean initializeDefaultHead;
+    private final boolean initializeHead;
 
     public GitFileApi(NativeGitRepository repository) {
         this(repository, true);
     }
 
-    public GitFileApi(NativeGitRepository repository, boolean initializeDefaultHead) {
+    public GitFileApi(NativeGitRepository repository, boolean initializeHead) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.initializeDefaultHead = initializeDefaultHead;
+        this.initializeHead = initializeHead;
     }
 
     public <T> T readFile(ObjectId commitId, String path, GitObjectRead<T> reader)
@@ -84,15 +85,16 @@ public final class GitFileApi {
                             CheckedFunction<GitFileAccess, T> operation) throws Exception {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
-        return repository.index().withAccess(writableRefs(ref), Optional.of(PackId.create()),
-                index -> run(index, branch, index.findRef(ref), message, author, operation));
+        Head head = repository.index().getHEAD();
+        return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
+                index -> run(index, branch, index.findRef(ref), message, author, head, operation));
     }
 
-    private Set<RefId> writableRefs(RefId ref) {
+    private Set<RefId> writableRefs(RefId ref, Head head) {
         Set<RefId> refs = new HashSet<>();
         refs.add(ref);
-        if (initializeDefaultHead) {
-            refs.add(new RefId(repository.defaultHead()));
+        if (initializeHead && head instanceof Head.Symbolic symbolic) {
+            refs.add(symbolic.target());
         }
         return refs;
     }
@@ -102,15 +104,16 @@ public final class GitFileApi {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         Optional<ObjectId> expected = Optional.ofNullable(expectedRevision).map(ObjectId::new);
-        return repository.index().withAccess(writableRefs(ref), Optional.of(PackId.create()),
-                index -> run(index, branch, expected, message, author, operation));
+        Head head = repository.index().getHEAD();
+        return repository.index().withAccess(writableRefs(ref, head), Optional.of(PackId.create()),
+                index -> run(index, branch, expected, message, author, head, operation));
     }
 
     private <T> T run(GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                      String message, GitCommitAuthor author,
+                      String message, GitCommitAuthor author, Head head,
                       CheckedFunction<GitFileAccess, T> operation) throws Exception {
         GitFileAccess access = new GitFileAccess(
-                repository, index, branch, parent, message, author, initializeDefaultHead);
+                repository, index, branch, parent, message, author, initializeHead, head);
         Throwable primary = null;
         try {
             return operation.apply(access);

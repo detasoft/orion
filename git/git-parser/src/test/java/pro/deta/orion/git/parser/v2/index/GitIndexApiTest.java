@@ -32,13 +32,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitIndexApiTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void requiresExplicitInitialHeadAndReadsItsCurrentValue(boolean local) throws Exception {
+        RefId trunk = new RefId("refs/heads/trunk");
+        try (GitIndexApi index = local ? new LocalGitIndex(directory, trunk) : new InMemoryIndex(trunk)) {
+            assertThat(index.getHEAD()).isEqualTo(new Head.Symbolic(trunk));
+            index.withAccess(access -> {
+                access.updateHead(new Head.Symbolic(new RefId("refs/heads/topic")));
+                access.apply();
+                return null;
+            });
+            assertThat(index.getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/topic")));
+        }
+        if (local) {
+            try (GitIndexApi reopened = new LocalGitIndex(directory, new RefId("refs/heads/other"))) {
+                assertThat(reopened.getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/topic")));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void closingOneConnectionPreservesOthersAndAllowsReopening(boolean local) throws Exception {
-        GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        GitIndexApi factory = local ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN);
         IndexedObject object = object(PackId.create(), "a", 12);
         factory.withAccess(Optional.of(object.packId()), first -> {
             GitIndexAccess second = factory.createAccess(Optional.of(object.packId()));
@@ -63,14 +84,14 @@ class GitIndexApiTest {
     void readingAndReopeningLeavesTheStoredIndexUnchanged() throws Exception {
         PackId id = PackId.create();
         IndexedObject object = object(id, "a", 12);
-        try (LocalGitIndex factory = new LocalGitIndex(directory)) {
+        try (LocalGitIndex factory = new LocalGitIndex(directory, MAIN)) {
             factory.withAccess(Optional.of(id), access -> {
                 access.addObject(object);
                 return null;
             });
         }
         byte[] saved = Files.readAllBytes(directory.resolve("refs.mv"));
-        try (LocalGitIndex factory = new LocalGitIndex(directory)) {
+        try (LocalGitIndex factory = new LocalGitIndex(directory, MAIN)) {
             for (int attempt = 0; attempt < 2; attempt++) {
                 factory.withAccess(access -> {
                     assertThat(access.findObject(id, object.objectId())).contains(object);
@@ -87,7 +108,7 @@ class GitIndexApiTest {
         PackId id = PackId.create();
         PackMetadata metadata = pack(id, "b", 100);
         IndexedObject abandoned = object(PackId.create(), "c", 12);
-        LocalGitIndex factory = new LocalGitIndex(directory);
+        LocalGitIndex factory = new LocalGitIndex(directory, MAIN);
         factory.withAccess(Optional.of(id), first -> {
             GitIndexAccess second = factory.createAccess(Optional.of(id));
             try {
@@ -163,7 +184,7 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void findsAllPublishedLocationsIncludingRepeatedObjectsInOnePack(boolean local) throws Exception {
-        try (GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex()) {
+        try (GitIndexApi factory = local ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN)) {
             IndexedObject first = object(PackId.create(), "a", 12);
             GitIndexAccess index = factory.createAccess(Optional.of(first.packId()));
             try {
@@ -196,7 +217,7 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void concurrentEqualChecksumsPublishBothPacksForTheClientToChoose(boolean local) throws Exception {
-        GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        GitIndexApi factory = local ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN);
         {
             IndexedObject a = object(PackId.create(), "a", 12);
             IndexedObject b = object(PackId.create(), "a", 12);
@@ -266,7 +287,7 @@ class GitIndexApiTest {
         PackMetadata pack = new PackMetadata(available.packId(), new PackChecksum("b".repeat(40)),
                 "packs/каталог:pack\tdata", 2, 64);
         {
-            LocalGitIndex factory = new LocalGitIndex(directory);
+            LocalGitIndex factory = new LocalGitIndex(directory, MAIN);
             GitIndexAccess index = factory.createAccess(Optional.of(available.packId()));
             try {
                 index.addObject(available);
@@ -299,7 +320,7 @@ class GitIndexApiTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void repositoryDefaultsToSha1AndRejectsMixedAlgorithms(boolean local) throws Exception {
-        try (GitIndexApi factory = local ? new LocalGitIndex(directory) : new InMemoryIndex()) {
+        try (GitIndexApi factory = local ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN)) {
             PackId packId = PackId.create();
             GitIndexAccess index = factory.createAccess(Optional.of(packId));
             try {
@@ -317,7 +338,7 @@ class GitIndexApiTest {
                         .isInstanceOf(IllegalArgumentException.class);
                 assertThatThrownBy(() -> index.updateHead(new Head.Detached(new CommitId(sha256.toBytes()))))
                         .isInstanceOf(IllegalArgumentException.class);
-                assertThatThrownBy(() -> index.updateRefs(List.of(new RefUpdate(new RefId("refs/heads/main"),
+                assertThatThrownBy(() -> index.updateRefs(List.of(new RefUpdate(MAIN,
                         Optional.empty(), Optional.of(sha256))), true))
                         .isInstanceOf(IllegalArgumentException.class);
                 assertThat(index.objects(packId)).isEmpty();
@@ -337,10 +358,10 @@ class GitIndexApiTest {
         IndexedObject object = new IndexedObject(id, objectId, GitObjectType.COMMIT, 3, 12, 8,
                 Optional.empty());
         PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(64)), "pack", 1, 64);
-        RefId ref = new RefId("refs/heads/main");
+        RefId ref = MAIN;
         Head head = new Head.Detached(new CommitId(objectId.toBytes()));
-        try (GitIndexApi factory = local ? new LocalGitIndex(directory, GitHashAlgorithm.SHA256)
-                : new InMemoryIndex(GitHashAlgorithm.SHA256)) {
+        try (GitIndexApi factory = local ? new LocalGitIndex(directory, MAIN, GitHashAlgorithm.SHA256)
+                : new InMemoryIndex(MAIN, GitHashAlgorithm.SHA256)) {
             GitIndexAccess index = factory.createAccess(java.util.Set.of(ref), Optional.of(id));
             try {
                 assertThat(factory.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
@@ -360,7 +381,7 @@ class GitIndexApiTest {
             }
         }
         if (local) {
-            LocalGitIndex factory = new LocalGitIndex(directory);
+            LocalGitIndex factory = new LocalGitIndex(directory, MAIN);
             assertThat(factory.hashAlgorithm()).isEqualTo(GitHashAlgorithm.SHA256);
             factory.withAccess(reopened -> {
                 assertThat(reopened.locations(objectId)).containsExactly(object);
@@ -370,7 +391,7 @@ class GitIndexApiTest {
                 return null;
             });
             byte[] original = Files.readAllBytes(directory.resolve("refs.mv"));
-            assertThatThrownBy(() -> new LocalGitIndex(directory, GitHashAlgorithm.SHA1).createAccess())
+            assertThatThrownBy(() -> new LocalGitIndex(directory, MAIN, GitHashAlgorithm.SHA1).createAccess())
                     .isInstanceOf(IOException.class).hasMessageContaining("hash algorithm");
             assertThat(Files.readAllBytes(directory.resolve("refs.mv"))).isEqualTo(original);
         }
@@ -379,12 +400,12 @@ class GitIndexApiTest {
     }
 
     private GitIndexAccess index(boolean local) throws IOException {
-        return local ? new LocalGitIndex(directory).createAccess() : new InMemoryIndex().createAccess();
+        return local ? new LocalGitIndex(directory, MAIN).createAccess() : new InMemoryIndex(MAIN).createAccess();
     }
 
     private GitIndexAccess index(boolean local, PackId id) throws IOException {
-        return local ? new LocalGitIndex(directory).createAccess(Optional.of(id))
-                : new InMemoryIndex().createAccess(Optional.of(id));
+        return local ? new LocalGitIndex(directory, MAIN).createAccess(Optional.of(id))
+                : new InMemoryIndex(MAIN).createAccess(Optional.of(id));
     }
 
     private static IndexedObject object(PackId packId, String hex, long offset) {

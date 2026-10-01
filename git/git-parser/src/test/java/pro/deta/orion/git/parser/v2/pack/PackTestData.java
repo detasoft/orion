@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
@@ -73,7 +74,7 @@ public final class PackTestData {
     }
 
     public static GitIndexAccess inspect(byte[] bytes) throws IOException {
-        GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+        GitIndexAccess index = new InMemoryIndex(new RefId("refs/heads/main")).createAccess(Optional.of(PackId.create()));
         {
             GitStorageAccess storage = new InMemoryStorage().createAccess();
             try {

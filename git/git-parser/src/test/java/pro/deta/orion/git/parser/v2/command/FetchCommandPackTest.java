@@ -54,6 +54,7 @@ import static pro.deta.orion.git.parser.v2.GitRepositoryContext.publishRefs;
 import static pro.deta.orion.git.parser.v2.capability.GitCapabilityValue.value;
 
 class FetchCommandPackTest implements BufferedByteInputV2.Source {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
     private ByteBuffer source;
@@ -64,7 +65,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         GitStorageAccess storage =
                 (disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess());
         {
-            GitIndexApi owner = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
+            GitIndexApi owner = disk ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN);
             GitIndexAccess index = owner.createAccess();
             try {
                 byte[] content = new byte[200000];
@@ -97,7 +98,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void excludesCommonHistoryButIncludesNewTreeAndBlob() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId oldBlob = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
             ObjectId oldTree = store(storage, owner, GitObjectType.TREE, tree(oldBlob));
@@ -128,7 +129,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void waitForDoneKeepsTheResponseAtAcknowledgments() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{42});
             byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(GitCapability.WAIT_FOR_DONE),
@@ -148,7 +149,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void readyWithoutDoneSendsAnEmptyPackWhenEverythingIsCommon() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId id = store(storage, owner, GitObjectType.BLOB, new byte[]{42});
             byte[] response = execute(storage, index, GitProtocolVersion.V2, capabilities(),
@@ -168,7 +169,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void commonShallowCommitDoesNotImplyThatTheClientHasItsParents() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
             ObjectId parent = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
@@ -220,7 +221,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void legacySendsNakThenRawOrBoundedSidebandPack(String capability) throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
         {
-            LocalGitIndex owner = new LocalGitIndex(directory);
+            LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
             GitIndexAccess index = owner.createAccess();
             try {
                 byte[] content = new byte[9000];
@@ -257,7 +258,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
         GitStorageAccess storage =
                 (disk ? new LocalGitStorage(directory).createAccess() : new InMemoryStorage().createAccess());
         {
-            GitIndexApi owner = disk ? new LocalGitIndex(directory) : new InMemoryIndex();
+            GitIndexApi owner = disk ? new LocalGitIndex(directory, MAIN) : new InMemoryIndex(MAIN);
             GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
             try {
                 byte[] base = {1, 2, 3};
@@ -304,7 +305,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void sendsLegacyShallowBoundariesBeforeNegotiationAndPack() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
@@ -335,7 +336,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ValueSource(booleans = {false, true})
     void deepensOneGenerationFromClientBoundary(boolean sidebandAll) throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
             ObjectId root = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
@@ -367,7 +368,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void cutsHistoryAtTimestampAndExcludedRevision() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex factory = new LocalGitIndex(directory);
+        LocalGitIndex factory = new LocalGitIndex(directory, MAIN);
         GitIndexApi owner = factory;
         factory.withAccess(index -> {
             ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
@@ -411,7 +412,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @Test
     void blobFilterOmitsTreeBlobsAndRetainsExplicitlyWantedBlob() throws Exception {
         GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-        LocalGitIndex owner = new LocalGitIndex(directory);
+        LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
         owner.withAccess(index -> {
             ObjectId blob = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
             ObjectId tree = store(storage, owner, GitObjectType.TREE, tree(blob));
@@ -465,7 +466,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(MAIN);
                     owner.withAccess(index -> {
                         ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
                         ObjectId root = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
@@ -506,7 +507,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     @ParameterizedTest
     @EnumSource(GitProtocolVersion.class)
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
-        InMemoryIndex indexApi = new InMemoryIndex();
+        InMemoryIndex indexApi = new InMemoryIndex(MAIN);
         {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
@@ -515,7 +516,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                     indexApi.withAccess(index -> {
                         ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
                         ObjectId tip = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-                        RefId main = new RefId("refs/heads/main");
+                        RefId main = MAIN;
                         publishRefs(
                                 storage, indexApi, List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
                         for (boolean missingObject : List.of(false, true)) {

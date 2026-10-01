@@ -12,6 +12,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
 import java.io.ByteArrayOutputStream;
@@ -26,6 +28,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class FileGitCompatibilityExporterTest {
     @TempDir
     Path root;
+
+    @Test
+    void exportsDetachedHeadWithoutAListedBranch() throws Exception {
+        Path store = root.resolve("store");
+        ObjectId commit;
+        try (NativeGitRepository source = new FileNativeGitRepositoryProvider(store)
+                .create("demo").valueOrFailure("source repository")) {
+            ObjectId tree = source.writeObject(GitObjectType.TREE, new byte[0]);
+            commit = source.writeObject(GitObjectType.COMMIT, commit(tree, null, "detached"));
+            CommitId target = new CommitId(commit.toBytes());
+            source.index().withAccess(index -> {
+                index.updateHead(new Head.Detached(target));
+                index.apply();
+                return null;
+            });
+        }
+
+        Path output = root.resolve("demo.git");
+        new FileGitCompatibilityExporter().export(store, "demo", output);
+        try (Repository git = new FileRepositoryBuilder().setGitDir(output.toFile()).build()) {
+            assertThat(git.getRefDatabase().exactRef(Constants.HEAD).isSymbolic()).isFalse();
+            assertThat(git.resolve(Constants.HEAD)).isNotNull();
+            assertThat(git.getRefDatabase().getRefsByPrefix("refs/heads/")).isEmpty();
+        }
+    }
 
     @Test
     void exportsUnsortedUnicodeTreeAndRewritesCommitAncestry() throws Exception {

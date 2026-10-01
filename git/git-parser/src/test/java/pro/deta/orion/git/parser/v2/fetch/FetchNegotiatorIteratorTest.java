@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
@@ -26,6 +27,7 @@ import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Control.REA
 import static pro.deta.orion.git.parser.v2.fetch.NegotiationResponse.Status.*;
 
 class FetchNegotiatorIteratorTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     static Path directory;
     private static final ObjectId FIRST = new ObjectId("1".repeat(40));
@@ -300,7 +302,7 @@ class FetchNegotiatorIteratorTest {
 
         private TestContext(FetchRequest request, Set<ObjectId> existing) {
             super(request, FetchTestSupport.storage(directory),
-                    new InMemoryIndex().createAccess(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
+                    new InMemoryIndex(MAIN).createAccess(), capabilities(GitCapability.SHALLOW, GitCapability.MULTI_ACK,
                     GitCapability.MULTI_ACK_DETAILED, GitCapability.NO_DONE, GitCapability.WAIT_FOR_DONE));
             this.existing = existing;
         }

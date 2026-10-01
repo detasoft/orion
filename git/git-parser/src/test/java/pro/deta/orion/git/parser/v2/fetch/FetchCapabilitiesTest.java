@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
@@ -196,12 +197,12 @@ class FetchCapabilitiesTest {
         var request = request(true);
         request.setFilter(Optional.of("blob:none"));
         var context = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), advertised);
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), advertised);
         advertised.clear();
         new FetchNegotiatorIterator(context, HTTP);
 
         var denied = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), advertised) {
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), advertised) {
             @Override
             public boolean objectExists(ObjectId id) {
                 throw new AssertionError("Unsupported request must not query storage");
@@ -225,6 +226,6 @@ class FetchCapabilitiesTest {
     private static void validate(FetchRequest request, GitCapabilities advertised, GitTransport transport)
             throws IOException {
         new FetchNegotiatorIterator(new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), advertised), transport);
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), advertised), transport);
     }
 }

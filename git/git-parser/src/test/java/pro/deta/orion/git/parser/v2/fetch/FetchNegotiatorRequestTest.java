@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.fetch;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.parser.v2.capability.GitCapability;
@@ -199,7 +200,7 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageAccess storage = FetchTestSupport.storage(directory);
-                new InMemoryIndex().withAccess(index -> {
+                new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                     var command = new FetchCommand(storage, index, capabilities());
                     assertThatThrownBy(() -> command.action(protocol))
                             .isInstanceOf(IOException.class).hasMessageContaining("not advertised");
@@ -227,7 +228,7 @@ class FetchNegotiatorRequestTest {
                 var reader = reader(input);
                 var protocol = protocol(input, bytes, version, HTTP);
                 var storage = FetchTestSupport.storage(directory);
-                new InMemoryIndex().withAccess(index -> {
+                new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                     var command = new FetchCommand(storage, index, capabilities());
 
                     assertThatThrownBy(() -> command.action(protocol))
@@ -252,7 +253,7 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            InMemoryIndex owner = new InMemoryIndex();
+            InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
             owner.withAccess(index -> {
                 PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities(GitCapability.WAIT_FOR_DONE));
@@ -272,7 +273,7 @@ class FetchNegotiatorRequestTest {
             var bytes = new ByteArrayOutputStream();
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var storage = FetchTestSupport.storage(directory);
-            InMemoryIndex owner = new InMemoryIndex();
+            InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
             owner.withAccess(index -> {
                 PackTestData.store(storage, owner, GitObjectType.BLOB, new byte[]{42});
                 var command = new FetchCommand(storage, index, capabilities());
@@ -319,7 +320,7 @@ class FetchNegotiatorRequestTest {
                 var bytes = new ByteArrayOutputStream();
                 var protocol = protocol(input, bytes, version, HTTP);
                 GitStorageAccess storage = FetchTestSupport.storage(directory);
-                new InMemoryIndex().withAccess(index -> {
+                new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                     assertThat(negotiate(new FetchCommand(storage, index, capabilities()), protocol)).isEmpty();
                     assertThat(input.readUnsignedByte()).isEqualTo('N');
                     assertThat(bytes.size()).isZero();
@@ -338,7 +339,7 @@ class FetchNegotiatorRequestTest {
             var protocol = protocol(input, bytes, GitProtocolVersion.V2, HTTP);
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = new NegotiationContext(request, FetchTestSupport.storage(directory),
-                    new InMemoryIndex().createAccess(), capabilities()) {
+                    new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), capabilities()) {
                 @Override
                 public boolean objectExists(ObjectId objectId) {
                     assertThat(objectId).isEqualTo(common);
@@ -351,7 +352,7 @@ class FetchNegotiatorRequestTest {
                 }
             };
             GitStorageAccess storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
+            new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context).isSameAs(checks);
@@ -396,7 +397,7 @@ class FetchNegotiatorRequestTest {
                 FetchRequest request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
                 var checks = checks(request, false, GitCapability.MULTI_ACK_DETAILED, GitCapability.SIDE_BAND_64K);
                 GitStorageAccess storage = FetchTestSupport.storage(directory);
-                new InMemoryIndex().withAccess(index -> {
+                new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                     NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                             new FetchNegotiatorIterator(checks, SSH), protocol.reader(), protocol.writer());
                     assertThat(context.commonObjects()).containsExactly(new ObjectId(HAVE));
@@ -420,7 +421,7 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.SIDEBAND_ALL);
             GitStorageAccess storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
+            new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context.ready()).isTrue();
@@ -442,7 +443,7 @@ class FetchNegotiatorRequestTest {
             var request = FetchRequest.parseRequest(protocol.reader(), protocol.version());
             var checks = checks(request, true, GitCapability.WAIT_FOR_DONE);
             GitStorageAccess storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
+            new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                 NegotiationContext context = new FetchCommand(storage, index, capabilities()).negotiate(
                         new FetchNegotiatorIterator(checks, HTTP), protocol.reader(), protocol.writer());
                 assertThat(context.ready()).isFalse();
@@ -506,7 +507,7 @@ class FetchNegotiatorRequestTest {
         try (var input = input(packet("want " + WANT + " object-format=sha256") + "0000")) {
             var request = FetchRequest.parseLegacy(reader(input));
             GitStorageAccess storage = FetchTestSupport.storage(directory);
-            new InMemoryIndex().withAccess(index -> {
+            new InMemoryIndex(new RefId("refs/heads/main")).withAccess(index -> {
                 var command = new FetchCommand(storage, index, capabilities(GitCapability.OBJECT_FORMAT));
                 assertThatThrownBy(() -> command.prepareNegotiation(request, SSH))
                         .isInstanceOf(IOException.class).hasMessageContaining("Expected object format sha1");
@@ -524,7 +525,7 @@ class FetchNegotiatorRequestTest {
 
     private static NegotiationContext checks(FetchRequest request, boolean ready, GitCapability... advertised) {
         return new NegotiationContext(request, FetchTestSupport.storage(directory),
-                new InMemoryIndex().createAccess(), capabilities(advertised)) {
+                new InMemoryIndex(new RefId("refs/heads/main")).createAccess(), capabilities(advertised)) {
             @Override
             public boolean objectExists(ObjectId objectId) {
                 return objectId.equals(new ObjectId(HAVE));

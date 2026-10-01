@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 
@@ -69,17 +70,18 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
                 if (source.hashAlgorithm() != GitHashAlgorithm.SHA1) {
                     throw new IOException("Only SHA-1 source repositories can be exported to Git SHA-1");
                 }
+                Head head = source.index().getHEAD();
                 Map<String, String> refs = source.refs();
                 target.create(true);
                 Map<String, String> converted;
                 try (ObjectInserter inserter = target.newObjectInserter()) {
-                    converted = convertReachable(source, inserter, refs);
+                    converted = convertReachable(source, inserter, refs, head);
                     inserter.flush();
                 }
-                if (!source.refs().equals(refs)) {
-                    throw new IOException("Source refs changed during export");
+                if (!source.refs().equals(refs) || !source.index().getHEAD().equals(head)) {
+                    throw new IOException("Source refs or HEAD changed during export");
                 }
-                publishRefs(target, refs, converted, source.defaultHead());
+                publishRefs(target, refs, converted, head);
                 writeIdMap(temporary, converted);
             }
             verifyWithGit(temporary);
@@ -95,10 +97,13 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
     }
 
     private static Map<String, String> convertReachable(
-            NativeGitRepository source, ObjectInserter inserter, Map<String, String> refs) throws IOException {
+            NativeGitRepository source, ObjectInserter inserter, Map<String, String> refs, Head head)
+            throws IOException {
         Map<String, String> converted = new HashMap<>();
         Set<String> visiting = new HashSet<>();
-        for (String root : refs.values()) {
+        List<String> roots = new ArrayList<>(refs.values());
+        if (head instanceof Head.Detached detached) roots.add(detached.target().toHex());
+        for (String root : roots) {
             ObjectId rootId = new ObjectId(root);
             if (converted.containsKey(root)) {
                 continue;
@@ -379,7 +384,7 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
     }
 
     private static void publishRefs(Repository target, Map<String, String> refs,
-            Map<String, String> converted, String defaultHead) throws IOException {
+            Map<String, String> converted, Head repositoryHead) throws IOException {
         for (Map.Entry<String, String> ref : new TreeMap<>(refs).entrySet()) {
             if (!ref.getKey().startsWith("refs/")) {
                 throw new IOException("Unsupported ref name: " + ref.getKey());
@@ -391,7 +396,14 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
             }
         }
         RefUpdate head = target.updateRef(Constants.HEAD, true);
-        RefUpdate.Result result = head.link(defaultHead);
+        RefUpdate.Result result = switch (repositoryHead) {
+            case Head.Symbolic symbolic -> head.link(symbolic.target().value());
+            case Head.Detached detached -> {
+                head.setNewObjectId(org.eclipse.jgit.lib.ObjectId.fromString(
+                        converted.get(detached.target().toHex())));
+                yield head.forceUpdate();
+            }
+        };
         if (result != RefUpdate.Result.NEW && result != RefUpdate.Result.FORCED
                 && result != RefUpdate.Result.NO_CHANGE) {
             throw new IOException("Cannot publish exported HEAD: " + result);

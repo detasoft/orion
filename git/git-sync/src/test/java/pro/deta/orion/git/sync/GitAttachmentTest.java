@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
@@ -296,7 +297,7 @@ class GitAttachmentTest {
 
         private RacingRepository(InMemoryStorage storage, String racedRef,
                                  String expectedOldId, String concurrentId) {
-            super("project", storage, new InMemoryIndex(), head("main"));
+            super("project", storage, new InMemoryIndex(new RefId("refs/heads/main")));
             populate(this);
             this.racedRef = racedRef;
             this.expectedOldId = expectedOldId;

@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.v2.index;
 
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
@@ -39,6 +40,11 @@ public interface GitIndexApi extends AutoCloseable {
     GitIndexAccess createAccess(List<RefUpdate> updates, Optional<PackId> packId) throws IOException;
 
     GitHashAlgorithm hashAlgorithm();
+
+    /** Reads the current symbolic or detached HEAD from the index. */
+    default Head getHEAD() throws IOException {
+        return withAccess(access -> access.snapshotRefs(new RefSelection.Head()).head());
+    }
 
     Set<GitIndexAccess> activeAccesses();
 

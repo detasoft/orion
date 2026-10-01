@@ -1,5 +1,6 @@
 package pro.deta.orion.git.fileapi;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -30,7 +31,7 @@ class GitFileAccessLifecycleTest {
         List<String> calls = new ArrayList<>();
         IOException packFailure = new IOException("pack close failed");
         IOException indexFailure = new IOException("index discard failed");
-        try (InMemoryStorage storage = new InMemoryStorage(); InMemoryIndex owner = new InMemoryIndex()) {
+        try (InMemoryStorage storage = new InMemoryStorage(); InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"))) {
             GitIndexAccess delegate = owner.createAccess(Optional.of(PackId.create()));
             GitIndexAccess index = proxy(GitIndexAccess.class, (ignored, method, args) -> {
                 if (method.getName().equals("discard")) {
@@ -56,9 +57,9 @@ class GitFileAccessLifecycleTest {
                     return invoke(delegateStorage, accessMethod, accessArgs);
                 });
             });
-            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner, "refs/heads/main");
+            NativeGitRepository repository = new NativeGitRepository("demo", observed, owner);
             GitFileAccess access = new GitFileAccess(repository, index, "main", Optional.empty(),
-                    "discard", GitCommitAuthor.EMPTY, false);
+                    "discard", GitCommitAuthor.EMPTY, false, owner.getHEAD());
             try {
                 if (failPack || failIndex) {
                     IOException expected = failPack ? packFailure : indexFailure;

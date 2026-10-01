@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
@@ -252,7 +253,7 @@ class SmartHttpGitRemoteGatewayTest {
         }
 
         private RacingRepository(Path directory, LocalGitStorage storage) throws IOException {
-            super("project", storage, new LocalGitIndex(directory.resolve(".git")), "refs/heads/main");
+            super("project", storage, new LocalGitIndex(directory.resolve(".git"), new RefId("refs/heads/main")));
         }
 
         @Override

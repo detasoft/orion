@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -173,7 +174,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
 
         repository.files().withAccess("main", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -191,7 +192,7 @@ class NativeGitRepositoryTest {
     void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
 
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared acl",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -211,7 +212,7 @@ class NativeGitRepositoryTest {
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
 
         repository.files().withAccess("main", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -236,7 +237,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
         repository.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             fileAccess.apply();
@@ -315,7 +316,7 @@ class NativeGitRepositoryTest {
     void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
         repository.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             fileAccess.write("preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8));
@@ -344,7 +345,7 @@ class NativeGitRepositoryTest {
     void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
         InMemoryStorage storage = new InMemoryStorage();
         NativeGitRepository repository = new NativeGitRepository(
-                "demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+                "demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
 
         repository.files().withAccess("master", "initial acl", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8));
@@ -358,6 +359,6 @@ class NativeGitRepositoryTest {
 
     private static NativeGitRepository repository() {
         InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(), "refs/heads/main");
+        return new NativeGitRepository("demo.git", storage, new InMemoryIndex(new RefId("refs/heads/main")));
     }
 }

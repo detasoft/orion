@@ -1,5 +1,6 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -78,7 +79,7 @@ class S3GitStorageTest {
                     4, 0, 4, Optional.empty());
             PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(40)), id.toString(), 1, 36);
             try (S3GitStorageApi storageApi = new S3GitStorageApi(objects);
-                 S3GitIndexApi index = new S3GitIndexApi(objects)) {
+                 S3GitIndexApi index = new S3GitIndexApi(objects, new RefId("refs/heads/main"))) {
                 GitStorageAccess storage = storageApi.createAccess();
                 try {
                 try (PackHandle handle = storage.newPack(id)) {
@@ -110,7 +111,7 @@ class S3GitStorageTest {
                     storage.discard();
                 }
             }
-            try (S3GitIndexApi reopened = new S3GitIndexApi(objects)) {
+            try (S3GitIndexApi reopened = new S3GitIndexApi(objects, new RefId("refs/heads/main"))) {
                 reopened.withAccess(access -> {
                     assertThat(access.locations(object.objectId())).containsExactly(object);
                     return null;
@@ -121,7 +122,7 @@ class S3GitStorageTest {
                     return null;
                 });
             }
-            try (S3GitIndexApi corrupted = new S3GitIndexApi(objects)) {
+            try (S3GitIndexApi corrupted = new S3GitIndexApi(objects, new RefId("refs/heads/main"))) {
                 assertThatThrownBy(() -> corrupted.withAccess(access -> access.packs()))
                         .isInstanceOf(IOException.class);
             }

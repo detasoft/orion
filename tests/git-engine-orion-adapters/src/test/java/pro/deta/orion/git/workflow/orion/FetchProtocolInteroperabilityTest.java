@@ -1,5 +1,6 @@
 package pro.deta.orion.git.workflow.orion;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.channel.ChannelExec;
 import org.apache.sshd.client.session.ClientSession;
@@ -215,7 +216,7 @@ class FetchProtocolInteroperabilityTest {
         if (!packfile) {
             throw new IOException("Fetch ended without a packfile section");
         }
-        GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+        GitIndexAccess index = new InMemoryIndex(new RefId("refs/heads/main")).createAccess(Optional.of(PackId.create()));
         try (InMemoryStorage storage = new InMemoryStorage();
              BufferedByteInputV2 input = new BufferedByteInputV2(new ByteArrayInputStream(bytes.toByteArray()))) {
             GitStorageAccess access = storage.createAccess();

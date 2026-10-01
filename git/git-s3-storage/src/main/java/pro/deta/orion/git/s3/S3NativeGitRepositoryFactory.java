@@ -3,6 +3,7 @@ package pro.deta.orion.git.s3;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryFactory;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
@@ -87,11 +88,11 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
     public Result<NativeGitRepository> open(RepositoryName repositoryName) {
         String name = repositoryName.value();
         try {
-            String storedName = readName(key(name));
-            return storedName == null
+            RepositoryMetadata metadata = readMetadata(key(name));
+            return metadata == null
                     ? new Result.Failure<>(Result.FailureCode.NOT_FOUND,
                             "S3 repository does not exist: " + name)
-                    : new Result.Success<>(repository(storedName));
+                    : new Result.Success<>(repository(metadata.name(), metadata.initialHead()));
         } catch (IOException | SdkException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
                     "Cannot read S3 repository metadata", failure);
@@ -114,7 +115,7 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
             }
             transport.client().putObject(request -> request.overrideConfiguration(overrides).bucket(bucket).key(key(name))
                     .ifNoneMatch("*").contentType("text/plain; charset=utf-8"), RequestBody.fromBytes(content));
-            return new Result.Success<>(repository(name));
+            return new Result.Success<>(repository(name, new RefId(DEFAULT_HEAD)));
         } catch (S3Exception failure) {
             if (failure.statusCode() == 412 && "PreconditionFailed".equals(errorCode(failure))) {
                 return new Result.Failure<>(Result.FailureCode.FILE_ALREADY_EXISTS,
@@ -130,6 +131,11 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
     }
 
     private String readName(String key) throws IOException {
+        RepositoryMetadata metadata = readMetadata(key);
+        return metadata == null ? null : metadata.name();
+    }
+
+    private RepositoryMetadata readMetadata(String key) throws IOException {
         try {
             byte[] content = transport.client().getObject(request -> request.overrideConfiguration(overrides).bucket(bucket)
                     .key(key), (response, input) -> {
@@ -143,11 +149,14 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
             Properties properties = new Properties();
             properties.load(new StringReader(new String(content, StandardCharsets.UTF_8)));
             String name = properties.getProperty("name");
-            if (name == null || !RepositoryName.parse(name).value().equals(name)
-                    || !key(name).equals(key) || !DEFAULT_HEAD.equals(properties.getProperty("defaultHead"))) {
+            String initialHead = properties.getProperty("defaultHead");
+            if (name == null || initialHead == null || !RepositoryName.parse(name).value().equals(name)
+                    || !key(name).equals(key)) {
                 throw new IOException("Invalid S3 repository metadata");
             }
-            return name;
+            RefId ref = new RefId(initialHead);
+            ref.requireFullName();
+            return new RepositoryMetadata(name, ref);
         } catch (S3Exception failure) {
             if (failure.statusCode() == 404 && "NoSuchKey".equals(errorCode(failure))) {
                 return null;
@@ -158,12 +167,15 @@ final class S3NativeGitRepositoryFactory implements NativeGitRepositoryFactory {
         }
     }
 
-    private NativeGitRepository repository(String name) {
+    private NativeGitRepository repository(String name, RefId initialHead) throws IOException {
         String metadataKey = key(name);
         S3RepositoryObjects objects = new S3RepositoryObjects(transport, () -> overrides, bucket,
                 metadataKey.substring(0, metadataKey.length() - METADATA_FILE.length()));
-        return new NativeGitRepository(name, new S3GitStorageApi(objects), new S3GitIndexApi(objects), DEFAULT_HEAD);
+        return new NativeGitRepository(name, new S3GitStorageApi(objects),
+                new S3GitIndexApi(objects, initialHead));
     }
+
+    private record RepositoryMetadata(String name, RefId initialHead) {}
 
     private String key(String name) {
         return prefix + HexFormat.of().formatHex(GitHashAlgorithm.SHA256.newDigest()

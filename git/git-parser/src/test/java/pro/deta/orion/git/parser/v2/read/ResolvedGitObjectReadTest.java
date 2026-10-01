@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.read;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class ResolvedGitObjectReadTest {
     @TempDir
     Path directory;
     private GitStorageAccess storage;
-    private final InMemoryIndex owner = new InMemoryIndex();
+    private final InMemoryIndex owner = new InMemoryIndex(new RefId("refs/heads/main"));
     private final GitIndexAccess index = owner.createAccess();
 
     @BeforeEach

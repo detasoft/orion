@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.pack;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class GitPackObjectResolverTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     GitPackObjectResolverTest() throws java.io.IOException {}
 
     @TempDir
@@ -52,7 +54,9 @@ class GitPackObjectResolverTest {
                 GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create())) : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
+                GitIndexAccess index = memory
+                        ? new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()))
+                        : new LocalGitIndex(directory, MAIN).createAccess(Optional.of(PackId.create()));
                 try {
                         ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
                         ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
@@ -78,7 +82,7 @@ class GitPackObjectResolverTest {
                             {
                                 GitStorageAccess replay = new InMemoryStorage().createAccess();
                                 try {
-                                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), replayIndex -> {
+                                    new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), replayIndex -> {
                                         PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
                                         assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
                                         assertThat(copy.objectCount()).isEqualTo(5);
@@ -106,7 +110,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
                 try {
-                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    LocalGitIndex owner = new LocalGitIndex(directory, MAIN);
                     owner.withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
                         byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
@@ -116,7 +120,7 @@ class GitPackObjectResolverTest {
                             {
                                 GitStorageAccess copy = new InMemoryStorage().createAccess();
                                 try {
-                                GitIndexAccess copyIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+                                GitIndexAccess copyIndex = new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()));
                                 try {
                                         publish(bytes(completed, storage, index), copy, copyIndex);
                                         assertThat(GitObjectRead.read(copy, copyIndex, objectId(GitObjectType.BLOB, new byte[]{2}),
@@ -146,7 +150,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(MAIN);
                     owner.withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
                         List<PackMetadata> before = index.packs();
@@ -168,7 +172,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(MAIN);
                     owner.withAccess(Optional.of(PackId.create()), index -> {
                         ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{2});
                         ObjectId root = objectId(GitObjectType.BLOB, new byte[]{1});
@@ -192,7 +196,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                    new InMemoryIndex(MAIN).withAccess(Optional.of(PackId.create()), index -> {
                         List<byte[]> entries = new ArrayList<>();
                         for (int value = 1100; value > 0; value--) {
                             byte[] previous = {(byte) ((value - 1) >>> 8), (byte) (value - 1)};
@@ -219,7 +223,9 @@ class GitPackObjectResolverTest {
         {
             try (CountingStorage storage = new CountingStorage(
                             memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess())) {
-                GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create())) : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
+                GitIndexAccess index = memory
+                        ? new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()))
+                        : new LocalGitIndex(directory, MAIN).createAccess(Optional.of(PackId.create()));
                 try {
                     int depth = 1100;
                     List<byte[]> entries = new ArrayList<>();
@@ -247,7 +253,7 @@ class GitPackObjectResolverTest {
     void reusesTheResolvedBaseAcrossManyBranches() throws Exception {
         {
             try (CountingStorage storage = new CountingStorage(new InMemoryStorage().createAccess())) {
-                InMemoryIndex owner = new InMemoryIndex();
+                InMemoryIndex owner = new InMemoryIndex(MAIN);
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     List<byte[]> entries = new ArrayList<>();
                     ObjectId base = objectId(GitObjectType.BLOB, new byte[]{0, 0});
@@ -275,7 +281,7 @@ class GitPackObjectResolverTest {
     void rereadsEvictedOrOversizedExternalBasesAndProducesSelfContainedPack(int size) throws Exception {
         {
             try (CountingStorage storage = new CountingStorage(new InMemoryStorage().createAccess())) {
-                InMemoryIndex owner = new InMemoryIndex();
+                InMemoryIndex owner = new InMemoryIndex(MAIN);
                 owner.withAccess(Optional.of(PackId.create()), index -> {
                     List<ObjectId> bases = new ArrayList<>();
                     for (int i = 0; i < 4; i++) {
@@ -304,7 +310,7 @@ class GitPackObjectResolverTest {
                         {
                             GitStorageAccess replay = new InMemoryStorage().createAccess();
                             try {
-                            GitIndexAccess replayIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+                            GitIndexAccess replayIndex = new InMemoryIndex(MAIN).createAccess(Optional.of(PackId.create()));
                             try {
                                     PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
                                     assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
@@ -382,7 +388,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(MAIN);
                     owner.withAccess(index -> {
                         byte[][] invalid = {{2, 0}, {1, 1, 0}, {1, 1, 1}, {1, 1, (byte) 0x91, 1, 1},
                                 {1, 1, (byte) 0x90, 2}, {1, 1}, {1, 0, 1, 42}, {1, 1, (byte) 0x91}};
@@ -410,7 +416,7 @@ class GitPackObjectResolverTest {
             {
                 GitStorageAccess storage = new InMemoryStorage().createAccess();
                 try {
-                    InMemoryIndex owner = new InMemoryIndex();
+                    InMemoryIndex owner = new InMemoryIndex(MAIN);
                     owner.withAccess(index -> {
                         ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
                         ObjectId other = objectId(GitObjectType.BLOB, new byte[]{2});

@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,10 +66,12 @@ class S3TransportTest {
             S3NativeGitRepositoryProvider provider = provider(transport, server, "pager", "eu-central-1");
             provider.create("new").valueOrFailure("create metadata").close();
             assertThat(provider.repositoryNames()).isEmpty();
-            assertThat(server.requests).hasSize(3);
+            assertThat(server.requests).hasSize(5);
             for (Request request : server.requests) assertRequest(request, "pager", "eu-central-1");
             assertThat(server.requests.get(0).method()).isEqualTo("PUT");
-            assertThat(server.requests.get(2).query()).contains("continuation-token=next");
+            assertThat(server.requests.get(1).path()).endsWith("/refs");
+            assertThat(server.requests.get(2).method()).isEqualTo("PUT");
+            assertThat(server.requests.get(4).query()).contains("continuation-token=next");
         }
     }
 
@@ -130,6 +133,7 @@ class S3TransportTest {
         final HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         final AtomicInteger pages = new AtomicInteger();
+        final ConcurrentHashMap<String, byte[]> refs = new ConcurrentHashMap<>();
 
         Server(CountDownLatch entered, CountDownLatch release) throws IOException {
             server.setExecutor(executor);
@@ -137,7 +141,10 @@ class S3TransportTest {
                 requests.add(new Request(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
                         exchange.getRequestURI().getQuery(), exchange.getRequestHeaders().getFirst("Authorization"),
                         exchange.getRequestHeaders().getFirst("X-Amz-Security-Token")));
-                exchange.getRequestBody().readAllBytes();
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                if ("aws-chunked".equals(exchange.getRequestHeaders().getFirst("Content-Encoding"))) {
+                    body = S3GitIndexTest.Wire.chunks(body);
+                }
                 entered.countDown();
                 try {
                     if (!release.await(8, TimeUnit.SECONDS)) throw new IOException("Request release timed out");
@@ -146,7 +153,12 @@ class S3TransportTest {
                     throw new IOException(interrupted);
                 }
                 if (exchange.getRequestMethod().equals("PUT")) {
+                    if (exchange.getRequestURI().getPath().endsWith("/refs")) {
+                        refs.putIfAbsent(exchange.getRequestURI().getPath(), body);
+                    }
                     reply(exchange, 200, "");
+                } else if (refs.containsKey(exchange.getRequestURI().getPath())) {
+                    reply(exchange, 200, refs.get(exchange.getRequestURI().getPath()));
                 } else if (exchange.getRequestURI().getQuery() != null
                         && exchange.getRequestURI().getQuery().contains("list-type=2")) {
                     boolean first = pages.getAndIncrement() == 0;
@@ -167,7 +179,10 @@ class S3TransportTest {
     }
 
     private static void reply(HttpExchange exchange, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        reply(exchange, status, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void reply(HttpExchange exchange, int status, byte[] bytes) throws IOException {
         exchange.getResponseHeaders().set("Content-Type", "application/xml");
         exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
         exchange.getResponseBody().write(bytes);

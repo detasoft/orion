@@ -49,7 +49,7 @@ class RefsCommandTest implements BufferedByteInputV2.Source {
 
     @BeforeEach
     void openIndex() throws Exception {
-        factory = new LocalGitIndex(repository);
+        factory = new LocalGitIndex(repository, new RefId("refs/heads/main"));
     }
 
     @AfterEach

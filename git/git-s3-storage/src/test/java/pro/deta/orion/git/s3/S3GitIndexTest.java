@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
+import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
@@ -40,13 +41,34 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(30)
 class S3GitIndexTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
+    @Test
+    void readsPersistedHeadBeforeTheRequestedInitialName() throws Exception {
+        try (Wire wire = new Wire(); S3Transport transport = new S3Transport()) {
+            S3RepositoryObjects objects = wire.objects(transport);
+            RefId trunk = new RefId("refs/heads/trunk");
+            try (S3GitIndexApi first = new S3GitIndexApi(objects, trunk)) {
+                assertThat(first.getHEAD()).isEqualTo(new Head.Symbolic(trunk));
+                first.withAccess(access -> {
+                    access.updateHead(new Head.Symbolic(new RefId("refs/heads/topic")));
+                    access.apply();
+                    return null;
+                });
+            }
+            try (S3GitIndexApi reopened = new S3GitIndexApi(objects, new RefId("refs/heads/other"))) {
+                assertThat(reopened.getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/topic")));
+            }
+        }
+    }
+
     @Test
     void conditionalCollisionMergesDifferentRefsAndRejectsTheSameRef() throws Exception {
         for (boolean sameRef : List.of(false, true)) {
             try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
                  ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 S3RepositoryObjects objects = wire.objects(transport);
-                try (S3GitIndexApi first = new S3GitIndexApi(objects); S3GitIndexApi second = new S3GitIndexApi(objects)) {
+                try (S3GitIndexApi first = new S3GitIndexApi(objects, MAIN);
+                     S3GitIndexApi second = new S3GitIndexApi(objects, MAIN)) {
                     RefId left = new RefId("refs/heads/left");
                     RefId right = sameRef ? left : new RefId("refs/heads/right");
                     GitIndexAccess a = first.createAccess(List.of(new RefUpdate(left, Optional.empty(),
@@ -78,7 +100,7 @@ class S3GitIndexTest {
     @Test
     void observesBoundPackAccessUntilCompletionAndRejectsOtherPackWrites() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport))) {
+             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport), MAIN)) {
             PackId pack = PackId.create();
             IndexedObject object = new IndexedObject(pack, new ObjectId("a".repeat(40)), GitObjectType.BLOB,
                     1, 0, 4, Optional.empty());
@@ -116,7 +138,7 @@ class S3GitIndexTest {
     @Test
     void duplicateObjectLookupUsesTheFirstPackPositionBeforeAndAfterPublication() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi index = new S3GitIndexApi(wire.objects(transport))) {
+             S3GitIndexApi index = new S3GitIndexApi(wire.objects(transport), MAIN)) {
             PackId pack = PackId.create();
             ObjectId id = new ObjectId("a".repeat(40));
             IndexedObject first = new IndexedObject(pack, id, GitObjectType.BLOB, 1, 0, 4, Optional.empty());
@@ -134,7 +156,7 @@ class S3GitIndexTest {
                         pack.toString(), 2, 40));
                 return null;
             });
-            try (S3GitIndexApi reopened = new S3GitIndexApi(wire.objects(transport))) {
+            try (S3GitIndexApi reopened = new S3GitIndexApi(wire.objects(transport), MAIN)) {
                 reopened.withAccess(access -> {
                     assertThat(access.findObject(pack, id)).contains(first);
                     assertThat(access.locations(id)).containsExactly(first, second);
@@ -147,7 +169,7 @@ class S3GitIndexTest {
     @Test
     void malformedRefContentFailsInsteadOfPretendingTheRepositoryIsEmpty() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi index = new S3GitIndexApi(wire.objects(transport))) {
+             S3GitIndexApi index = new S3GitIndexApi(wire.objects(transport), MAIN)) {
             wire.contents.put("/bucket/repo/refs", new byte[]{0, 1, 2, 3});
             assertThatThrownBy(index::createAccess).isInstanceOf(IOException.class).hasMessageContaining("refs");
         }
@@ -160,7 +182,7 @@ class S3GitIndexTest {
             IndexedObject object = object(pack);
             wire.store(manifest(object));
             for (int restart = 0; restart < 2; restart++) {
-                try (S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport))) {
+                try (S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport), MAIN)) {
                     for (int iteration = 0; iteration < 3; iteration++) {
                         owner.withAccess(access -> {
                             assertThat(access.locations(object.objectId())).containsExactly(object);
@@ -182,7 +204,7 @@ class S3GitIndexTest {
     @Test
     void publishesIntoEveryAccessOnlyAfterDurablePublication() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport))) {
+             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport), MAIN)) {
             GitIndexAccess reader = owner.createAccess();
             IndexedObject object = object(PackId.create());
             assertThat(reader.locations(object.objectId())).isEmpty();
@@ -209,7 +231,7 @@ class S3GitIndexTest {
     @Test
     void retriesTheWholeLoadAfterAMalformedManifestWithoutRetainingPartialState() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport))) {
+             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport), MAIN)) {
             GitIndexAccess access = owner.createAccess();
             IndexedObject first = object(new PackId("00000000-0000-0000-0000-000000000001"));
             IndexedObject second = object(new PackId("00000000-0000-0000-0000-000000000002"));
@@ -229,7 +251,7 @@ class S3GitIndexTest {
     @Test
     void publicationRacingTheInitialLoadRemainsVisibleToAllAccesses() throws Exception {
         try (Wire wire = new Wire(); S3Transport transport = new S3Transport();
-             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport));
+             S3GitIndexApi owner = new S3GitIndexApi(wire.objects(transport), MAIN);
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             GitIndexAccess reader = owner.createAccess();
             IndexedObject object = object(PackId.create());
@@ -428,7 +450,7 @@ class S3GitIndexTest {
             }
         }
 
-        private static byte[] chunks(byte[] bytes) throws IOException {
+        static byte[] chunks(byte[] bytes) throws IOException {
             ByteArrayInputStream input = new ByteArrayInputStream(bytes);
             ByteArrayOutputStream decoded = new ByteArrayOutputStream();
             for (;;) {

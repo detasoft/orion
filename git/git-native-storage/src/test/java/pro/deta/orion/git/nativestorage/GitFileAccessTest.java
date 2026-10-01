@@ -6,7 +6,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.parser.v2.data.FileMode;
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 
 import pro.deta.orion.net.io.BufferedByteInputV2;
@@ -26,6 +29,42 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitFileAccessTest {
     @TempDir
     Path directory;
+
+    @Test
+    void initializesCurrentSymbolicHeadButNotDetachedHead() throws Exception {
+        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+                .create("demo").valueOrFailure("repository")) {
+            repository.index().withAccess(index -> {
+                index.updateHead(new Head.Symbolic(new RefId("refs/heads/trunk")));
+                index.apply();
+                return null;
+            });
+            assertThat(repository.defaultHead()).isEqualTo("refs/heads/trunk");
+            repository.files().withAccess("topic", "first", GitCommitAuthor.EMPTY, access -> {
+                access.write("file", new byte[]{1});
+                access.apply();
+                return null;
+            });
+            assertThat(repository.refs()).containsKeys("refs/heads/trunk", "refs/heads/topic")
+                    .doesNotContainKey("refs/heads/main");
+
+            CommitId detached = new CommitId(new ObjectId(repository.refs().get("refs/heads/topic")).toBytes());
+            repository.index().withAccess(index -> {
+                index.updateHead(new Head.Detached(detached));
+                index.apply();
+                return null;
+            });
+            assertThat(repository.defaultHead()).isEqualTo("HEAD");
+            repository.files().withAccess("other", "second", GitCommitAuthor.EMPTY, access -> {
+                access.write("file", new byte[]{2});
+                access.apply();
+                return null;
+            });
+            assertThat(repository.refs()).containsKeys("refs/heads/trunk", "refs/heads/topic", "refs/heads/other")
+                    .hasSize(3);
+            assertThat(repository.index().getHEAD()).isEqualTo(new Head.Detached(detached));
+        }
+    }
 
     @Test
     void streamsOneFileAndReusesUntouchedTrees() throws Exception {

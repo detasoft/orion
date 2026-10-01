@@ -36,6 +36,7 @@ import java.util.TreeMap;
  * S3 index owner. Pending pack entries are shared across accesses until immutable manifest publication.
  * Published manifests load once per owner; successful local publication updates every access immediately.
  * Only published entries survive reopening the owner; bytes, manifests and refs have independent durability.
+ * The initial HEAD name is stored when refs are absent; reopening reads the stored HEAD.
  */
 final class S3GitIndexApi implements GitIndexApi {
     final S3RepositoryObjects objects;
@@ -46,8 +47,12 @@ final class S3GitIndexApi implements GitIndexApi {
     private boolean closed;
     private final Set<GitIndexAccess> accesses = new HashSet<>();
 
-    S3GitIndexApi(S3RepositoryObjects objects) {
+    S3GitIndexApi(S3RepositoryObjects objects, RefId initialHead) throws IOException {
         this.objects = objects;
+        Objects.requireNonNull(initialHead, "initialHead").requireFullName();
+        if (objects.read("refs", (stream, length, etag) -> true).isEmpty()) {
+            objects.put("refs", encode(new RefsSnapshot(Map.of(), new Head.Symbolic(initialHead))), null);
+        }
     }
 
     @Override
@@ -326,8 +331,7 @@ final class S3GitIndexApi implements GitIndexApi {
             } catch (IllegalArgumentException failure) {
                 throw new IOException("Invalid S3 refs", failure);
             }
-        }).orElseGet(() -> new Refs(new RefsSnapshot(Map.of(),
-                new Head.Symbolic(new RefId("refs/heads/main"))), null));
+        }).orElseThrow(() -> new IOException("Repository refs are missing"));
     }
 
     static byte[] encode(RefsSnapshot refs) throws IOException {

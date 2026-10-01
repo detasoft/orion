@@ -1,5 +1,6 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.id.RefId;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.v2.pack.PackTestData.*;
 
 class PackIndexStorageTest {
+    private static final RefId MAIN = new RefId("refs/heads/main");
     @TempDir
     Path directory;
 
@@ -46,7 +48,7 @@ class PackIndexStorageTest {
                 GitStorageAccess backend = memory ? new InMemoryStorage().createAccess()
                         : new LocalGitStorage(directory).createAccess();
                 try {
-                GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
+                GitIndexApi owner = memory ? new InMemoryIndex(MAIN) : new LocalGitIndex(directory, MAIN);
                 GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
                 try {
                             GitStorageAccess recording = new GitStorageAccess() {

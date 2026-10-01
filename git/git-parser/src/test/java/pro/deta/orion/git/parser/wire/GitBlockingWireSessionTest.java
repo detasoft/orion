@@ -56,7 +56,7 @@ class GitBlockingWireSessionTest {
     void openStorage() throws Exception {
         storageApi = new LocalGitStorage(directory);
         storage = storageApi.createAccess();
-        factory = new LocalGitIndex(directory);
+        factory = new LocalGitIndex(directory, new RefId("refs/heads/main"));
         index = factory.createAccess();
     }
 

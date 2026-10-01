@@ -73,7 +73,7 @@ class GitIndexModificationTest {
 
     @Test
     void lastDiscardReleasesTheFileAndAllowsReopening() throws Exception {
-        try (LocalGitIndex index = new LocalGitIndex(directory)) {
+        try (LocalGitIndex index = new LocalGitIndex(directory, new RefId("refs/heads/main"))) {
             index.withAccess(List.of(update()), access -> {
                 access.apply();
                 return null;
@@ -89,7 +89,7 @@ class GitIndexModificationTest {
 
     @Test
     void interruptedCleanupReleasesTheAccessAndPreservesTheInterrupt() throws Exception {
-        try (LocalGitIndex index = new LocalGitIndex(directory)) {
+        try (LocalGitIndex index = new LocalGitIndex(directory, new RefId("refs/heads/main"))) {
             index.withAccess(access -> {
                 Thread.currentThread().interrupt();
                 try {
@@ -105,12 +105,12 @@ class GitIndexModificationTest {
     }
 
     private GitIndexApi index(boolean local) throws IOException {
-        return local ? new LocalGitIndex(directory) : new InMemoryIndex();
+        return local ? new LocalGitIndex(directory, new RefId("refs/heads/main")) : new InMemoryIndex(new RefId("refs/heads/main"));
     }
 
     @Test
     void concurrentAccessesShareTheStoreUntilBothFinish() throws Exception {
-        try (GitIndexApi index = new LocalGitIndex(directory);
+        try (GitIndexApi index = new LocalGitIndex(directory, new RefId("refs/heads/main"));
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             CyclicBarrier start = new CyclicBarrier(2);
             CyclicBarrier opened = new CyclicBarrier(2);
