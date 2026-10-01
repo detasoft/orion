@@ -26,20 +26,20 @@ class SessionHostLinuxMakefileTest {
         assertThat(result.exitCode()).as("make output:%n%s", result.output()).isZero();
         assertThat(Files.readString(tools.archiveList())).contains(
                 "Makefile",
-                "session-host/Cargo.toml",
-                "session-host/src/platform/unix.rs",
-                "session-host/tests/unix_process_host.rs",
-                "agent-protocol/protocol/fixtures/session-events-v1.hex"
+                "agent/session-host/Cargo.toml",
+                "agent/session-host/src/platform/unix.rs",
+                "agent/session-host/tests/unix_process_host.rs",
+                "agent/agent-protocol/protocol/fixtures/session-events-v1.hex"
         ).doesNotContain(
                 ".git/",
                 ".orion-cache/",
-                "session-host/target/"
+                "agent/session-host/target/"
         );
         assertThat(Files.readString(tools.trace())).contains(
                 "mkdir -p",
                 "tar -xzf",
                 "CARGO_TARGET_DIR=/tmp/orion-session-host-linux/cache/cargo",
-                "/opt/rust/bin/cargo test --locked --manifest-path session-host/Cargo.toml"
+                "/opt/rust/bin/cargo test --locked --manifest-path agent/session-host/Cargo.toml"
         );
     }
 
@@ -53,7 +53,7 @@ class SessionHostLinuxMakefileTest {
         String trace = Files.readString(tools.trace());
         int extract = trace.indexOf("tar -xzf");
         int refresh = trace.indexOf("find \"$run\" -type f -exec touch {} +");
-        int build = trace.indexOf("/opt/rust/bin/cargo test --locked --manifest-path session-host/Cargo.toml");
+        int build = trace.indexOf("/opt/rust/bin/cargo test --locked --manifest-path agent/session-host/Cargo.toml");
         assertThat(extract).isGreaterThanOrEqualTo(0);
         assertThat(refresh).isGreaterThan(extract);
         assertThat(build).isGreaterThan(refresh);

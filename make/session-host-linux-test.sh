@@ -82,13 +82,13 @@ trap 'exit 143' TERM
 
 COPYFILE_DISABLE=1 tar --no-xattrs -czf "$archive" \
     Makefile \
-    session-host/Cargo.toml \
-    session-host/Cargo.lock \
-    session-host/rust-toolchain.toml \
-    session-host/src \
-    session-host/tests \
-    session-host/protocol \
-    agent-protocol/protocol/fixtures
+    agent/session-host/Cargo.toml \
+    agent/session-host/Cargo.lock \
+    agent/session-host/rust-toolchain.toml \
+    agent/session-host/src \
+    agent/session-host/tests \
+    agent/session-host/protocol \
+    agent/agent-protocol/protocol/fixtures
 
 build_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
 remote_archive="$remote_root/uploads/source-$build_id.tar.gz"
@@ -118,7 +118,7 @@ env PATH=$linux_toolchain:\$PATH \\
     CC=$linux_cc AR=$linux_ar \\
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=$linux_cc \\
     CFLAGS_x86_64_unknown_linux_gnu=$linux_cflags \\
-    $linux_toolchain/cargo test --locked --manifest-path session-host/Cargo.toml"
+    $linux_toolchain/cargo test --locked --manifest-path agent/session-host/Cargo.toml"
 
 # shellcheck disable=SC2086
 "$ssh_command" $ssh_options $keepalive_options "$linux_host" "$remote_command"
