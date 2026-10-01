@@ -11,7 +11,7 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
@@ -108,8 +108,9 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                         assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8)))
                                 .contains("root", expectedUser);
                         assertUserAuthenticates(component.orionAccessControlService(), expectedUser);
-                        String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                                .repositoryName().orElseThrow();
+                        String cache = bootstrap.repositoryFactory()
+                                .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
+                                        .orElseThrow();
                         assertThat(bootstrap.repositoryProvider().repositoryNames()).doesNotContain(cache);
 
                         if (launch == 0) {

@@ -50,7 +50,6 @@ final class RemoteBootstrapTestSupport {
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
-                .bootstrapRepositorySources(context.repositorySources())
                 .build();
     }
 

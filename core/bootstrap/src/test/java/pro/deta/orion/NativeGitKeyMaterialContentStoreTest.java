@@ -11,7 +11,6 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -140,12 +139,12 @@ class NativeGitKeyMaterialContentStoreTest {
         source.setLocation("git+" + bare.toUri());
         source.setRef(REF);
         source.setPath(MATERIAL_PATH);
-        ResolvedBootstrapSource resolved = factory.resolveProvisional("material", source, true);
+        String repositoryName = factory.resolveProvisional("material", source, true).orElseThrow();
         NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(
                 factory.provider(),
-                resolved.repositoryName().orElseThrow(),
-                resolved.refName(),
-                resolved.path());
+                repositoryName,
+                NativeGitRepositoryFactory.sourceRefName(source),
+                NativeGitRepositoryFactory.repositoryPath(source.getPath()));
 
         assertThat(store.read()).isEmpty();
         store.write(bytes("encrypted-material"), null);

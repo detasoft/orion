@@ -34,7 +34,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void nestedWriteCannotReplaceAnExistingFileWithADirectory() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
                 access.write("folder", bytes("original"));
@@ -57,7 +57,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void writingAFileCannotSilentlyReplaceAnExistingDirectory() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
                 access.write("folder/keep.txt", bytes("original"));
@@ -81,7 +81,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void nestedWritePreservesUntouchedSubtreeWithoutPackingItsObjects() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
                 access.write("left/config.txt", bytes("before"));
@@ -104,7 +104,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void explicitChangesCanReplaceAFileWithADirectoryAndBack() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
                 access.write("entry", bytes("file"));

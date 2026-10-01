@@ -5,14 +5,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.config.OrionConfigurationStorageResolver;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -90,16 +89,17 @@ class BootstrapProxyTransportIT {
                 byte[] signature;
                 try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment)) {
                     var provider = bootstrap.repositoryProvider();
-                    String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                            .repositoryName().orElseThrow();
-                    assertThat(bootstrap.repositorySources().required(BootstrapRepositorySources.MATERIAL)
-                            .repositoryName()).contains(cache);
+                    String cache = bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
+                    assertThat(bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)).contains(cache);
                     assertThat(provider.repositoryNames()).doesNotContain(cache);
                     signature = bootstrap.serverIdentity().sign(payload);
 
                     NativeGitRepository retained = provider.openForRead(cache).valueOrFailure("provisional handle");
 
-                    var storage = new OrionConfigurationStorageResolver(bootstrap.repositorySources(), provider).resolve();
+                    var storage = new NativeGitOrionConfigurationStorage(bootstrap.repositoryFactory(),
+                            configuration.getBootstrap().getAccessControl());
                     var component = runtimeComponent(configuration, bootstrap);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -178,10 +178,11 @@ class BootstrapProxyTransportIT {
                 try (BootstrapContext restarted = BootstrapContext.open(configuration, environment)) {
                     assertThat(restarted.serverIdentity().verify(
                             restarted.serverIdentity().activeKeyId(), payload, signature)).isTrue();
-                    String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                            .repositoryName().orElseThrow();
+                    String cache = restarted.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                     var provider = restarted.repositoryProvider();
-                    var storage = new OrionConfigurationStorageResolver(restarted.repositorySources(), provider).resolve();
+                    var storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory(),
+                            configuration.getBootstrap().getAccessControl());
                     var before = storage.load().valueOrFailure("configuration before adoption").revision();
                     var component = runtimeComponent(configuration, restarted);
                     var lifecycle = component.orionApplicationLifecycle();

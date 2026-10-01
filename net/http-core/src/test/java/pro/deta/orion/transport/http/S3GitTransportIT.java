@@ -22,7 +22,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
@@ -59,7 +58,7 @@ class S3GitTransportIT {
             Files.writeString(directory.resolve("source/file.txt"), original);
             source.add().addFilepattern("file.txt").call();
             source.commit().setMessage("first").setAuthor("Tester", "test@example.com").call();
-            try (S3NativeGitRepositoryProvider provider = provider(minio); Http server = new Http(provider)) {
+            try (NativeGitRepositoryProvider provider = provider(minio); Http server = new Http(provider)) {
                 provider.create("repo").valueOrFailure("create");
                 push(source, server.url());
                 try (Git clone = Git.cloneRepository().setURI(server.url())

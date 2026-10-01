@@ -7,16 +7,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionConfigurationStorage;
-import pro.deta.orion.config.OrionConfigurationStorageResolver;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -135,7 +133,7 @@ class BootstrapConnectionDecisionTest {
         final OrionDesiredState desired = new OrionDesiredState();
         final DecisionRegistry decisions = new DecisionRegistry(10, Runnable::run, (actor, scope) -> true);
         final OrionKeyMaterial material;
-        final ProxyAwareNativeGitRepositoryProvider provider;
+        final NativeGitRepositoryFactory provider;
         final OrionConfigurationStorage storage;
         final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;
@@ -168,11 +166,13 @@ class BootstrapConnectionDecisionTest {
             BootstrapSourceConfig source = new BootstrapSourceConfig();
             source.setLocation("git+" + upstream.toUri());
             source.setPath("orion.xml");
-            ResolvedBootstrapSource resolved = provider.resolveProvisional("material", source, false);
-            ResolvedBootstrapSource configuration = new ResolvedBootstrapSource("configuration", resolved.location(),
-                    resolved.repositoryName(), resolved.refName(), resolved.path(), resolved.revision(), false);
-            storage = new OrionConfigurationStorageResolver(new BootstrapRepositorySources(List.of(configuration)), provider)
-                    .resolve();
+            provider.resolveProvisional(NativeGitRepositoryFactory.MATERIAL_SOURCE, source, false);
+            pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig configuration =
+                    new pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig();
+            configuration.setLocation(source.getLocation());
+            configuration.setPath(source.getPath());
+            provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
+            storage = new NativeGitOrionConfigurationStorage(provider, configuration);
             KeyMaterialDescriptor signing = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
                     KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
                     KeyMaterialScope.cluster("test"));
@@ -198,8 +198,7 @@ class BootstrapConnectionDecisionTest {
 
         void start() {
             OrionRuntimeModule.bootstrapProxies(storage,
-                    configured,
-                    new pro.deta.orion.git.proxy.BootstrapRepositorySources(List.of()), provider,
+                    configured, provider,
                             material.configurationCipher(), secrets,
                     desired, editor, decisions,
                     OrionRuntimeModule.connectionFailures(decisions),

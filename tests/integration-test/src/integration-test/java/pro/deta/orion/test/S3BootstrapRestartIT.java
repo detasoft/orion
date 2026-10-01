@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -11,7 +12,7 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
@@ -80,7 +81,7 @@ class S3BootstrapRestartIT {
             }
             byte[] material = materialStore.read().orElseThrow().bytes();
             Map<String, String> refs;
-            try (S3NativeGitRepositoryProvider provider = new S3NativeGitRepositoryProvider(
+            try (NativeGitRepositoryProvider provider = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                     configuration.getStorage().getAuth(), environment)) {
                 NativeGitRepository repository = provider.create("orion").valueOrFailure("seed S3 bootstrap");

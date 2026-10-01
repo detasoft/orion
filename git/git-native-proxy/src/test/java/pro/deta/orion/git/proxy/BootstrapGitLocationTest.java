@@ -48,6 +48,7 @@ class BootstrapGitLocationTest {
         assertThat(location.remoteUri()).isEqualTo(
                 URI.create("https://example.test/team/orion.git"));
         assertThat(location.refName()).isEqualTo("refs/heads/configuration");
+        assertThat(NativeGitRepositoryFactory.sourceRefName(config)).isEqualTo(location.refName());
         assertThat(location.credentialReference()).isEqualTo("env:ORION_GIT_CREDENTIAL");
         assertThat(location.credentialKind()).isEqualTo(GitCredentialKind.TOKEN);
     }

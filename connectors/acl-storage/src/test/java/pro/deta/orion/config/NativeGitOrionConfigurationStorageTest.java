@@ -8,9 +8,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.util.Result;
@@ -29,12 +27,13 @@ class NativeGitOrionConfigurationStorageTest {
     private static final String ACL_PATH = "config/orion.xml";
 
     @Test
-    void resolverRequiresConfigurationRepositoryBootstrap() {
-        assertThatThrownBy(() -> new OrionConfigurationStorageResolver(
-                new BootstrapRepositorySources(List.of()),
-                pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider.inMemory()).resolve())
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Bootstrap source has not been resolved: configuration");
+    void requiresConfigurationRepositoryBootstrap() {
+        assertThatThrownBy(() -> new NativeGitOrionConfigurationStorage(
+                new NativeGitRepositoryFactory(
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory()),
+                new BootstrapConfigurationSourceConfig()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Orion configuration requires a resolved Git repository");
     }
 
     @Test
@@ -49,18 +48,8 @@ class NativeGitOrionConfigurationStorageTest {
             fileAccess.apply();
             return null;
         });
-        ResolvedBootstrapSource source = new ResolvedBootstrapSource(
-                BootstrapRepositorySources.CONFIGURATION,
-                "git+https://sensitive.example/private.git",
-                Optional.of("bootstrap/proxy-alias"),
-                "refs/heads/main",
-                ACL_PATH,
-                Optional.of(repository.refs().get("refs/heads/main")),
-                false);
-
-        OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                new BootstrapRepositorySources(List.of(source)),
-                provider).resolve();
+        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
+                provider, "bootstrap/proxy-alias", "refs/heads/main", ACL_PATH, false);
 
         assertThat(storage).isInstanceOf(NativeGitOrionConfigurationStorage.class);
         assertThat(storage.createIfMissing()).isFalse();
@@ -90,11 +79,10 @@ class NativeGitOrionConfigurationStorageTest {
         configuration.setLocation("local:team%2Frepo");
         configuration.setRef("configuration");
         configuration.setCreateDefaultIfMissing(false);
-        ResolvedBootstrapSource source = provider.resolveProvisional(
-                BootstrapRepositorySources.CONFIGURATION, configuration, false);
-        assertThat(source.repositoryName()).contains("team/repo");
-        OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                new BootstrapRepositorySources(List.of(source)), provider).resolve();
+        provider.resolveProvisional(NativeGitRepositoryFactory.CONFIGURATION_SOURCE, configuration, false);
+        assertThat(provider.bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE))
+                .contains("team/repo");
+        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(provider, configuration);
 
         ConfigurationFile loaded = storage.load().valueOrFailure("selected ACL");
         assertThat(loaded.content()).isEqualTo(bytes("selected ACL"));
@@ -119,7 +107,7 @@ class NativeGitOrionConfigurationStorageTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void createsConfiguredRepositoryAndCommitsInitialAcl(boolean useDefaults, @TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(rootDirectory);
         OrionConfigurationStorage storage = preparedStorage(provider);
 
         assertThat(storage.load()).isInstanceOf(Result.Failure.class);
@@ -147,13 +135,13 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void reusesExistingRepositoryAndConfiguredRefAfterRestart(@TempDir Path rootDirectory) {
         OrionConfigurationStorage first = preparedStorage(
-                new FileNativeGitRepositoryProvider(rootDirectory));
+                NativeGitRepositoryProvider.file(rootDirectory));
         first.save(
                 new ConfigurationFile(bytes("persisted acl"), Optional.empty()),
                 "bootstrap ACL", UserEmail.EMPTY);
 
         OrionConfigurationStorage restarted = preparedStorage(
-                new FileNativeGitRepositoryProvider(rootDirectory));
+                NativeGitRepositoryProvider.file(rootDirectory));
 
         assertThat(restarted.load().valueOrFailure("ACL should survive restart").content())
                 .isEqualTo(bytes("persisted acl"));
@@ -198,7 +186,7 @@ class NativeGitOrionConfigurationStorageTest {
 
     @Test
     void reportsOnlyAcceptedUpdatesToConfiguredRef(@TempDir Path rootDirectory) throws Exception {
-        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(rootDirectory);
         OrionConfigurationStorage storage = preparedStorage(provider);
         AtomicInteger changes = new AtomicInteger();
         OrionConfigurationStorage.ChangeSubscription subscription = storage.onChange(
@@ -226,7 +214,7 @@ class NativeGitOrionConfigurationStorageTest {
 
     @Test
     void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
-        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(rootDirectory);
         OrionConfigurationStorage storage = preparedStorage(provider);
         storage.save(
                 new ConfigurationFile(bytes("version one"), Optional.empty()),
@@ -297,7 +285,7 @@ class NativeGitOrionConfigurationStorageTest {
     @Test
     void savesConfiguredRefThroughProviderOperation(@TempDir Path rootDirectory) {
         RecordingProvider provider = new RecordingProvider(
-                new FileNativeGitRepositoryProvider(rootDirectory));
+                NativeGitRepositoryProvider.file(rootDirectory));
         OrionConfigurationStorage storage = preparedStorage(provider);
 
         storage.save(
@@ -327,16 +315,8 @@ class NativeGitOrionConfigurationStorageTest {
 
     private static OrionConfigurationStorage resolvedStorage(
             NativeGitRepositoryProvider provider, String path) {
-        ResolvedBootstrapSource source = new ResolvedBootstrapSource(
-                BootstrapRepositorySources.CONFIGURATION,
-                "local:internal/configuration",
-                Optional.of("internal/configuration"),
-                "refs/heads/configuration",
-                path,
-                Optional.empty(),
-                true);
-        return new OrionConfigurationStorageResolver(new BootstrapRepositorySources(List.of(source)), provider)
-                .resolve();
+        return new NativeGitOrionConfigurationStorage(provider, "internal/configuration",
+                "refs/heads/configuration", path, true);
     }
 
     private static byte[] bytes(String value) {

@@ -27,7 +27,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
@@ -181,8 +181,9 @@ class BootstrapProxyEndpointIT {
                                 return null;
                             });
                         }
-                        String cache = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                                .repositoryName().orElseThrow();
+                        String cache = bootstrap.repositoryFactory()
+                                .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
+                                        .orElseThrow();
                         char[] rootPassword = PASSWORD.toCharArray();
                         try (var writer = client(target, bootstrap, transport, port,
                                      "writer", writerKey, PASSWORD.toCharArray());

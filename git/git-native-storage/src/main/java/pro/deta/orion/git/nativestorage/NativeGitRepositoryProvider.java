@@ -21,7 +21,7 @@ import java.util.function.Supplier;
 /** Owns every repository returned by its factory and closes them together. */
 public class NativeGitRepositoryProvider implements AutoCloseable {
     private final NativeGitRepositoryBackend factory;
-    private final ConcurrentMap<String, RepositoryEntry> repositories = new ConcurrentHashMap<>();
+    private final ConcurrentMap<RepositoryKey, RepositoryEntry> repositories = new ConcurrentHashMap<>();
     private final ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock();
     private volatile boolean closed;
 
@@ -44,9 +44,11 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     public List<String> repositoryNames() {
         return operation(() -> {
             TreeSet<String> names = new TreeSet<>(factory.repositoryNames());
-            for (Map.Entry<String, RepositoryEntry> entry : repositories.entrySet()) {
-                if (entry.getValue().view != null && factory.visible(RepositoryName.parse(entry.getKey()))) {
-                    names.add(entry.getKey());
+            for (Map.Entry<RepositoryKey, RepositoryEntry> entry : repositories.entrySet()) {
+                RepositoryName name = RepositoryName.parse(entry.getKey().name());
+                if (entry.getValue().view != null && factory.visible(name)
+                        && entry.getKey().owner() == factory.owner(name)) {
+                    names.add(name.value());
                 }
             }
             return List.copyOf(names);
@@ -69,16 +71,22 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     public Result<NativeGitRepository> find(String repositoryName) {
         return operation(() -> {
             RepositoryName name = RepositoryName.parse(repositoryName);
-            RepositoryEntry entry = entry(name);
+            RepositoryEntry entry;
+            try {
+                entry = entry(name);
+            } catch (RuntimeException failure) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL,
+                        "Cannot resolve repository factory", failure);
+            }
             try {
                 synchronized (entry) {
                     if (entry.view != null && factory.retainedAvailable(name)) {
-                        return factory.reuse(name, entry.view);
+                        return entry.key.owner().reuse(name, entry.view);
                     }
-                    return retain(entry, factory.open(name));
+                    return retain(entry, entry.key.owner().open(name));
                 }
             } finally {
-                release(name, entry);
+                release(entry);
             }
         });
     }
@@ -86,17 +94,23 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     public Result<NativeGitRepository> create(String repositoryName) {
         return operation(() -> {
             RepositoryName name = RepositoryName.parse(repositoryName);
-            RepositoryEntry entry = entry(name);
+            RepositoryEntry entry;
+            try {
+                entry = entry(name);
+            } catch (RuntimeException failure) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL,
+                        "Cannot resolve repository factory", failure);
+            }
             try {
                 synchronized (entry) {
                     if (entry.view != null && factory.retainedAvailable(name)) {
                         return new Result.Failure<>(Result.FailureCode.FILE_ALREADY_EXISTS,
                                 "Native repository already exists: " + name.value());
                     }
-                    return retain(entry, factory.create(name));
+                    return retain(entry, entry.key.owner().create(name));
                 }
             } finally {
-                release(name, entry);
+                release(entry);
             }
         });
     }
@@ -189,7 +203,7 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
                     return repository;
                 }
             } finally {
-                release(name, entry);
+                release(entry);
             }
         });
     }
@@ -210,7 +224,7 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
                     entry.view = Objects.requireNonNull(view, "repository view");
                 }
             } finally {
-                release(name, entry);
+                release(entry);
             }
             return null;
         });
@@ -225,22 +239,23 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
                     entry.view = null;
                 }
             } finally {
-                release(name, entry);
+                release(entry);
             }
             return null;
         });
     }
 
     private RepositoryEntry entry(RepositoryName name) {
-        return repositories.compute(name.value(), (ignored, current) -> {
-            RepositoryEntry entry = current == null ? new RepositoryEntry() : current;
+        RepositoryKey key = new RepositoryKey(name.value(), factory.owner(name));
+        return repositories.compute(key, (ignored, current) -> {
+            RepositoryEntry entry = current == null ? new RepositoryEntry(key) : current;
             entry.users++;
             return entry;
         });
     }
 
-    private void release(RepositoryName name, RepositoryEntry entry) {
-        repositories.computeIfPresent(name.value(), (ignored, current) -> {
+    private void release(RepositoryEntry entry) {
+        repositories.computeIfPresent(entry.key, (ignored, current) -> {
             if (current != entry) throw new IllegalStateException("Repository entry changed during an operation");
             current.users--;
             return current.users == 0 && current.backing == null && current.view == null ? null : current;
@@ -248,7 +263,7 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     }
 
     private RepositoryEntry entryIfPresent(RepositoryName name) {
-        return repositories.get(name.value());
+        return repositories.get(new RepositoryKey(name.value(), factory.owner(name)));
     }
 
     private <T> T operation(Supplier<T> action) {
@@ -262,8 +277,15 @@ public class NativeGitRepositoryProvider implements AutoCloseable {
     }
 
     private static final class RepositoryEntry {
+        private final RepositoryKey key;
         private int users;
         private volatile NativeGitRepository backing;
         private volatile NativeGitRepository view;
+
+        private RepositoryEntry(RepositoryKey key) {
+            this.key = key;
+        }
     }
+
+    private record RepositoryKey(String name, NativeGitRepositoryBackend owner) {}
 }

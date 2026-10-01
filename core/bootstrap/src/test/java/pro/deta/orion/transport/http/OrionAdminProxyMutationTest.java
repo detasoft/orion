@@ -31,7 +31,6 @@ import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -435,21 +434,16 @@ class OrionAdminProxyMutationTest {
         git(work, "add", "file");
         git(work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "seed");
         git(root, "clone", "--bare", work.toString(), bare.toString());
-        try (var f = new Fixture()) {
+        var source = new pro.deta.orion.bootstrap.config.BootstrapSourceConfig();
+        source.setLocation("git+" + bare.toUri());
+        source.setRef("main");
+        source.setPath("file");
+        try (var f = new Fixture(source)) {
             var create = f.command("create", "archive", bare.toUri().toString(), null);
             create.put("credentialKind", "NONE");
             Reply created = f.post(create);
             assertThat(created.status).isEqualTo(201);
             assertThat(created.json.at("/alias/status").asText()).isEqualTo("success");
-            var source = new pro.deta.orion.bootstrap.config.BootstrapSourceConfig();
-            source.setLocation("git+" + bare.toUri());
-            source.setRef("main");
-            source.setPath("file");
-            source.setAuth(Map.of());
-            var bootstrap = new NativeGitRepositoryFactory(
-                    pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
-            var resolved = bootstrap.resolveProvisional("material", source, false);
-            f.routes(new BootstrapRepositorySources(List.of(resolved)));
             var changeSource = f.command("update", "archive", null, null);
             changeSource.put("ref", "other");
             Reply protectedSource = f.post(changeSource);
@@ -559,6 +553,10 @@ class OrionAdminProxyMutationTest {
         int bodyReads;
 
         Fixture() throws Exception {
+            this(null);
+        }
+
+        Fixture(pro.deta.orion.bootstrap.config.BootstrapSourceConfig bootstrapSource) throws Exception {
             var signing = new KeyMaterialDescriptor(new KeyMaterialAlias("signing"),
                     KeyMaterialPurpose.SERVER_SIGNING, KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1),
                     KeyMaterialScope.cluster("test"));
@@ -580,10 +578,13 @@ class OrionAdminProxyMutationTest {
                 java.util.Optional.empty());
             acl.onStart();
             secrets = new ConfigurationSecrets(() -> desired.current().document(), material.configurationCipher());
+            if (bootstrapSource != null) {
+                provider.resolveProvisional(NativeGitRepositoryFactory.MATERIAL_SOURCE, bootstrapSource, false);
+            }
             provider.connectionFailures(OrionRuntimeModule.connectionFailures(decisions),
                     OrionRuntimeModule.proxyHostKeyDecisions(desired, editor, audit::add));
-            provider.activate(() -> desired.current().document(), secrets);
-            routes(new BootstrapRepositorySources(List.of()));
+            provider.activate(() -> desired.current().document(), secrets, bootstrapSource != null);
+            routes();
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/repository.git", exchange -> {
                 authorization.add(exchange.getRequestHeaders().getFirst("Authorization"));
@@ -593,8 +594,8 @@ class OrionAdminProxyMutationTest {
             server.start();
         }
 
-        void routes(BootstrapRepositorySources sources) {
-            var route = new OrionAdminProxiesRoute(desired, provider, editor, secrets, sources, audit::add, mapper);
+        void routes() {
+            var route = new OrionAdminProxiesRoute(desired, provider, editor, secrets, audit::add, mapper);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(
                     Set.of(route, new OrionAdminDecisionsRoute(decisions, mapper))),
                     new OrionHttpResponseWriter(mapper));

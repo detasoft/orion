@@ -375,12 +375,12 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 new AtomicInteger(),
                 new AtomicInteger());
 
-        ResolvedBootstrapSource source = provider.resolveProvisional(
+        Optional<String> repositoryName = provider.resolveProvisional(
                 "configuration",
                 localSource("team%2Frepo"),
                 true);
 
-        assertThat(source.repositoryName()).contains("team/repo");
+        assertThat(repositoryName).contains("team/repo");
         assertThat(provider.provider().exists("team/repo")).isTrue();
     }
 
@@ -785,7 +785,9 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThatThrownBy(() -> provider.resolveProvisional("configuration", replacement, false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source ref is unavailable: configuration");
-        assertThat(provider.resolveProvisional("configuration", source, true).revision()).isEmpty();
+        assertThat(provider.resolveProvisional("configuration", source, true)).contains("bootstrap");
+        assertThat(provider.provider().openForRead("bootstrap").valueOrFailure("bootstrap").refs()
+                .get("refs/heads/main")).isNull();
     }
 
     @Test
@@ -831,7 +833,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
             fileAccess.apply();
             return null;
         });
-        ResolvedBootstrapSource resolved = provider.resolveProvisional("configuration", configuration, false);
+        Optional<String> resolved = provider.resolveProvisional("configuration", configuration, false);
         NativeGitRepository retained = provider.provider().openForRead(name).valueOrFailure("proxy handle");
 
         assertThatThrownBy(() -> provider.resolveProvisional("material", remoteSource("material.p12"), false))
@@ -840,13 +842,13 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
         BootstrapSourceConfig material = remoteSource("material.p12");
         material.setLocation("git+file:///material.git");
-        assertThat(provider.resolveProvisional("material", material, true).repositoryName())
+        assertThat(provider.resolveProvisional("material", material, true))
                 .hasValue(BootstrapGitLocation.parse(material).proxyName());
         assertThatThrownBy(() -> provider.resolveProvisional(
                 "configuration", remoteSource("missing.xml"), false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap source path is unavailable: configuration");
-        assertThat(Optional.ofNullable(retained.refs().get("refs/heads/main"))).isEqualTo(resolved.revision());
+        assertThat(retained.refs().get("refs/heads/main")).isNotNull();
         assertThat(provider.resolveProvisional("configuration", configuration, false)).isEqualTo(resolved);
     }
 

@@ -22,16 +22,13 @@ import pro.deta.orion.schema.orion.v2.RepositoryId;
 import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationStorage;
-import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
@@ -330,7 +327,7 @@ class OrionRuntimeModuleTest {
                 "versioned acl", UserEmail.EMPTY);
 
         assertInstanceOf(NativeGitOrionConfigurationStorage.class, storage);
-        assertEquals(List.of("internal/settings"), provider.repositoryNames());
+        assertEquals(List.of("internal/settings"), provider.provider().repositoryNames());
         assertEquals(
                 "versioned acl",
                 new String(storage.load().valueOrFailure("ACL should load").content(),
@@ -349,19 +346,18 @@ class OrionRuntimeModuleTest {
     }
 
     private OrionConfigurationStorage runtimeOrionConfigurationStorage(OrionConfiguration configuration) {
-        return resolvedStorage(configuration, new InMemoryNativeGitRepositoryProvider());
+        return resolvedStorage(configuration, new NativeGitRepositoryFactory(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory()));
     }
 
     private static OrionConfigurationStorage resolvedStorage(
             OrionConfiguration configuration,
             NativeGitRepositoryFactory provider) {
-        ResolvedBootstrapSource resolved = provider.resolveProvisional(
-                BootstrapRepositorySources.CONFIGURATION,
+        provider.resolveProvisional(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
-        return new OrionConfigurationStorageResolver(
-                new BootstrapRepositorySources(List.of(resolved)),
-                provider.provider()).resolve();
+        return new NativeGitOrionConfigurationStorage(provider, configuration.getBootstrap().getAccessControl());
     }
 
     private byte[] aclBytes(String userId) throws Exception {

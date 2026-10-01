@@ -4,9 +4,7 @@ import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
@@ -46,8 +44,8 @@ final class TestRuntimeBootstrap {
                 new ConfiguredNativeGitRepositoryFactory(backend, transport);
         NativeGitRepositoryFactory provider =
                 NativeGitRepositoryFactory.bootstrap(configured, Map.copyOf(System.getenv()));
-        ResolvedBootstrapSource source = provider.resolveProvisional(
-                BootstrapRepositorySources.CONFIGURATION,
+        provider.resolveProvisional(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                 configuration.getBootstrap().getAccessControl(),
                 true);
         return DaggerOrionComponent.builder()
@@ -63,7 +61,6 @@ final class TestRuntimeBootstrap {
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)
-                .s3Transport(transport)
-                .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(source)));
+                .s3Transport(transport);
     }
 }

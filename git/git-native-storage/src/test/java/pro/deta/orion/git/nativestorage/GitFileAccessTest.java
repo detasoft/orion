@@ -32,7 +32,7 @@ class GitFileAccessTest {
 
     @Test
     void initializesCurrentSymbolicHeadButNotDetachedHead() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.index().withAccess(index -> {
                 index.updateHead(new Head.Symbolic(new RefId("refs/heads/trunk")));

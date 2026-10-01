@@ -39,7 +39,7 @@ class OrionAdminProxiesRouteTest {
             pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
     private final NativeGitRepositoryProvider backend = provider.provider();
     private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(
-            desired, provider, null, null, null, null, mapper);
+            desired, provider, null, null, null, mapper);
     private final OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
             new OrionHttpRouteRegistry(Set.of(route)), new OrionHttpResponseWriter(mapper));
 
@@ -82,7 +82,7 @@ class OrionAdminProxiesRouteTest {
 
         JsonNode body = mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString());
         assertThat(body.get("aliases").get(0).get("alias").asText()).isEqualTo("archive");
-        assertThat(provider.repositoryNames()).containsExactly("team/repository");
+        assertThat(backend.repositoryNames()).containsExactly("team/repository");
     }
 
     @Test

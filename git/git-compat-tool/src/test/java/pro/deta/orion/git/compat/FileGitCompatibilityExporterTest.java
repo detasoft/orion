@@ -33,7 +33,7 @@ class FileGitCompatibilityExporterTest {
     void exportsDetachedHeadWithoutAListedBranch() throws Exception {
         Path store = root.resolve("store");
         ObjectId commit;
-        try (NativeGitRepository source = new FileNativeGitRepositoryProvider(store)
+        try (NativeGitRepository source = NativeGitRepositoryProvider.file(store)
                 .create("demo").valueOrFailure("source repository")) {
             ObjectId tree = source.writeObject(GitObjectType.TREE, new byte[0]);
             commit = source.writeObject(GitObjectType.COMMIT, commit(tree, null, "detached"));

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.s3;
 
+import java.nio.file.Path;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -38,7 +40,7 @@ class ConfiguredS3StorageTest {
     @Test
     void retainsTheIndexOwnerThroughCredentialRotationAndSeparatesChangedLocations() throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
-             S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
             String endpoint = "http://127.0.0.1:" + wire.server.getAddress().getPort();
             fixture.connection(true, "archive", endpoint, "us-east-1", "old-id", "old-key", null);
             fixture.bind("repo", true, "archive", "s3://bucket/prefix");
@@ -97,7 +99,7 @@ class ConfiguredS3StorageTest {
     void removingABindingStopsRoutingAndReaddingItReusesTheOwner() throws Exception {
         for (boolean listing : List.of(false, true)) {
             try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
-                 S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+                 S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
                 String endpoint = "http://127.0.0.1:" + wire.server.getAddress().getPort();
                 fixture.connection(true, "archive", endpoint, "us-east-1", "id", "key", null);
                 fixture.bind("repo", true, "archive", "s3://bucket/prefix");

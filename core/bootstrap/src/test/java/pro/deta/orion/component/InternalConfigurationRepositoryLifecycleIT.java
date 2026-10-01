@@ -23,9 +23,7 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
@@ -927,8 +925,8 @@ class InternalConfigurationRepositoryLifecycleIT {
         pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
                 new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(backend, transport);
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(configured);
-        ResolvedBootstrapSource configurationSource = provider.resolveProvisional(
-                BootstrapRepositorySources.CONFIGURATION,
+        provider.resolveProvisional(
+                NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return DaggerOrionComponent.builder()
@@ -945,7 +943,6 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .nativeGitRepositoryProvider(provider)
                 .configuredRepositoryFactory(configured)
                 .s3Transport(transport)
-                .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)))
                 .build();
     }
 

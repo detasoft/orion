@@ -90,7 +90,6 @@ public class App {
                         .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
                         .configuredRepositoryFactory(bootstrap.storageFactory())
                         .s3Transport(bootstrap.s3Transport())
-                        .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);
             }

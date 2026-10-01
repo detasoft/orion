@@ -23,6 +23,10 @@ public interface NativeGitRepositoryBackend extends AutoCloseable {
 
     Result<NativeGitRepository> create(RepositoryName name);
 
+    default NativeGitRepositoryBackend owner(RepositoryName name) {
+        return this;
+    }
+
     default Result<NativeGitRepository> reuse(RepositoryName name, NativeGitRepository repository) {
         return new Result.Success<>(repository);
     }

@@ -31,14 +31,13 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.BootstrapChange;
 import pro.deta.orion.git.proxy.ProxySshConnection;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionConfigurationStorage;
-import pro.deta.orion.config.OrionConfigurationStorageResolver;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -71,7 +70,7 @@ public class OrionRuntimeModule {
     @Provides
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(OrionConfigurationStorage storage,
-            ConfiguredNativeGitRepositoryFactory configured, BootstrapRepositorySources sources,
+            ConfiguredNativeGitRepositoryFactory configured,
             NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
             ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
@@ -81,7 +80,8 @@ public class OrionRuntimeModule {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
                     storage, editor, provider, cipher, desiredState.current());
-            configured.activate(() -> desiredState.current().document(), secrets, sources::referencesRepository);
+            configured.activate(() -> desiredState.current().document(), secrets,
+                    provider::referencesBootstrapRepository);
             provider.activate(() -> desiredState.current().document(), secrets, adopted.isEmpty());
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             for (BootstrapChange change : provider.bootstrapChanges(snapshot.document())) {
@@ -262,8 +262,9 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static OrionConfigurationStorage configurationStorage(
-            OrionConfigurationStorageResolver configurationStorageResolver) {
-        return configurationStorageResolver.resolve();
+    static OrionConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
+            ConfigurationProvider configurationProvider) {
+        return new NativeGitOrionConfigurationStorage(repositoryFactory,
+                configurationProvider.readConfiguration().getBootstrap().getAccessControl());
     }
 }

@@ -42,6 +42,8 @@ import java.util.function.Supplier;
 
 /** Selects native, S3, and proxy repositories; its provider owns every opened handle. */
 public final class NativeGitRepositoryFactory implements NativeGitRepositoryBackend {
+    public static final String CONFIGURATION_SOURCE = "configuration";
+    public static final String MATERIAL_SOURCE = "material";
     private boolean closed;
 
     @Override
@@ -122,7 +124,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         this.hostKeyDecisions = Objects.requireNonNull(hostKeyDecisions, "host key decisions");
     }
 
-    public synchronized ResolvedBootstrapSource resolveProvisional(
+    public synchronized Optional<String> resolveProvisional(
             String sourceId,
             BootstrapSourceConfig source,
             boolean allowMissing) {
@@ -133,7 +135,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         Objects.requireNonNull(source, "source");
         String location = Objects.requireNonNull(source.getLocation(), "location");
         String path = repositoryPath(source.getPath());
-        if (BootstrapRepositorySources.CONFIGURATION.equals(id)) {
+        if (CONFIGURATION_SOURCE.equals(id)) {
             ResourceLocation parsed = ResourceLocation.parse(location, "ACL repository");
             if (parsed.scheme() instanceof ResourceScheme.File
                     || parsed.scheme() instanceof ResourceScheme.Empty) {
@@ -158,14 +160,8 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
             }
         }
         if (!BootstrapGitLocation.isRemote(location) && !location.startsWith("local:")) {
-            return new ResolvedBootstrapSource(
-                    id,
-                    location,
-                    Optional.empty(),
-                    refName(source.selectedRef()),
-                    path,
-                    Optional.empty(),
-                    allowMissing);
+            refName(source.selectedRef());
+            return Optional.empty();
         }
 
         boolean remote = BootstrapGitLocation.isRemote(location);
@@ -180,17 +176,17 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
             String revision = repository.refs().get(refName);
             if (revision == null) {
                 if (allowMissing) {
-                    return resolved(id, repositoryName, refName, path, Optional.empty(), allowMissing);
+                    return Optional.of(repositoryName);
                 }
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
             try {
                 repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
                         (type, size, base, input) -> Boolean.TRUE);
-                return resolved(id, repositoryName, refName, path, Optional.of(revision), allowMissing);
+                return Optional.of(repositoryName);
             } catch (GitRepositoryFileNotFoundException error) {
                 if (allowMissing) {
-                    return resolved(id, repositoryName, refName, path, Optional.empty(), allowMissing);
+                    return Optional.of(repositoryName);
                 }
                 throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
             } catch (IOException | GitOperationException error) {
@@ -216,7 +212,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         String id = requireSourceId(sourceId);
         BootstrapGitLocation location = BootstrapGitLocation.parse(source);
         ProxyNativeGitRepository bootstrap = provisionalBindings.get("bootstrap");
-        String repositoryName = BootstrapRepositorySources.CONFIGURATION.equals(id)
+        String repositoryName = CONFIGURATION_SOURCE.equals(id)
                 || bootstrap != null && bootstrap.location().proxyName().equals(location.proxyName())
                 ? "bootstrap" : repositoryName(location.proxyName());
         String previousSource = provisionalSources.get(id);
@@ -320,11 +316,26 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         return Result.of(runtime.syncObservation());
     }
 
-    public boolean isBootstrapSource(GitProxyBinding binding, BootstrapRepositorySources sources,
+    public boolean isBootstrapSource(GitProxyBinding binding,
             OrionDocument.SystemConfiguration system) {
         ProxyNativeGitRepository runtime = bootstrapOverrides.get(binding.alias());
-        return sources.referencesRepository(runtime == null
+        return referencesBootstrapRepository(runtime == null
                 ? BootstrapGitLocation.persistent(binding, system).proxyName() : runtime.repositoryName());
+    }
+
+    public Optional<String> bootstrapRepositoryName(String sourceId) {
+        return Optional.ofNullable(provisionalSources.get(requireSourceId(sourceId)));
+    }
+
+    public boolean referencesBootstrapRepository(String repositoryName) {
+        return provisionalSources.containsValue(repositoryName);
+    }
+
+    public static String sourceRefName(BootstrapSourceConfig source) {
+        String location = Objects.requireNonNull(source.getLocation(), "location");
+        return BootstrapGitLocation.isRemote(location)
+                ? BootstrapGitLocation.parse(source).refName()
+                : refName(source.selectedRef());
     }
 
     public synchronized void activate(Supplier<OrionDocument> current, ConfigurationSecrets secrets) {
@@ -587,8 +598,8 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
 
     private static String bootstrapSection(String sourceId) {
         return switch (sourceId) {
-            case BootstrapRepositorySources.CONFIGURATION -> "accessControl";
-            case BootstrapRepositorySources.MATERIAL -> "keyMaterial";
+            case CONFIGURATION_SOURCE -> "accessControl";
+            case MATERIAL_SOURCE -> "keyMaterial";
             default -> null;
         };
     }
@@ -604,23 +615,6 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         }
         provider.openBacking(repositoryName, backend);
         return repositoryName;
-    }
-
-    private static ResolvedBootstrapSource resolved(
-            String sourceId,
-            String repositoryName,
-            String refName,
-            String path,
-            Optional<String> revision,
-            boolean createIfMissing) {
-        return new ResolvedBootstrapSource(
-                sourceId,
-                "local:" + repositoryName,
-                Optional.of(repositoryName),
-                refName,
-                path,
-                revision,
-                createIfMissing);
     }
 
     @Override
@@ -644,6 +638,11 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
     public boolean retainedAvailable(RepositoryName repositoryName) {
         String name = repositoryName.value();
         return !isBootstrapCache(name) && !isProxyEndpoint(name) || binding(name) != null;
+    }
+
+    @Override
+    public NativeGitRepositoryBackend owner(RepositoryName name) {
+        return isBootstrapCache(name.value()) || isProxyEndpoint(name.value()) ? this : backend.owner(name);
     }
 
     @Override
@@ -683,7 +682,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
     @Override
     public Result<NativeGitRepository> reuse(RepositoryName name, NativeGitRepository repository) {
         if (repository instanceof ProxyNativeGitRepository) return openRepository(name.value());
-        return new Result.Success<>(repository);
+        return backend.reuse(name, repository);
     }
 
     private Result<NativeGitRepository> openRepository(String repositoryName) {
@@ -728,7 +727,7 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
         return RepositoryName.parse(value).value();
     }
 
-    private static String repositoryPath(String value) {
+    public static String repositoryPath(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("Bootstrap source path must not be blank");
         }

@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,8 +10,8 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
+import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -100,7 +101,7 @@ class S3BootstrapProxyColdStartIT {
                     access.apply();
                     return null;
                 });
-                try (S3NativeGitRepositoryProvider empty = new S3NativeGitRepositoryProvider(
+                try (NativeGitRepositoryProvider empty = S3NativeGitRepositoryFactory.repositories(
                         configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                         configuration.getStorage().getAuth(), environment)) {
                     assertThat(empty.repositoryNames()).isEmpty();
@@ -110,10 +111,10 @@ class S3BootstrapProxyColdStartIT {
                     assertThat(bootstrap.initialConfiguration().orElseThrow().content()).isEqualTo(xml);
                     assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                     assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
-                    cacheName = bootstrap.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                            .repositoryName().orElseThrow();
-                    assertThat(bootstrap.repositorySources().required(BootstrapRepositorySources.MATERIAL)
-                            .repositoryName()).contains(cacheName);
+                    cacheName = bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
+                    assertThat(bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)).contains(cacheName);
                     OrionComponent component = runtimeComponent(configuration, bootstrap);
                     OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                     try {
@@ -147,7 +148,7 @@ class S3BootstrapProxyColdStartIT {
                     }
                 }
             }
-            try (S3NativeGitRepositoryProvider reopened = new S3NativeGitRepositoryProvider(
+            try (NativeGitRepositoryProvider reopened = S3NativeGitRepositoryFactory.repositories(
                     configuration.getStorage().getLocation(), configuration.getStorage().getEndpoint(),
                     configuration.getStorage().getAuth(), environment)) {
                 NativeGitRepository persisted = reopened.find(cacheName).valueOrFailure("persisted S3 proxy cache");

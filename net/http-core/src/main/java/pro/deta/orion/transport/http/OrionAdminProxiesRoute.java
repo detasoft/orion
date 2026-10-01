@@ -12,7 +12,6 @@ import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
@@ -42,20 +41,18 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final NativeGitRepositoryFactory provider;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
-    private final BootstrapRepositorySources sources;
     private final CommandAuditSink audit;
     private final ObjectMapper mapper;
 
     @Inject
     public OrionAdminProxiesRoute(OrionDesiredState desiredState, NativeGitRepositoryFactory provider,
-            OrionConfigurationEditor editor, ConfigurationSecrets secrets, BootstrapRepositorySources sources,
+            OrionConfigurationEditor editor, ConfigurationSecrets secrets,
             CommandAuditSink audit, ObjectMapper mapper) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.desiredState = desiredState;
         this.provider = provider;
         this.editor = editor;
         this.secrets = secrets;
-        this.sources = sources;
         this.audit = audit;
         this.mapper = mapper;
     }
@@ -235,7 +232,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
             transport = new GitProxyBinding.Direct(upstream, kind, secret, username);
         }
         GitProxyBinding replacement = new GitProxyBinding(alias, transport, ref);
-        if (existing != null && provider.isBootstrapSource(existing, sources, document.system())
+        if (existing != null && provider.isBootstrapSource(existing, document.system())
                 && (!existing.upstream(document.system()).equals(GitProxyBinding.canonicalUpstream(upstream))
                         || !existing.ref().equals(replacement.ref()))) {
             throw new Rejected("bootstrap-source-fixed");

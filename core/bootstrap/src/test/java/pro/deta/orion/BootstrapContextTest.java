@@ -20,21 +20,18 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.config.OrionConfigurationStorageResolver;
+import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
+import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -183,23 +180,22 @@ class BootstrapContextTest {
                 Map.of(
                         "orion.xml", bytes("configuration"),
                         "material.p12", materialBytes(configuration)));
+        String initialRevision = backend.find("orion").valueOrFailure("configuration repository")
+                .refs().get("refs/heads/main");
 
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            String configurationRepository = context.repositorySources()
-                    .required(BootstrapRepositorySources.CONFIGURATION)
-                    .repositoryName()
+            String configurationRepository = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
                     .orElseThrow();
-            String materialRepository = context.repositorySources()
-                    .required(BootstrapRepositorySources.MATERIAL)
-                    .repositoryName()
+            String materialRepository = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)
                     .orElseThrow();
 
             assertThat(configurationRepository).isEqualTo("orion");
             assertThat(materialRepository).isEqualTo(configurationRepository);
             assertThat(context.repositoryProvider().repositoryNames()).containsExactly("orion");
             assertThat(context.initialConfiguration().orElseThrow().revision())
-                    .contains(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                            .revision().orElseThrow());
+                    .contains(initialRevision);
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
             assertThat(context.acmeKeyMaterial()).isNotNull();
             assertThat(context.tlsKeyMaterial()).isNotNull();
@@ -293,7 +289,7 @@ class BootstrapContextTest {
             }
         };
 
-        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, observedBackend)) {
+        try (BootstrapContext context = openContext(configuration, ENVIRONMENT, observedBackend)) {
             ConfigurationFile pinned = context.initialConfiguration().orElseThrow();
             assertThat(pinned.revision()).contains(firstCommit);
             assertThat(pinned.content()).isEqualTo(bytes("first configuration"));
@@ -452,13 +448,11 @@ class BootstrapContextTest {
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
         try {
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-                String configurationRepository = context.repositorySources()
-                        .required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName()
+                String configurationRepository = context.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
                         .orElseThrow();
-                String materialRepository = context.repositorySources()
-                        .required(BootstrapRepositorySources.MATERIAL)
-                        .repositoryName()
+                String materialRepository = context.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)
                         .orElseThrow();
 
                 assertThat(materialRepository).isEqualTo(configurationRepository);
@@ -486,13 +480,11 @@ class BootstrapContextTest {
         NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
         try {
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-                String configurationRepository = context.repositorySources()
-                        .required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName()
+                String configurationRepository = context.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
                         .orElseThrow();
-                String materialRepository = context.repositorySources()
-                        .required(BootstrapRepositorySources.MATERIAL)
-                        .repositoryName()
+                String materialRepository = context.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE)
                         .orElseThrow();
 
                 assertThat(materialRepository).isNotEqualTo(configurationRepository);
@@ -741,10 +733,10 @@ class BootstrapContextTest {
                 Map.of("material.p12", materialBytes(configuration)))) {
             String firstRevision;
             try (BootstrapContext context = openContext(configuration, ENVIRONMENT, borrow(backend))) {
-                assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName()).isPresent();
-                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                        context.repositorySources(), context.repositoryProvider()).resolve();
+                assertThat(context.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)).isPresent();
+                OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 storage.save(new ConfigurationFile(xml(), Optional.empty()),
                         "initial ACL", UserEmail.EMPTY);
                 ConfigurationFile first = storage.load().valueOrFailure("initial ACL");
@@ -762,9 +754,9 @@ class BootstrapContextTest {
             try (Git git = Git.open(directory.toFile())) {
                 assertThat(git.log().add(git.getRepository().resolve("refs/heads/main")).call()).hasSize(2);
             }
-            try (BootstrapContext reopened = BootstrapContext.open(configuration, ENVIRONMENT, borrow(backend))) {
-                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                        reopened.repositorySources(), reopened.repositoryProvider()).resolve();
+            try (BootstrapContext reopened = openContext(configuration, ENVIRONMENT, borrow(backend))) {
+                OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(reopened.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 assertThat(storage.load().valueOrFailure("reopened ACL").revision().orElseThrow())
                         .isNotEqualTo(firstRevision);
             }
@@ -809,10 +801,12 @@ class BootstrapContextTest {
                 Map.of("material.p12", materialBytes(configuration)));
 
         try (BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
+            var source = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE);
 
-            assertThat(source.repositoryName()).isPresent();
-            assertThat(source.path()).isEqualTo("orion.xml");
+            assertThat(source).isPresent();
+            assertThat(NativeGitRepositoryFactory.repositoryPath(
+                    configuration.getBootstrap().getAccessControl().getPath())).isEqualTo("orion.xml");
         }
     }
 
@@ -933,16 +927,18 @@ class BootstrapContextTest {
         try (var ignored = upstream.git();
              BootstrapContext context = openContext(configuration, ENVIRONMENT,
                      NativeGitRepositoryProvider.inMemory())) {
-            var source = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION);
+            var source = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE);
             OrionDocument adopted = adopt(context, storage);
             assertThat(adopted.system().proxies()).isEmpty();
             assertThat(adopted.system().secrets()).isEmpty();
             assertThat(adopt(context, storage)).isEqualTo(adopted);
             assertThat(storage.saves).isZero();
-            assertThat(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION))
-                    .isSameAs(source);
+            assertThat(context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE))
+                    .isEqualTo(source);
             assertThat(context.repositoryProvider().repositoryNames()).isEmpty();
-            assertThat(context.repositoryProvider().isPublicRepositoryName(source.repositoryName().orElseThrow()))
+            assertThat(context.repositoryProvider().isPublicRepositoryName(source.orElseThrow()))
                     .isFalse();
             assertThat(storage.content).isEqualTo(xml());
         }
@@ -958,24 +954,24 @@ class BootstrapContextTest {
         try (var ignored = upstream.git()) {
             OrionDocument adopted;
             Optional<String> adoptedRevision;
-            try (BootstrapContext first = BootstrapContext.open(configuration, ENVIRONMENT,
-                    new InMemoryNativeGitRepositoryProvider())) {
-                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                        first.repositorySources(), first.repositoryProvider()).resolve();
+            try (BootstrapContext first = openContext(configuration, ENVIRONMENT,
+                    NativeGitRepositoryProvider.inMemory())) {
+                OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(first.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 Optional<String> initialRevision = storage.load().valueOrFailure("configuration").revision();
                 adopted = adopt(first, storage);
                 adoptedRevision = storage.load().valueOrFailure("configuration").revision();
                 assertThat(adopted.system().proxies()).isEmpty();
                 assertThat(adoptedRevision).isEqualTo(initialRevision);
             }
-            try (BootstrapContext restarted = BootstrapContext.open(configuration, ENVIRONMENT,
-                    new InMemoryNativeGitRepositoryProvider())) {
-                OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(
-                        restarted.repositorySources(), restarted.repositoryProvider()).resolve();
+            try (BootstrapContext restarted = openContext(configuration, ENVIRONMENT,
+                    NativeGitRepositoryProvider.inMemory())) {
+                OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(restarted.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
                 assertThat(storage.load().valueOrFailure("configuration").revision()).isEqualTo(adoptedRevision);
-                String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                        .repositoryName().orElseThrow();
+                String cache = restarted.repositoryFactory()
+                        .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
                 assertThat(restarted.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
             }
         }
@@ -1022,8 +1018,8 @@ class BootstrapContextTest {
                 assertThat(storage.saves).isZero();
                 assertThat(storage.content).isEqualTo(changedXml);
             }
-            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                    .repositoryName().orElseThrow();
+            String cache = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
             assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
         }
     }
@@ -1121,8 +1117,8 @@ class BootstrapContextTest {
                 storage.mode = AdoptionStorage.Mode.NORMAL;
                 assertThat(adopt(context, storage).system().proxies()).hasSize(1);
             }
-            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                    .repositoryName().orElseThrow();
+            String cache = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
             assertThat(context.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
             assertThat(context.repositoryProvider().repositoryNames()).doesNotContain(cache);
         }
@@ -1211,8 +1207,8 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                var storage = new OrionConfigurationStorageResolver(context.repositorySources(),
-                        context.repositoryProvider()).resolve();
+                var storage = new NativeGitOrionConfigurationStorage(context.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 var snapshot = storage.load().valueOrFailure("runtime configuration");
                 assertThat(OrionXml.read(new ByteArrayInputStream(snapshot.content()))
                         .system().proxies()).isEmpty();
@@ -1323,8 +1319,8 @@ class BootstrapContextTest {
         try (Git ignored = upstream.git();
              Git ignoredUnrelated = unrelatedUpstream.git();
              BootstrapContext context = openContext(configuration, ENVIRONMENT, backend)) {
-            String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
-                    .repositoryName().orElseThrow();
+            String cache = context.repositoryFactory()
+                    .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE).orElseThrow();
             NativeGitRepository source = context.repositoryProvider().openForWrite(cache)
                     .valueOrFailure("remote configuration source");
             source.files().withAccess("refs/heads/main", "invalid B after pinning A", GitCommitAuthor.EMPTY,
@@ -1389,8 +1385,8 @@ class BootstrapContextTest {
             try {
                 assertThat(lifecycle.runApplication())
                         .isEqualTo(RUNNING);
-                OrionConfigurationStorage local = new OrionConfigurationStorageResolver(
-                        context.repositorySources(), context.repositoryProvider()).resolve();
+                OrionConfigurationStorage local = new NativeGitOrionConfigurationStorage(context.repositoryFactory(),
+                        configuration.getBootstrap().getAccessControl());
                 assertThat(OrionXml.read(new ByteArrayInputStream(
                         local.load().valueOrFailure("published configuration").content()))
                         .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
@@ -1456,7 +1452,7 @@ class BootstrapContextTest {
                 context.configurationCipher(),
                 context.configurationMaterial(),
                 new pro.deta.orion.config.OrionDesiredState()),
-                context.repositoryProvider(), context.configurationCipher(), approved);
+                context.repositoryFactory(), context.configurationCipher(), approved);
     }
 
     private static OrionDesiredState.Snapshot approved(OrionConfigurationStorage storage) {
@@ -1485,8 +1481,7 @@ class BootstrapContextTest {
                 .nativeGitRepositoryProvider(context.repositoryFactory())
                 .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
-                .bootstrapRepositorySources(context.repositorySources())
-                .build();
+                                .build();
     }
 
     private OrionConfiguration configuration() {

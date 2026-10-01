@@ -5,7 +5,6 @@ import pro.deta.orion.internal.UserEmail;
 
 
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import java.io.ByteArrayOutputStream;
 import java.util.Optional;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -40,10 +39,8 @@ class NativeSshCredentialPersistenceTest {
         NativeGitRepositoryProvider provider =
                 NativeGitRepositoryProvider.file(root);
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
-        ResolvedBootstrapSource source = new ResolvedBootstrapSource(
-                "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",
-                "users.xml", Optional.empty(), false);
-        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(source, provider);
+        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(
+                provider, "acl", "refs/heads/main", "users.xml", false);
         User alice = new User("alice", null, null, "alice@example.test",
                 List.of(), List.of(), List.of());
         AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
@@ -82,8 +79,9 @@ class NativeSshCredentialPersistenceTest {
         } finally {
             service.onStop();
         }
-        OrionAccessControlServiceImpl reopened = service(new NativeGitOrionConfigurationStorage(source,
-                new FileNativeGitRepositoryProvider(root)), editor, desired);
+        OrionAccessControlServiceImpl reopened = service(new NativeGitOrionConfigurationStorage(
+                NativeGitRepositoryProvider.file(root), "acl", "refs/heads/main", "users.xml", false),
+                editor, desired);
         try {
             reopened.onStart();
             assertThat(reopened.authenticateSshUser("alice", key.getPublic().getEncoded()))

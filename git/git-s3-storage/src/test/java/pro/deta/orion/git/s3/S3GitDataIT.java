@@ -34,7 +34,7 @@ class S3GitDataIT {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-data-" + UUID.randomUUID())) {
             PackId orphan = PackId.create();
             ObjectId id;
-            try (S3NativeGitRepositoryProvider provider = provider(server);
+            try (NativeGitRepositoryProvider provider = provider(server);
                  NativeGitRepository repository = provider.create("repo").valueOrFailure("create")) {
                 GitStorageAccess storage = repository.storage().createAccess();
                 try {
@@ -53,7 +53,7 @@ class S3GitDataIT {
                     storage.discard();
                 }
             }
-            try (S3NativeGitRepositoryProvider provider = provider(server);
+            try (NativeGitRepositoryProvider provider = provider(server);
                  NativeGitRepository repository = provider.find("repo").valueOrFailure("reopen")) {
                 GitStorageAccess storage = repository.storage().createAccess();
                 try {
@@ -132,7 +132,7 @@ class S3GitDataIT {
             } finally {
                 storage.discard();
             }
-            try (S3NativeGitRepositoryProvider reopened = provider(server);
+            try (NativeGitRepositoryProvider reopened = provider(server);
                  NativeGitRepository other = reopened.find("repo").valueOrFailure("reopen")) {
                 GitStorageAccess reader = other.storage().createAccess();
                 try {
@@ -148,7 +148,7 @@ class S3GitDataIT {
     @Test
     void existingAccessSeesPublicationThroughAnotherHandleOfTheSameProvider() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-publication-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider first = provider(server);
+             NativeGitRepositoryProvider first = provider(server);
              NativeGitRepository writer = first.create("repo").valueOrFailure("create");
              NativeGitRepository reader = first.find("repo").valueOrFailure("open")) {
             reader.index().withAccess(access -> {

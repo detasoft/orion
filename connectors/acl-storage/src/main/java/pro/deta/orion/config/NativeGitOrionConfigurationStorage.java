@@ -9,8 +9,9 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
-import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.CheckedFunction;
+import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -26,15 +27,27 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
     private final String path;
     private final boolean createIfMissing;
 
+    public NativeGitOrionConfigurationStorage(NativeGitRepositoryFactory repositoryFactory,
+            BootstrapConfigurationSourceConfig source) {
+        this(repositoryFactory.provider(),
+                repositoryFactory.bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Orion configuration requires a resolved Git repository")),
+                NativeGitRepositoryFactory.sourceRefName(source),
+                NativeGitRepositoryFactory.repositoryPath(source.getPath()), source.isCreateDefaultIfMissing());
+    }
+
     NativeGitOrionConfigurationStorage(
-            ResolvedBootstrapSource source,
-            NativeGitRepositoryProvider repositoryProvider) {
-        Objects.requireNonNull(source, "source");
+            NativeGitRepositoryProvider repositoryProvider,
+            String repositoryName,
+            String configurationRef,
+            String path,
+            boolean createIfMissing) {
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
-        repositoryName = source.repositoryName().orElseThrow();
-        configurationRef = source.refName();
-        path = source.path();
-        createIfMissing = source.createIfMissing();
+        this.repositoryName = Objects.requireNonNull(repositoryName, "repositoryName");
+        this.configurationRef = Objects.requireNonNull(configurationRef, "configurationRef");
+        this.path = Objects.requireNonNull(path, "path");
+        this.createIfMissing = createIfMissing;
     }
 
     @Override

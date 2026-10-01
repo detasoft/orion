@@ -9,7 +9,7 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -219,10 +219,11 @@ class RemoteBootstrapConfigurationIT {
             for (int launch = 0; launch < 2; launch++) {
                 try (var bootstrap = BootstrapContext.open(target, environment)) {
                     var provider = bootstrap.repositoryProvider();
-                    String configurationCache = bootstrap.repositorySources()
-                            .required(BootstrapRepositorySources.CONFIGURATION).repositoryName().orElseThrow();
-                    String materialCache = bootstrap.repositorySources()
-                            .required(BootstrapRepositorySources.MATERIAL).repositoryName().orElseThrow();
+                    String configurationCache = bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.CONFIGURATION_SOURCE)
+                                    .orElseThrow();
+                    String materialCache = bootstrap.repositoryFactory()
+                            .bootstrapRepositoryName(NativeGitRepositoryFactory.MATERIAL_SOURCE).orElseThrow();
                     assertThat(configurationCache).isNotEqualTo(materialCache);
                     var component = runtimeComponent(target, bootstrap);
                     var lifecycle = component.orionApplicationLifecycle();

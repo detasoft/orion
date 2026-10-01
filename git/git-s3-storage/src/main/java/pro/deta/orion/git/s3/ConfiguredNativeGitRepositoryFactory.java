@@ -45,9 +45,9 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
 
     private final NativeGitRepositoryBackend bootstrap;
     private final S3Transport client;
-    private RuntimeConfiguration runtime;
+    private volatile RuntimeConfiguration runtime;
     private final Map<RepositoryLocation, S3NativeGitRepositoryFactory> factories = new HashMap<>();
-    private boolean closed;
+    private volatile boolean closed;
 
     public ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend bootstrap, S3Transport client) {
         this.bootstrap = Objects.requireNonNull(bootstrap, "bootstrap repository factory");
@@ -75,9 +75,11 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
     @Override
     public List<String> repositoryNames() {
         return client.operation(() -> {
-            Map<String, Binding> bindings = configuredBindings();
+            requireOpen();
             RuntimeConfiguration configured = runtime;
             OrionDocument document = configured == null ? null : configured.current().get();
+            Map<String, Binding> bindings = document == null ? Map.of()
+                    : bindings(document, configured.bootstrapRepository());
             TreeSet<String> names = new TreeSet<>(bootstrap.repositoryNames());
             for (Map.Entry<String, Binding> entry : bindings.entrySet()) {
                 names.remove(entry.getKey());
@@ -105,6 +107,11 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
         return repository(repositoryName, true);
     }
 
+    @Override
+    public NativeGitRepositoryBackend owner(RepositoryName name) {
+        return withFactory(name, selected -> selected.owner(name));
+    }
+
     private Result<NativeGitRepository> repository(RepositoryName name, boolean create) {
         try {
             return withFactory(name, factory -> create ? factory.create(name) : factory.open(name));
@@ -125,13 +132,6 @@ public final class ConfiguredNativeGitRepositoryFactory implements NativeGitRepo
                     : factory(document, configured.secrets(), name.value(), binding);
             return operation.apply(selected);
         });
-    }
-
-    private synchronized Map<String, Binding> configuredBindings() {
-        requireOpen();
-        RuntimeConfiguration configured = runtime;
-        OrionDocument document = configured == null ? null : configured.current().get();
-        return document == null ? Map.of() : bindings(document, configured.bootstrapRepository());
     }
 
     private void requireOpen() {
