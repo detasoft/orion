@@ -13,10 +13,9 @@ import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
-import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
-import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -88,8 +87,7 @@ class SmartHttpGitRemoteGatewayClosureTest {
     }
 
     private static NativeGitRepository repository() {
-        InMemoryStorage storage = new InMemoryStorage();
-        return new NativeGitRepository("project", storage, new InMemoryIndex(), "refs/heads/main");
+        return NativeGitRepository.createInMemory(RepositoryName.parse("project"));
     }
 
     private static Entry commit(String tree, String message) {

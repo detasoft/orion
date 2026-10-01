@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
+import pro.deta.orion.schema.orion.RepositoryName;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -168,9 +169,7 @@ class GitAttachmentTest {
     }
 
     private static NativeGitRepository repository() {
-        InMemoryStorage storage = new InMemoryStorage();
-        NativeGitRepository repository = new NativeGitRepository(
-                "project", storage, new InMemoryIndex(), head("main"));
+        NativeGitRepository repository = NativeGitRepository.createInMemory(RepositoryName.parse("project"));
         populate(repository);
         return repository;
     }

@@ -21,13 +21,12 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
-import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.RepositoryName;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -56,11 +55,10 @@ class NativeBootstrapGitPackReplayTest {
     void replaysCompletedPackWithItsBaseRegardlessOfUpstreamHistory(boolean disk) throws Exception {
         for (boolean upstreamHasBase : List.of(true, false)) {
             Path bare = directory.resolve("upstream-" + upstreamHasBase + ".git");
-            InMemoryStorage storage = new InMemoryStorage();
             NativeGitRepository repository = disk
                     ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
                             .create("proxy").valueOrFailure("repository")
-                    : new NativeGitRepository("proxy", storage, new InMemoryIndex(), "refs/heads/main");
+                    : NativeGitRepository.createInMemory(RepositoryName.parse("proxy"));
             byte[] base = new byte[8192];
             new Random(37).nextBytes(base);
             byte[] target = base.clone();
@@ -125,9 +123,7 @@ class NativeBootstrapGitPackReplayTest {
 
     @Test
     void buildsMissingObjectsWhenIncomingPackDoesNotCoverTheRequestedCommit() throws Exception {
-        InMemoryStorage storage = new InMemoryStorage();
-        NativeGitRepository repository = new NativeGitRepository(
-                "proxy", storage, new InMemoryIndex(), "refs/heads/main");
+        NativeGitRepository repository = NativeGitRepository.createInMemory(RepositoryName.parse("proxy"));
         repository.files().withAccess("main", "local", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", new byte[]{1});
             fileAccess.apply();
