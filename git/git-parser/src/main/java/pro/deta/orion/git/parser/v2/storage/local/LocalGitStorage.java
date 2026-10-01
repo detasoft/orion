@@ -44,6 +44,7 @@ public final class LocalGitStorage implements GitStorageApi {
 
     private final class Access implements GitStorageAccess {
         private final List<PackHandle> writers = new ArrayList<>();
+        private final List<PackId> created = new ArrayList<>();
         private boolean closed;
 
         @Override
@@ -55,9 +56,15 @@ public final class LocalGitStorage implements GitStorageApi {
                 parent.force(true);
             } catch (IOException | RuntimeException | Error failure) {
                 closeUnreturned(bytes, failure);
+                try {
+                    Files.deleteIfExists(path(packId));
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
                 throw failure;
             }
             writers.add(bytes);
+            created.add(packId);
             return bytes;
         }
 
@@ -112,7 +119,16 @@ public final class LocalGitStorage implements GitStorageApi {
         }
 
         @Override
-        public void close() throws IOException {
+        public void apply() throws IOException {
+            finish(false);
+        }
+
+        @Override
+        public void discard() throws IOException {
+            finish(true);
+        }
+
+        private void finish(boolean delete) throws IOException {
             if (closed) return;
             closed = true;
             IOException failure = null;
@@ -125,6 +141,17 @@ public final class LocalGitStorage implements GitStorageApi {
                 }
             }
             writers.clear();
+            if (delete || failure != null) {
+                for (PackId id : created) {
+                    try {
+                        Files.deleteIfExists(path(id));
+                    } catch (IOException error) {
+                        if (failure == null) failure = error;
+                        else failure.addSuppressed(error);
+                    }
+                }
+            }
+            created.clear();
             if (failure != null) throw failure;
         }
     }

@@ -76,23 +76,27 @@ class ResolvedGitObjectReadTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void resolvesMixedOffsetAndReferenceBasesFromPublishedIndex(boolean memory) throws Exception {
-        try (GitStorageAccess api =
-                (memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess())) {
-            byte[] full = PackTestData.blob(new byte[]{10});
-            byte[] offsetDelta = PackTestData.join(new byte[]{0x64, (byte) full.length},
-                    PackTestData.compressed(new byte[]{1, 1, 1, 20}));
-            ObjectId offsetId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{20});
-            ObjectId referenceId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{30});
-            PackTestData.publish(PackTestData.pack(full, offsetDelta,
-                    PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api, owner);
-            ResolvedGitObjectRead<byte[]> reader = new ResolvedGitObjectRead<>(api, index, (type, size, base, content) -> {
-                assertThat(type).isEqualTo(GitObjectType.BLOB);
-                assertThat(size).isEqualTo(1);
-                assertThat(base).isEmpty();
-                return content.readBytes((int) size);
-            });
-            assertThat(read(GitObjectType.REF_DELTA, Optional.of(referenceId), new byte[]{1, 1, 1, 40}, reader))
-                    .containsExactly(40);
+        {
+            GitStorageAccess api = (memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess());
+            try {
+                byte[] full = PackTestData.blob(new byte[]{10});
+                byte[] offsetDelta = PackTestData.join(new byte[]{0x64, (byte) full.length},
+                        PackTestData.compressed(new byte[]{1, 1, 1, 20}));
+                ObjectId offsetId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{20});
+                ObjectId referenceId = PackTestData.objectId(GitObjectType.BLOB, new byte[]{30});
+                PackTestData.publish(PackTestData.pack(full, offsetDelta,
+                        PackTestData.delta(offsetId, new byte[]{1, 1, 1, 30})), api, owner);
+                ResolvedGitObjectRead<byte[]> reader = new ResolvedGitObjectRead<>(api, index, (type, size, base, content) -> {
+                    assertThat(type).isEqualTo(GitObjectType.BLOB);
+                    assertThat(size).isEqualTo(1);
+                    assertThat(base).isEmpty();
+                    return content.readBytes((int) size);
+                });
+                assertThat(read(GitObjectType.REF_DELTA, Optional.of(referenceId), new byte[]{1, 1, 1, 40}, reader))
+                        .containsExactly(40);
+            } finally {
+                api.discard();
+            }
         }
     }
 

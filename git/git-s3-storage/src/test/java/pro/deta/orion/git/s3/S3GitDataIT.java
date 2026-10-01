@@ -34,8 +34,9 @@ class S3GitDataIT {
             PackId orphan = PackId.create();
             ObjectId id;
             try (S3NativeGitRepositoryProvider provider = provider(server);
-                 NativeGitRepository repository = provider.create("repo").valueOrFailure("create");
-                 GitStorageAccess storage = repository.storage().createAccess()) {
+                 NativeGitRepository repository = provider.create("repo").valueOrFailure("create")) {
+                GitStorageAccess storage = repository.storage().createAccess();
+                try {
                 assertThat(repository.refs()).isEmpty();
                 try (PackHandle writer = storage.newPack(orphan)) {
                     writer.write(0, ByteBuffer.wrap(new byte[]{1, 2, 3, 4}));
@@ -46,10 +47,15 @@ class S3GitDataIT {
                 }
                 id = repository.writeObject(GitObjectType.BLOB, new byte[]{8, 9, 10});
                 assertThat(repository.readObject(id)).isPresent();
+                storage.apply();
+                } finally {
+                    storage.discard();
+                }
             }
             try (S3NativeGitRepositoryProvider provider = provider(server);
-                 NativeGitRepository repository = provider.find("repo").valueOrFailure("reopen");
-                 GitStorageAccess storage = repository.storage().createAccess()) {
+                 NativeGitRepository repository = provider.find("repo").valueOrFailure("reopen")) {
+                GitStorageAccess storage = repository.storage().createAccess();
+                try {
                 assertThat(storage.<byte[]>readPack(orphan, 0, 3,
                         (length, input) -> input.readBytes(3))).containsExactly(1, 2, 3);
                 Optional<PackMetadata> unpublished = repository.index().withAccess(index -> index.findPack(orphan));
@@ -58,6 +64,9 @@ class S3GitDataIT {
                 assertThatThrownBy(() -> storage.readPack(orphan, 0, 4, (length, input) -> 1))
                         .isInstanceOf(IOException.class);
                 assertThatThrownBy(() -> storage.newPack(orphan)).isInstanceOf(IOException.class);
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -112,16 +121,25 @@ class S3GitDataIT {
              NativeGitRepository repository = provider.create("repo").valueOrFailure("create")) {
             PackId id = PackId.create();
             long offset = 65L * 1024 * 1024;
-            try (GitStorageAccess storage = repository.storage().createAccess();
-                 PackHandle handle = storage.newPack(id)) {
-                handle.write(offset, ByteBuffer.wrap(new byte[]{42}));
-                handle.flush();
+            GitStorageAccess storage = repository.storage().createAccess();
+            try {
+                try (PackHandle handle = storage.newPack(id)) {
+                    handle.write(offset, ByteBuffer.wrap(new byte[]{42}));
+                    handle.flush();
+                }
+                storage.apply();
+            } finally {
+                storage.discard();
             }
             try (S3NativeGitRepositoryProvider reopened = provider(server);
-                 NativeGitRepository other = reopened.find("repo").valueOrFailure("reopen");
-                 GitStorageAccess storage = other.storage().createAccess()) {
-                assertThat(storage.<byte[]>readPack(id, offset - 1, 2, (length, input) -> input.readBytes(2)))
-                        .containsExactly(0, 42);
+                 NativeGitRepository other = reopened.find("repo").valueOrFailure("reopen")) {
+                GitStorageAccess reader = other.storage().createAccess();
+                try {
+                    assertThat(reader.<byte[]>readPack(id, offset - 1, 2, (length, input) -> input.readBytes(2)))
+                            .containsExactly(0, 42);
+                } finally {
+                    reader.discard();
+                }
             }
         }
     }

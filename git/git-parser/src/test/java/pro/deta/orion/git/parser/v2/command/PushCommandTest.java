@@ -61,20 +61,31 @@ class PushCommandTest {
     void memoryPushKeepsPublishedPackReadableAfterCommandReturns() throws Exception {
         indexApi = new InMemoryIndex();
         {
-            try (GitStorageApi storageApi = new InMemoryStorage();
-                 GitStorageAccess storage = storageApi.createAccess()) {
+            try (GitStorageApi storageApi = new InMemoryStorage()) {
+                GitStorageAccess storage = storageApi.createAccess();
+                try {
                 indexApi.withAccess(index -> {
                     ObjectId base = store(storage, indexApi, GitObjectType.BLOB, new byte[]{1});
+                    storage.apply();
                     ObjectId result = objectId(GitObjectType.BLOB, new byte[]{2});
                     byte[] response = execute(storageApi, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
                             ZERO + " " + result + " " + REF + "\0report-status"));
                     assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
                     assertThat(index.snapshotRefs().refs()).containsEntry(REF, result);
-                    assertThat(GitObjectRead.read(storage, index, result, new ResolvedGitObjectRead<>(storage, index,
-                            (type, size, unused, input) -> input.readBytes((int) size))))
-                            .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
+                    GitStorageAccess reader = storageApi.createAccess();
+                    try {
+                        assertThat(GitObjectRead.read(reader, index, result,
+                                new ResolvedGitObjectRead<>(reader, index,
+                                        (type, size, unused, input) -> input.readBytes((int) size))))
+                                .hasValueSatisfying(content -> assertThat(content).containsExactly(2));
+                    } finally {
+                        reader.discard();
+                    }
                     return null;
                 });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }

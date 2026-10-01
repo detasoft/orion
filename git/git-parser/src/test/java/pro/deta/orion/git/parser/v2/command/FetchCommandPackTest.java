@@ -86,7 +86,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                         indexed.discard();
                     }
                 }
-                storage.close();
+                storage.apply();
             } finally {
                 index.discard();
             }
@@ -293,7 +293,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                         }
                     }
                 }
-                storage.close();
+                storage.apply();
             } finally {
                 index.discard();
             }
@@ -461,38 +461,43 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void acceptsOnlyCleanHttpEofAfterShallowRequest(GitTransport transport, String suffix, boolean accepted)
             throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                InMemoryIndex owner = new InMemoryIndex();
-                owner.withAccess(index -> {
-                    ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
-                    ObjectId root = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-                    ObjectId tip = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
-                    ByteArrayOutputStream request = new ByteArrayOutputStream();
-                    OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
-                    new GitPktLine.Data(("want " + tip.toHex() + " shallow\n")
-                            .getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
-                    new GitPktLine.Data("deepen 1\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
-                    GitPktLine.Control.FLUSH.writeTo(wire);
-                    request.write(suffix.getBytes(StandardCharsets.US_ASCII));
-                    ByteArrayOutputStream response = new ByteArrayOutputStream();
-                    try (BufferedByteInputV2 input = input(request.toByteArray())) {
-                        GitProtocolContext protocol = new GitProtocolContext(input,
-                                new OutputStreamBufferedByteOutput(response), GitProtocolVersion.V1, transport);
-                        FetchCommand command = new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW));
-                        if (accepted) {
-                            command.action(protocol);
-                            try (BufferedByteInputV2 reply = input(response.toByteArray())) {
-                                assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(reply).orElseThrow()).text())
-                                        .isEqualTo("shallow " + tip.toHex());
-                                assertThat(GitPktLine.readNextFrom(reply)).contains(GitPktLine.Control.FLUSH);
-                                assertThat(GitPktLine.readNextFrom(reply)).isEmpty();
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    InMemoryIndex owner = new InMemoryIndex();
+                    owner.withAccess(index -> {
+                        ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
+                        ObjectId root = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+                        ObjectId tip = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.of(root)));
+                        ByteArrayOutputStream request = new ByteArrayOutputStream();
+                        OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
+                        new GitPktLine.Data(("want " + tip.toHex() + " shallow\n")
+                                .getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                        new GitPktLine.Data("deepen 1\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                        GitPktLine.Control.FLUSH.writeTo(wire);
+                        request.write(suffix.getBytes(StandardCharsets.US_ASCII));
+                        ByteArrayOutputStream response = new ByteArrayOutputStream();
+                        try (BufferedByteInputV2 input = input(request.toByteArray())) {
+                            GitProtocolContext protocol = new GitProtocolContext(input,
+                                    new OutputStreamBufferedByteOutput(response), GitProtocolVersion.V1, transport);
+                            FetchCommand command = new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW));
+                            if (accepted) {
+                                command.action(protocol);
+                                try (BufferedByteInputV2 reply = input(response.toByteArray())) {
+                                    assertThat(((GitPktLine.Data) GitPktLine.readNextFrom(reply).orElseThrow()).text())
+                                            .isEqualTo("shallow " + tip.toHex());
+                                    assertThat(GitPktLine.readNextFrom(reply)).contains(GitPktLine.Control.FLUSH);
+                                    assertThat(GitPktLine.readNextFrom(reply)).isEmpty();
+                                }
+                            } else {
+                                assertThatThrownBy(() -> command.action(protocol)).isInstanceOf(IOException.class);
                             }
-                        } else {
-                            assertThatThrownBy(() -> command.action(protocol)).isInstanceOf(IOException.class);
                         }
-                    }
-                    return null;
-                });
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -502,37 +507,42 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
     void rejectsInvalidDepthAndMissingObjectsBeforeWritingAResponse(GitProtocolVersion version) throws Exception {
         InMemoryIndex indexApi = new InMemoryIndex();
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                GitIndexApi owner = indexApi;
-                indexApi.withAccess(index -> {
-                    ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
-                    ObjectId tip = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
-                    RefId main = new RefId("refs/heads/main");
-                    publishRefs(
-                            storage, indexApi, List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
-                    for (boolean missingObject : List.of(false, true)) {
-                        String wanted = missingObject ? "11".repeat(20) : tip.toHex();
-                        ByteArrayOutputStream request = new ByteArrayOutputStream();
-                        OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
-                        new GitPktLine.Data(("want " + wanted + "\n").getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
-                        if (!missingObject) {
-                            new GitPktLine.Data("deepen 0\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    GitIndexApi owner = indexApi;
+                    indexApi.withAccess(index -> {
+                        ObjectId tree = store(storage, owner, GitObjectType.TREE, new byte[0]);
+                        ObjectId tip = store(storage, owner, GitObjectType.COMMIT, commit(tree, Optional.empty()));
+                        RefId main = new RefId("refs/heads/main");
+                        publishRefs(
+                                storage, indexApi, List.of(new RefUpdate(main, Optional.empty(), Optional.of(tip))), false);
+                        for (boolean missingObject : List.of(false, true)) {
+                            String wanted = missingObject ? "11".repeat(20) : tip.toHex();
+                            ByteArrayOutputStream request = new ByteArrayOutputStream();
+                            OutputStreamBufferedByteOutput wire = new OutputStreamBufferedByteOutput(request);
+                            new GitPktLine.Data(("want " + wanted + "\n").getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                            if (!missingObject) {
+                                new GitPktLine.Data("deepen 0\n".getBytes(StandardCharsets.US_ASCII)).writeTo(wire);
+                            }
+                            GitPktLine.Control.FLUSH.writeTo(wire);
+                            ByteArrayOutputStream response = new ByteArrayOutputStream();
+                            try (BufferedByteInputV2 input = input(request.toByteArray())) {
+                                GitProtocolContext protocol = new GitProtocolContext(input,
+                                        new OutputStreamBufferedByteOutput(response), version, GitTransport.HTTP);
+                                assertThatThrownBy(() -> new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW))
+                                        .action(protocol)).isInstanceOf(IOException.class)
+                                        .hasMessageContaining(missingObject ? wanted : "Depth must be positive");
+                            }
+                            assertThat(response.toByteArray()).isEmpty();
+                            assertThat(index.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
+                            assertThat(GitObjectRead.exists(storage, index, tip)).isTrue();
                         }
-                        GitPktLine.Control.FLUSH.writeTo(wire);
-                        ByteArrayOutputStream response = new ByteArrayOutputStream();
-                        try (BufferedByteInputV2 input = input(request.toByteArray())) {
-                            GitProtocolContext protocol = new GitProtocolContext(input,
-                                    new OutputStreamBufferedByteOutput(response), version, GitTransport.HTTP);
-                            assertThatThrownBy(() -> new FetchCommand(storage, index, capabilities(GitCapability.SHALLOW))
-                                    .action(protocol)).isInstanceOf(IOException.class)
-                                    .hasMessageContaining(missingObject ? wanted : "Depth must be positive");
-                        }
-                        assertThat(response.toByteArray()).isEmpty();
-                        assertThat(index.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
-                        assertThat(GitObjectRead.exists(storage, index, tip)).isTrue();
-                    }
-                    return null;
-                });
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }

@@ -41,19 +41,30 @@ class NativeGitRepositoryPackInventoryTest {
             PackId pending = PackId.create();
             GitIndexAccess active = index.createAccess(Optional.of(pending));
             try {
-                try (GitStorageAccess bytes = storage.createAccess()) {
-                    try (PackHandle handle = bytes.newPack(orphan)) {
-                        handle.flush();
-                    }
-                    try (PackHandle handle = bytes.newPack(pending)) {
-                        handle.flush();
+                {
+                    GitStorageAccess bytes = storage.createAccess();
+                    try {
+                        try (PackHandle handle = bytes.newPack(orphan)) {
+                            handle.flush();
+                        }
+                        try (PackHandle handle = bytes.newPack(pending)) {
+                            handle.flush();
+                        }
+                        bytes.apply();
+                    } finally {
+                        bytes.discard();
                     }
                 }
                 if (!memory) {
                     Files.write(directory.resolve("packs/pack-invalid.data"), new byte[]{1});
                 }
-                try (GitStorageAccess bytes = storage.createAccess()) {
-                    assertThat(bytes.packIds()).containsExactlyInAnyOrder(published, orphan, pending);
+                {
+                    GitStorageAccess bytes = storage.createAccess();
+                    try {
+                        assertThat(bytes.packIds()).containsExactlyInAnyOrder(published, orphan, pending);
+                    } finally {
+                        bytes.discard();
+                    }
                 }
                 assertThat(repository.packCleanupCandidates()).containsExactly(orphan);
             } finally {
@@ -71,9 +82,15 @@ class NativeGitRepositoryPackInventoryTest {
             PackId published = repository.index().withAccess(access -> access.packs().getFirst().packId());
             PackId expired = PackId.create();
             PackId recent = PackId.create();
-            try (GitStorageAccess bytes = repository.storage().createAccess()) {
-                try (PackHandle handle = bytes.newPack(expired)) { handle.flush(); }
-                try (PackHandle handle = bytes.newPack(recent)) { handle.flush(); }
+            {
+                GitStorageAccess bytes = repository.storage().createAccess();
+                try {
+                    try (PackHandle handle = bytes.newPack(expired)) { handle.flush(); }
+                    try (PackHandle handle = bytes.newPack(recent)) { handle.flush(); }
+                    bytes.apply();
+                } finally {
+                    bytes.discard();
+                }
             }
             Instant now = Instant.now();
             Files.setLastModifiedTime(packPath(expired), FileTime.from(now.minusSeconds(25 * 60 * 60)));

@@ -29,7 +29,7 @@ class PackByteSourceTest {
 
     @AfterEach
     void closeMemory() throws IOException {
-        memoryStorage.close();
+        memoryStorage.discard();
     }
 
     @TempDir

@@ -61,15 +61,22 @@ class PackIngestorTest {
         AtomicInteger conflicts = new AtomicInteger();
         CyclicBarrier ready = new CyclicBarrier(2);
         List<PackMetadata> uploaded = new ArrayList<>();
-        try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-             LocalGitIndex index = new LocalGitIndex(directory);
+        LocalGitStorage storageApi = new LocalGitStorage(directory);
+        try (LocalGitIndex index = new LocalGitIndex(directory);
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<PackMetadata>> uploads = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
                 uploads.add(executor.submit(() -> index.withAccess(
                         updates, Optional.of(PackId.create()), access -> {
                     ready.await(5, TimeUnit.SECONDS);
-                    PackMetadata pack = PackTestData.ingest(wire, storage, access);
+                    GitStorageAccess storage = storageApi.createAccess();
+                    PackMetadata pack;
+                    try {
+                        pack = PackTestData.ingest(wire, storage, access);
+                        storage.apply();
+                    } finally {
+                        storage.discard();
+                    }
                     assertThat(access.findPack(pack.packId())).isEmpty();
                     assertThat(access.objects(pack.packId())).hasSize(entries.length);
                     access.publishIndex(pack);
@@ -91,8 +98,8 @@ class PackIngestorTest {
             assertThat(uploaded.get(0).packId()).isNotEqualTo(uploaded.get(1).packId());
             assertThat(uploaded.get(0).packChecksum()).isEqualTo(uploaded.get(1).packChecksum());
         }
-        try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
-             LocalGitIndex index = new LocalGitIndex(directory)) {
+        GitStorageAccess storage = storageApi.createAccess();
+        try (LocalGitIndex index = new LocalGitIndex(directory)) {
             index.withAccess(access -> {
                 assertThat(access.snapshotRefs().refs()).containsEntry(ref, target);
                 assertThat(access.packs(uploaded.getFirst().packChecksum()))
@@ -104,6 +111,8 @@ class PackIngestorTest {
                 }
                 return null;
             });
+        } finally {
+            storage.discard();
         }
     }
 
@@ -112,30 +121,36 @@ class PackIngestorTest {
     void completesPrivatePackWithoutConsumingProtocolBytes(boolean memory) throws Exception {
         byte[] wire = pack();
         {
-            try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
+            {
+                GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
+                        : new LocalGitStorage(directory).createAccess();
+                try {
                 GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create()))
                         : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
-                    try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
-                        PackMetadata pack;
-                        try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-                            pack = ingestor.ingest();
-                            assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
+                        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
+                            PackMetadata pack;
+                            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                                pack = ingestor.ingest();
+                                assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
+                            }
+                            assertThat(storage.exists(pack.packId())).isTrue();
+                            assertThat(index.packs()).isEmpty();
+                            ObjectId id = PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
+                            assertThat(index.locations(id)).isEmpty();
+                            IndexedObject object = index.findObject(pack.packId(), id).orElseThrow();
+                            assertThat(object.objectSize()).isEqualTo(3);
+                            assertThat(object.packOffset()).isEqualTo(8);
+                            assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
+                            index.publishIndex(pack);
+                            assertThat(index.locations(id)).containsExactly(object);
+                            assertThat(input.readUnsignedByte()).isEqualTo(42);
                         }
-                        assertThat(storage.exists(pack.packId())).isTrue();
-                        assertThat(index.packs()).isEmpty();
-                        ObjectId id = PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3});
-                        assertThat(index.locations(id)).isEmpty();
-                        IndexedObject object = index.findObject(pack.packId(), id).orElseThrow();
-                        assertThat(object.objectSize()).isEqualTo(3);
-                        assertThat(object.packOffset()).isEqualTo(8);
-                        assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
-                        index.publishIndex(pack);
-                        assertThat(index.locations(id)).containsExactly(object);
-                        assertThat(input.readUnsignedByte()).isEqualTo(42);
+                    } finally {
+                        index.discard();
                     }
                 } finally {
-                    index.discard();
+                    storage.discard();
                 }
             }
         }
@@ -157,23 +172,28 @@ class PackIngestorTest {
         }
         byte[] wire = PackTestData.pack(entries.toArray(byte[][]::new));
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
-                    try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize)) {
-                        try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-                            PackMetadata pack = ingestor.ingest();
-                            assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
-                            for (int i = 0; i < types.length; i++) {
-                                IndexedObject object = index.findObject(pack.packId(),
-                                        PackTestData.objectId(types[i], contents.get(i))).orElseThrow();
-                                assertThat(object.type()).isEqualTo(types[i]);
-                                assertThat(object.objectSize()).isEqualTo(contents.get(i).length);
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})), chunkSize)) {
+                            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                                PackMetadata pack = ingestor.ingest();
+                                assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(wire);
+                                for (int i = 0; i < types.length; i++) {
+                                    IndexedObject object = index.findObject(pack.packId(),
+                                            PackTestData.objectId(types[i], contents.get(i))).orElseThrow();
+                                    assertThat(object.type()).isEqualTo(types[i]);
+                                    assertThat(object.objectSize()).isEqualTo(contents.get(i).length);
+                                }
+                                assertThat(input.readUnsignedByte()).isEqualTo(42);
                             }
-                            assertThat(input.readUnsignedByte()).isEqualTo(42);
                         }
-                    }
-                    return null;
-                });
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -184,26 +204,32 @@ class PackIngestorTest {
         byte[] wire = pack();
         wire[wire.length - 1] ^= 1;
         {
-            try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
+            {
+                GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
+                        : new LocalGitStorage(directory).createAccess();
+                try {
                 GitIndexApi owner = memory ? new InMemoryIndex() : new LocalGitIndex(directory);
                 ObjectId previous = owner.withAccess(Optional.of(PackId.create()), writer ->
                         PackTestData.store(storage, writer, GitObjectType.BLOB, new byte[]{9}));
                 GitIndexAccess index = owner.createAccess(Optional.of(PackId.create()));
                 try {
-                    try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
-                        try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-                            List<PackMetadata> published = index.packs();
-                            assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
-                                    .hasMessage("Pack checksum mismatch");
-                            assertThat(index.packs()).isEqualTo(published);
-                            assertThat(index.locations(previous)).hasSize(1);
-                            assertThat(index.locations(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3}))).isEmpty();
-                            assertThat(index.snapshotRefs().refs()).isEmpty();
-                            assertThat(input.readUnsignedByte()).isEqualTo(42);
+                        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.join(wire, new byte[]{42})))) {
+                            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                                List<PackMetadata> published = index.packs();
+                                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class)
+                                        .hasMessage("Pack checksum mismatch");
+                                assertThat(index.packs()).isEqualTo(published);
+                                assertThat(index.locations(previous)).hasSize(1);
+                                assertThat(index.locations(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3}))).isEmpty();
+                                assertThat(index.snapshotRefs().refs()).isEmpty();
+                                assertThat(input.readUnsignedByte()).isEqualTo(42);
+                            }
                         }
+                    } finally {
+                        index.discard();
                     }
                 } finally {
-                    index.discard();
+                    storage.discard();
                 }
             }
         }
@@ -215,16 +241,21 @@ class PackIngestorTest {
         for (int length = 0; length < wire.length; length++) {
             byte[] prefix = Arrays.copyOf(wire, length);
             {
-                try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
-                        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(prefix))) {
-                            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-                                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
-                                assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
+                {
+                    GitStorageAccess storage = new InMemoryStorage().createAccess();
+                    try {
+                        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                            try (BufferedByteInputV2 input = input(ByteBuffer.wrap(prefix))) {
+                                try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                                    assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
+                                    assertThatThrownBy(ingestor::ingest).isInstanceOf(IllegalStateException.class);
+                                }
                             }
-                        }
-                        return null;
-                    });
+                            return null;
+                        });
+                    } finally {
+                        storage.discard();
+                    }
                 }
             }
         }
@@ -254,16 +285,21 @@ class PackIngestorTest {
                 PackTestData.join(new byte[]{0x34}, valid), PackTestData.join(new byte[]{0x33}, corrupt),
                 PackTestData.join(new byte[]{0x33}, dictionary.toByteArray())}) {
             {
-                try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
-                        try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)))) {
-                            try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
-                                assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
-                                assertThat(index.packs()).isEmpty();
+                {
+                    GitStorageAccess storage = new InMemoryStorage().createAccess();
+                    try {
+                        new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                            try (BufferedByteInputV2 input = input(ByteBuffer.wrap(PackTestData.pack(entry)))) {
+                                try (PackIngestor ingestor = new PackIngestor(input, storage, index)) {
+                                    assertThatThrownBy(ingestor::ingest).isInstanceOf(IOException.class);
+                                    assertThat(index.packs()).isEmpty();
+                                }
                             }
-                        }
-                        return null;
-                    });
+                            return null;
+                        });
+                    } finally {
+                        storage.discard();
+                    }
                 }
             }
         }
@@ -272,13 +308,18 @@ class PackIngestorTest {
     @Test
     void acceptsEmptyPacksAndRejectsInvalidHeaders() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
-                    PackMetadata pack = PackTestData.ingest(PackTestData.pack(), storage, index);
-                    assertThat(pack.objectCount()).isZero();
-                    assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(PackTestData.pack());
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                        PackMetadata pack = PackTestData.ingest(PackTestData.pack(), storage, index);
+                        assertThat(pack.objectCount()).isZero();
+                        assertThat(PackTestData.bytes(pack, storage, index)).containsExactly(PackTestData.pack());
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
         byte[] magic = PackTestData.pack();

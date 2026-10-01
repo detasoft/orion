@@ -531,11 +531,16 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         repository.refs();
         repository.readObject(new ObjectId("0".repeat(40)));
         repository.index().withAccess(access2 -> {
-            try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
-                GitObjectRead.exists(storageAccess, access2, new ObjectId("0".repeat(40)));
+            {
+                GitStorageAccess storageAccess = repository.storage().createAccess();
+                try {
+                    GitObjectRead.exists(storageAccess, access2, new ObjectId("0".repeat(40)));
 
-                assertThat(refreshes).hasValue(2);
-                return null;
+                    assertThat(refreshes).hasValue(2);
+                    return null;
+                } finally {
+                    storageAccess.discard();
+                }
             }
         });
     }

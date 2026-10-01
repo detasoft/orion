@@ -161,9 +161,12 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             assertThat(repository.refs()).containsEntry("refs/heads/main", MAIN_ID);
             assertThat(repository.refs().containsKey("refs/heads/feature")).isEqualTo(!atomic);
             repository.index().withAccess(access1 -> {
-                try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
+                GitStorageAccess storageAccess = repository.storage().createAccess();
+                try {
                     assertThat(GitObjectRead.exists(storageAccess, access1, feature.newId().orElseThrow())).isTrue();
                     return null;
+                } finally {
+                    storageAccess.discard();
                 }
             });
         }
@@ -197,10 +200,13 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
-                try (GitStorageAccess storageAccess = reopened.storage().createAccess()) {
+                GitStorageAccess storageAccess = reopened.storage().createAccess();
+                try {
                     assertThat(GitObjectRead.exists(storageAccess, access2,
                             update.refUpdates().getFirst().newId().orElseThrow())).isTrue();
                     return null;
+                } finally {
+                    storageAccess.discard();
                 }
             });
         }

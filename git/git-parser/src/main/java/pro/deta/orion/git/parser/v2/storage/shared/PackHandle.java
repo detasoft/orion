@@ -5,8 +5,8 @@ import java.nio.ByteBuffer;
 
 /**
  * One mutable pack's random-access bytes. Finish writing and flush before publishing its index.
- * Closing releases this handle and preserves stored bytes; it publishes neither the index nor refs.
- * The creating storage access closes any handle the caller has not already closed.
+ * Closing releases this handle; the creating storage access decides whether its bytes are retained
+ * or deleted. It publishes neither the index nor refs.
  */
 public interface PackHandle extends AutoCloseable {
     int read(long offset, ByteBuffer target) throws IOException;

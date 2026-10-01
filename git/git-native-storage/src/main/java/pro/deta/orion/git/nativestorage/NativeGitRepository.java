@@ -28,7 +28,6 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 import pro.deta.orion.schema.orion.RepositoryName;
-import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
@@ -98,18 +97,16 @@ public class NativeGitRepository implements AutoCloseable {
 
     /** Read-only cleanup candidates; a later deletion must recheck concurrent access. */
     public Set<PackId> packCleanupCandidates() throws IOException {
-        return index.withAccess(access -> {
-            try (GitStorageAccess bytes = storage.createAccess()) {
-                Set<PackId> candidates = new HashSet<>(bytes.packIds());
-                for (GitIndexAccess active : index.activeAccesses()) {
-                    active.packId().ifPresent(candidates::remove);
-                }
-                for (PackMetadata pack : access.packs()) {
-                    candidates.remove(pack.packId());
-                }
-                return Set.copyOf(candidates);
+        return index.withAccess(access -> storage.withAccess(bytes -> {
+            Set<PackId> candidates = new HashSet<>(bytes.packIds());
+            for (GitIndexAccess active : index.activeAccesses()) {
+                active.packId().ifPresent(candidates::remove);
             }
-        });
+            for (PackMetadata pack : access.packs()) {
+                candidates.remove(pack.packId());
+            }
+            return Set.copyOf(candidates);
+        }));
     }
 
     /** Local-only cleanup. An empty result means another index access was active and the run was skipped. */
@@ -118,19 +115,17 @@ public class NativeGitRepository implements AutoCloseable {
         if (!(storage instanceof LocalGitStorage local) || !(index instanceof LocalGitIndex localIndex)) {
             return OptionalInt.of(0);
         }
-        Optional<Integer> deleted = localIndex.whenIdle(access -> {
-            try (GitStorageAccess bytes = storage.createAccess()) {
-                Set<PackId> candidates = new HashSet<>(bytes.packIds());
-                for (PackMetadata published : access.packs()) {
-                    candidates.remove(published.packId());
-                }
-                int count = 0;
-                for (PackId id : candidates) {
-                    if (local.deleteExpiredPack(id, cutoff)) count++;
-                }
-                return count;
+        Optional<Integer> deleted = localIndex.whenIdle(access -> storage.withAccess(bytes -> {
+            Set<PackId> candidates = new HashSet<>(bytes.packIds());
+            for (PackMetadata published : access.packs()) {
+                candidates.remove(published.packId());
             }
-        });
+            int count = 0;
+            for (PackId id : candidates) {
+                if (local.deleteExpiredPack(id, cutoff)) count++;
+            }
+            return count;
+        }));
         return deleted.isPresent() ? OptionalInt.of(deleted.get()) : OptionalInt.empty();
     }
 
@@ -195,55 +190,51 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public Optional<LooseObject> readObject(ObjectId id) {
-        try (GitStorageAccess bytes = storage().createAccess()) {
-            return index.withAccess(access -> {
-                return GitObjectRead.read(bytes, access, id, new ResolvedGitObjectRead<>(bytes, access,
-                        (type, size, base, input) -> new LooseObject(id, type,
-                        input.readBytes(Math.toIntExact(size)))));
-            });
+        try {
+            return storage.withAccess(bytes -> index.withAccess(access -> GitObjectRead.read(bytes, access, id,
+                        new ResolvedGitObjectRead<>(bytes, access, (type, size, base, input) ->
+                                new LooseObject(id, type, input.readBytes(Math.toIntExact(size)))))));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }
     }
 
     public PackMetadata ingestAndPublish(BufferedByteInputV2 input) throws IOException {
-        return index.withAccess(Optional.of(PackId.create()), access -> {
-            try (GitStorageAccess bytes = storage().createAccess()) {
-                PackMetadata pack;
-                try (PackIngestor ingestor = new PackIngestor(input, bytes, access)) {
-                    pack = ingestor.ingest();
-                }
-                if (!bytes.exists(pack.packId())) {
-                    throw new IOException("Cannot publish missing pack: " + pack.packId());
-                }
-                return access.publishIndex(pack);
+        return index.withAccess(Optional.of(PackId.create()), access -> storage.withAccess(bytes -> {
+            PackMetadata pack;
+            try (PackIngestor ingestor = new PackIngestor(input, bytes, access)) {
+                pack = ingestor.ingest();
             }
-        });
+            if (!bytes.exists(pack.packId())) {
+                throw new IOException("Cannot publish missing pack: " + pack.packId());
+            }
+            bytes.apply();
+            return access.publishIndex(pack);
+        }));
     }
 
     public PackMetadata publishPack(PackMetadata pack) throws IOException {
         return index.withAccess(Optional.of(pack.packId()), access -> {
-            try (GitStorageAccess bytes = storage().createAccess()) {
+            storage.withAccess(bytes -> {
                 if (!bytes.exists(pack.packId())) {
                     throw new IOException("Cannot publish missing pack: " + pack.packId());
                 }
-            }
+                return null;
+            });
             return access.publishIndex(pack);
         });
     }
 
     public void writePack(PackMetadata pack, BufferedByteOutput output) throws IOException {
-        try (GitStorageAccess bytes = storage().createAccess()) {
-            index.withAccess(access -> {
-                try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
-                    writer.writeObjects(bytes, access.objects(pack.packId()));
-                    if (!writer.finish().equals(pack.packChecksum())) {
-                        throw new IOException("Exported pack checksum differs from published metadata");
-                    }
+        storage.withAccess(bytes -> index.withAccess(access -> {
+            try (PackWriter writer = new PackWriter(output, pack.objectCount())) {
+                writer.writeObjects(bytes, access.objects(pack.packId()));
+                if (!writer.finish().equals(pack.packChecksum())) {
+                    throw new IOException("Exported pack checksum differs from published metadata");
                 }
-                return null;
-            });
-        }
+            }
+            return null;
+        }));
     }
 
     public List<RefUpdateResult> publishPack(byte[] bytes, List<RefUpdate> updates, boolean atomic,
@@ -265,8 +256,8 @@ public class NativeGitRepository implements AutoCloseable {
 
     public List<RefUpdateResult> publishRefs(List<RefUpdate> updates, boolean atomic) {
         List<RefUpdateResult> results;
-        try (GitStorageAccess bytes = storage().createAccess()) {
-            results = GitRepositoryContext.publishRefs(bytes, index, updates, atomic);
+        try {
+            results = storage.withAccess(bytes -> GitRepositoryContext.publishRefs(bytes, index, updates, atomic));
         } catch (IOException failure) {
             List<RefUpdateResult> failed = new ArrayList<>();
             for (RefUpdate update : updates) {
@@ -314,10 +305,9 @@ public class NativeGitRepository implements AutoCloseable {
     }
 
     public boolean hasCompleteObjectClosure(ObjectId root) {
-        try (GitStorageAccess bytes = storage().createAccess()) {
-            return index.withAccess(access -> {
-                return new GitObjectGraph(bytes, access).hasCompleteClosure(root);
-            });
+        try {
+            return storage.withAccess(bytes -> index.withAccess(access ->
+                    new GitObjectGraph(bytes, access).hasCompleteClosure(root)));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

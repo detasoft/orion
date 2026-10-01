@@ -26,8 +26,9 @@ class PackHandleTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsAndRewritesAcrossStorageBlocksAndTruncates(boolean memory) throws Exception {
-        try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess();
-             PackHandle pack = storage.newPack(PackId.create())) {
+        GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
+                : new LocalGitStorage(directory).createAccess();
+        try (PackHandle pack = storage.newPack(PackId.create())) {
             byte[] expected = new byte[20000];
             new Random(42).nextBytes(expected);
             ByteBuffer source = ByteBuffer.allocateDirect(expected.length).put(expected).flip();
@@ -49,13 +50,15 @@ class PackHandleTest {
             assertThatThrownBy(() -> pack.write(-1, ByteBuffer.allocate(0)))
                     .isInstanceOf(IllegalArgumentException.class);
             pack.flush();
+        } finally {
+            storage.discard();
         }
     }
 
     @Test
     void memoryStorageUsesLongOffsetsAndDoesNotRetainTruncatedBytes() throws Exception {
-        try (GitStorageAccess storage = new InMemoryStorage().createAccess();
-             PackHandle pack = storage.newPack(PackId.create())) {
+        GitStorageAccess storage = new InMemoryStorage().createAccess();
+        try (PackHandle pack = storage.newPack(PackId.create())) {
             long offset = (long) Integer.MAX_VALUE + 100;
             pack.write(offset, ByteBuffer.wrap(new byte[]{1, 2, 3}));
             assertThat(pack.size()).isEqualTo(offset + 3);
@@ -71,6 +74,8 @@ class PackHandleTest {
             try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {
                 assertThat(files.iterator().hasNext()).isFalse();
             }
+        } finally {
+            storage.discard();
         }
     }
 

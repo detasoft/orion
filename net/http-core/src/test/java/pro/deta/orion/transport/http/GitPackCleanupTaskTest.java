@@ -27,10 +27,11 @@ class GitPackCleanupTaskTest {
         try (NativeGitRepository repository = NativeGitRepository.openLocal(
                 RepositoryName.parse("team/repo"), directory, "refs/heads/main")) {
             PackId orphan = PackId.create();
-            try (GitStorageAccess bytes = repository.storage().createAccess();
-                 PackHandle handle = bytes.newPack(orphan)) {
+            GitStorageAccess bytes = repository.storage().createAccess();
+            try (PackHandle handle = bytes.newPack(orphan)) {
                 handle.flush();
             }
+            bytes.apply();
             Path pack = directory.resolve("packs/pack-" + orphan + ".data");
             Instant now = Instant.parse("2026-10-01T12:00:00Z");
             Files.setLastModifiedTime(pack, FileTime.from(now.minusSeconds(25 * 60 * 60)));
@@ -52,10 +53,11 @@ class GitPackCleanupTaskTest {
         try (NativeGitRepository repository = NativeGitRepository.createInMemory(
                 RepositoryName.parse("team/repo"))) {
             PackId orphan = PackId.create();
-            try (GitStorageAccess bytes = repository.storage().createAccess();
-                 PackHandle handle = bytes.newPack(orphan)) {
+            GitStorageAccess bytes = repository.storage().createAccess();
+            try (PackHandle handle = bytes.newPack(orphan)) {
                 handle.flush();
             }
+            bytes.apply();
             GitPackCleanupTask.Status status = new GitPackCleanupTask(provider(repository))
                     .runOnce(Instant.parse("2026-10-01T12:00:00Z"));
             assertThat(status.observed()).isEqualTo(1);

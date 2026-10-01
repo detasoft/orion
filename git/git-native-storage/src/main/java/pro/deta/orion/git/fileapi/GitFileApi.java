@@ -9,7 +9,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
-import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
 import pro.deta.orion.git.parser.v2.read.ResolvedGitObjectRead;
@@ -55,7 +54,7 @@ public final class GitFileApi {
         if (entry.mode() == FileMode.TREE || entry.mode() == FileMode.GITLINK) {
             throw new GitOperationException("Path is not a file: " + normalized);
         }
-        try (GitStorageAccess bytes = repository.storage().createAccess()) {
+        return repository.storage().withAccess(bytes -> {
             Optional<T> result = repository.index().withAccess(index -> GitObjectRead.read(
                     bytes, index, entry.objectId(),
                     new ResolvedGitObjectRead<>(bytes, index, (type, size, base, input) -> {
@@ -65,7 +64,7 @@ public final class GitFileApi {
                         return reader.read(type, size, base, input);
                     })));
             return result.orElseThrow(() -> new GitOperationException("Object not found: " + entry.objectId()));
-        }
+        });
     }
 
     public <T> T readFile(String branch, String path, GitObjectRead<T> reader)

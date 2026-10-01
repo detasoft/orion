@@ -59,14 +59,10 @@ class FetchCommandPackUriTest {
 
     @AfterEach
     void closeStorage() throws IOException {
-        {
-            try (storage) {
-                try {
-
-                } finally {
-                    index.discard();
-                }
-            }
+        try {
+            storage.discard();
+        } finally {
+            index.discard();
         }
     }
 

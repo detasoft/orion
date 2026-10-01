@@ -33,7 +33,7 @@ import static pro.deta.orion.git.parser.v2.storage.shared.PackSupport.closeUnret
 
 /**
  * Storage access with temporary random-access pack staging. Flush persists bytes independently of the
- * index; closing handles uploads remaining changes and removes scratch files, never stored S3 objects.
+ * index; apply retains owned packs and discard deletes them, including bytes already flushed to S3.
  */
 final class S3GitStorage implements GitStorageAccess {
     private final S3GitStorageApi owner;
@@ -157,16 +157,35 @@ final class S3GitStorage implements GitStorageAccess {
     }
 
     @Override
-    public void close() throws IOException {
+    public void apply() throws IOException {
+        finish(false);
+    }
+
+    @Override
+    public void discard() throws IOException {
+        finish(true);
+    }
+
+    private void finish(boolean delete) throws IOException {
         if (closed) return;
         closed = true;
         IOException failure = null;
         for (Writer writer : owned) {
             try {
-                writer.close();
+                if (delete) writer.abort();
+                else writer.close();
             } catch (IOException error) {
                 if (failure == null) failure = error;
                 else failure.addSuppressed(error);
+            }
+        }
+        if (!delete && failure != null) {
+            for (Writer writer : owned) {
+                try {
+                    writer.abort();
+                } catch (IOException error) {
+                    failure.addSuppressed(error);
+                }
             }
         }
         owned.clear();
@@ -320,6 +339,26 @@ final class S3GitStorage implements GitStorageAccess {
             }
             try {
                 Files.deleteIfExists(path);
+            } catch (IOException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+            if (failure != null) throw failure;
+        }
+
+        private void abort() throws IOException {
+            IOException failure = null;
+            try {
+                cleanup();
+            } catch (IOException error) {
+                failure = error;
+            } finally {
+                synchronized (owner) { owner.writers.remove(id, this); }
+            }
+            try {
+                objects.operation(() -> objects.transport().client().deleteObject(request -> request
+                        .overrideConfiguration(objects.overrides()).bucket(objects.bucket())
+                        .key(objects.prefix() + key(id))));
             } catch (IOException error) {
                 if (failure == null) failure = error;
                 else failure.addSuppressed(error);

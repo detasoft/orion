@@ -28,14 +28,18 @@ class S3GitStorageTest {
     @Test
     void inventoriesOnlyStoredPackObjects() throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire(); S3Transport transport = new S3Transport();
-             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport));
-             GitStorageAccess storage = owner.createAccess()) {
+             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport))) {
+            GitStorageAccess storage = owner.createAccess();
+            try {
             PackId stored = PackId.create();
             PackId pending = PackId.create();
             wire.contents.put("/bucket/repo/packs/" + stored + ".data", new byte[]{1});
             wire.contents.put("/bucket/repo/packs/not-a-pack.data", new byte[]{1});
             storage.newPack(pending);
             assertThat(storage.packIds()).containsExactly(stored);
+            } finally {
+                storage.discard();
+            }
         }
     }
 
@@ -43,8 +47,9 @@ class S3GitStorageTest {
     @ValueSource(booleans = {false, true})
     void failedMultipartUploadAbortsAndCloseReleasesTheHandle(boolean rejectAbort) throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire(); S3Transport transport = new S3Transport();
-             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport));
-             GitStorageAccess storage = owner.createAccess()) {
+             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport))) {
+            GitStorageAccess storage = owner.createAccess();
+            try {
             PackId id = PackId.create();
             PackHandle handle = storage.newPack(id);
             handle.write(65L * 1024 * 1024, ByteBuffer.wrap(new byte[]{42}));
@@ -58,6 +63,9 @@ class S3GitStorageTest {
             assertThat(handle.isOpen()).isFalse();
             assertThat(wire.abortedUploads).hasValue(2);
             assertThat(storage.exists(id)).isFalse();
+            } finally {
+                storage.discard();
+            }
         }
     }
 
@@ -70,13 +78,15 @@ class S3GitStorageTest {
                     4, 0, 4, Optional.empty());
             PackMetadata pack = new PackMetadata(id, new PackChecksum("b".repeat(40)), id.toString(), 1, 36);
             try (S3GitStorageApi storageApi = new S3GitStorageApi(objects);
-                 GitStorageAccess storage = storageApi.createAccess();
                  S3GitIndexApi index = new S3GitIndexApi(objects)) {
+                GitStorageAccess storage = storageApi.createAccess();
+                try {
                 try (PackHandle handle = storage.newPack(id)) {
                     handle.write(0, ByteBuffer.wrap(new byte[]{1, 2, 3, 4}));
                     handle.flush();
                     handle.flush();
                 }
+                storage.apply();
                 index.withAccess(Optional.of(id), access -> { access.addObject(object); return null; });
                 wire.rejectIndexes = true;
                 assertThatThrownBy(() -> index.withAccess(Optional.of(id), access -> access.publishIndex(pack)))
@@ -85,13 +95,20 @@ class S3GitStorageTest {
                     assertThat(access.locations(object.objectId())).isEmpty();
                     return null;
                 });
-                try (S3GitStorageApi reopened = new S3GitStorageApi(objects);
-                     GitStorageAccess bytes = reopened.createAccess()) {
+                try (S3GitStorageApi reopened = new S3GitStorageApi(objects)) {
+                    GitStorageAccess bytes = reopened.createAccess();
+                    try {
                     assertThat(bytes.<byte[]>readPack(id, 0, 4, (length, input) -> input.readBytes(4)))
                             .containsExactly(1, 2, 3, 4);
+                    } finally {
+                        bytes.discard();
+                    }
                 }
                 wire.rejectIndexes = false;
                 index.withAccess(Optional.of(id), access -> access.publishIndex(pack));
+                } finally {
+                    storage.discard();
+                }
             }
             try (S3GitIndexApi reopened = new S3GitIndexApi(objects)) {
                 reopened.withAccess(access -> {
@@ -114,8 +131,9 @@ class S3GitStorageTest {
     @Test
     void rangesAreBoundedBorrowedAndPropagateCallbackAndTruncationFailures() throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire(); S3Transport transport = new S3Transport();
-             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport));
-             GitStorageAccess storage = owner.createAccess()) {
+             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport))) {
+            GitStorageAccess storage = owner.createAccess();
+            try {
             PackId id = PackId.create();
             wire.contents.put("/bucket/repo/packs/" + id + ".data", new byte[]{1, 2, 3, 4});
             AtomicReference<BufferedByteInputV2> borrowed = new AtomicReference<>();
@@ -130,6 +148,33 @@ class S3GitStorageTest {
             wire.truncateRange = true;
             assertThatThrownBy(() -> storage.readPack(id, 0, 4,
                     (length, input) -> input.newInputStream().readAllBytes())).isInstanceOf(IOException.class);
+            } finally {
+                storage.discard();
+            }
+        }
+    }
+
+    @Test
+    void discardDeletesFlushedPackWithoutDeletingExistingPacks() throws Exception {
+        try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire(); S3Transport transport = new S3Transport();
+             S3GitStorageApi owner = new S3GitStorageApi(wire.objects(transport))) {
+            PackId retained = PackId.create();
+            PackId discarded = PackId.create();
+            wire.contents.put("/bucket/repo/packs/" + retained + ".data", new byte[]{1});
+            GitStorageAccess writer = owner.createAccess();
+            try (PackHandle handle = writer.newPack(discarded)) {
+                handle.write(0, ByteBuffer.wrap(new byte[]{2}));
+                handle.flush();
+            }
+            writer.discard();
+            writer.discard();
+            GitStorageAccess reader = owner.createAccess();
+            try {
+                assertThat(reader.exists(retained)).isTrue();
+                assertThat(reader.exists(discarded)).isFalse();
+            } finally {
+                reader.discard();
+            }
         }
     }
 }

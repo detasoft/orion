@@ -96,7 +96,7 @@ public final class GitFileAccess implements Modification {
             bytes.write(0, ByteBuffer.allocate(8).putInt(0x4f52504b).putInt(1).flip());
         } catch (IOException | RuntimeException | Error failure) {
             try {
-                storage.close();
+                storage.discard();
             } catch (Exception cleanup) {
                 failure.addSuppressed(cleanup);
             }
@@ -193,7 +193,9 @@ public final class GitFileAccess implements Modification {
         requireOpen();
         Throwable primary = null;
         try {
-            index.publishIndex(pack());
+            PackMetadata metadata = pack();
+            storage.apply();
+            index.publishIndex(metadata);
             List<RefUpdateResult> results = NativeGitReceivePack.complete(repository.name(), repository,
                     updates, true, GitNativeRepositoryAccessHook.ALLOW_ALL,
                     valid -> repository.publishReceivedPack(Optional.of(pack.packChecksum()), valid, true));
@@ -229,7 +231,8 @@ public final class GitFileAccess implements Modification {
         if (!finished) {
             finished = true;
             Throwable primary = null;
-            try (storage; bytes) {
+            try {
+                storage.discard();
             } catch (IOException | RuntimeException | Error failure) {
                 primary = failure;
                 throw failure;

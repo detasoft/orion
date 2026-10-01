@@ -74,8 +74,13 @@ public final class PackTestData {
 
     public static GitIndexAccess inspect(byte[] bytes) throws IOException {
         GitIndexAccess index = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
-        try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-            publish(bytes, storage, index);
+        {
+            GitStorageAccess storage = new InMemoryStorage().createAccess();
+            try {
+                publish(bytes, storage, index);
+            } finally {
+                storage.discard();
+            }
         }
         return index;
     }

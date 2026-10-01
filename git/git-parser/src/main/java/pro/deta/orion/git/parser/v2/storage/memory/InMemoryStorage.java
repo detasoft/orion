@@ -48,6 +48,7 @@ public final class InMemoryStorage implements GitStorageApi {
 
     private final class Access implements GitStorageAccess {
         private final List<Writer> writers = new ArrayList<>();
+        private final List<PackId> created = new ArrayList<>();
         private boolean closed;
 
         @Override
@@ -58,6 +59,7 @@ public final class InMemoryStorage implements GitStorageApi {
                 if (packs.containsKey(packId)) throw new IOException("Pack already exists: " + packId);
                 MemoryPackHandle bytes = new MemoryPackHandle();
                 packs.put(packId, bytes);
+                created.add(packId);
                 Writer writer = new Writer(bytes);
                 writers.add(writer);
                 return writer;
@@ -109,12 +111,28 @@ public final class InMemoryStorage implements GitStorageApi {
         }
 
         @Override
-        public void close() {
+        public void apply() {
+            finish(false);
+        }
+
+        @Override
+        public void discard() {
+            finish(true);
+        }
+
+        private void finish(boolean delete) {
             synchronized (InMemoryStorage.this) {
                 if (closed) return;
                 closed = true;
                 for (Writer writer : writers) writer.close();
                 writers.clear();
+                if (delete) {
+                    for (PackId id : created) {
+                        MemoryPackHandle bytes = packs.remove(id);
+                        if (bytes != null) bytes.close();
+                    }
+                }
+                created.clear();
                 accesses--;
                 releaseBytes();
             }

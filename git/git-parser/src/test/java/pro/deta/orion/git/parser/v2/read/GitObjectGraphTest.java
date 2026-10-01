@@ -26,7 +26,7 @@ class GitObjectGraphTest {
 
     @AfterEach
     void closeStorage() throws Exception {
-        objects.close();
+        objects.discard();
     }
 
     private final GitStorageAccess objects = new InMemoryStorage().createAccess();

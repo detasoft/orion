@@ -106,8 +106,13 @@ final class NativeGitRepositoryContext extends GitRepositoryContext {
     @Override
     public List<RefUpdateResult> publish(Optional<PackMetadata> pack, List<RefUpdate> updates, boolean atomic)
             throws IOException {
-        Optional<PackChecksum> received = pack.isPresent()
-                ? Optional.of(repository.publishPack(pack.orElseThrow()).packChecksum()) : Optional.empty();
+        Optional<PackChecksum> received;
+        if (pack.isPresent()) {
+            storage().apply();
+            received = Optional.of(repository.publishPack(pack.orElseThrow()).packChecksum());
+        } else {
+            received = Optional.empty();
+        }
         return NativeGitReceivePack.complete(name, repository, updates, atomic, accessHook,
                 accepted -> provider.publish(repository, received, accepted, atomic));
     }

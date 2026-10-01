@@ -27,8 +27,8 @@ class S3GitAccessTest {
             assertThat(index.snapshotRefs().refs()).isEmpty();
             index.apply();
             index.discard();
-            storage.close();
-            storage.close();
+            storage.discard();
+            storage.discard();
             assertThatThrownBy(repository.index()::createAccess).isInstanceOf(IOException.class);
             assertThatThrownBy(repository.storage()::createAccess).isInstanceOf(IOException.class);
             assertThatThrownBy(index::snapshotRefs).isInstanceOf(IOException.class);

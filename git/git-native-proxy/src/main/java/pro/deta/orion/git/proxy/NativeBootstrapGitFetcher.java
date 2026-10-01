@@ -1,6 +1,5 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitClientTransport;
@@ -90,23 +89,23 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
             String oldId,
             String newId) {
         try {
-            repository.index().withAccess(Optional.of(PackId.create()), access -> {
-                try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
-                    GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
-                            List.of(newId),
-                            NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
-                            input -> {
-                                try (PackIngestor ingestor = new PackIngestor(input, storageAccess, access)) {
-                                    return ingestor.ingest();
-                                }
-                            },
-                            ignored -> { });
-                    PackMetadata pack = success(client.fetch(location.remoteUri(), OPTIONS, request),
-                            "pack transfer").pack();
-                    repository.publishPack(pack);
-                    return null;
-                }
-            });
+            repository.index().withAccess(Optional.of(PackId.create()), access ->
+                    repository.storage().withAccess(storageAccess -> {
+                        GitUploadPackRequest<PackMetadata> request = new GitUploadPackRequest<>(
+                                List.of(newId),
+                                NULL_ID.equals(oldId) ? List.of() : List.of(oldId),
+                                input -> {
+                                    try (PackIngestor ingestor = new PackIngestor(input, storageAccess, access)) {
+                                        return ingestor.ingest();
+                                    }
+                                },
+                                ignored -> { });
+                        PackMetadata pack = success(client.fetch(location.remoteUri(), OPTIONS, request),
+                                "pack transfer").pack();
+                        storageAccess.apply();
+                        repository.publishPack(pack);
+                        return null;
+                    }));
         } catch (IOException failure) {
             throw new BootstrapGitProxyException("pack validation");
         }

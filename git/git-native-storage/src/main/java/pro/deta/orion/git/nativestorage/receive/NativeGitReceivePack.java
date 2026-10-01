@@ -4,7 +4,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
-import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -22,8 +21,8 @@ public final class NativeGitReceivePack {
     public static List<RefUpdateResult> complete(String repositoryName, NativeGitRepository repository,
             List<RefUpdate> updates, boolean atomic, GitNativeRepositoryAccessHook accessHook,
             Function<List<RefUpdate>, List<RefUpdateResult>> publisher) {
-        try (GitStorageAccess bytes = repository.storage().createAccess()) {
-            return repository.index().withAccess(access -> {
+        try {
+            return repository.storage().withAccess(bytes -> repository.index().withAccess(access -> {
                 Objects.requireNonNull(repositoryName, "repositoryName");
                 Objects.requireNonNull(repository, "repository");
                 List<RefUpdate> requested = List.copyOf(updates);
@@ -68,7 +67,7 @@ public final class NativeGitReceivePack {
                     }
                 }
                 return List.copyOf(results);
-            });
+            }));
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

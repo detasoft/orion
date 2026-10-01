@@ -360,6 +360,12 @@ class S3GitIndexTest {
                 reply(exchange, 200, new byte[0]);
                 return;
             }
+            if (method.equals("DELETE")) {
+                contents.remove(key);
+                etags.remove(key);
+                reply(exchange, 204, new byte[0]);
+                return;
+            }
             if (exchange.getRequestURI().getQuery() != null && exchange.getRequestURI().getQuery().contains("list-type=2")) {
                 StringBuilder xml = new StringBuilder("<ListBucketResult><IsTruncated>false</IsTruncated>");
                 indexLists.incrementAndGet();

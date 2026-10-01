@@ -220,7 +220,8 @@ class FileNativeGitRepositoryProviderTest {
                 .find("packed").valueOrFailure("repository")) {
             {
                 GitIndexAccess access2 = reopened.index().createAccess();
-                try (GitStorageAccess storageAccess = reopened.storage().createAccess()) {
+                GitStorageAccess storageAccess = reopened.storage().createAccess();
+                try {
                     assertThat(access2.objects(access2.packs(id).getFirst().packId()))
                             .extracting(IndexedObject::objectId)
                             .contains(new ObjectId(blobId(base)), new ObjectId(blobId(target)));
@@ -233,6 +234,7 @@ class FileNativeGitRepositoryProviderTest {
                     }))).hasValueSatisfying(prefix ->
                                     assertThat(prefix).isEqualTo("hello n".getBytes(StandardCharsets.UTF_8)));
                 } finally {
+                    storageAccess.discard();
                     access2.discard();
                 }
             }

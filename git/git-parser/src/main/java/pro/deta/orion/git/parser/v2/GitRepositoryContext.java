@@ -32,22 +32,25 @@ import java.util.Set;
  */
 public class GitRepositoryContext implements AutoCloseable {
     private final GitStorageAccess storage;
+    private final GitStorageApi storageApi;
     private final GitIndexAccess index;
     private final GitIndexApi indexApi;
 
     public GitRepositoryContext(GitStorageAccess storage, GitIndexAccess index) {
         this.storage = Objects.requireNonNull(storage, "storage");
+        this.storageApi = null;
         this.index = Objects.requireNonNull(index, "index");
         this.indexApi = null;
     }
 
     public GitRepositoryContext(GitStorageApi storage, GitIndexApi index) throws IOException {
         this.indexApi = Objects.requireNonNull(index, "index");
-        this.storage = Objects.requireNonNull(storage, "storage").createAccess();
+        this.storageApi = Objects.requireNonNull(storage, "storage");
+        this.storage = storage.createAccess();
         try {
             this.index = index.createAccess();
         } catch (IOException | RuntimeException | Error failure) {
-            try { this.storage.close(); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
+            try { this.storage.discard(); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
             throw failure;
         }
     }
@@ -64,7 +67,7 @@ public class GitRepositoryContext implements AutoCloseable {
     public void close() throws IOException {
         Throwable primary = null;
         try {
-            storage.close();
+            storage.discard();
         } catch (IOException | RuntimeException | Error failure) {
             primary = failure;
             throw failure;
@@ -102,7 +105,9 @@ public class GitRepositoryContext implements AutoCloseable {
             if (!storage.exists(metadata.packId())) {
                 throw new IOException("Cannot publish missing pack: " + metadata.packId());
             }
+            storage.apply();
             indexApi.withAccess(Optional.of(metadata.packId()), access -> access.publishIndex(metadata));
+            return storageApi.withAccess(reader -> publishRefs(reader, indexApi, updates, atomic));
         }
         return publishRefs(storage, indexApi, updates, atomic);
     }

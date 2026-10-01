@@ -30,18 +30,23 @@ class PackCompletionTest {
     @Test
     void preservesSelfContainedAndEmptyGitExports() throws Exception {
         {
-            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
-                LocalGitIndex owner = new LocalGitIndex(directory);
-                for (byte[] wire : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
-                    owner.withAccess(Optional.of(PackId.create()), index -> {
-                        PackMetadata metadata = ingest(wire, storage, index);
-                        byte[] exported = bytes(metadata, storage, index);
-                        assertThat(exported).containsExactly(wire);
-                        Path path = directory.resolve(metadata.packId() + ".pack");
-                        Files.write(path, exported);
-                        assertGitIndexes(path);
-                        return null;
-                    });
+            {
+                GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
+                try {
+                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    for (byte[] wire : new byte[][]{pack(), pack(blob(new byte[]{1, 2, 3}))}) {
+                        owner.withAccess(Optional.of(PackId.create()), index -> {
+                            PackMetadata metadata = ingest(wire, storage, index);
+                            byte[] exported = bytes(metadata, storage, index);
+                            assertThat(exported).containsExactly(wire);
+                            Path path = directory.resolve(metadata.packId() + ".pack");
+                            Files.write(path, exported);
+                            assertGitIndexes(path);
+                            return null;
+                        });
+                    }
+                } finally {
+                    storage.discard();
                 }
             }
         }
@@ -52,26 +57,31 @@ class PackCompletionTest {
         byte[] base = new byte[30_000];
         new Random(17).nextBytes(base);
         {
-            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
-                LocalGitIndex owner = new LocalGitIndex(directory);
-                owner.withAccess(Optional.of(PackId.create()), index -> {
-                    ObjectId baseId = store(storage, owner, GitObjectType.BLOB, base);
-                    byte[] original = pack(delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 4}),
-                            delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 5}));
-                    PackMetadata metadata = ingest(original, storage, index);
-                    byte[] output = bytes(metadata, storage, index);
-                    assertThat(metadata.objectCount()).isEqualTo(3);
-                    assertThat(metadata.packChecksum().toBytes())
-                            .isNotEqualTo(Arrays.copyOfRange(original, original.length - 20, original.length));
-                    assertThat(ByteBuffer.wrap(output).getInt(8)).isEqualTo(3);
-                    assertThat(Arrays.copyOfRange(output, 12, original.length - 20))
-                            .containsExactly(Arrays.copyOfRange(original, 12, original.length - 20));
-                    assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
-                    Path path = directory.resolve("shared.pack");
-                    Files.write(path, output);
-                    assertGitIndexes(path);
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
+                try {
+                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    owner.withAccess(Optional.of(PackId.create()), index -> {
+                        ObjectId baseId = store(storage, owner, GitObjectType.BLOB, base);
+                        byte[] original = pack(delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 4}),
+                                delta(baseId, new byte[]{(byte) 0xb0, (byte) 0xea, 1, 3, 3, 1, 2, 5}));
+                        PackMetadata metadata = ingest(original, storage, index);
+                        byte[] output = bytes(metadata, storage, index);
+                        assertThat(metadata.objectCount()).isEqualTo(3);
+                        assertThat(metadata.packChecksum().toBytes())
+                                .isNotEqualTo(Arrays.copyOfRange(original, original.length - 20, original.length));
+                        assertThat(ByteBuffer.wrap(output).getInt(8)).isEqualTo(3);
+                        assertThat(Arrays.copyOfRange(output, 12, original.length - 20))
+                                .containsExactly(Arrays.copyOfRange(original, 12, original.length - 20));
+                        assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
+                        Path path = directory.resolve("shared.pack");
+                        Files.write(path, output);
+                        assertGitIndexes(path);
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -81,19 +91,24 @@ class PackCompletionTest {
         byte[] root = {1, 2, 3};
         byte[] base = {1, 2, 4};
         {
-            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
-                LocalGitIndex owner = new LocalGitIndex(directory);
-                owner.withAccess(Optional.of(PackId.create()), index -> {
-                    ObjectId baseId = storeDelta(storage, owner, GitObjectType.BLOB, root,
-                            new byte[]{3, 3, 3, 1, 2, 4}, base);
-                    PackMetadata metadata = ingest(pack(delta(baseId, new byte[]{3, 1, 1, 9})), storage, index);
-                    assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
-                    assertThat(index.findObject(metadata.packId(), objectId(GitObjectType.BLOB, root))).isEmpty();
-                    Path path = directory.resolve("restored.pack");
-                    Files.write(path, bytes(metadata, storage, index));
-                    assertGitIndexes(path);
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
+                try {
+                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    owner.withAccess(Optional.of(PackId.create()), index -> {
+                        ObjectId baseId = storeDelta(storage, owner, GitObjectType.BLOB, root,
+                                new byte[]{3, 3, 3, 1, 2, 4}, base);
+                        PackMetadata metadata = ingest(pack(delta(baseId, new byte[]{3, 1, 1, 9})), storage, index);
+                        assertThat(index.findObject(metadata.packId(), baseId).orElseThrow().delta()).isEmpty();
+                        assertThat(index.findObject(metadata.packId(), objectId(GitObjectType.BLOB, root))).isEmpty();
+                        Path path = directory.resolve("restored.pack");
+                        Files.write(path, bytes(metadata, storage, index));
+                        assertGitIndexes(path);
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }

@@ -123,7 +123,8 @@ class GitIndexActiveAccessTest {
                     }
                     public boolean exists(PackId id) { return false; }
                     public Set<PackId> packIds() { return Set.of(); }
-                    public void close() { }
+                    public void apply() { }
+                    public void discard() { }
                 };
                 assertThatThrownBy(() -> PackTestData.ingest(PackTestData.pack(), storage, access))
                         .isSameAs(failure);

@@ -48,41 +48,52 @@ class GitPackObjectResolverTest {
     void resolvesForwardReferencesBranchesAndOffsetDeltasWithoutChangingCompressedBytes(boolean memory, int version)
             throws Exception {
         {
-            try (GitStorageAccess storage = memory ? new InMemoryStorage().createAccess() : new LocalGitStorage(directory).createAccess()) {
+            {
+                GitStorageAccess storage = memory ? new InMemoryStorage().createAccess()
+                        : new LocalGitStorage(directory).createAccess();
+                try {
                 GitIndexAccess index = memory ? new InMemoryIndex().createAccess(Optional.of(PackId.create())) : new LocalGitIndex(directory).createAccess(Optional.of(PackId.create()));
                 try {
-                    ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
-                    ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
-                    byte[] forward = delta(second, new byte[]{1, 1, 1, 3});
-                    byte[] offset = join(PackEntryWriter.objectHeader(GitObjectType.OFS_DELTA, 4),
-                            new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
-                    byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
-                            delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-                    PackMetadata completed = publish(source, storage, index);
-                    assertThat(completed.objectCount()).isEqualTo(5);
-                    IndexedObject stored = index.objects(completed.packId()).getFirst();
-                    assertThat(GitObjectRead.<byte[]>read(storage, stored,
-                            (type, size, base, input) -> input.newInputStream().readAllBytes()))
-                            .containsExactly(compressed(new byte[]{1, 1, 1, 3}));
-                    for (byte value = 1; value <= 5; value++) {
-                        byte expected = value;
-                        assertThat(GitObjectRead.read(storage, index, objectId(GitObjectType.BLOB, new byte[]{value}),
-                                new ResolvedGitObjectRead<>(storage, index,
-                                        (type, size, base, input) -> input.readBytes((int) size))))
-                                .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
-                    }
-                    {
-                        try (GitStorageAccess replay = new InMemoryStorage().createAccess()) {
-                            new InMemoryIndex().withAccess(Optional.of(PackId.create()), replayIndex -> {
-                                PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
-                                assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
-                                assertThat(copy.objectCount()).isEqualTo(5);
-                                return null;
-                            });
+                        ObjectId first = objectId(GitObjectType.BLOB, new byte[]{1});
+                        ObjectId second = objectId(GitObjectType.BLOB, new byte[]{2});
+                        byte[] forward = delta(second, new byte[]{1, 1, 1, 3});
+                        byte[] offset = join(PackEntryWriter.objectHeader(GitObjectType.OFS_DELTA, 4),
+                                new byte[]{(byte) forward.length}, compressed(new byte[]{1, 1, 1, 4}));
+                        byte[] source = pack(version, forward, offset, delta(second, new byte[]{1, 1, 1, 5}),
+                                delta(first, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
+                        PackMetadata completed = publish(source, storage, index);
+                        assertThat(completed.objectCount()).isEqualTo(5);
+                        IndexedObject stored = index.objects(completed.packId()).getFirst();
+                        assertThat(GitObjectRead.<byte[]>read(storage, stored,
+                                (type, size, base, input) -> input.newInputStream().readAllBytes()))
+                                .containsExactly(compressed(new byte[]{1, 1, 1, 3}));
+                        for (byte value = 1; value <= 5; value++) {
+                            byte expected = value;
+                            assertThat(GitObjectRead.read(storage, index, objectId(GitObjectType.BLOB, new byte[]{value}),
+                                    new ResolvedGitObjectRead<>(storage, index,
+                                            (type, size, base, input) -> input.readBytes((int) size))))
+                                    .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
                         }
+                        {
+                            {
+                                GitStorageAccess replay = new InMemoryStorage().createAccess();
+                                try {
+                                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), replayIndex -> {
+                                        PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
+                                        assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
+                                        assertThat(copy.objectCount()).isEqualTo(5);
+                                        return null;
+                                    });
+                                } finally {
+                                    replay.discard();
+                                }
+                            }
+                        }
+                    } finally {
+                        index.discard();
                     }
                 } finally {
-                    index.discard();
+                    storage.discard();
                 }
             }
         }
@@ -92,29 +103,39 @@ class GitPackObjectResolverTest {
     @ValueSource(ints = {2, 3})
     void completesThinPackWithExternalBaseAndPersistsIt(int version) throws Exception {
         {
-            try (GitStorageAccess storage = new LocalGitStorage(directory).createAccess()) {
-                LocalGitIndex owner = new LocalGitIndex(directory);
-                owner.withAccess(Optional.of(PackId.create()), index -> {
-                    ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
-                    byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
-                    PackMetadata completed = publish(source, storage, index);
-                    assertThat(completed.objectCount()).isEqualTo(2);
-                    {
-                        try (GitStorageAccess copy = new InMemoryStorage().createAccess()) {
-                            GitIndexAccess copyIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
-                            try {
-                                publish(bytes(completed, storage, index), copy, copyIndex);
-                                assertThat(GitObjectRead.read(copy, copyIndex, objectId(GitObjectType.BLOB, new byte[]{2}),
-                                        new ResolvedGitObjectRead<>(copy, copyIndex,
-                                                (type, size, unused, input) -> input.readBytes((int) size))))
-                                        .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
-                            } finally {
-                                copyIndex.discard();
+            {
+                GitStorageAccess storage = new LocalGitStorage(directory).createAccess();
+                try {
+                    LocalGitIndex owner = new LocalGitIndex(directory);
+                    owner.withAccess(Optional.of(PackId.create()), index -> {
+                        ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
+                        byte[] source = pack(version, delta(base, new byte[]{1, 1, 1, 2}));
+                        PackMetadata completed = publish(source, storage, index);
+                        assertThat(completed.objectCount()).isEqualTo(2);
+                        {
+                            {
+                                GitStorageAccess copy = new InMemoryStorage().createAccess();
+                                try {
+                                GitIndexAccess copyIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
+                                try {
+                                        publish(bytes(completed, storage, index), copy, copyIndex);
+                                        assertThat(GitObjectRead.read(copy, copyIndex, objectId(GitObjectType.BLOB, new byte[]{2}),
+                                                new ResolvedGitObjectRead<>(copy, copyIndex,
+                                                        (type, size, unused, input) -> input.readBytes((int) size))))
+                                                .hasValueSatisfying(content -> assertThat(content).containsExactly((byte) 2));
+                                    } finally {
+                                        copyIndex.discard();
+                                    }
+                                } finally {
+                                    copy.discard();
+                                }
                             }
                         }
-                    }
-                    return null;
-                });
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -122,16 +143,21 @@ class GitPackObjectResolverTest {
     @Test
     void rejectsSelfReferencingDeltaEvenWhenItsContentCanBeResolvedExternally() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                InMemoryIndex owner = new InMemoryIndex();
-                owner.withAccess(Optional.of(PackId.create()), index -> {
-                    ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
-                    List<PackMetadata> before = index.packs();
-                    assertThatThrownBy(() -> ingest(pack(delta(base, new byte[]{1, 1, (byte) 0x90, 1})),
-                            storage, index)).isInstanceOf(IOException.class).hasMessageContaining("cycle");
-                    assertThat(index.packs()).isEqualTo(before);
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    InMemoryIndex owner = new InMemoryIndex();
+                    owner.withAccess(Optional.of(PackId.create()), index -> {
+                        ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{1});
+                        List<PackMetadata> before = index.packs();
+                        assertThatThrownBy(() -> ingest(pack(delta(base, new byte[]{1, 1, (byte) 0x90, 1})),
+                                storage, index)).isInstanceOf(IOException.class).hasMessageContaining("cycle");
+                        assertThat(index.packs()).isEqualTo(before);
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -139,18 +165,23 @@ class GitPackObjectResolverTest {
     @Test
     void doesNotAppendAPublishedBaseThatLaterResolvesInsideThePack() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                InMemoryIndex owner = new InMemoryIndex();
-                owner.withAccess(Optional.of(PackId.create()), index -> {
-                    ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{2});
-                    ObjectId root = objectId(GitObjectType.BLOB, new byte[]{1});
-                    byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
-                            delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
-                    PackMetadata completed = publish(source, storage, index);
-                    assertThat(completed.objectCount()).isEqualTo(3);
-                    assertThat(bytes(completed, storage, index)).containsExactly(source);
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    InMemoryIndex owner = new InMemoryIndex();
+                    owner.withAccess(Optional.of(PackId.create()), index -> {
+                        ObjectId base = store(storage, owner, GitObjectType.BLOB, new byte[]{2});
+                        ObjectId root = objectId(GitObjectType.BLOB, new byte[]{1});
+                        byte[] source = pack(delta(base, new byte[]{1, 1, 1, 3}),
+                                delta(root, new byte[]{1, 1, 1, 2}), blob(new byte[]{1}));
+                        PackMetadata completed = publish(source, storage, index);
+                        assertThat(completed.objectCount()).isEqualTo(3);
+                        assertThat(bytes(completed, storage, index)).containsExactly(source);
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -158,21 +189,26 @@ class GitPackObjectResolverTest {
     @Test
     void resolvesADeepForwardChainWithoutRecursiveCalls() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
-                    List<byte[]> entries = new ArrayList<>();
-                    for (int value = 1100; value > 0; value--) {
-                        byte[] previous = {(byte) ((value - 1) >>> 8), (byte) (value - 1)};
-                        entries.add(delta(objectId(GitObjectType.BLOB, previous),
-                                new byte[]{2, 2, 2, (byte) (value >>> 8), (byte) value}));
-                    }
-                    entries.add(blob(new byte[]{0, 0}));
-                    byte[] source = pack(entries.toArray(byte[][]::new));
-                    PackMetadata completed = assertTimeout(Duration.ofSeconds(30), () -> publish(source, storage, index));
-                    assertThat(completed.objectCount()).isEqualTo(1101);
-                    assertThat(bytes(completed, storage, index)).containsExactly(source);
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    new InMemoryIndex().withAccess(Optional.of(PackId.create()), index -> {
+                        List<byte[]> entries = new ArrayList<>();
+                        for (int value = 1100; value > 0; value--) {
+                            byte[] previous = {(byte) ((value - 1) >>> 8), (byte) (value - 1)};
+                            entries.add(delta(objectId(GitObjectType.BLOB, previous),
+                                    new byte[]{2, 2, 2, (byte) (value >>> 8), (byte) value}));
+                        }
+                        entries.add(blob(new byte[]{0, 0}));
+                        byte[] source = pack(entries.toArray(byte[][]::new));
+                        PackMetadata completed = assertTimeout(Duration.ofSeconds(30), () -> publish(source, storage, index));
+                        assertThat(completed.objectCount()).isEqualTo(1101);
+                        assertThat(bytes(completed, storage, index)).containsExactly(source);
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -265,20 +301,25 @@ class GitPackObjectResolverTest {
                     assertThat(storage.readsByPack.get(firstPack)).isGreaterThanOrEqualTo(2);
                     assertThat(completed.objectCount()).isEqualTo(9);
                     {
-                        try (GitStorageAccess replay = new InMemoryStorage().createAccess()) {
+                        {
+                            GitStorageAccess replay = new InMemoryStorage().createAccess();
+                            try {
                             GitIndexAccess replayIndex = new InMemoryIndex().createAccess(Optional.of(PackId.create()));
                             try {
-                                PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
-                                assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
-                                for (int i = 0; i < 5; i++) {
-                                    byte[] expected = {(byte) (10 + i)};
-                                    assertThat(GitObjectRead.read(replay, replayIndex, objectId(GitObjectType.BLOB, expected),
-                                            new ResolvedGitObjectRead<>(replay, replayIndex,
-                                                    (type, length, base, input) -> input.readBytes((int) length))))
-                                            .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
+                                    PackMetadata copy = publish(bytes(completed, storage, index), replay, replayIndex);
+                                    assertThat(copy.packChecksum()).isEqualTo(completed.packChecksum());
+                                    for (int i = 0; i < 5; i++) {
+                                        byte[] expected = {(byte) (10 + i)};
+                                        assertThat(GitObjectRead.read(replay, replayIndex, objectId(GitObjectType.BLOB, expected),
+                                                new ResolvedGitObjectRead<>(replay, replayIndex,
+                                                        (type, length, base, input) -> input.readBytes((int) length))))
+                                                .hasValueSatisfying(content -> assertThat(content).containsExactly(expected));
+                                    }
+                                } finally {
+                                    replayIndex.discard();
                                 }
                             } finally {
-                                replayIndex.discard();
+                                replay.discard();
                             }
                         }
                     }
@@ -288,7 +329,7 @@ class GitPackObjectResolverTest {
         }
     }
 
-    private static final class CountingStorage implements GitStorageAccess {
+    private static final class CountingStorage implements GitStorageAccess, AutoCloseable {
         private final GitStorageAccess backend;
         private int reads;
         private final Map<PackId, Integer> readsByPack = new HashMap<>();
@@ -320,30 +361,45 @@ class GitPackObjectResolverTest {
         }
 
         @Override
+        public void apply() throws IOException {
+            backend.apply();
+        }
+
+        @Override
+        public void discard() throws IOException {
+            backend.discard();
+        }
+
+        @Override
         public void close() throws IOException {
-            backend.close();
+            discard();
         }
     }
 
     @Test
     void rejectsInvalidDeltaInstructionsBeforePublication() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                InMemoryIndex owner = new InMemoryIndex();
-                owner.withAccess(index -> {
-                    byte[][] invalid = {{2, 0}, {1, 1, 0}, {1, 1, 1}, {1, 1, (byte) 0x91, 1, 1},
-                            {1, 1, (byte) 0x90, 2}, {1, 1}, {1, 0, 1, 42}, {1, 1, (byte) 0x91}};
-                    for (byte[] instructions : invalid) {
-                        byte[] source = pack(blob(new byte[]{1}),
-                                delta(objectId(GitObjectType.BLOB, new byte[]{1}), instructions));
-                        owner.withAccess(Optional.of(PackId.create()), writer -> {
-                            assertThatThrownBy(() -> publish(source, storage, writer)).isInstanceOf(IOException.class);
-                            return null;
-                        });
-                        assertThat(index.packs()).isEmpty();
-                    }
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    InMemoryIndex owner = new InMemoryIndex();
+                    owner.withAccess(index -> {
+                        byte[][] invalid = {{2, 0}, {1, 1, 0}, {1, 1, 1}, {1, 1, (byte) 0x91, 1, 1},
+                                {1, 1, (byte) 0x90, 2}, {1, 1}, {1, 0, 1, 42}, {1, 1, (byte) 0x91}};
+                        for (byte[] instructions : invalid) {
+                            byte[] source = pack(blob(new byte[]{1}),
+                                    delta(objectId(GitObjectType.BLOB, new byte[]{1}), instructions));
+                            owner.withAccess(Optional.of(PackId.create()), writer -> {
+                                assertThatThrownBy(() -> publish(source, storage, writer)).isInstanceOf(IOException.class);
+                                return null;
+                            });
+                            assertThat(index.packs()).isEmpty();
+                        }
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }
@@ -351,22 +407,27 @@ class GitPackObjectResolverTest {
     @Test
     void rejectsMissingBasesCyclesAndDuplicateObjects() throws Exception {
         {
-            try (GitStorageAccess storage = new InMemoryStorage().createAccess()) {
-                InMemoryIndex owner = new InMemoryIndex();
-                owner.withAccess(index -> {
-                    ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
-                    ObjectId other = objectId(GitObjectType.BLOB, new byte[]{2});
-                    for (byte[] source : new byte[][] {pack(delta(absent, new byte[]{1, 1, 1, 3})),
-                            pack(delta(absent, new byte[]{1, 1, 1, 2}), delta(other, new byte[]{1, 1, 1, 1})),
-                            pack(blob(new byte[]{1}), blob(new byte[]{1}))}) {
-                        owner.withAccess(Optional.of(PackId.create()), writer -> {
-                            assertThatThrownBy(() -> publish(source, storage, writer)).isInstanceOf(IOException.class);
-                            return null;
-                        });
-                        assertThat(index.packs()).isEmpty();
-                    }
-                    return null;
-                });
+            {
+                GitStorageAccess storage = new InMemoryStorage().createAccess();
+                try {
+                    InMemoryIndex owner = new InMemoryIndex();
+                    owner.withAccess(index -> {
+                        ObjectId absent = objectId(GitObjectType.BLOB, new byte[]{1});
+                        ObjectId other = objectId(GitObjectType.BLOB, new byte[]{2});
+                        for (byte[] source : new byte[][] {pack(delta(absent, new byte[]{1, 1, 1, 3})),
+                                pack(delta(absent, new byte[]{1, 1, 1, 2}), delta(other, new byte[]{1, 1, 1, 1})),
+                                pack(blob(new byte[]{1}), blob(new byte[]{1}))}) {
+                            owner.withAccess(Optional.of(PackId.create()), writer -> {
+                                assertThatThrownBy(() -> publish(source, storage, writer)).isInstanceOf(IOException.class);
+                                return null;
+                            });
+                            assertThat(index.packs()).isEmpty();
+                        }
+                        return null;
+                    });
+                } finally {
+                    storage.discard();
+                }
             }
         }
     }

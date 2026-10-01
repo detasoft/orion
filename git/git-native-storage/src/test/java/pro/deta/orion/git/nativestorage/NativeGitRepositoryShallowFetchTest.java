@@ -34,11 +34,16 @@ class NativeGitRepositoryShallowFetchTest {
                     plan(tip, OptionalInt.of(1), OptionalLong.empty(), Set.of()),
                     plan(tip, OptionalInt.empty(), OptionalLong.of(200), Set.of()))) {
                 repository.index().withAccess(access1 -> {
-                    try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
-                        FetchPack pack = FetchPack.prepare(storageAccess, access1, plan);
-                        assertThat(pack.shallowCommits()).containsExactly(tip);
-                        assertThat(pack.objectCount()).isEqualTo(2);
-                        return null;
+                    {
+                        GitStorageAccess storageAccess = repository.storage().createAccess();
+                        try {
+                            FetchPack pack = FetchPack.prepare(storageAccess, access1, plan);
+                            assertThat(pack.shallowCommits()).containsExactly(tip);
+                            assertThat(pack.objectCount()).isEqualTo(2);
+                            return null;
+                        } finally {
+                            storageAccess.discard();
+                        }
                     }
                 });
             }
@@ -54,12 +59,17 @@ class NativeGitRepositoryShallowFetchTest {
             repository.updateRef("refs/heads/main", "0".repeat(40), base.toHex());
             for (String ref : List.of("refs/heads/main", "main", "HEAD")) {
                 repository.index().withAccess(access2 -> {
-                    try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
-                        FetchPack pack = FetchPack.prepare(storageAccess, access2,
-                                plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of(ref)));
-                        assertThat(pack.shallowCommits()).containsExactly(tip);
-                        assertThat(pack.objectCount()).isEqualTo(2);
-                        return null;
+                    {
+                        GitStorageAccess storageAccess = repository.storage().createAccess();
+                        try {
+                            FetchPack pack = FetchPack.prepare(storageAccess, access2,
+                                    plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of(ref)));
+                            assertThat(pack.shallowCommits()).containsExactly(tip);
+                            assertThat(pack.objectCount()).isEqualTo(2);
+                            return null;
+                        } finally {
+                            storageAccess.discard();
+                        }
                     }
                 });
             }
@@ -72,11 +82,16 @@ class NativeGitRepositoryShallowFetchTest {
             ObjectId tree = repository.writeObject(GitObjectType.TREE, new byte[0]);
             ObjectId tip = commit(repository, tree, null, 100);
             repository.index().withAccess(access3 -> {
-                try (GitStorageAccess storageAccess = repository.storage().createAccess()) {
-                    assertThatThrownBy(() -> FetchPack.prepare(storageAccess, access3,
-                            plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of("refs/heads/missing"))))
-                            .isInstanceOf(IOException.class).hasMessageContaining("Unknown deepen-not ref");
-                    return null;
+                {
+                    GitStorageAccess storageAccess = repository.storage().createAccess();
+                    try {
+                        assertThatThrownBy(() -> FetchPack.prepare(storageAccess, access3,
+                                plan(tip, OptionalInt.empty(), OptionalLong.empty(), Set.of("refs/heads/missing"))))
+                                .isInstanceOf(IOException.class).hasMessageContaining("Unknown deepen-not ref");
+                        return null;
+                    } finally {
+                        storageAccess.discard();
+                    }
                 }
             });
         }

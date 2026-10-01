@@ -117,7 +117,8 @@ class NativeGitRepositoryPackIngestionTest {
                     return !missing && access.exists(packId);
                 }
                 public Set<PackId> packIds() throws IOException { return access.packIds(); }
-                public void close() throws IOException { access.close(); }
+                public void apply() throws IOException { access.apply(); }
+                public void discard() throws IOException { access.discard(); }
             };
         }
 

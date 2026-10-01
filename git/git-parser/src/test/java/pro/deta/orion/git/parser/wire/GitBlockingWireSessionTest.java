@@ -61,16 +61,12 @@ class GitBlockingWireSessionTest {
 
     @AfterEach
     void closeStorage() throws Exception {
-        {
-            try (GitStorageApi ownedApi = storageApi; GitStorageAccess ownedStorage = storage) {
-                GitIndexAccess ownedIndex = index;
-                try {
-
-                } finally {
-                    ownedIndex.discard();
-                    factory.close();
-                }
-            }
+        try {
+            storage.discard();
+        } finally {
+            index.discard();
+            factory.close();
+            storageApi.close();
         }
         if (servedAccess != null) {
             assertThatThrownBy(servedAccess::snapshotRefs).isInstanceOf(IOException.class);
