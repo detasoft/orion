@@ -24,6 +24,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitClientTest {
     @Test
+    void initializesWorkTreeWhenDirectoryNameIsNotARepositoryName(@TempDir Path directory) throws Exception {
+        Path workTreeDirectory = directory.resolve("Mixed Case");
+        try (GitWorkTree workTree = OrionGitEngines.client().init(workTreeDirectory)) {
+            assertThat(workTree.directory()).isEqualTo(workTreeDirectory.toAbsolutePath().normalize());
+            commit(workTree, "README.md", "content\n", "initial");
+            assertThat(workTree.head()).isNotNull();
+        }
+    }
+
+    @Test
     void createsTheSameDeterministicCommitAsJGitAndUpdatesLocalRefs(@TempDir Path directory) throws Exception {
         try (GitWorkTree orion = OrionGitEngines.client().init(directory.resolve("orion"));
                 GitWorkTree jgit = GitClients.jgit().init(directory.resolve("jgit"))) {

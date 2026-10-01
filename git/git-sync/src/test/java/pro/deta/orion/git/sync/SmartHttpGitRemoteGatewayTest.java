@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
@@ -202,9 +203,7 @@ class SmartHttpGitRemoteGatewayTest {
     private static NativeGitRepository nativeRepository(Path directory) throws Exception {
         Path gitDirectory = directory.resolve(".git");
         Files.createDirectories(gitDirectory);
-        LocalGitStorage storage = new LocalGitStorage(gitDirectory);
-        return new NativeGitRepository(
-                "project", storage, new LocalGitIndex(gitDirectory), "refs/heads/main");
+        return NativeGitRepository.openLocal(RepositoryName.parse("project"), gitDirectory, "refs/heads/main");
     }
 
     private static Seed seedRemote(

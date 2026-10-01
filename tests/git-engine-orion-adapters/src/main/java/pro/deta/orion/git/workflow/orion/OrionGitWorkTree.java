@@ -24,12 +24,9 @@ import pro.deta.orion.git.parser.v2.fetch.FetchPlan;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.git.parser.v2.index.GitIndexApi;
-import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectGraph;
-import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
-import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.git.workflow.GitClient;
 import pro.deta.orion.git.workflow.GitOperationResult;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
@@ -84,15 +81,13 @@ final class OrionGitWorkTree implements GitWorkTree {
         Path workTree = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
         Path gitDirectory = workTree.resolve(".git");
         Files.createDirectories(gitDirectory);
-        GitStorageApi storage = new LocalGitStorage(gitDirectory);
-        GitIndexApi index = new LocalGitIndex(gitDirectory);
-        index.withAccess(access -> {
+        NativeGitRepository repository = NativeGitRepository.openLocal(
+                RepositoryName.parse("worktree"), gitDirectory, MAIN_REF);
+        repository.index().withAccess(access -> {
             access.updateHead(new Head.Symbolic(new RefId(MAIN_REF)));
             access.apply();
             return null;
         });
-        NativeGitRepository repository = new NativeGitRepository(
-                workTree.getFileName().toString(), storage, index, MAIN_REF);
         return new OrionGitWorkTree(client, workTree, repository);
     }
 
