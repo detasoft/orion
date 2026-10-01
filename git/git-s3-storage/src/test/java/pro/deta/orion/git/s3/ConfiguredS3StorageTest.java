@@ -2,6 +2,7 @@ package pro.deta.orion.git.s3;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -32,6 +33,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(30)
 class ConfiguredS3StorageTest {
+    @TempDir
+    Path directory;
     @Test
     void retainsTheIndexOwnerThroughCredentialRotationAndSeparatesChangedLocations() throws Exception {
         try (S3GitIndexTest.Wire wire = new S3GitIndexTest.Wire();
@@ -117,7 +120,7 @@ class ConfiguredS3StorageTest {
         CountDownLatch release = new CountDownLatch(1);
         try (S3TransportTest.Server old = new S3TransportTest.Server(entered, release);
              S3TransportTest.Server next = new S3TransportTest.Server(new CountDownLatch(0), new CountDownLatch(0));
-             S3ConfigurationFixture fixture = new S3ConfigurationFixture();
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory);
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             fixture.connection(true, "archive", old.endpoint(), "eu-west-1", "old-id", "old-key", "old-token");
             fixture.bind("repo", true, "archive", "s3://bucket/prefix");
@@ -140,7 +143,7 @@ class ConfiguredS3StorageTest {
     @Test
     void explicitScopeSurvivesEncryptedSecretAndAclEditsAndS3AbsenceSuppressesLocalData() throws Exception {
         try (S3TransportTest.Server server = new S3TransportTest.Server(new CountDownLatch(0), new CountDownLatch(0));
-             S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
             fixture.connection(true, "archive", server.endpoint(), "us-east-1", "system-id", "system-key", null);
             fixture.connection(false, "archive", server.endpoint(), "us-east-1", "organization-id", "org-key", null);
             fixture.bind("system", true, "archive", "s3://bucket/system");
@@ -151,8 +154,8 @@ class ConfiguredS3StorageTest {
             OrionXml.write(fixture.current.get(), xml);
             assertThat(xml.toString(java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("system-key", "changed-key");
             fixture.current.set(OrionXml.read(new ByteArrayInputStream(xml.toByteArray())));
-            fixture.local.create("acme/dev/system").valueOrFailure("local data").close();
-            fixture.local.create("local-repo").valueOrFailure("unbound data").close();
+            fixture.local.create("acme/dev/system").valueOrFailure("local data");
+            fixture.local.create("local-repo").valueOrFailure("unbound data");
             assertThat(fixture.provider.exists("acme%2Fdev%2Fsystem")).isFalse();
             assertThat(fixture.provider.exists("acme/dev/organization")).isFalse();
             assertThat(server.requests.get(0).authorization()).contains("Credential=system-id/");
@@ -164,15 +167,15 @@ class ConfiguredS3StorageTest {
 
     @Test
     void unrelatedConnectionCredentialsDoNotBlockUnboundLocalRepositories() throws Exception {
-        try (S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+        try (S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
             fixture.connection(true, "unavailable", "http://127.0.0.1:1", "us-east-1", "id", "key", null);
             fixture.bind("remote", true, "unavailable", "s3://bucket/prefix");
-            fixture.local.create("local-repo").valueOrFailure("local data").close();
+            fixture.local.create("local-repo").valueOrFailure("local data");
             ConfigurationSecrets unavailable = new ConfigurationSecrets(fixture.current::get,
                     ConfigurationCipherCapability.unavailable());
-            fixture.provider.activate(fixture.current::get, unavailable, ignored -> false);
+            fixture.factory.activate(fixture.current::get, unavailable, ignored -> false);
             assertThat(fixture.provider.exists("local-repo")).isTrue();
-            fixture.provider.find("local-repo").valueOrFailure("local read").close();
+            fixture.provider.find("local-repo").valueOrFailure("local read");
             assertThatThrownBy(() -> fixture.provider.exists("acme/dev/remote"))
                     .isInstanceOf(IllegalStateException.class);
             assertThat(fixture.provider.find("acme/dev/remote").isFailure()).isTrue();
@@ -183,10 +186,10 @@ class ConfiguredS3StorageTest {
 
     @Test
     void bootstrapBindingsAreRejectedBeforeRuntimeActivation() throws Exception {
-        try (S3ConfigurationFixture fixture = new S3ConfigurationFixture()) {
+        try (S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory)) {
             fixture.connection(true, "archive", "http://127.0.0.1:1", "us-east-1", "id", "key", null);
             fixture.bind("config", true, "archive", "s3://bucket/config");
-            assertThatThrownBy(() -> fixture.provider.activate(fixture.current::get, fixture.secrets,
+            assertThatThrownBy(() -> fixture.factory.activate(fixture.current::get, fixture.secrets,
                     "acme/dev/config"::equals)).hasMessageContaining("must remain file-backed");
         }
     }

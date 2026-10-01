@@ -23,7 +23,6 @@ import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -60,21 +59,25 @@ class OrionGitRouteStreamingFailureTest {
     private static void verifyFailure(boolean commit, Exception failure, int expectedStatus) throws Exception {
         AtomicReference<HttpServletResponse> activeResponse = new AtomicReference<>();
         CompletableFuture<Throwable> escaped = new CompletableFuture<>();
-        NativeGitRepositoryProvider provider = (NativeGitRepositoryProvider) Proxy.newProxyInstance(
-                NativeGitRepositoryProvider.class.getClassLoader(),
-                new Class<?>[]{NativeGitRepositoryProvider.class}, (proxy, method, arguments) -> {
-                    if (method.getName().equals("isPublicRepositoryName")) {
-                        return true;
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+            @Override
+            public boolean isPublicRepositoryName(String repositoryName) {
+                return true;
+            }
+
+            @Override
+            public Result<pro.deta.orion.git.nativestorage.NativeGitRepository> openForRead(String repositoryName) {
+                if (commit) {
+                    try {
+                        activeResponse.get().flushBuffer();
+                    } catch (IOException error) {
+                        throw new IllegalStateException(error);
                     }
-                    if (method.getName().equals("openForRead")) {
-                        if (commit) {
-                            activeResponse.get().flushBuffer();
-                        }
-                        assertThat(activeResponse.get().isCommitted()).isEqualTo(commit);
-                        return Result.Failure.generalFailure(failure);
-                    }
-                    throw new AssertionError("Unexpected provider call: " + method.getName());
-                });
+                }
+                assertThat(activeResponse.get().isCommitted()).isEqualTo(commit);
+                return Result.Failure.generalFailure(failure);
+            }
+        };
         OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),
                 new GitTransportConfig(), provider);
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(

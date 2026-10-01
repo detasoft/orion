@@ -2,7 +2,7 @@ package pro.deta.orion.git.compat;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 
 import java.io.ByteArrayOutputStream;
@@ -19,7 +19,7 @@ class GitCompatibilityToolTest {
     @Test
     void exportsANewBareRepositoryFromCommandLineArguments() throws Exception {
         Path store = root.resolve("store");
-        try (NativeGitRepository ignored = new FileNativeGitRepositoryProvider(store)
+        try (NativeGitRepository ignored = NativeGitRepositoryProvider.file(store)
                 .create("demo").valueOrFailure("source repository")) {
             // An empty source still has a default HEAD and is a valid export.
         }

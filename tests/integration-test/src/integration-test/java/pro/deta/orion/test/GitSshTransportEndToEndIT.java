@@ -35,9 +35,8 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
@@ -1547,7 +1546,7 @@ class GitSshTransportEndToEndIT {
          */
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(accessControl), output);
-        new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
+        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"))
                 .create("orion")
                 .valueOrFailure("ACL repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH, "seed e2e access control",
@@ -1621,7 +1620,7 @@ class GitSshTransportEndToEndIT {
     }
 
     private static void seedProjectRepository(Path orionRoot, String repositoryName, String content) throws Exception {
-        new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
+        NativeGitRepositoryProvider.file(orionRoot.resolve("repos"))
                 .create(repositoryName)
                 .valueOrFailure("Project repository should be created")
                 .files().withAccess("refs/heads/" + BRANCH, "seed " + repositoryName,

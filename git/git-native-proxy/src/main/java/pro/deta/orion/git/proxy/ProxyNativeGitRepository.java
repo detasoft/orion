@@ -9,8 +9,8 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus;
 
 import java.time.Instant;
 import java.util.ArrayList;

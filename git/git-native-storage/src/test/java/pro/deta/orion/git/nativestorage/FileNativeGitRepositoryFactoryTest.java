@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class FileNativeGitRepositoryFactoryTest {
     @Test
     void opensIndependentHandlesAndLeavesTheirLifecycleToTheCaller(@TempDir Path root) {
-        NativeGitRepositoryFactory factory = new FileNativeGitRepositoryFactory(root);
+        NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root);
         RepositoryName name = RepositoryName.parse("team/repo");
         byte[] content = "persisted".getBytes(StandardCharsets.UTF_8);
         ObjectId blob;
@@ -34,7 +34,7 @@ class FileNativeGitRepositoryFactoryTest {
     @Test
     void missingOpenDoesNotPreventCreationAndDuplicateCreatePreservesContents(@TempDir Path root) {
         RepositoryName name = RepositoryName.parse("team/repo");
-        try (NativeGitRepositoryFactory factory = new FileNativeGitRepositoryFactory(root)) {
+        try (NativeGitRepositoryBackend factory = new FileNativeGitRepositoryFactory(root)) {
             Result<NativeGitRepository> missing = factory.open(name);
             assertThat(missing).isInstanceOf(Result.Failure.class);
             assertThat(((Result.Failure<?>) missing).code()).isEqualTo(Result.FailureCode.NOT_FOUND);

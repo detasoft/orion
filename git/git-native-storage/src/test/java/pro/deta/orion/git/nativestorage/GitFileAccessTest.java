@@ -69,7 +69,7 @@ class GitFileAccessTest {
 
     @Test
     void streamsOneFileAndReusesUntouchedTrees() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("nested/keep", new byte[]{7});
@@ -89,7 +89,7 @@ class GitFileAccessTest {
 
     @Test
     void discardsWhenCallbackFailsAndLeavesBorrowedInputOpen() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             InputStream input = new ByteArrayInputStream(new byte[]{1}) {
                 @Override
@@ -112,7 +112,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsConcurrentUpdateAtApply() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "stale", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
@@ -130,7 +130,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsTruncatedInputWithoutPublishing() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             assertThatThrownBy(() -> repository.files().withAccess("main", "config", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 2, input(1));
@@ -151,7 +151,7 @@ class GitFileAccessTest {
                 output.write(block);
             }
         }
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory.resolve("repositories"))
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory.resolve("repositories"))
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "stream", GitCommitAuthor.EMPTY, access -> {
                 for (String name : List.of("first", "second")) {
@@ -172,7 +172,7 @@ class GitFileAccessTest {
 
     @Test
     void rejectsExplicitCreationWhenTheBranchAlreadyExists() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "winner", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 1, input(1));
@@ -192,7 +192,7 @@ class GitFileAccessTest {
     @ParameterizedTest
     @ValueSource(strings = {"main", "configuration"})
     void createsAnExplicitlyAbsentBranch(String branch) throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess(branch, null, "creation", GitCommitAuthor.EMPTY, access -> {
                 access.write("material.p12", FileMode.REGULAR_FILE, 1, input(1));
@@ -212,7 +212,7 @@ class GitFileAccessTest {
 
     @Test
     void streamsTheRequestedRevisionAfterTheBranchMoves() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, access -> {
                 access.write("orion.xml", FileMode.REGULAR_FILE, 3, input(1, 2, 3));
@@ -241,7 +241,7 @@ class GitFileAccessTest {
 
     @Test
     void returnsCallbackResultWithoutApplyingImplicitly() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             String result = repository.files().withAccess("main", "discard", GitCommitAuthor.EMPTY, access -> {
                 try (BufferedByteInputV2 input = input(1)) {

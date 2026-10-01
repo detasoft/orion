@@ -8,8 +8,8 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
@@ -35,8 +35,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrionAdminProxiesRouteTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final OrionDesiredState desired = new OrionDesiredState();
-    private final InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-    private final ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+    private final NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
+            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+    private final NativeGitRepositoryProvider backend = provider.provider();
     private final OrionAdminProxiesRoute route = new OrionAdminProxiesRoute(
             desired, provider, null, null, null, null, mapper);
     private final OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(

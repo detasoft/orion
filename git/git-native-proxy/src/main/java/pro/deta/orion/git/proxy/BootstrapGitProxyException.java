@@ -1,7 +1,7 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.git.client.GitClientFailure;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus;
 
 /** Keeps a stable proxy message and category, with the original cause available to error handlers. */
 final class BootstrapGitProxyException extends IllegalStateException {

@@ -9,9 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -45,7 +44,7 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void hidesInternalPackEvenFromReaderWithRepositoryGrant() throws Exception {
-        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(tempDir);
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.file(tempDir);
         NativeGitRepository repository = backend.create("team/project").valueOrFailure("repository");
         PublishedPackFixture pack = publishPack(repository);
         RecordingProvider provider = new RecordingProvider(backend);
@@ -63,8 +62,8 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void usesTheSameCanonicalNameForAuthorizationAndProviderRead() throws Exception {
-        FileNativeGitRepositoryProvider backend =
-                new FileNativeGitRepositoryProvider(tempDir);
+        NativeGitRepositoryProvider backend =
+                NativeGitRepositoryProvider.file(tempDir);
         NativeGitRepository repository = backend.create("team/project")
                 .valueOrFailure("repository");
         RecordingProvider provider = new RecordingProvider(backend);
@@ -94,7 +93,7 @@ class OrionGitPackfileRouteTest {
     @Test
     void rejectsInvalidPackIdentifier() throws Exception {
         OrionGitRoute route = gitRoute(
-                new FileNativeGitRepositoryProvider(tempDir));
+                NativeGitRepositoryProvider.file(tempDir));
         ResponseRecorder response = new ResponseRecorder();
 
         service(route,
@@ -110,8 +109,8 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void returnsNotFoundForMissingPack() throws Exception {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(tempDir);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(tempDir);
         provider.create("team/project").valueOrFailure("repository");
         OrionGitRoute route = gitRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
@@ -130,8 +129,8 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void rejectsReaderWithoutRepositoryGrant() throws Exception {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(tempDir);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(tempDir);
         NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         PublishedPackFixture pack = publishPack(repository);
@@ -153,7 +152,7 @@ class OrionGitPackfileRouteTest {
     @Test
     void rejectsInvalidRepositoryNamesBeforeProviderRead() throws Exception {
         RecordingProvider provider = new RecordingProvider(
-                new FileNativeGitRepositoryProvider(tempDir));
+                NativeGitRepositoryProvider.file(tempDir));
         OrionGitRoute route = gitRoute(provider);
         String packId = "a".repeat(40);
 
@@ -266,7 +265,7 @@ class OrionGitPackfileRouteTest {
         }
     }
 
-    private static final class RecordingProvider implements NativeGitRepositoryProvider {
+    private static final class RecordingProvider extends NativeGitRepositoryProvider {
         @Override
         public void close() {
             backend.close();

@@ -25,7 +25,7 @@ import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.client.GitUploadPackResult;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -66,7 +66,7 @@ class OrionGitHttpInteroperabilityTest {
             "git-v1,160", "git-v2,160", "jgit-v2,160"})
     @Execution(ExecutionMode.CONCURRENT)
     void discoversAndFetchesInitialAndUpdatedHistory(String engine, int divergence) throws Exception {
-        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory.resolve("server"));
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory.resolve("server"));
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         List<String> versions = new CopyOnWriteArrayList<>();
         AtomicInteger uploadRequests = new AtomicInteger();
@@ -180,7 +180,7 @@ class OrionGitHttpInteroperabilityTest {
             GitUploadPackClient client = new GitUploadPackClient(
                     new GitSmartHttpClientTransport(http, GitCredentials.none(), true));
             assertThat(client.discover(remote, GitClientOptions.defaults())).isInstanceOf(GitClientResult.Success.class);
-            FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(
+            NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(
                     Files.createTempDirectory(directory, "received-"));
             try (NativeGitRepository received = provider.create("copy").valueOrFailure("copy")) {
                 GitClientResult<GitUploadPackResult<PackMetadata>> result = client.fetch(

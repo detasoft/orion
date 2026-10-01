@@ -6,12 +6,10 @@ import pro.deta.orion.decision.Decision;
 import pro.deta.orion.git.client.GitSshClientTransport.HostKeyRejectedException;
 import java.util.function.BiFunction;
 import pro.deta.orion.decision.DecisionRequiredException;
-import jakarta.inject.Inject;
-import jakarta.inject.Named;
-import jakarta.inject.Singleton;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
@@ -42,13 +40,18 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Supplier;
 
-@Singleton
-public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
+/** Selects native, S3, and proxy repositories; its provider owns every opened handle. */
+public final class NativeGitRepositoryFactory implements NativeGitRepositoryBackend {
+    private boolean closed;
+
     @Override
     public synchronized void close() {
+        if (closed) return;
+        closed = true;
         try {
             for (ProxyNativeGitRepository repository : provisionalBindings.values()) repository.revoke();
             for (ProxyNativeGitRepository repository : activeBindings.values()) repository.revoke();
+            provider.close();
             backend.close();
         } finally {
             provisionalBindings.clear();
@@ -57,12 +60,14 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         }
     }
 
-    private final NativeGitRepositoryProvider backend;
+    private final NativeGitRepositoryBackend backend;
+    private final NativeGitRepositoryProvider provider;
     private final BootstrapGitTransportFactory transportFactory;
     private final BootstrapSecretResolver secretResolver;
     private final BootstrapGitFetcher fetcher;
     private final BootstrapGitPusher pusher;
-    private final ConcurrentMap<String, ProxyNativeGitRepository> provisionalBindings = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, ProxyNativeGitRepository> provisionalBindings =
+            new ConcurrentHashMap<>();
     private final ConcurrentMap<String, String> provisionalSources = new ConcurrentHashMap<>();
     private volatile Map<String, ProxyNativeGitRepository> activeBindings = Map.of();
     private volatile Map<RemoteAlias, ProxyNativeGitRepository> bootstrapOverrides = Map.of();
@@ -70,9 +75,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     private ConnectionFailureHandler connectionFailures;
     private BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions;
 
-    @Inject
-    public ProxyAwareNativeGitRepositoryProvider(
-            @Named("nativeRepositoryBackend") NativeGitRepositoryProvider backend) {
+    public NativeGitRepositoryFactory(NativeGitRepositoryBackend backend) {
         this(
                 backend,
                 new BootstrapSecretResolver(System.getenv()),
@@ -80,18 +83,18 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 new NativeBootstrapGitPusher());
     }
 
-    public static ProxyAwareNativeGitRepositoryProvider bootstrap(
-            NativeGitRepositoryProvider backend,
+    public static NativeGitRepositoryFactory bootstrap(
+            NativeGitRepositoryBackend backend,
             Map<String, String> environment) {
-        return new ProxyAwareNativeGitRepositoryProvider(
+        return new NativeGitRepositoryFactory(
                 backend,
                 new BootstrapSecretResolver(environment),
                 new NativeBootstrapGitFetcher(),
                 new NativeBootstrapGitPusher());
     }
 
-    ProxyAwareNativeGitRepositoryProvider(
-            NativeGitRepositoryProvider backend,
+    NativeGitRepositoryFactory(
+            NativeGitRepositoryBackend backend,
             BootstrapSecretResolver secretResolver,
             BootstrapGitFetcher fetcher,
             BootstrapGitPusher pusher) {
@@ -101,6 +104,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 this.secretResolver, this::bootstrapSections);
         this.fetcher = Objects.requireNonNull(fetcher, "fetcher");
         this.pusher = Objects.requireNonNull(pusher, "pusher");
+        provider = new NativeGitRepositoryProvider(this);
+    }
+
+    public NativeGitRepositoryProvider provider() {
+        return provider;
+    }
+
+    public NativeGitRepositoryBackend backend() {
+        return backend;
     }
 
     public synchronized void connectionFailures(ConnectionFailureHandler handler,
@@ -123,10 +135,12 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         String path = repositoryPath(source.getPath());
         if (BootstrapRepositorySources.CONFIGURATION.equals(id)) {
             ResourceLocation parsed = ResourceLocation.parse(location, "ACL repository");
-            if (parsed.scheme() instanceof ResourceScheme.File || parsed.scheme() instanceof ResourceScheme.Empty) {
+            if (parsed.scheme() instanceof ResourceScheme.File
+                    || parsed.scheme() instanceof ResourceScheme.Empty) {
                 if (parsed.uri().getRawAuthority() != null || parsed.uri().getRawQuery() != null
                         || parsed.uri().getRawFragment() != null) {
-                    throw new IllegalArgumentException("ACL file location must contain only a local repository path");
+                    throw new IllegalArgumentException(
+                            "ACL file location must contain only a local repository path");
                 }
                 Path directory = Path.of(parsed.pathOrSchemeSpecificPart("ACL repository path is required"))
                         .toAbsolutePath().normalize();
@@ -162,8 +176,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 : prepareLocal(id, location);
         String refName = remote ? remoteLocation.refName() : refName(source.selectedRef());
         try {
-            NativeGitRepository repository = backend.find(repositoryName)
-                    .valueOrFailure("Cannot open bootstrap repository");
+            NativeGitRepository repository = provider.openBacking(repositoryName, backend);
             String revision = repository.refs().get(refName);
             if (revision == null) {
                 if (allowMissing) {
@@ -223,7 +236,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         try {
             candidate = ProxyNativeGitRepositoryFactory.create(
                     repositoryName, location,
-                    backend,
+                    provider, backend,
                     transportFactory,
                     fetcher,
                     pusher);
@@ -231,6 +244,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (binding == null) {
                 binding = candidate;
             }
+            provider.bind(repositoryName, binding);
             binding.refresh();
             return repositoryName;
         } catch (RuntimeException error) {
@@ -247,7 +261,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     public SyncObservation syncObservation(GitProxyBinding binding, OrionDocument.SystemConfiguration system) {
         Objects.requireNonNull(binding, "proxy binding");
         ProxyNativeGitRepository proxy = bootstrapOverrides.get(binding.alias());
-        if (proxy == null) proxy = activeBindings.get(BootstrapGitLocation.persistent(binding, system).proxyName());
+        if (proxy == null) {
+            proxy = activeBindings.get(BootstrapGitLocation.persistent(binding, system).proxyName());
+        }
         return proxy == null ? new SyncObservation(SyncStatus.NOT_CHECKED, null) : proxy.syncObservation();
     }
 
@@ -285,7 +301,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (runtime == null) runtime = previousBindings.get(location.proxyName());
             if (runtime == null) {
                 runtime = ProxyNativeGitRepositoryFactory.create(location.proxyName(), location,
-                        backend,
+                        provider, backend,
                         persistent, fetcher, pusher);
             }
             addActiveBinding(candidate, binding, runtime);
@@ -352,7 +368,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             }
             if (!adopted.containsAll(provisionalBindings.keySet())) {
                 if (!retainInternalBootstrapSources) {
-                    throw new IllegalStateException("Bootstrap proxy sources must be adopted before activation");
+                    throw new IllegalStateException(
+                            "Bootstrap proxy sources must be adopted before activation");
                 }
                 for (Map.Entry<String, ProxyNativeGitRepository> entry : provisionalBindings.entrySet()) {
                     if (!adopted.contains(entry.getKey())) {
@@ -370,7 +387,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (runtime == null) runtime = candidate.get(location.proxyName());
             if (runtime == null) {
                 runtime = ProxyNativeGitRepositoryFactory.create(location.proxyName(), location,
-                        backend, persistent, fetcher, pusher);
+                        provider, backend, persistent, fetcher, pusher);
                 try {
                     runtime.refresh();
                 } catch (BootstrapGitProxyException failure) {
@@ -406,11 +423,18 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             }
         }
         activeBindings = Map.copyOf(candidate);
+        for (String name : previous.keySet()) {
+            if (!candidate.containsKey(name)) provider.unbind(name);
+        }
+        for (Map.Entry<String, ProxyNativeGitRepository> entry : candidate.entrySet()) {
+            provider.bind(entry.getKey(), entry.getValue());
+        }
     }
 
     private void addActiveBinding(Map<String, ProxyNativeGitRepository> candidate,
             GitProxyBinding configured, ProxyNativeGitRepository runtime) {
-        if (backend.exists(configured.publicRepositoryName())) {
+        if (provider.backingExists(configured.publicRepositoryName())
+                || backend.exists(RepositoryName.parse(configured.publicRepositoryName()))) {
             throw new IllegalArgumentException("Proxy endpoint repository already exists");
         }
         if (candidate.containsKey(runtime.repositoryName())) {
@@ -446,7 +470,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     public synchronized OrionDocument adoptProvisional(OrionDocument document, ConfigurationSecrets secrets) {
         Objects.requireNonNull(document, "document");
         Objects.requireNonNull(secrets, "secrets");
-        if (activePhase) throw new IllegalStateException("Bootstrap proxy adoption requires the provisional phase");
+        if (activePhase) {
+            throw new IllegalStateException("Bootstrap proxy adoption requires the provisional phase");
+        }
         secrets.validate(document);
         OrionDocument candidate = document;
         for (Map.Entry<String, String> source : new java.util.TreeMap<>(provisionalSources).entrySet()) {
@@ -455,7 +481,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             BootstrapGitLocation location = runtime.location();
             boolean sameUpstream = false;
             for (GitProxyBinding binding : candidate.system().proxies()) {
-                if (BootstrapGitLocation.persistent(binding, candidate.system()).proxyName().equals(location.proxyName())) {
+                if (BootstrapGitLocation.persistent(binding, candidate.system()).proxyName()
+                        .equals(location.proxyName())) {
                     sameUpstream = true;
                 }
             }
@@ -463,12 +490,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                     && sourceBinding(candidate, source.getKey(), location) != null) continue;
             RemoteAlias alias = new RemoteAlias(source.getKey());
             for (GitProxyBinding binding : candidate.system().proxies()) {
-                if (binding.alias().equals(alias)) throw new IllegalArgumentException("Bootstrap proxy alias is occupied");
+                if (binding.alias().equals(alias)) {
+                    throw new IllegalArgumentException("Bootstrap proxy alias is occupied");
+                }
             }
             Optional<String> secret = location.credentialKind() == GitCredentialKind.NONE
                     ? Optional.empty() : Optional.of(alias.value() + "-credential");
             if (secret.isPresent()) {
-                try (BootstrapSecret value = secretResolver.resolve("Remote Git credential", location.credentialReference())) {
+                try (BootstrapSecret value = secretResolver.resolve(
+                        "Remote Git credential", location.credentialReference())) {
                     candidate = secrets.createSystem(candidate, secret.orElseThrow(), value.copy());
                 }
             }
@@ -476,9 +506,10 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             GitProxyBinding.Source transport;
             if ("ssh".equals(location.remoteUri().getScheme())) {
                 String name = alias.value() + "-ssh";
-                connections.add(Connection.Ssh.fromUpstream(name, location.remoteUri(), location.credentialKind(),
-                        secret, location.knownHosts()));
-                transport = new GitProxyBinding.Ssh(new ConnectionReference(ConnectionReference.Scope.SYSTEM, name),
+                connections.add(Connection.Ssh.fromUpstream(name, location.remoteUri(),
+                        location.credentialKind(), secret, location.knownHosts()));
+                transport = new GitProxyBinding.Ssh(
+                        new ConnectionReference(ConnectionReference.Scope.SYSTEM, name),
                         location.remoteUri().getRawPath());
             } else {
                 transport = new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), secret,
@@ -487,8 +518,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             List<GitProxyBinding> bindings = new ArrayList<>(candidate.system().proxies());
             bindings.add(new GitProxyBinding(alias, transport, location.refName()));
             OrionDocument.SystemConfiguration system = candidate.system();
-            candidate = new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
-                    system.secrets(), bindings, connections), candidate.organizations());
+            candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
+                    system.accessControl(), system.https(), system.secrets(), bindings, connections),
+                    candidate.organizations());
         }
         return candidate;
     }
@@ -518,7 +550,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             Connection.Ssh replacement = Connection.Ssh.fromUpstream(previous.name(), location.remoteUri(),
                     previous.credentialKind(), previous.secret(), transportFactory.knownHosts(location));
             return new BootstrapChange(binding, new GitProxyBinding(binding.alias(),
-                    new GitProxyBinding.Ssh(ssh.connection(), location.remoteUri().getRawPath()), location.refName()),
+                    new GitProxyBinding.Ssh(ssh.connection(), location.remoteUri().getRawPath()),
+                    location.refName()),
                     Optional.of(previous), Optional.of(replacement));
         }
         GitProxyBinding replacement = new GitProxyBinding(binding.alias(),
@@ -533,7 +566,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (binding.alias().value().equals(sourceId)) return binding;
         }
         for (GitProxyBinding binding : document.system().proxies()) {
-            if (BootstrapGitLocation.persistent(binding, document.system()).proxyName().equals(location.proxyName())) return binding;
+            if (BootstrapGitLocation.persistent(binding, document.system()).proxyName()
+                    .equals(location.proxyName())) return binding;
         }
         return null;
     }
@@ -543,7 +577,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         for (Map.Entry<String, String> source : provisionalSources.entrySet()) {
             String section = bootstrapSection(source.getKey());
             ProxyNativeGitRepository repository = provisionalBindings.get(source.getValue());
-            if (section != null && repository != null && repository.location().equals(location)) sections.add(section);
+            if (section != null && repository != null && repository.location().equals(location)) {
+                sections.add(section);
+            }
         }
         sections.sort(String::compareTo);
         return sections;
@@ -566,7 +602,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         if (previous != null && !previous.equals(repositoryName)) {
             throw new IllegalStateException("Bootstrap source is already bound: " + sourceId);
         }
-        ProxyNativeGitRepositoryFactory.openOrCreate(repositoryName, backend);
+        provider.openBacking(repositoryName, backend);
         return repositoryName;
     }
 
@@ -600,47 +636,54 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     @Override
+    public boolean visible(RepositoryName repositoryName) {
+        return !isBootstrapCache(repositoryName.value()) && !isProxyEndpoint(repositoryName.value());
+    }
+
+    @Override
+    public boolean retainedAvailable(RepositoryName repositoryName) {
+        String name = repositoryName.value();
+        return !isBootstrapCache(name) && !isProxyEndpoint(name) || binding(name) != null;
+    }
+
+    @Override
     public boolean isPublicRepositoryName(String repositoryName) {
         String name = repositoryName(repositoryName);
         return !isBootstrapCache(name) && (!isProxyEndpoint(name) || activeBindings.containsKey(name));
     }
 
     @Override
-    public boolean exists(String repositoryName) {
-        String canonicalName = repositoryName(repositoryName);
+    public boolean exists(RepositoryName repositoryName) {
+        String canonicalName = repositoryName.value();
         ProxyNativeGitRepository proxy = binding(canonicalName);
         if (proxy != null) {
-            return backend.exists(proxy.repositoryName());
+            return provider.backingExists(proxy.repositoryName());
         }
         return !isBootstrapCache(canonicalName) && !isProxyEndpoint(canonicalName)
-                && backend.exists(canonicalName);
+                && backend.exists(repositoryName);
     }
 
     @Override
-    public Result<NativeGitRepository> find(String repositoryName) {
-        return openRepository(repositoryName);
+    public Result<NativeGitRepository> open(RepositoryName repositoryName) {
+        return openRepository(repositoryName.value());
     }
 
     @Override
-    public Result<NativeGitRepository> create(String repositoryName) {
-        String canonicalName = repositoryName(repositoryName);
+    public Result<NativeGitRepository> create(RepositoryName repositoryName) {
+        String canonicalName = repositoryName.value();
         if (isBootstrapCache(canonicalName)) {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal");
         }
         if (isProxyEndpoint(canonicalName)) {
             return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Proxy endpoints require a binding");
         }
-        return backend.create(canonicalName);
+        return backend.create(repositoryName);
     }
 
     @Override
-    public Result<NativeGitRepository> openForRead(String repositoryName) {
-        return openRepository(repositoryName);
-    }
-
-    @Override
-    public Result<NativeGitRepository> openForWrite(String repositoryName) {
-        return openRepository(repositoryName);
+    public Result<NativeGitRepository> reuse(RepositoryName name, NativeGitRepository repository) {
+        if (repository instanceof ProxyNativeGitRepository) return openRepository(name.value());
+        return new Result.Success<>(repository);
     }
 
     private Result<NativeGitRepository> openRepository(String repositoryName) {
@@ -650,17 +693,17 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             if (isBootstrapCache(canonicalName) || isProxyEndpoint(canonicalName)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Bootstrap binding is unavailable");
             }
-            return backend.find(canonicalName);
+            return backend.open(RepositoryName.parse(canonicalName));
         }
         proxy.refresh();
-        return switch (backend.find(proxy.repositoryName())) {
-            case Result.Success<NativeGitRepository> ignored -> new Result.Success<>(proxy);
-            case Result.Failure<NativeGitRepository> failure -> failure;
-        };
+        return provider.backingExists(proxy.repositoryName())
+                ? new Result.Success<>(proxy)
+                : new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Proxy cache is unavailable");
     }
 
     private static boolean isBootstrapCache(String repositoryName) {
-        return repositoryName.equals("bootstrap") || repositoryName.startsWith(BootstrapGitLocation.CACHE_PREFIX);
+        return repositoryName.equals("bootstrap")
+                || repositoryName.startsWith(BootstrapGitLocation.CACHE_PREFIX);
     }
 
     private static boolean isProxyEndpoint(String repositoryName) {

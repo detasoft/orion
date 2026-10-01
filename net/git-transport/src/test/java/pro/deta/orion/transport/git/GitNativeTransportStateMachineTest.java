@@ -8,9 +8,8 @@ import com.sun.management.UnixOperatingSystemMXBean;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
@@ -57,7 +56,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(false),
                 new DefaultGitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        NativeGitRepositoryProvider.inMemory()));
 
         service.onStart();
 
@@ -70,7 +69,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        NativeGitRepositoryProvider.inMemory()));
 
         try {
             service.onStart();
@@ -88,7 +87,7 @@ class GitNativeTransportStateMachineTest {
     void occupiedPortFailureCanBeStoppedAndStartedAfterThePortIsReleased() throws Exception {
         GitTransportConfig config = config(true);
         GitNativeTransportService service = new GitNativeTransportService(
-                config, new DefaultGitNativeRepositoryService(new InMemoryNativeGitRepositoryProvider()));
+                config, new DefaultGitNativeRepositoryService(NativeGitRepositoryProvider.inMemory()));
 
         try {
             try (ServerSocket occupied = new ServerSocket()) {
@@ -126,7 +125,7 @@ class GitNativeTransportStateMachineTest {
         UnixOperatingSystemMXBean unix = (UnixOperatingSystemMXBean) operatingSystem;
         GitTransportConfig config = config(true);
         GitNativeTransportService service = new GitNativeTransportService(
-                config, new DefaultGitNativeRepositoryService(new InMemoryNativeGitRepositoryProvider()));
+                config, new DefaultGitNativeRepositoryService(NativeGitRepositoryProvider.inMemory()));
 
         try (ServerSocket occupied = new ServerSocket()) {
             occupied.bind(new InetSocketAddress("127.0.0.1", 0));
@@ -211,7 +210,7 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
                 new DefaultGitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        NativeGitRepositoryProvider.inMemory()));
 
         try (ConnectionFailureLogCapture logs = new ConnectionFailureLogCapture()) {
             service.onStart();
@@ -472,14 +471,14 @@ class GitNativeTransportStateMachineTest {
     }
 
     private static final class RecordingNativeGitRepositoryProvider
-            implements NativeGitRepositoryProvider {
+            extends NativeGitRepositoryProvider {
         @Override
         public void close() {
             delegate.close();
         }
 
-        private final InMemoryNativeGitRepositoryProvider delegate =
-                new InMemoryNativeGitRepositoryProvider();
+        private final NativeGitRepositoryProvider delegate =
+                NativeGitRepositoryProvider.inMemory();
         private final CountDownLatch handled;
         private final AtomicBoolean virtualThread;
 
@@ -489,6 +488,11 @@ class GitNativeTransportStateMachineTest {
             this.handled = handled;
             this.virtualThread = virtualThread;
             delegate.create("repo");
+        }
+
+        @Override
+        public boolean isPublicRepositoryName(String repositoryName) {
+            return delegate.isPublicRepositoryName(repositoryName);
         }
 
         @Override

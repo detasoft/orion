@@ -16,7 +16,7 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminCreateRepositoryRouteTest {
-    private final InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+    private final NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
             provider, StorageManagementFixture.create(provider, organizationDocument().organizations()),
             new ObjectMapper());

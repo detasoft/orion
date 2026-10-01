@@ -210,7 +210,7 @@ class NativeGitReceivePackTest {
     }
 
     private static NativeGitRepository repository() {
-        return new InMemoryNativeGitRepositoryProvider().create("demo").valueOrFailure("repository");
+        return NativeGitRepositoryProvider.inMemory().create("demo").valueOrFailure("repository");
     }
 
     private static FileTestSupport.Prepared prepare(NativeGitRepository repository, String value)

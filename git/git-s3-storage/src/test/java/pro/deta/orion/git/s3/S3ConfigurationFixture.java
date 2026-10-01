@@ -1,7 +1,8 @@
 package pro.deta.orion.git.s3;
 
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -24,6 +25,7 @@ import pro.deta.orion.schema.orion.v2.S3StorageBinding;
 import pro.deta.orion.schema.orion.v2.TeamId;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -36,12 +38,18 @@ final class S3ConfigurationFixture implements AutoCloseable {
                     ORGANIZATION, "", List.of(), List.of(), List.of(), List.of(new OrionDocument.Team(
                     new TeamId("dev"), "", List.of(), List.of(), List.of())), List.of(), List.of(), List.of(), List.of()))));
     final S3Transport transport = new S3Transport();
-    final InMemoryNativeGitRepositoryProvider local = new InMemoryNativeGitRepositoryProvider();
-    final ConfiguredNativeGitRepositoryProvider provider = new ConfiguredNativeGitRepositoryProvider(local, transport);
+    final Path localRoot;
+    final NativeGitRepositoryProvider local;
+    final ConfiguredNativeGitRepositoryFactory factory;
+    final NativeGitRepositoryProvider provider;
     final KeyMaterialService material;
     final ConfigurationSecrets secrets;
 
-    S3ConfigurationFixture() throws Exception {
+    S3ConfigurationFixture(Path directory) throws Exception {
+        localRoot = directory.resolve("local-repositories");
+        local = NativeGitRepositoryProvider.file(localRoot);
+        factory = new ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend.file(localRoot), transport);
+        provider = new NativeGitRepositoryProvider(factory);
         KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(new KeyMaterialAlias("configuration-v1"),
                 KeyMaterialPurpose.CONFIGURATION_CIPHER, KeyMaterialAlgorithm.AES, new KeyMaterialVersion(1),
                 KeyMaterialScope.cluster("test"));
@@ -52,7 +60,7 @@ final class S3ConfigurationFixture implements AutoCloseable {
         material.save();
         secrets = new ConfigurationSecrets(current::get,
                 KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor));
-        provider.activate(current::get, secrets, ignored -> false);
+        factory.activate(current::get, secrets, ignored -> false);
     }
 
     void connection(boolean system, String name, String endpoint, String region, String id, String key, String token) {
@@ -114,7 +122,15 @@ final class S3ConfigurationFixture implements AutoCloseable {
             provider.close();
             transport.close();
         } finally {
-            material.close();
+            try {
+                local.close();
+            } finally {
+                try {
+                    transport.close();
+                } finally {
+                    material.close();
+                }
+            }
         }
     }
 }

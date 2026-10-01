@@ -13,7 +13,7 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -53,7 +53,7 @@ class NativeBootstrapGitPackReplayTest {
         for (boolean upstreamHasBase : List.of(true, false)) {
             Path bare = directory.resolve("upstream-" + upstreamHasBase + ".git");
             NativeGitRepository repository = disk
-                    ? new FileNativeGitRepositoryProvider(directory.resolve("cache-" + upstreamHasBase))
+                    ? NativeGitRepositoryProvider.file(directory.resolve("cache-" + upstreamHasBase))
                             .create("proxy").valueOrFailure("repository")
                     : NativeGitRepository.createInMemory(RepositoryName.parse("proxy"));
             byte[] base = new byte[8192];

@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,7 +22,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
@@ -83,7 +84,7 @@ class S3GitTransportIT {
                     });
                 }
             }
-            try (S3NativeGitRepositoryProvider reopened = provider(minio); Http server = new Http(reopened);
+            try (NativeGitRepositoryProvider reopened = provider(minio); Http server = new Http(reopened);
                  Git clone = Git.cloneRepository().setURI(server.url())
                          .setDirectory(directory.resolve("reopened").toFile()).call()) {
                 assertThat(Files.readString(directory.resolve("reopened/file.txt"))).isEqualTo(updated);
@@ -102,8 +103,8 @@ class S3GitTransportIT {
         }
     }
 
-    private static S3NativeGitRepositoryProvider provider(MinioS3TestServer server) {
-        return new S3NativeGitRepositoryProvider("s3://" + server.bucketName() + "/repos", server.endpoint(),
+    private static NativeGitRepositoryProvider provider(MinioS3TestServer server) {
+        return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/repos", server.endpoint(),
                 Map.of("accessKeyId", server.accessKeyId(), "secretAccessKey", "env:SECRET"),
                 Map.of("SECRET", server.secretAccessKey()));
     }

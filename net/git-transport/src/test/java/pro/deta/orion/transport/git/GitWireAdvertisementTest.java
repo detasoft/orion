@@ -2,8 +2,7 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
@@ -19,10 +18,10 @@ class GitWireAdvertisementTest {
 
     @Test
     void advertisesRefsFromFileBackedRepositoryProvider(@TempDir Path rootDirectory) throws Exception {
-        FileNativeGitRepositoryProvider firstProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider firstProvider = NativeGitRepositoryProvider.file(rootDirectory);
         NativeGitRepository repository = createRepository(firstProvider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
-        FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider secondProvider = NativeGitRepositoryProvider.file(rootDirectory);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(secondProvider);
 
         GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("demo"));
@@ -33,7 +32,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void advertisesHeadFirstAndSortsRepositoryRefs() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/tags/v1", NULL_ID, TAG_ID);
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
@@ -66,7 +65,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void keepsUnbornHeadTargetWhenAnotherBranchExists() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -81,7 +80,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void omitsEachDisabledUploadPackCapabilityWithoutReorderingOthers() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepositoryProvider provider = providerWithMainRef();
         List<UploadCapabilityCase> cases = List.of(
                 new UploadCapabilityCase(
                         uploadConfiguration(false, true, true, true, true, true),
@@ -196,7 +195,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void advertisesReceivePackRefsAndCapabilities() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = createRepository(provider, "demo");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -221,7 +220,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void omitsEachDisabledReceivePackCapabilityWithoutReorderingOthers() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepositoryProvider provider = providerWithMainRef();
         List<ReceiveCapabilityCase> cases = List.of(
                 new ReceiveCapabilityCase(
                         receiveConfiguration(false, true, true, true, true),
@@ -289,7 +288,7 @@ class GitWireAdvertisementTest {
 
     @Test
     void advertisesEmptyReceivePackRepositoryWithPseudoRef() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
         GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("demo"));

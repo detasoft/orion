@@ -2,7 +2,7 @@ package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.OrionConfiguration;
@@ -183,7 +183,7 @@ class TransportLifecycleStateMachineTest {
             super(
                     configuration.getTransport().getGit(),
                     new DefaultGitNativeRepositoryService(
-                            new InMemoryNativeGitRepositoryProvider()));
+                            NativeGitRepositoryProvider.inMemory()));
             enabled = configuration.getTransport().getGit().isEnabled();
         }
 

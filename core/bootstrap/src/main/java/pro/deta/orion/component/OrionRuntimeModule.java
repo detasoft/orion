@@ -28,12 +28,12 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.BootstrapChange;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.BootstrapChange;
 import pro.deta.orion.git.proxy.ProxySshConnection;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.orion.v2.Connection;
-import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -71,8 +71,8 @@ public class OrionRuntimeModule {
     @Provides
     @Named("bootstrap-proxies")
     static Runnable bootstrapProxies(OrionConfigurationStorage storage,
-            ConfiguredNativeGitRepositoryProvider configured, BootstrapRepositorySources sources,
-            ProxyAwareNativeGitRepositoryProvider provider, ConfigurationCipherCapability cipher,
+            ConfiguredNativeGitRepositoryFactory configured, BootstrapRepositorySources sources,
+            NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
             ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
@@ -225,8 +225,8 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    static NativeGitRepositoryProvider nativeGitRepositoryProvider(ProxyAwareNativeGitRepositoryProvider provider) {
-        return provider;
+    static NativeGitRepositoryProvider nativeGitRepositoryProvider(NativeGitRepositoryFactory provider) {
+        return provider.provider();
     }
 
     @Provides

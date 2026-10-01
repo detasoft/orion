@@ -11,7 +11,7 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.config.*;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
@@ -31,7 +31,7 @@ class ConfiguredStorageManagementTest {
     private final OrionDesiredState desired = new OrionDesiredState();
     private final MemoryStorage storage = new MemoryStorage();
     private final OrganizationId organization = new OrganizationId("acme");
-    private final InMemoryNativeGitRepositoryProvider repositories = new InMemoryNativeGitRepositoryProvider();
+    private final NativeGitRepositoryProvider repositories = NativeGitRepositoryProvider.inMemory();
     private KeyMaterialService material;
     private ConfigurationCipherCapability cipher;
     private ConfiguredStorageManagement management;

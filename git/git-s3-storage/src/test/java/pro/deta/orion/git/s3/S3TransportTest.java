@@ -1,5 +1,6 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -37,9 +38,9 @@ class S3TransportTest {
         try (Server first = new Server(entered, release); Server second = new Server(entered, release);
              S3Transport transport = new S3Transport();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            S3NativeGitRepositoryProvider one = provider(transport, first, "one", "eu-west-1");
+            NativeGitRepositoryProvider one = provider(transport, first, "one", "eu-west-1");
             Server selected = sameEndpoint ? first : second;
-            S3NativeGitRepositoryProvider two = provider(transport, selected, "two", "ap-south-1");
+            NativeGitRepositoryProvider two = provider(transport, selected, "two", "ap-south-1");
             Future<Boolean> a = executor.submit(() -> one.exists("repo"));
             Future<Boolean> b = executor.submit(() -> two.exists("repo"));
             try {
@@ -63,9 +64,9 @@ class S3TransportTest {
     void everyPaginatorPageAndPutCarryRequestOverrides() throws Exception {
         try (Server server = new Server(new CountDownLatch(0), new CountDownLatch(0));
              S3Transport transport = new S3Transport()) {
-            S3NativeGitRepositoryProvider provider = provider(transport, server, "pager", "eu-central-1");
-            provider.create("new").valueOrFailure("create metadata").close();
-            assertThat(provider.repositoryNames()).isEmpty();
+            NativeGitRepositoryProvider provider = provider(transport, server, "pager", "eu-central-1");
+            provider.create("new").valueOrFailure("create metadata");
+            assertThat(provider.repositoryNames()).containsExactly("new");
             assertThat(server.requests).hasSize(5);
             for (Request request : server.requests) assertRequest(request, "pager", "eu-central-1");
             assertThat(server.requests.get(0).method()).isEqualTo("PUT");
@@ -81,7 +82,7 @@ class S3TransportTest {
         CountDownLatch release = new CountDownLatch(1);
         try (Server server = new Server(entered, release); S3Transport transport = new S3Transport();
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            S3NativeGitRepositoryProvider provider = provider(transport, server, "owner", "us-east-1");
+            NativeGitRepositoryProvider provider = provider(transport, server, "owner", "us-east-1");
             Future<Boolean> request = executor.submit(() -> provider.exists("repo"));
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
             CountDownLatch closing = new CountDownLatch(1);
@@ -114,7 +115,7 @@ class S3TransportTest {
         }
     }
 
-    private static S3NativeGitRepositoryProvider provider(S3Transport transport, Server server,
+    private static NativeGitRepositoryProvider provider(S3Transport transport, Server server,
             String id, String region) {
         return transport.repositories("s3://bucket/prefix", server.endpoint(), region, false,
                 Optional.of(StaticCredentialsProvider.create(AwsSessionCredentials.create(id, "secret", id + "-token"))));

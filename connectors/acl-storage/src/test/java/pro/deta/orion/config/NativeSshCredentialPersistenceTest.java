@@ -4,7 +4,7 @@ import pro.deta.orion.internal.UserEmail;
 
 
 
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import java.io.ByteArrayOutputStream;
 import java.util.Optional;
@@ -37,8 +37,8 @@ class NativeSshCredentialPersistenceTest {
 
     @Test
     void activatesAndReloadsANewKeyWithoutChangingOtherFiles() throws Exception {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(root);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(root);
         NativeGitRepository repository = provider.create("acl").valueOrFailure("create repository");
         ResolvedBootstrapSource source = new ResolvedBootstrapSource(
                 "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",

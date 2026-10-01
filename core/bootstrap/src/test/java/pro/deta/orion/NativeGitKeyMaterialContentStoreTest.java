@@ -5,13 +5,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
@@ -89,7 +88,7 @@ class NativeGitKeyMaterialContentStoreTest {
 
     @Test
     void rejectsAnUpdateCommittedBetweenPreparationAndPublication() throws Exception {
-        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
         repository.files().withAccess(REF, "seed repository", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write(MATERIAL_PATH, bytes("initial"));
@@ -135,15 +134,15 @@ class NativeGitKeyMaterialContentStoreTest {
             // Bare fixture is ready.
         }
 
-        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+        NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
         BootstrapSourceConfig source = new BootstrapSourceConfig();
         source.setLocation("git+" + bare.toUri());
         source.setRef(REF);
         source.setPath(MATERIAL_PATH);
-        ResolvedBootstrapSource resolved = provider.resolveProvisional("material", source, true);
+        ResolvedBootstrapSource resolved = factory.resolveProvisional("material", source, true);
         NativeGitKeyMaterialContentStore store = new NativeGitKeyMaterialContentStore(
-                provider,
+                factory.provider(),
                 resolved.repositoryName().orElseThrow(),
                 resolved.refName(),
                 resolved.path());
@@ -165,8 +164,9 @@ class NativeGitKeyMaterialContentStoreTest {
     }
 
     private static Fixture fixture(Map<String, byte[]> initialFiles) throws Exception {
-        NativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = backend.create(REPOSITORY).valueOrFailure("create repository");
+        NativeGitRepositoryFactory factory = new NativeGitRepositoryFactory(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
+        NativeGitRepository repository = factory.provider().create(REPOSITORY).valueOrFailure("create repository");
         repository.files().withAccess(REF, "seed repository", GitCommitAuthor.EMPTY, fileAccess -> {
             for (Map.Entry<String, byte[]> fileEntry : initialFiles.entrySet()) {
                 fileAccess.write(fileEntry.getKey(), fileEntry.getValue());
@@ -174,8 +174,7 @@ class NativeGitKeyMaterialContentStoreTest {
             fileAccess.apply();
             return null;
         });
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
-        return new Fixture(repository, provider);
+        return new Fixture(repository, factory.provider());
     }
 
     private static byte[] bytes(String value) {
@@ -190,7 +189,7 @@ class NativeGitKeyMaterialContentStoreTest {
         }
     }
 
-    private static final class InterleavingProvider implements NativeGitRepositoryProvider {
+    private static final class InterleavingProvider extends NativeGitRepositoryProvider {
         @Override
         public void close() {
             delegate.close();

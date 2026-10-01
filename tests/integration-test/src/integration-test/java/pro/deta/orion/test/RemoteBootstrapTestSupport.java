@@ -47,8 +47,8 @@ final class RemoteBootstrapTestSupport {
                 .tlsCapability(context.tlsKeyMaterial())
                 .sshHostKeyCapability(context.sshHostKeys())
                 .configurationCipherCapability(context.configurationCipher())
-                .nativeGitRepositoryProvider(context.repositoryProvider())
-                .configuredRepositoryProvider(context.storageProvider())
+                .nativeGitRepositoryProvider(context.repositoryFactory())
+                .configuredRepositoryFactory(context.storageFactory())
                 .s3Transport(context.s3Transport())
                 .bootstrapRepositorySources(context.repositorySources())
                 .build();

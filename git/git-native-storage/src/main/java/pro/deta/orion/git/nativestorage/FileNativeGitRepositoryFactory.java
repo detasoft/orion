@@ -19,7 +19,7 @@ import java.util.Objects;
 import java.util.Properties;
 
 /** File layout and metadata for opening native repositories, without an instance registry. */
-final class FileNativeGitRepositoryFactory implements NativeGitRepositoryFactory {
+final class FileNativeGitRepositoryFactory implements NativeGitRepositoryBackend {
     private static final String DEFAULT_HEAD = "refs/heads/main";
     private static final String METADATA_FILE = "orion-native-repository.properties";
     private static final String NAME_PROPERTY = "name";

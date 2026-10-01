@@ -18,9 +18,8 @@ import org.eclipse.jgit.transport.RefSpec;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.client.GitTransportScheme;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.workflow.GitCapability;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
@@ -266,7 +265,7 @@ final class OrionGitServer implements GitServer {
     private void start(Path requestedRoot) {
         root = requestedRoot;
         storageRoot = root.resolve(".orion-native-storage");
-        provider = new FileNativeGitRepositoryProvider(storageRoot);
+        provider = NativeGitRepositoryProvider.file(storageRoot);
         if (transport != GIT) {
             try {
                 startAllowAllTransport();

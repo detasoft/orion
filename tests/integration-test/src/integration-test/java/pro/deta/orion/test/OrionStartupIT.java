@@ -19,9 +19,8 @@ import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -376,7 +375,7 @@ class OrionStartupIT {
     }
 
     private static NativeGitRepositoryProvider repositoryProvider(Path orionRoot) {
-        return new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"));
+        return NativeGitRepositoryProvider.file(orionRoot.resolve("repos"));
     }
 
     private static byte[] readFileFromRepository(Path repositoryPath, String filePath) throws IOException {

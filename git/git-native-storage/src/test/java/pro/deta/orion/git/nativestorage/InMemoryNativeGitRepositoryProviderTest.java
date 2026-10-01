@@ -9,8 +9,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class InMemoryNativeGitRepositoryProviderTest {
     @Test
     void canonicalizesNamesBeforeLookupAndCollisionChecks() {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory();
 
         NativeGitRepository created = provider.create("team%2Frepo")
                 .valueOrFailure("repository");
@@ -25,8 +25,8 @@ class InMemoryNativeGitRepositoryProviderTest {
 
     @Test
     void rejectsInvalidNamesBeforeAccessingStorage() {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory();
 
         assertThatThrownBy(() -> provider.exists("Repo"))
                 .isInstanceOf(IllegalArgumentException.class);

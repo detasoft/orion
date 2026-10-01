@@ -1,7 +1,9 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
@@ -12,6 +14,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -26,12 +29,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Timeout(120)
 class S3NativeGitRepositoryProviderIT {
+    @TempDir
+    Path directory;
     @Test
     void persistsMetadataAcrossProvidersAndOpensEmptyRepositories() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider first = provider(server, "repos");
-             S3NativeGitRepositoryProvider second = provider(server, "repos");
-             S3NativeGitRepositoryProvider isolated = provider(server, "repos/nested")) {
+             NativeGitRepositoryProvider first = provider(server, "repos");
+             NativeGitRepositoryProvider second = provider(server, "repos");
+             NativeGitRepositoryProvider isolated = provider(server, "repos/nested")) {
             assertThat(first.repositoryNames()).isEmpty();
             assertThat(first.exists("team/repo")).isFalse();
             assertFailure(first.find("team/repo"), Result.FailureCode.NOT_FOUND);
@@ -39,26 +44,24 @@ class S3NativeGitRepositoryProviderIT {
             assertThat(created.name()).isEqualTo("team/repo");
             assertThat(created.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
             assertThat(created.refs()).isEmpty();
-            created.close();
             assertFailure(second.create("team/repo"), Result.FailureCode.FILE_ALREADY_EXISTS);
             assertThat(second.exists("team/repo")).isTrue();
-            try (NativeGitRepository reopened = second.find("team/repo").valueOrFailure("reopen")) {
-                assertThat(reopened.name()).isEqualTo("team/repo");
-                assertThat(reopened.index().getHEAD())
-                        .isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
-            }
-            first.create("alpha").valueOrFailure("create alpha").close();
+            NativeGitRepository opened = second.find("team/repo").valueOrFailure("reopen");
+            assertThat(opened.name()).isEqualTo("team/repo");
+            assertThat(opened.index().getHEAD())
+                    .isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
+            first.create("alpha").valueOrFailure("create alpha");
             assertThat(second.repositoryNames()).containsExactly("alpha", "team/repo");
             assertThat(isolated.repositoryNames()).isEmpty();
             assertThat(isolated.exists("team/repo")).isFalse();
-            isolated.create("team/repo").valueOrFailure("isolated create").close();
+            isolated.create("team/repo").valueOrFailure("isolated create");
             assertThat(isolated.repositoryNames()).containsExactly("team/repo");
             assertThat(first.repositoryNames()).containsExactly("alpha", "team/repo");
             first.close();
             first.close();
             assertThatThrownBy(first::repositoryNames).isInstanceOf(IllegalStateException.class);
             assertThat(second.exists("alpha")).isTrue();
-            try (S3NativeGitRepositoryProvider reopened = provider(server, "repos/")) {
+            try (NativeGitRepositoryProvider reopened = provider(server, "repos/")) {
                 assertThat(reopened.repositoryNames()).containsExactly("alpha", "team/repo");
             }
         }
@@ -67,8 +70,8 @@ class S3NativeGitRepositoryProviderIT {
     @Test
     void competingProvidersCreateExactlyOneRepository() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider first = provider(server, "repos");
-             S3NativeGitRepositoryProvider second = provider(server, "repos");
+             NativeGitRepositoryProvider first = provider(server, "repos");
+             NativeGitRepositoryProvider second = provider(server, "repos");
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             CountDownLatch ready = new CountDownLatch(2);
             CountDownLatch start = new CountDownLatch(1);
@@ -102,13 +105,13 @@ class S3NativeGitRepositoryProviderIT {
     @Test
     void missingBucketAndDeniedAccessAreFailuresNotMissingRepositories() {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider missingBucket = new S3NativeGitRepositoryProvider(
+             NativeGitRepositoryProvider missingBucket = S3NativeGitRepositoryFactory.repositories(
                      "s3://missing-" + UUID.randomUUID() + "/repos", server.endpoint(),
                      auth(server), environment(server));
-             S3NativeGitRepositoryProvider denied = new S3NativeGitRepositoryProvider(
+             NativeGitRepositoryProvider denied = S3NativeGitRepositoryFactory.repositories(
                      "s3://" + server.bucketName() + "/repos", server.endpoint(), auth(server),
                      Map.of("SECRET", "wrong-secret"))) {
-            for (S3NativeGitRepositoryProvider provider : List.of(missingBucket, denied)) {
+            for (NativeGitRepositoryProvider provider : List.of(missingBucket, denied)) {
                 assertFailure(provider.find("repo"), Result.FailureCode.GENERAL);
                 assertFailure(provider.create("repo"), Result.FailureCode.GENERAL);
                 assertThatThrownBy(() -> provider.exists("repo")).isInstanceOf(UncheckedIOException.class);
@@ -120,11 +123,11 @@ class S3NativeGitRepositoryProviderIT {
     @Test
     void listsAllPagesAndRejectsCorruptOrMisplacedMetadata() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider provider = provider(server, "repos")) {
+             NativeGitRepositoryProvider provider = provider(server, "repos")) {
             for (int index = 0; index < 1001; index++) {
                 server.putObject("repos/000-foreign-" + index, new byte[0]);
             }
-            provider.create("last-page").valueOrFailure("create").close();
+            provider.create("last-page").valueOrFailure("create");
             assertThat(provider.repositoryNames()).containsExactly("last-page");
             String key = "repos/" + HexFormat.of().formatHex(GitHashAlgorithm.SHA256.newDigest()
                     .digest("last-page".getBytes(StandardCharsets.UTF_8)))
@@ -144,7 +147,7 @@ class S3NativeGitRepositoryProviderIT {
     @Test
     void xmlBindingsShareTransportAcrossBucketsAndUseUpdatedEncryptedCredentialsWithoutLocalFallback() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-s3-" + UUID.randomUUID());
-             S3ConfigurationFixture fixture = new S3ConfigurationFixture();
+             S3ConfigurationFixture fixture = new S3ConfigurationFixture(directory);
              software.amazon.awssdk.services.s3.S3Client setup = software.amazon.awssdk.services.s3.S3Client.builder()
                      .region(software.amazon.awssdk.regions.Region.US_EAST_1)
                      .endpointOverride(java.net.URI.create(server.endpoint())).forcePathStyle(true)
@@ -159,19 +162,22 @@ class S3NativeGitRepositoryProviderIT {
                 fixture.bind("first", false, "archive", "s3://" + server.bucketName() + "/first");
                 fixture.bind("second", false, "archive", "s3://" + secondBucket + "/second");
                 assertThat(fixture.provider.repositoryNames()).isEmpty();
-                fixture.provider.create("acme/dev/first").valueOrFailure("first bucket").close();
-                fixture.provider.create("acme/dev/second").valueOrFailure("second bucket").close();
+                fixture.provider.create("acme/dev/first").valueOrFailure("first bucket");
+                fixture.provider.create("acme/dev/second").valueOrFailure("second bucket");
                 assertThat(fixture.provider.repositoryNames()).containsExactly("acme/dev/first", "acme/dev/second");
                 try (S3Transport reopened = new S3Transport()) {
-                    ConfiguredNativeGitRepositoryProvider reader =
-                            new ConfiguredNativeGitRepositoryProvider(fixture.local, reopened);
-                    reader.activate(fixture.current::get, fixture.secrets, ignored -> false);
-                    reader.find("acme/dev/first").valueOrFailure("reopen persisted metadata").close();
+                    ConfiguredNativeGitRepositoryFactory readerFactory = new ConfiguredNativeGitRepositoryFactory(
+                            pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(fixture.localRoot),
+                            reopened);
+                    try (NativeGitRepositoryProvider reader = new NativeGitRepositoryProvider(readerFactory)) {
+                        readerFactory.activate(fixture.current::get, fixture.secrets, ignored -> false);
+                        reader.find("acme/dev/first").valueOrFailure("reopen persisted metadata");
+                    }
                 }
                 fixture.connection(true, "archive", server.endpoint(), "us-east-1", server.accessKeyId(),
                         "invalid-secret", null);
                 fixture.bind("denied", true, "archive", "s3://" + server.bucketName() + "/denied");
-                fixture.local.create("acme/dev/denied").valueOrFailure("same-name local data").close();
+                fixture.local.create("acme/dev/denied").valueOrFailure("same-name local data");
                 assertThatThrownBy(() -> fixture.provider.exists("acme/dev/denied"))
                         .isInstanceOf(UncheckedIOException.class);
                 assertFailure(fixture.provider.find("acme/dev/denied"), Result.FailureCode.GENERAL);
@@ -179,7 +185,7 @@ class S3NativeGitRepositoryProviderIT {
                 fixture.connection(true, "archive", server.endpoint(), "us-east-1", server.accessKeyId(),
                         server.secretAccessKey(), null);
                 assertThat(fixture.provider.exists("acme/dev/denied")).isFalse();
-                fixture.provider.create("acme/dev/denied").valueOrFailure("rotated credentials").close();
+                fixture.provider.create("acme/dev/denied").valueOrFailure("rotated credentials");
                 assertThat(fixture.provider.exists("acme/dev/denied")).isTrue();
                 fixture.bind("first", false, "archive", "s3://" + server.bucketName() + "/different");
                 assertThat(fixture.provider.exists("acme/dev/first")).isFalse();
@@ -195,8 +201,8 @@ class S3NativeGitRepositoryProviderIT {
         }
     }
 
-    private static S3NativeGitRepositoryProvider provider(MinioS3TestServer server, String prefix) {
-        return new S3NativeGitRepositoryProvider("s3://" + server.bucketName() + "/" + prefix,
+    private static NativeGitRepositoryProvider provider(MinioS3TestServer server, String prefix) {
+        return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/" + prefix,
                 server.endpoint(), auth(server), environment(server));
     }
 

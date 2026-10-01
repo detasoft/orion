@@ -7,14 +7,13 @@ import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.bootstrap.config.OrionConfiguration;
@@ -71,8 +70,8 @@ class BootstrapProxyTransportIT {
                 return null;
             });
 
-            var upstreamProvider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
-                    new FileNativeGitRepositoryProvider(
+            var upstreamProvider = NativeGitRepositoryFactory.bootstrap(
+                    NativeGitRepositoryBackend.file(
                             new ConfigurationContext(upstreamConfiguration).getFileGitStoragePath()),
                     environment);
             String upstreamCache = upstreamProvider.prepareProvisional(
@@ -220,8 +219,8 @@ class BootstrapProxyTransportIT {
                 .replace("bootstrap-inputs.git", cache + ".git"));
         source.setAuth(configuration.getBootstrap().getAccessControl().getAuth());
         source.setPath("orion.xml");
-        var client = ProxyAwareNativeGitRepositoryProvider.bootstrap(
-                new InMemoryNativeGitRepositoryProvider(), environment);
+        var client = NativeGitRepositoryFactory.bootstrap(
+                NativeGitRepositoryBackend.inMemory(), environment);
 
         assertThatThrownBy(() -> client.resolveProvisional("guessed-cache", source, false))
                 .isInstanceOf(IllegalStateException.class)

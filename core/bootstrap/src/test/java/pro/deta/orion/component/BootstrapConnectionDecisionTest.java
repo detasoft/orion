@@ -13,9 +13,9 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -141,8 +141,9 @@ class BootstrapConnectionDecisionTest {
         final OrionAccessControlServiceImpl acl;
         final ConfigurationSecrets secrets;
         final pro.deta.orion.git.s3.S3Transport transport = new pro.deta.orion.git.s3.S3Transport();
-        final pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider configured =
-                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(), transport);
+        final pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
+                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory(), transport);
 
         Fixture(Path directory) throws Exception {
             upstream = directory.resolve("moved.git");
@@ -162,7 +163,7 @@ class BootstrapConnectionDecisionTest {
                     // The moved repository contains its former address in orion.xml.
                 }
             }
-            provider = ProxyAwareNativeGitRepositoryProvider.bootstrap(
+            provider = NativeGitRepositoryFactory.bootstrap(
                     configured, Map.of());
             BootstrapSourceConfig source = new BootstrapSourceConfig();
             source.setLocation("git+" + upstream.toUri());

@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -465,7 +465,7 @@ class AcmeCertificateServiceTest {
                     checked.countDown();
                 }
             };
-            GitPackCleanupTask cleanup = new GitPackCleanupTask(new InMemoryNativeGitRepositoryProvider());
+            GitPackCleanupTask cleanup = new GitPackCleanupTask(NativeGitRepositoryProvider.inMemory());
             JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
                     () -> server, () -> service, () -> cleanup);
             try {

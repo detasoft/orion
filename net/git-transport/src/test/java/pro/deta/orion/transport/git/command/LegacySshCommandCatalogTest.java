@@ -464,7 +464,7 @@ class LegacySshCommandCatalogTest {
         }
     }
 
-    private static final class RepositoryProvider implements NativeGitRepositoryProvider {
+    private static final class RepositoryProvider extends NativeGitRepositoryProvider {
         @Override
         public void close() {
 

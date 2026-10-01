@@ -1,7 +1,7 @@
 package pro.deta.orion.transport.git;
 
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 
 import java.util.concurrent.CountDownLatch;
 
@@ -22,7 +22,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
         super(
                 config(enabled),
                 new DefaultGitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        NativeGitRepositoryProvider.inMemory()));
         this.enabled = enabled;
     }
 

@@ -276,14 +276,14 @@ class NativeGitRepositoryTest {
 
     @Test
     void conditionalFileSaveRejectsStaleVersionAcrossProviders(@TempDir Path rootDirectory) throws Exception {
-        NativeGitRepositoryProvider firstProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider firstProvider = NativeGitRepositoryProvider.file(rootDirectory);
         NativeGitRepository first = firstProvider.create("demo").valueOrFailure("repository");
         first.files().withAccess("main", "version one", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "version one".getBytes(StandardCharsets.UTF_8));
             fileAccess.apply();
             return null;
         });
-        NativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider secondProvider = NativeGitRepositoryProvider.file(rootDirectory);
         NativeGitRepository second = secondProvider.find("demo").valueOrFailure("repository");
         String versionOne = second.refs().get("refs/heads/main");
         FileTestSupport.Prepared update = FileTestSupport.prepared(second.files(), "main", versionOne, "stale",

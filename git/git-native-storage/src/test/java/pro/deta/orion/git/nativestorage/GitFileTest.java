@@ -13,7 +13,7 @@ class GitFileTest {
     @Test
     void writesConsumeBytesImmediatelyAndReadsHaveIndependentContent() throws Exception {
         byte[] content = new byte[]{1, 2};
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
                 access.write("run", FileMode.EXECUTABLE_FILE, content);
@@ -31,7 +31,7 @@ class GitFileTest {
 
     @Test
     void rejectsModesWhosePayloadIsNotFileContentWithoutPublishing() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             for (FileMode mode : new FileMode[]{FileMode.TREE, FileMode.GITLINK}) {
                 assertThatThrownBy(() -> repository.files().withAccess(

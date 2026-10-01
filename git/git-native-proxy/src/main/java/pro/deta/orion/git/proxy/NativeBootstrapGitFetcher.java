@@ -56,8 +56,8 @@ final class NativeBootstrapGitFetcher implements BootstrapGitFetcher {
         if (result.status() != RefUpdateResult.Status.APPLIED) {
             throw new BootstrapGitProxyException("local ref publication",
                     result.status() == RefUpdateResult.Status.EXPECTED_OLD_MISMATCH
-                            ? ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT
-                            : ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+                            ? NativeGitRepositoryFactory.SyncStatus.CONFLICT
+                            : NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
         }
     }
 

@@ -64,7 +64,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 RepositoryAddress address = RepositoryAddress.parse(name);
                 if (name.startsWith("bootstrap/") || name.startsWith("proxy/")) throw new IllegalArgumentException();
                 S3StorageBinding binding = storage.orElseThrow();
-                pro.deta.orion.git.s3.S3NativeGitRepositoryProvider.validateLocation(binding.location().toString());
+                pro.deta.orion.git.s3.S3NativeGitRepositoryFactory.validateLocation(binding.location().toString());
                 editor.edit(snapshot.revision().orElseThrow()).update(document -> {
                     requireRepositoryCreate(actor, document, name);
                     Optional<OrganizationId> owner = binding.connection().scope() == ConnectionReference.Scope.SYSTEM

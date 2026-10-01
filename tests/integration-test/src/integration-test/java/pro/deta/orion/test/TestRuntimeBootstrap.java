@@ -2,11 +2,12 @@ package pro.deta.orion.test;
 
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
-import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
@@ -38,13 +39,13 @@ final class TestRuntimeBootstrap {
             ServerIdentityCapability identity,
             SshHostKeyCapability sshHostKeys,
             OrionRuntimeOptions runtimeOptions) {
-        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(
+        NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.file(
                 new ConfigurationContext(configuration).getFileGitStoragePath());
         S3Transport transport = new S3Transport();
-        ConfiguredNativeGitRepositoryProvider configured =
-                new ConfiguredNativeGitRepositoryProvider(backend, transport);
-        ProxyAwareNativeGitRepositoryProvider provider =
-                ProxyAwareNativeGitRepositoryProvider.bootstrap(configured, Map.copyOf(System.getenv()));
+        ConfiguredNativeGitRepositoryFactory configured =
+                new ConfiguredNativeGitRepositoryFactory(backend, transport);
+        NativeGitRepositoryFactory provider =
+                NativeGitRepositoryFactory.bootstrap(configured, Map.copyOf(System.getenv()));
         ResolvedBootstrapSource source = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION,
                 configuration.getBootstrap().getAccessControl(),
@@ -61,7 +62,7 @@ final class TestRuntimeBootstrap {
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
-                .configuredRepositoryProvider(configured)
+                .configuredRepositoryFactory(configured)
                 .s3Transport(transport)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(source)));
     }

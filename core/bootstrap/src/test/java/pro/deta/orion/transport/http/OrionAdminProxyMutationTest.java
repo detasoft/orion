@@ -30,9 +30,9 @@ import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
@@ -71,7 +71,8 @@ class OrionAdminProxyMutationTest {
             assertThat(f.decisions.list(OPERATOR)).isEmpty();
             String repository = f.desired.current().document().system().proxies().getFirst().publicRepositoryName();
 
-            assertThatThrownBy(() -> f.provider.openForRead(repository)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> f.provider.provider().openForRead(repository))
+                    .isInstanceOf(IllegalStateException.class);
 
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
         }
@@ -87,7 +88,7 @@ class OrionAdminProxyMutationTest {
             assertThat(f.decisions.list(OPERATOR)).hasSize(1);
             assertThat(f.provider.syncObservation(f.desired.current().document().system().proxies().getFirst(),
                     f.desired.current().document().system())
-                    .status()).isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+                    .status()).isEqualTo(NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
         }
     }
 
@@ -445,7 +446,8 @@ class OrionAdminProxyMutationTest {
             source.setRef("main");
             source.setPath("file");
             source.setAuth(Map.of());
-            var bootstrap = new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
+            var bootstrap = new NativeGitRepositoryFactory(
+                    pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
             var resolved = bootstrap.resolveProvisional("material", source, false);
             f.routes(new BootstrapRepositorySources(List.of(resolved)));
             var changeSource = f.command("update", "archive", null, null);
@@ -535,8 +537,9 @@ class OrionAdminProxyMutationTest {
         final OrionKeyMaterial material;
         final OrionDesiredState desired = new OrionDesiredState();
         final MemoryStorage storage = new MemoryStorage();
-        final ProxyAwareNativeGitRepositoryProvider provider =
-                new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
+        final NativeGitRepositoryFactory provider =
+                new NativeGitRepositoryFactory(
+                        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
         final ConfigurationSecrets secrets;
         final OrionConfigurationEditor editor;
         final OrionAccessControlServiceImpl acl;

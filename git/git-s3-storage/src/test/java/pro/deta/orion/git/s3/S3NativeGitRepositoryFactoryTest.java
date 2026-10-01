@@ -1,9 +1,10 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryFactory;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -65,7 +66,7 @@ class S3NativeGitRepositoryFactoryTest {
             AwsRequestOverrideConfiguration overrides = transport.overrides(
                     "http://127.0.0.1:" + server.getAddress().getPort(), "us-east-1", true,
                     Optional.of(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))));
-            NativeGitRepositoryFactory factory = new S3NativeGitRepositoryFactory("bucket", "prefix/",
+            NativeGitRepositoryBackend factory = new S3NativeGitRepositoryFactory("bucket", "prefix/",
                     transport, overrides);
             RepositoryName name = RepositoryName.parse("team/repo");
             Result<NativeGitRepository> missing = factory.open(name);
@@ -86,8 +87,8 @@ class S3NativeGitRepositoryFactoryTest {
                 }
             }
             factory.close();
-            try (S3NativeGitRepositoryProvider other =
-                         new S3NativeGitRepositoryProvider("s3://bucket/prefix", transport, overrides)) {
+            try (NativeGitRepositoryProvider other =
+                         S3NativeGitRepositoryFactory.repositories("s3://bucket/prefix", transport, overrides)) {
                 assertThat(other.exists(name.value())).isTrue();
             }
             assertThat(requests).contains("GET", "PUT");

@@ -35,7 +35,6 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -120,7 +119,7 @@ class SshCommandFactoryTest {
     @Test
     void readOnlyDomainExecRendersPlainOutputWithoutPromptOrAnsi() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                new InMemoryNativeGitRepositoryProvider(),
+                NativeGitRepositoryProvider.inMemory(),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
@@ -476,7 +475,7 @@ class SshCommandFactoryTest {
         for (String service : List.of("git-upload-pack", "git-receive-pack")) {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             ByteArrayOutputStream error = new ByteArrayOutputStream();
-            ExitOutcome exit = run(gitFactory(new InMemoryNativeGitRepositoryProvider()), channel(true),
+            ExitOutcome exit = run(gitFactory(NativeGitRepositoryProvider.inMemory()), channel(true),
                     service + " '/demo.git'", output, error);
 
             assertNotEquals(0, exit.code());
@@ -498,11 +497,12 @@ class SshCommandFactoryTest {
             IllegalStateException failure = new IllegalStateException("Repository unavailable");
             failure.setStackTrace(new StackTraceElement[]{
                     new StackTraceElement("Example", "method", "Example.java", 12)});
-            NativeGitRepositoryProvider provider = (NativeGitRepositoryProvider) Proxy.newProxyInstance(
-                    NativeGitRepositoryProvider.class.getClassLoader(),
-                    new Class<?>[]{NativeGitRepositoryProvider.class}, (proxy, method, args) -> {
-                        throw failure;
-                    });
+            NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+                @Override
+                public boolean isPublicRepositoryName(String repositoryName) {
+                    throw failure;
+                }
+            };
             for (String service : List.of("git-upload-pack", "git-receive-pack")) {
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 ByteArrayOutputStream error = new ByteArrayOutputStream();
@@ -527,7 +527,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitAuthenticationAndExecutorRejectionUseStderr() throws Exception {
-        SshCommandFactory factory = gitFactory(new InMemoryNativeGitRepositoryProvider());
+        SshCommandFactory factory = gitFactory(NativeGitRepositoryProvider.inMemory());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream error = new ByteArrayOutputStream();
         ExitOutcome unauthenticated = run(factory, channel(false), "git-receive-pack '/demo.git'",
@@ -546,7 +546,7 @@ class SshCommandFactoryTest {
 
     @Test
     void gitFailureAfterAdvertisementPreservesProtocolOutput() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         provider.create("demo").valueOrFailure("repository");
         TestChannelSession channel = channel(true);
         Grant grant = new Grant("repository", List.of(
@@ -583,7 +583,7 @@ class SshCommandFactoryTest {
     @Test
     void gitStderrDeliveryFailureStillCompletesOnce() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ExitOutcome exit = run(gitFactory(new InMemoryNativeGitRepositoryProvider()), channel(true),
+        ExitOutcome exit = run(gitFactory(NativeGitRepositoryProvider.inMemory()), channel(true),
                 "git-receive-pack '/demo.git'", output, new FailingOutputStream());
         assertNotEquals(0, exit.code());
         assertEquals("", output.toString(StandardCharsets.UTF_8));

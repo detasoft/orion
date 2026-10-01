@@ -1,8 +1,7 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilityValue;
@@ -57,8 +56,8 @@ final class GitWireTestClient {
         return repository;
     }
 
-    static InMemoryNativeGitRepositoryProvider providerWithMainRef() {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+    static NativeGitRepositoryProvider providerWithMainRef() {
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         createRepository(provider, "demo").updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         return provider;
     }

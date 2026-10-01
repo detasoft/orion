@@ -13,8 +13,8 @@ import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
@@ -39,7 +39,7 @@ import java.util.UUID;
 /** Administers system proxy bindings through revision-checked configuration updates and safe audit records. */
 public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final OrionDesiredState desiredState;
-    private final ProxyAwareNativeGitRepositoryProvider provider;
+    private final NativeGitRepositoryFactory provider;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final BootstrapRepositorySources sources;
@@ -47,7 +47,7 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminProxiesRoute(OrionDesiredState desiredState, ProxyAwareNativeGitRepositoryProvider provider,
+    public OrionAdminProxiesRoute(OrionDesiredState desiredState, NativeGitRepositoryFactory provider,
             OrionConfigurationEditor editor, ConfigurationSecrets secrets, BootstrapRepositorySources sources,
             CommandAuditSink audit, ObjectMapper mapper) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);

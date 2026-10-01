@@ -7,13 +7,13 @@ import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.config.OrionConfigurationEditor;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
-import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
-import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
+import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
+import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
+import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
@@ -55,28 +55,23 @@ import java.util.concurrent.Executors;
 public final class BootstrapContext implements AutoCloseable {
     private static final String FAILURE_MESSAGE = "Bootstrap inputs are unavailable or invalid";
 
-    private final ProxyAwareNativeGitRepositoryProvider repositoryProvider;
+    private final NativeGitRepositoryFactory repositoryFactory;
     private final BootstrapRepositorySources repositorySources;
     private final OrionKeyMaterial keyMaterial;
-    private final ConfiguredNativeGitRepositoryProvider storageProvider;
-    private final S3Transport s3Transport;
     private final SshHostKeyCapability sshHostKeys;
     private final Optional<ConfigurationFile> initialConfiguration;
 
     private BootstrapContext(
-            ProxyAwareNativeGitRepositoryProvider repositoryProvider,
+            NativeGitRepositoryFactory repositoryFactory,
             BootstrapRepositorySources repositorySources,
             OrionKeyMaterial keyMaterial,
             SshHostKeyCapability sshHostKeys,
-            Optional<ConfigurationFile> initialConfiguration,
-            ConfiguredNativeGitRepositoryProvider storageProvider, S3Transport s3Transport) {
-        this.repositoryProvider = repositoryProvider;
+            Optional<ConfigurationFile> initialConfiguration) {
+        this.repositoryFactory = repositoryFactory;
         this.repositorySources = repositorySources;
         this.keyMaterial = keyMaterial;
         this.sshHostKeys = sshHostKeys;
         this.initialConfiguration = initialConfiguration;
-        this.storageProvider = storageProvider;
-        this.s3Transport = s3Transport;
     }
 
     public static BootstrapContext open(
@@ -91,41 +86,45 @@ public final class BootstrapContext implements AutoCloseable {
             boolean createIfMissing) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(environment, "environment");
-        return open(configuration, environment, createRepositoryBackend(configuration, environment), createIfMissing);
+        return open(configuration, environment, null, createIfMissing);
     }
 
-    static NativeGitRepositoryProvider createRepositoryBackend(
-            OrionConfiguration configuration, Map<String, String> environment) {
+    static NativeGitRepositoryBackend createRepositoryBackend(
+            OrionConfiguration configuration, Map<String, String> environment, S3Transport transport) {
         String location = configuration.getStorage().getLocation();
         if (ResourceLocation.parse(location, "Storage location").scheme().value().equals("s3")) {
-            return new S3NativeGitRepositoryProvider(location, configuration.getStorage().getEndpoint(),
-                    configuration.getStorage().getAuth(), environment);
+            return S3NativeGitRepositoryFactory.shared(location, configuration.getStorage().getEndpoint(),
+                    configuration.getStorage().getAuth(), environment, transport);
         }
         ConfigurationContext context = new ConfigurationContext(configuration, environment);
-        return new FileNativeGitRepositoryProvider(context.getFileGitStoragePath());
+        return NativeGitRepositoryBackend.file(context.getFileGitStoragePath());
     }
 
     @TestOnly
     static BootstrapContext open(
             OrionConfiguration configuration,
             Map<String, String> environment,
-            NativeGitRepositoryProvider backend) {
+            NativeGitRepositoryBackend backend) {
         return open(configuration, environment, backend, false);
     }
 
-    @TestOnly
     static BootstrapContext open(
             OrionConfiguration configuration,
             Map<String, String> environment,
-            NativeGitRepositoryProvider backend,
+            NativeGitRepositoryBackend backend,
             boolean createIfMissing) {
         OrionKeyMaterial keyMaterial = null;
         S3Transport s3Transport = new S3Transport();
-        ConfiguredNativeGitRepositoryProvider storageProvider =
-                new ConfiguredNativeGitRepositoryProvider(backend, s3Transport);
+        NativeGitRepositoryFactory provider = null;
+        NativeGitRepositoryBackend selectedBackend = backend;
         try {
-            ProxyAwareNativeGitRepositoryProvider provider =
-                    ProxyAwareNativeGitRepositoryProvider.bootstrap(storageProvider, environment);
+            if (selectedBackend == null) {
+                selectedBackend = createRepositoryBackend(configuration, environment, s3Transport);
+            }
+            ConfiguredNativeGitRepositoryFactory storageFactory =
+                    new ConfiguredNativeGitRepositoryFactory(selectedBackend, s3Transport);
+            provider = NativeGitRepositoryFactory.bootstrap(storageFactory, environment);
+            NativeGitRepositoryFactory repositoryFactory = provider;
             BootstrapConfigurationSourceConfig configuredConfiguration =
                     repositoryConfiguration(configuration, environment);
             ResolvedBootstrapSource configurationSource = provider.resolveProvisional(
@@ -145,14 +144,14 @@ public final class BootstrapContext implements AutoCloseable {
                 ResolvedBootstrapSource selectedMaterial = materialSource;
                 CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
                     try {
-                        return openKeyMaterial(configuration, environment, provider, selectedMaterial,
+                        return openKeyMaterial(configuration, environment, repositoryFactory.provider(), selectedMaterial,
                                 createIfMissing);
                     } catch (IOException | GeneralSecurityException error) {
                         throw new CompletionException(error);
                     }
                 }, executor);
                 try {
-                    initialConfiguration = loadInitialConfiguration(sources, provider);
+                    initialConfiguration = loadInitialConfiguration(sources, provider.provider());
                     keyMaterial = awaitMaterial(materialInput);
                 } catch (IOException | GeneralSecurityException | RuntimeException failure) {
                     materialInput.handle((opened, error) -> {
@@ -167,28 +166,34 @@ public final class BootstrapContext implements AutoCloseable {
             SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
                     keyMaterial.sshHostKeyMaterial(),
                     sshHostKeyReferences(configuration));
-            return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys, initialConfiguration,
-                    storageProvider, s3Transport);
+            return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys, initialConfiguration);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             try {
-                closeResources(s3Transport, storageProvider, keyMaterial);
+                closeResources(s3Transport, provider == null ? null : provider.provider(), keyMaterial);
             } catch (RuntimeException cleanup) {
                 failure.addSuppressed(cleanup);
+            }
+            if (selectedBackend == null && failure instanceof RuntimeException invalidStorage) {
+                throw invalidStorage;
             }
             throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
     }
 
     public S3Transport s3Transport() {
-        return s3Transport;
+        return storageFactory().transport();
     }
 
-    public ConfiguredNativeGitRepositoryProvider storageProvider() {
-        return storageProvider;
+    public ConfiguredNativeGitRepositoryFactory storageFactory() {
+        return (ConfiguredNativeGitRepositoryFactory) repositoryFactory.backend();
     }
 
-    public ProxyAwareNativeGitRepositoryProvider repositoryProvider() {
-        return repositoryProvider;
+    public NativeGitRepositoryProvider repositoryProvider() {
+        return repositoryFactory.provider();
+    }
+
+    public NativeGitRepositoryFactory repositoryFactory() {
+        return repositoryFactory;
     }
 
     public BootstrapRepositorySources repositorySources() {
@@ -223,7 +228,7 @@ public final class BootstrapContext implements AutoCloseable {
 
     private static Optional<ConfigurationFile> loadInitialConfiguration(
             BootstrapRepositorySources sources,
-            ProxyAwareNativeGitRepositoryProvider provider) {
+            NativeGitRepositoryProvider provider) {
         OrionConfigurationStorage storage = new OrionConfigurationStorageResolver(sources, provider).resolve();
         return switch (storage.load()) {
             case Result.Success<ConfigurationFile>(var file) -> Optional.of(file);
@@ -237,7 +242,7 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     public static Optional<OrionDocument> adoptProxies(OrionConfigurationStorage storage, OrionConfigurationEditor editor,
-            ProxyAwareNativeGitRepositoryProvider repositoryProvider, ConfigurationCipherCapability cipher,
+            NativeGitRepositoryFactory repositoryProvider, ConfigurationCipherCapability cipher,
             OrionDesiredState.Snapshot approved) {
         Objects.requireNonNull(storage, "configuration storage");
         Objects.requireNonNull(approved, "approved configuration");
@@ -326,19 +331,16 @@ public final class BootstrapContext implements AutoCloseable {
 
     @Override
     public void close() {
-        closeResources(s3Transport, repositoryProvider, keyMaterial);
+        closeResources(null, repositoryFactory.provider(), keyMaterial);
     }
 
     private static void closeResources(S3Transport transport, NativeGitRepositoryProvider provider,
             OrionKeyMaterial material) {
         try {
-            transport.close();
+            if (provider != null) provider.close();
+            else if (transport != null) transport.close();
         } finally {
-            try {
-                provider.close();
-            } finally {
-                if (material != null) material.close();
-            }
+            if (material != null) material.close();
         }
     }
 
@@ -368,7 +370,7 @@ public final class BootstrapContext implements AutoCloseable {
     private static OrionKeyMaterial openKeyMaterial(
             OrionConfiguration configuration,
             Map<String, String> environment,
-            ProxyAwareNativeGitRepositoryProvider provider,
+            NativeGitRepositoryProvider provider,
             ResolvedBootstrapSource resolved,
             boolean createIfMissing) throws IOException, GeneralSecurityException {
         if (resolved.repositoryName().isPresent()) {

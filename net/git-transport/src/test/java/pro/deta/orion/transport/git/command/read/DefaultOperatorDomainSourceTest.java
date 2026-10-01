@@ -1,9 +1,8 @@
 package pro.deta.orion.transport.git.command.read;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
@@ -21,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DefaultOperatorDomainSourceTest {
     @Test
     void snapshotsRepositoriesWithStablePathSafeIdsAndOriginalNames() {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         provider.create("internal/configuration");
         provider.create("demo");
         DefaultOperatorDomainSource source = source(provider, emptyRuntime(), () -> resources());
@@ -85,7 +84,7 @@ class DefaultOperatorDomainSourceTest {
                 if (repositoryName.equals("broken")) {
                     return new Result.Failure<>(Result.FailureCode.GENERAL, "sensitive detail");
                 }
-                return new InMemoryNativeGitRepositoryProvider().create(repositoryName);
+                return NativeGitRepositoryProvider.inMemory().create(repositoryName);
             }
 
             @Override
@@ -111,7 +110,7 @@ class DefaultOperatorDomainSourceTest {
                 .child("alpha", alpha)
                 .build());
         DefaultOperatorDomainSource source = source(
-                new InMemoryNativeGitRepositoryProvider(), runtime, DefaultOperatorDomainSourceTest::resources);
+                NativeGitRepositoryProvider.inMemory(), runtime, DefaultOperatorDomainSourceTest::resources);
 
         assertThat(availableValue(source.systemResources()).value()).isEqualTo(resources());
         assertThat(availableSnapshot(source.services()).value())
@@ -136,7 +135,7 @@ class DefaultOperatorDomainSourceTest {
                 .build());
 
         assertThat(availableSnapshot(source(
-                new InMemoryNativeGitRepositoryProvider(),
+                NativeGitRepositoryProvider.inMemory(),
                 runtime,
                 DefaultOperatorDomainSourceTest::resources).services()).value())
                 .extracting(OperatorDomainViews.ServiceView::id)
@@ -170,7 +169,7 @@ class DefaultOperatorDomainSourceTest {
                 .build());
 
         assertThat(availableSnapshot(source(
-                new InMemoryNativeGitRepositoryProvider(),
+                NativeGitRepositoryProvider.inMemory(),
                 runtime,
                 DefaultOperatorDomainSourceTest::resources).services()).value())
                 .extracting(OperatorDomainViews.ServiceView::id, OperatorDomainViews.ServiceView::name)
@@ -185,7 +184,7 @@ class DefaultOperatorDomainSourceTest {
     @Test
     void leavesUnfinishedDomainSourcesExplicitlyUnavailable() {
         DefaultOperatorDomainSource source = source(
-                new InMemoryNativeGitRepositoryProvider(),
+                NativeGitRepositoryProvider.inMemory(),
                 emptyRuntime(),
                 DefaultOperatorDomainSourceTest::resources);
 

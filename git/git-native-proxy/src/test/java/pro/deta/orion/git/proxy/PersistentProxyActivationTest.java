@@ -1,12 +1,13 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -41,7 +42,7 @@ class PersistentProxyActivationTest {
     @Test
     void movedBootstrapSourceKeepsYamlConnectionUntilConfigurationIsReconciled() throws Exception {
         try (Fixture fixture = new Fixture()) {
-            ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
+            NativeGitRepositoryFactory provider = fixture.provider();
             String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
@@ -55,8 +56,8 @@ class PersistentProxyActivationTest {
                     .isSameAs(fixture.current.get());
 
             provider.activate(fixture.current::get, fixture.secrets);
-            provider.openForRead(name).valueOrFailure("bootstrap source");
-            provider.openForRead(old.publicRepositoryName()).valueOrFailure("bootstrap proxy");
+            provider.provider().openForRead(name).valueOrFailure("bootstrap source");
+            provider.provider().openForRead(old.publicRepositoryName()).valueOrFailure("bootstrap proxy");
             assertThat(provider.retry(old.alias(), fixture.current::get, fixture.secrets).isFailure()).isFalse();
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
             assertThat(fixture.current.get().system().proxies()).containsExactly(old);
@@ -66,7 +67,7 @@ class PersistentProxyActivationTest {
     @Test
     void ordinaryProxyCannotInheritTrustFromARelocatedBootstrapConnection() throws Exception {
         try (Fixture fixture = new Fixture()) {
-            ProxyAwareNativeGitRepositoryProvider provider = fixture.provider();
+            NativeGitRepositoryFactory provider = fixture.provider();
             String name = provider.prepareProvisional("material", fixture.source());
             fixture.adopt(provider);
             GitProxyBinding actual = fixture.current.get().system().proxies().getFirst();
@@ -81,7 +82,7 @@ class PersistentProxyActivationTest {
             fixture.current.set(withProxies(fixture.current.get(), List.of(previous, ordinary)));
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("same bootstrap repository");
-            assertThat(provider.openForRead(name).isFailure()).isFalse();
+            assertThat(provider.provider().openForRead(name).isFailure()).isFalse();
         }
     }
 
@@ -90,7 +91,7 @@ class PersistentProxyActivationTest {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
             String name = provider.prepareProvisional("material", fixture.source());
-            var retained = provider.openForWrite(name).valueOrFailure("proxy");
+            var retained = provider.provider().openForWrite(name).valueOrFailure("proxy");
             fixture.adopt(provider);
             fixture.rotate("stored-token");
 
@@ -104,11 +105,11 @@ class PersistentProxyActivationTest {
             assertThat(fixture.authorization).containsExactly("Bearer stored-token", "Bearer stored-token");
 
             fixture.rotate("rotated-token");
-            provider.openForRead(name.replace("/", "%2F")).valueOrFailure("same cache");
+            provider.provider().openForRead(name.replace("/", "%2F")).valueOrFailure("same cache");
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer rotated-token");
             assertThat(retained.name()).isEqualTo(name);
-            assertThat(provider.repositoryNames()).doesNotContain(name);
-            assertThat(provider.isPublicRepositoryName(name)).isFalse();
+            assertThat(provider.provider().repositoryNames()).doesNotContain(name);
+            assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
         }
     }
 
@@ -126,7 +127,7 @@ class PersistentProxyActivationTest {
                         GitCredentialKind.PASSWORD, Optional.of("basic"), Optional.of("user")), previous.ref());
             fixture.current.set(withProxies(changed, List.of(basic)));
 
-            provider.openForRead(name).valueOrFailure("reloaded proxy");
+            provider.provider().openForRead(name).valueOrFailure("reloaded proxy");
 
             assertThat(fixture.authorization.getLast()).isEqualTo("Basic dXNlcjpwYXNzd29yZA==");
         }
@@ -148,7 +149,7 @@ class PersistentProxyActivationTest {
             fixture.current.set(withProxies(fixture.current.get(), List.of(redirected)));
             fixture.authorization.clear();
 
-            assertThatThrownBy(() -> provider.openForRead(name))
+            assertThatThrownBy(() -> provider.provider().openForRead(name))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("persistent binding lookup");
             assertThat(fixture.authorization).isEmpty();
         }
@@ -172,12 +173,12 @@ class PersistentProxyActivationTest {
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("upstream synchronization");
 
-            provider.openForRead(name).valueOrFailure("provisional source after failed activation");
+            provider.provider().openForRead(name).valueOrFailure("provisional source after failed activation");
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
             String failedCache = BootstrapGitLocation.persistent(unavailable, fixture.current.get().system()).proxyName();
-            assertThat(provider.openForRead(failedCache)).isInstanceOf(Result.Failure.class);
-            assertThat(provider.isPublicRepositoryName(failedCache)).isFalse();
-            assertThat(provider.repositoryNames()).isEmpty();
+            assertThat(provider.provider().openForRead(failedCache)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.provider().isPublicRepositoryName(failedCache)).isFalse();
+            assertThat(provider.provider().repositoryNames()).isEmpty();
         }
     }
 
@@ -188,9 +189,9 @@ class PersistentProxyActivationTest {
             String name = provider.prepareProvisional("material", fixture.source());
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("adopted");
-            assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
+            assertThat(provider.provider().openForRead(name)).isInstanceOf(Result.Success.class);
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
-            assertThat(provider.isPublicRepositoryName(name)).isFalse();
+            assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
         }
     }
 
@@ -208,7 +209,7 @@ class PersistentProxyActivationTest {
 
             assertThatThrownBy(() -> provider.activate(fixture.current::get, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class).hasMessageNotContaining("invalid-envelope");
-            provider.openForRead(name).valueOrFailure("provisional source");
+            provider.provider().openForRead(name).valueOrFailure("provisional source");
             assertThat(fixture.authorization.getLast()).isEqualTo("Bearer external-token");
             OrionDocument corrupt = fixture.current.get();
             fixture.current.set(valid);
@@ -216,7 +217,7 @@ class PersistentProxyActivationTest {
             fixture.current.set(corrupt);
             fixture.authorization.clear();
 
-            assertThatThrownBy(() -> provider.openForRead(name))
+            assertThatThrownBy(() -> provider.provider().openForRead(name))
                     .isInstanceOf(IllegalStateException.class).hasMessageNotContaining("invalid-envelope");
             assertThat(fixture.authorization).isEmpty();
         }
@@ -236,7 +237,7 @@ class PersistentProxyActivationTest {
             assertThatThrownBy(() -> provider.activate(() -> invalid, fixture.secrets))
                     .isInstanceOf(IllegalStateException.class);
 
-            assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
+            assertThat(provider.provider().openForRead(name)).isInstanceOf(Result.Success.class);
         }
     }
 
@@ -245,13 +246,13 @@ class PersistentProxyActivationTest {
         try (Fixture fixture = new Fixture()) {
             var provider = fixture.provider();
             String name = provider.prepareProvisional("material", fixture.source());
-            var retained = provider.openForWrite(name).valueOrFailure("proxy");
+            var retained = provider.provider().openForWrite(name).valueOrFailure("proxy");
             fixture.adopt(provider);
             provider.activate(fixture.current::get, fixture.secrets);
             fixture.current.set(withProxies(fixture.current.get(), List.of()));
             provider.activate(fixture.current::get, fixture.secrets);
 
-            assertThat(provider.openForRead(name)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.provider().openForRead(name)).isInstanceOf(Result.Failure.class);
             assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> retained.files().withAccess("main", "save", GitCommitAuthor.EMPTY,
                     fileAccess -> {
@@ -259,8 +260,8 @@ class PersistentProxyActivationTest {
                 fileAccess.apply();
                 return null;
             })).isInstanceOf(IllegalStateException.class);
-            assertThat(provider.repositoryNames()).doesNotContain(name);
-            assertThat(provider.isPublicRepositoryName(name)).isFalse();
+            assertThat(provider.provider().repositoryNames()).doesNotContain(name);
+            assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
         }
     }
 
@@ -306,8 +307,8 @@ class PersistentProxyActivationTest {
             return source;
         }
 
-        ProxyAwareNativeGitRepositoryProvider provider() {
-            return new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(),
+        NativeGitRepositoryFactory provider() {
+            return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
                     new BootstrapSecretResolver(Map.of("TOKEN", "external-token")),
                     (location, transport, repository) -> {
                         if (location.remoteUri().equals(unavailable.get())) {
@@ -321,7 +322,7 @@ class PersistentProxyActivationTest {
                     });
         }
 
-        void adopt(ProxyAwareNativeGitRepositoryProvider provider) {
+        void adopt(NativeGitRepositoryFactory provider) {
             current.set(provider.adoptProvisional(current.get(), secrets));
         }
 

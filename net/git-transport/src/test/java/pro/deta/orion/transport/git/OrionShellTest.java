@@ -36,7 +36,7 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
@@ -140,7 +140,7 @@ class OrionShellTest {
     @Test
     void interactiveShellDispatchesTheReadOnlyWhoamiCommand() throws Exception {
         DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
-                new InMemoryNativeGitRepositoryProvider(),
+                NativeGitRepositoryProvider.inMemory(),
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();

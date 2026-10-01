@@ -3,7 +3,7 @@ package pro.deta.orion.transport.http;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.*;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -28,7 +28,7 @@ class OrionStorageConnectionsRouteTest {
             ConfigurationCipherCapability cipher = KeyMaterialCapabilities.open(material, List.of(descriptor))
                     .configurationCipher(descriptor);
             StorageManagementFixture.State fixture = StorageManagementFixture.open(
-                    new InMemoryNativeGitRepositoryProvider(), List.of(), cipher);
+                    NativeGitRepositoryProvider.inMemory(), List.of(), cipher);
             OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(fixture.management(), mapper);
             String body = """
                     {"revision":"v1","create":true,"connection":{"name":"archive","region":"us-east-1",
@@ -46,7 +46,7 @@ class OrionStorageConnectionsRouteTest {
 
     @Test
     void anonymousAndOrganizationIdentitiesCannotManageSystemConnections() throws Exception {
-        StorageManagement management = StorageManagementFixture.create(new InMemoryNativeGitRepositoryProvider(), List.of());
+        StorageManagement management = StorageManagementFixture.create(NativeGitRepositoryProvider.inMemory(), List.of());
         OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(management, mapper);
         for (SecurityContext context : List.of(SecurityContext.createContext(), SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("alice", new OrganizationId("acme"),

@@ -10,7 +10,7 @@ import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequiredException;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
@@ -40,7 +40,7 @@ class ProxyNativeGitRepositoryTest {
     @Test
     void rejectedUpstreamCasDoesNotAdvanceLocalRef() throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", "first".getBytes());
@@ -74,7 +74,7 @@ class ProxyNativeGitRepositoryTest {
     @ValueSource(booleans = {true, false})
     void fetchAndPushFailuresReachTheSameDecisionHandlerWithoutChangingRefs(boolean failFetch) throws Exception {
         BootstrapGitLocation location = fileLocation();
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName()).valueOrFailure("create proxy");
         repository.files().withAccess(location.refName(), "first", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{1});
@@ -120,7 +120,7 @@ class ProxyNativeGitRepositoryTest {
             assertThat(publications).hasValue(failFetch ? 0 : 1);
             assertThat(repository.refs()).containsEntry(location.refName(), previous);
             assertThat(runtime.syncObservation().status())
-                    .isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE);
+                    .isEqualTo(NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE);
         }
     }
 

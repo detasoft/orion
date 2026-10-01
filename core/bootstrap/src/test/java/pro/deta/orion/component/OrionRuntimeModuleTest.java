@@ -28,9 +28,9 @@ import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
@@ -321,7 +321,8 @@ class OrionRuntimeModuleTest {
     @Test
     void localLocatorUsesConfiguredNativeRepository() {
         OrionConfiguration configuration = configurationWithAcl("local:internal/settings");
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
 
         OrionConfigurationStorage storage = resolvedStorage(configuration, provider);
         storage.save(
@@ -353,15 +354,14 @@ class OrionRuntimeModuleTest {
 
     private static OrionConfigurationStorage resolvedStorage(
             OrionConfiguration configuration,
-            InMemoryNativeGitRepositoryProvider backend) {
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+            NativeGitRepositoryFactory provider) {
         ResolvedBootstrapSource resolved = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION,
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return new OrionConfigurationStorageResolver(
                 new BootstrapRepositorySources(List.of(resolved)),
-                provider).resolve();
+                provider.provider()).resolve();
     }
 
     private byte[] aclBytes(String userId) throws Exception {

@@ -16,8 +16,8 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
-import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.AUTHENTICATION_FAILED;
-import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.UNAVAILABLE;
+import static pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus.AUTHENTICATION_FAILED;
+import static pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus.UNAVAILABLE;
 
 class BootstrapGitProxyExceptionTest {
     @Test

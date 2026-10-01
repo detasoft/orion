@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -15,7 +16,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientTransportSession;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -107,7 +108,7 @@ class BootstrapSshTrustTest {
             }
             fixture.keyPair.set(KeyPairGenerator.getInstance("EC").generateKeyPair());
             int authenticated = fixture.authentications.get();
-            assertThatThrownBy(() -> fixture.provider.openForRead(repository))
+            assertThatThrownBy(() -> fixture.provider.provider().openForRead(repository))
                     .isInstanceOf(BootstrapGitProxyException.class);
             assertThat(fixture.authentications).hasValue(authenticated);
             assertThat(fixture.messages()).contains("rejected");
@@ -136,7 +137,7 @@ class BootstrapSshTrustTest {
                     current.get().organizations()));
             assertThat(fixture.provider.adoptProvisional(current.get(), secrets)).isSameAs(current.get());
             fixture.provider.activate(current::get, secrets);
-            assertThat(fixture.provider.openForRead(repository).isFailure()).isFalse();
+            assertThat(fixture.provider.provider().openForRead(repository).isFailure()).isFalse();
             assertThat(fixture.provider.retry(previous.alias(), current::get, secrets).isFailure()).isFalse();
             assertThat(fixture.provider.bootstrapChanges(current.get())).singleElement().satisfies(change -> {
                 assertThat(change.previous()).isEqualTo(previous);
@@ -165,7 +166,7 @@ class BootstrapSshTrustTest {
         private final AtomicInteger authentications = new AtomicInteger();
         private final Logger logger = (Logger) LoggerFactory.getLogger(BootstrapGitTransportFactory.class);
         private final ListAppender<ILoggingEvent> events = new ListAppender<>();
-        private final ProxyAwareNativeGitRepositoryProvider provider;
+        private final NativeGitRepositoryFactory provider;
 
         private Fixture() throws Exception {
             events.start();
@@ -179,7 +180,7 @@ class BootstrapSshTrustTest {
             });
             server.setCommandFactory((channel, command) -> new UnknownCommand(command));
             server.start();
-            provider = new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(),
+            provider = new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
                     new BootstrapSecretResolver(Map.of("SSH_PASSWORD", "secret-password")),
                     (location, transport, repository) -> {
                         try (GitClientTransportSession session = transport.open(GitClientService.UPLOAD_PACK,

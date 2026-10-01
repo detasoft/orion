@@ -11,7 +11,7 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitClientTransportSession;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -48,7 +48,7 @@ class NativeBootstrapGitFetcherTest {
     void fetchesAndRefreshesSelectedRefIntoNativeRepository() throws Exception {
         Upstream upstream = upstream("first");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName()).valueOrFailure("create proxy");
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
 
@@ -74,7 +74,7 @@ class NativeBootstrapGitFetcherTest {
     void missingUpstreamFailsWithoutDisclosingItsPath() {
         Path missing = tempDir.resolve("credential-looking-upstream.git");
         BootstrapGitLocation location = location(missing);
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName()).valueOrFailure("create proxy");
 
         assertThatThrownBy(() -> {
@@ -92,7 +92,7 @@ class NativeBootstrapGitFetcherTest {
     void rewindsSelectedRefToObjectAlreadyPresentWithoutPackData() throws Exception {
         Upstream upstream = upstream("first");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName()).valueOrFailure("create proxy");
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         String firstId = upstream.git().getRepository().resolve("refs/heads/main").name();
@@ -126,7 +126,7 @@ class NativeBootstrapGitFetcherTest {
     @ParameterizedTest
     @ValueSource(strings = {"ffffffffffffffffffffffffffffffffffffffff", "invalid-private-tree"})
     void rejectsInvalidDownloadedObjectGraphBeforeRefPublication(String tree) throws Exception {
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("proxy").valueOrFailure("create proxy");
         byte[] content = ("tree " + tree + "\n\ninvalid tree\n").getBytes(StandardCharsets.UTF_8);
         ObjectId commit;
@@ -152,7 +152,7 @@ class NativeBootstrapGitFetcherTest {
     @Test
     void rejectsDamagedDownloadedPacksWithoutPublishingObjectsOrRefs() throws Exception {
         FileTestSupport.Prepared prepared;
-        try (NativeGitRepository source = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository source = NativeGitRepositoryProvider.inMemory()
                 .create("source").valueOrFailure("source")) {
             prepared = FileTestSupport.prepared(source.files(), "main", "initial", GitCommitAuthor.EMPTY,
                     fileAccess -> {
@@ -166,7 +166,7 @@ class NativeBootstrapGitFetcherTest {
         ObjectId commit = prepared.refUpdates().getFirst().newId().orElseThrow();
         for (byte[] invalid : new byte[][]{
                 Arrays.copyOf(valid, valid.length - 1), corrupt, Arrays.copyOf(valid, valid.length + 1)}) {
-            try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+            try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                     .create("proxy").valueOrFailure("proxy")) {
                 GitClientTransport transport = packTransport(commit, invalid);
                 assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(
@@ -186,7 +186,7 @@ class NativeBootstrapGitFetcherTest {
     void reportsConcurrentLocalRefPublicationAsAConflictWithoutChangingRefs() throws Exception {
         Upstream upstream = upstream("remote");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("proxy").valueOrFailure("create proxy");
         repository.files().withAccess("refs/heads/main", "local", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("orion.xml", new byte[]{1});
@@ -213,7 +213,7 @@ class NativeBootstrapGitFetcherTest {
             assertThatThrownBy(() -> new NativeBootstrapGitFetcher().fetch(location, transport, repository))
                     .isInstanceOfSatisfying(BootstrapGitProxyException.class, failure ->
                             assertThat(failure.status())
-                                    .isEqualTo(ProxyAwareNativeGitRepositoryProvider.SyncStatus.CONFLICT));
+                                    .isEqualTo(NativeGitRepositoryFactory.SyncStatus.CONFLICT));
             assertThat(repository.refs()).containsExactlyInAnyOrderEntriesOf(Map.of(
                     "refs/heads/main", concurrent, "refs/heads/incoming", concurrent));
         } finally {

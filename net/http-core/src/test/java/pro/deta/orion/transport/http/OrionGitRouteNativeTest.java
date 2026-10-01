@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -51,7 +51,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void protocolV2DiscoveryOmitsServiceAnnouncement() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -87,7 +87,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postUsesAutoPackfileUriBaseFromSmartHttpRequest() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -129,7 +129,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postDecodesGzipRequestBody() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         PublishedObjectFixture fixture = publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -158,7 +158,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postDecodesGzipReceivePackRequestBody() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         NativeGitRepository repository = provider.create(REPOSITORY_NAME)
                 .valueOrFailure("repository");
         byte[] data = "received".getBytes(StandardCharsets.UTF_8);
@@ -192,7 +192,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postRejectsUnsupportedContentEncoding() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
                 autoPackfileUriConfig(), provider);
@@ -216,7 +216,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postRejectsMalformedGzipRequestBody() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
                 autoPackfileUriConfig(), provider);
@@ -240,7 +240,7 @@ class OrionGitRouteNativeTest {
     @Test
     void postRejectsUnexpectedContentTypeBeforeReadingRepository()
             throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -267,7 +267,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void postRequiresCanonicalExactContentType() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -297,7 +297,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void headUsesSmartDiscoveryGetSemantics() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
@@ -324,7 +324,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void rejectsUnknownDiscoveryServiceAsForbidden() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
@@ -339,7 +339,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void rejectsMissingOrBlankDiscoveryServiceAsBadRequest() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
@@ -358,7 +358,7 @@ class OrionGitRouteNativeTest {
     @Test
     void rejectsEndpointSpecificWrongMethodsWithAccurateAllowHeader()
             throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider),
                 autoPackfileUriConfig(), provider);
@@ -399,7 +399,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void requiresExplicitRepositoryBoundaryAndExactChildPath() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
@@ -421,7 +421,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void repositorySegmentsMayHaveOperationNames() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         String name = "organization/team/info/refs/project";
         provider.create(name).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
@@ -436,7 +436,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void rejectsDeniedReadAndWriteBeforeOpeningBodyOrResponseStream() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
@@ -460,7 +460,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void receiveDiscoveryRequiresCreateGrantForMissingRepository() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
         ResponseRecorder denied = new ResponseRecorder();
@@ -482,7 +482,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void unknownHttpVerbUsesChildAllowHeader() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
         for (String[] endpoint : new String[][]{
@@ -498,7 +498,7 @@ class OrionGitRouteNativeTest {
 
     @Test
     void usesOneContextRelativePathForRoutingAndRepositoryResolution() throws Exception {
-        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(
                 new DefaultGitNativeRepositoryService(provider), autoPackfileUriConfig(), provider);
@@ -536,8 +536,8 @@ class OrionGitRouteNativeTest {
         servlet.service(request, response);
     }
 
-    private FileNativeGitRepositoryProvider provider() {
-        return new FileNativeGitRepositoryProvider(tempDir);
+    private NativeGitRepositoryProvider provider() {
+        return NativeGitRepositoryProvider.file(tempDir);
     }
 
     private static GitTransportConfig autoPackfileUriConfig() {
@@ -547,7 +547,7 @@ class OrionGitRouteNativeTest {
     }
 
     private static PublishedObjectFixture publishObject(
-            FileNativeGitRepositoryProvider provider) throws IOException {
+            NativeGitRepositoryProvider provider) throws IOException {
         NativeGitRepository repository = provider.create(REPOSITORY_NAME)
                 .valueOrFailure("repository");
         byte[] data = "published".getBytes(StandardCharsets.UTF_8);

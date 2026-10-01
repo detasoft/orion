@@ -2,7 +2,7 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -33,8 +33,8 @@ class GitBlockingWireSessionShallowHistoryTest {
     @Test
     void smartHttpPostAcceptsClientShallowStateAndRelativeDepth()
             throws Exception {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -68,8 +68,8 @@ class GitBlockingWireSessionShallowHistoryTest {
     @Test
     void smartHttpPostSerializesShallowInfoForDeepenSince()
             throws Exception {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
         ObjectId rootBlob = repository.writeObject(
@@ -145,7 +145,7 @@ class GitBlockingWireSessionShallowHistoryTest {
 
     @Test
     void duplicateShallowDeclarationsDoNotDuplicateTheResponse() throws Exception {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("file", new byte[]{1});
@@ -166,7 +166,7 @@ class GitBlockingWireSessionShallowHistoryTest {
     private static GitBlockingWireSession session(
             QueueByteSource input,
             RecordingBufferedByteOutput output,
-            InMemoryNativeGitRepositoryProvider provider) {
+            NativeGitRepositoryProvider provider) {
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(new BufferedByteInputV2(input), output);
         return new GitBlockingWireSession(
@@ -176,9 +176,9 @@ class GitBlockingWireSessionShallowHistoryTest {
                 wire);
     }
 
-    private static InMemoryNativeGitRepositoryProvider providerWithMainRef() {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
+    private static NativeGitRepositoryProvider providerWithMainRef() {
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.inMemory();
         NativeGitRepository repository = provider.create("project").valueOrFailure("repository");
         ObjectId id = repository.writeObject(GitObjectType.BLOB, "main".getBytes(StandardCharsets.US_ASCII));
         assertThat(id.toHex()).isEqualTo(MAIN_ID);

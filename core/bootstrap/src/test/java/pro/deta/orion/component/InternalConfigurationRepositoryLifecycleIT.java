@@ -18,15 +18,14 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
-import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
-import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
@@ -921,12 +920,13 @@ class InternalConfigurationRepositoryLifecycleIT {
             OrionConfiguration configuration,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
-        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(
-                new ConfigurationContext(configuration).getFileGitStoragePath());
+        pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
+                pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
+                        new ConfigurationContext(configuration).getFileGitStoragePath());
         S3Transport transport = new S3Transport();
-        ConfiguredNativeGitRepositoryProvider configured =
-                new ConfiguredNativeGitRepositoryProvider(backend, transport);
-        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(configured);
+        pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory configured =
+                new pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory(backend, transport);
+        NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(configured);
         ResolvedBootstrapSource configurationSource = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION,
                 configuration.getBootstrap().getAccessControl(),
@@ -943,7 +943,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 .tlsCapability(TlsCapability.unavailable())
                 .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
-                .configuredRepositoryProvider(configured)
+                .configuredRepositoryFactory(configured)
                 .s3Transport(transport)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)))
                 .build();

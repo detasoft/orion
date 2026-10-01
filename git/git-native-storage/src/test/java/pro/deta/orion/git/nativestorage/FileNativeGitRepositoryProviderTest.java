@@ -42,7 +42,7 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void closesCachedRepositoriesAndRejectsNewLookups(@TempDir Path root) throws Exception {
-        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(root);
+        NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(root);
         NativeGitRepository first = provider.create("first").valueOrFailure("create first");
         NativeGitRepository second = provider.create("second").valueOrFailure("create second");
         provider.close();
@@ -50,15 +50,15 @@ class FileNativeGitRepositoryProviderTest {
         assertThatThrownBy(() -> first.index().createAccess()).hasMessageContaining("closed");
         assertThatThrownBy(() -> second.index().createAccess()).hasMessageContaining("closed");
         assertThatThrownBy(() -> provider.find("first")).hasMessageContaining("closed");
-        try (FileNativeGitRepositoryProvider reopened = new FileNativeGitRepositoryProvider(root)) {
+        try (NativeGitRepositoryProvider reopened = NativeGitRepositoryProvider.file(root)) {
             assertThat(reopened.exists("first")).isTrue();
         }
     }
 
     @Test
     void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) throws Exception {
-        FileNativeGitRepositoryProvider first =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider first =
+                NativeGitRepositoryProvider.file(rootDirectory);
         NativeGitRepository repository = first.create(
                 "team/project").valueOrFailure("repository");
         ObjectId blob = repository.writeObject(
@@ -66,8 +66,8 @@ class FileNativeGitRepositoryProviderTest {
                 "persistent".getBytes(StandardCharsets.UTF_8));
         repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());
 
-        FileNativeGitRepositoryProvider second =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider second =
+                NativeGitRepositoryProvider.file(rootDirectory);
         NativeGitRepository reopened = second.find("team/project")
                 .valueOrFailure("repository");
 
@@ -88,8 +88,8 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void repositoryNamesDoNotMapDirectlyToFileSystemPaths(
             @TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(rootDirectory);
 
         provider.create("team/project")
                 .valueOrFailure("repository");
@@ -99,21 +99,21 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void listsPersistedRepositoriesInStableOrder(@TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider first =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider first =
+                NativeGitRepositoryProvider.file(rootDirectory);
         first.create("team/zeta").valueOrFailure("repository");
         first.create("alpha").valueOrFailure("repository");
 
-        FileNativeGitRepositoryProvider reopened =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider reopened =
+                NativeGitRepositoryProvider.file(rootDirectory);
 
         assertThat(reopened.repositoryNames()).containsExactly("alpha", "team/zeta");
     }
 
     @Test
     void createFailsWhenRepositoryAlreadyExists(@TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(rootDirectory);
         provider.create("project").valueOrFailure("repository");
 
         Result<NativeGitRepository> result = provider.create("project");
@@ -125,8 +125,8 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void findDoesNotCreateRepository(@TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(rootDirectory);
 
         Result<NativeGitRepository> result = provider.find("missing");
 
@@ -137,8 +137,8 @@ class FileNativeGitRepositoryProviderTest {
     @Test
     void canonicalizesNamesBeforeLookupAndPersistsTheCanonicalIdentity(
             @TempDir Path rootDirectory) {
-        FileNativeGitRepositoryProvider first =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider first =
+                NativeGitRepositoryProvider.file(rootDirectory);
 
         NativeGitRepository created = first.create("team%2Frepo")
                 .valueOrFailure("repository");
@@ -148,8 +148,8 @@ class FileNativeGitRepositoryProviderTest {
                 .isSameAs(created);
         assertThat(first.create("team/repo")).isInstanceOf(Result.Failure.class);
 
-        FileNativeGitRepositoryProvider reopened =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider reopened =
+                NativeGitRepositoryProvider.file(rootDirectory);
         assertThat(reopened.find("team/repo").valueOrFailure("repository").name())
                 .isEqualTo("team/repo");
         assertThat(reopened.repositoryNames()).containsExactly("team/repo");
@@ -157,8 +157,8 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void rejectsInvalidPersistedRepositoryNames(@TempDir Path rootDirectory) throws IOException {
-        FileNativeGitRepositoryProvider provider =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider provider =
+                NativeGitRepositoryProvider.file(rootDirectory);
         provider.create("team/repo").valueOrFailure("repository");
         Path metadata = singlePathWithSuffix(
                 rootDirectory,
@@ -169,8 +169,8 @@ class FileNativeGitRepositoryProviderTest {
                 content.replace("name=team/repo", "name=Team/repo"),
                 StandardCharsets.UTF_8);
 
-        FileNativeGitRepositoryProvider reopened =
-                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepositoryProvider reopened =
+                NativeGitRepositoryProvider.file(rootDirectory);
 
         assertThatThrownBy(reopened::repositoryNames)
                 .isInstanceOf(IllegalArgumentException.class);
@@ -180,7 +180,7 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void reopensReceivedPackAndItsIndexWithoutChangingBytes(@TempDir Path root) throws Exception {
-        NativeGitRepository repository = new FileNativeGitRepositoryProvider(root)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(root)
                 .create("packed").valueOrFailure("repository");
         byte[] first = "published-one".getBytes(StandardCharsets.UTF_8);
         byte[] second = "published-two".getBytes(StandardCharsets.UTF_8);
@@ -188,7 +188,7 @@ class FileNativeGitRepositoryProviderTest {
         PackChecksum id = persist(repository, bytes);
         assertThat(id.toHex()).isEqualTo(packChecksum(bytes));
         repository.close();
-        try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root)
                 .find("packed").valueOrFailure("repository")) {
             ByteArrayOutputStream exported = new ByteArrayOutputStream();
             reopened.index().withAccess(access1 -> {
@@ -209,7 +209,7 @@ class FileNativeGitRepositoryProviderTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void readsOffsetAndCompletedReferenceDeltasAfterReopen(boolean reference, @TempDir Path root) throws Exception {
-        NativeGitRepository repository = new FileNativeGitRepositoryProvider(root)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(root)
                 .create("packed").valueOrFailure("repository");
         byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
         byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -219,7 +219,7 @@ class FileNativeGitRepositoryProviderTest {
         PackChecksum id = persist(repository, reference
                 ? packWithReferenceDelta(blobId(base), base, target) : packWithOffsetDelta(base, target));
         repository.close();
-        try (NativeGitRepository reopened = new FileNativeGitRepositoryProvider(root)
+        try (NativeGitRepository reopened = NativeGitRepositoryProvider.file(root)
                 .find("packed").valueOrFailure("repository")) {
             {
                 GitIndexAccess access2 = reopened.index().createAccess();
@@ -247,7 +247,7 @@ class FileNativeGitRepositoryProviderTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void rejectsThinPackWithMissingOrCorruptBase(boolean corrupt, @TempDir Path root) throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(root)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root)
                 .create("packed").valueOrFailure("repository")) {
             byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
             byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -271,7 +271,7 @@ class FileNativeGitRepositoryProviderTest {
 
     @Test
     void malformedPackLeavesNoPublishedObjectsOrRefs(@TempDir Path root) throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(root)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(root)
                 .create("packed").valueOrFailure("repository")) {
             byte[] bytes = pack("broken".getBytes(StandardCharsets.UTF_8));
             bytes[bytes.length - 1] ^= 1;

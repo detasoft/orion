@@ -14,7 +14,7 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -281,7 +281,7 @@ class RuntimeHttpGitRouteIT {
             }
         }
 
-        assertThat(new FileNativeGitRepositoryProvider(repositoryRoot).repositoryNames())
+        assertThat(NativeGitRepositoryProvider.file(repositoryRoot).repositoryNames())
                 .contains(repositoryName);
     }
 
@@ -581,14 +581,14 @@ class RuntimeHttpGitRouteIT {
     private static void assertRepositoryDoesNotExist(
             Path repositoryRoot,
             String repositoryName) {
-        assertThat(new FileNativeGitRepositoryProvider(repositoryRoot).exists(repositoryName))
+        assertThat(NativeGitRepositoryProvider.file(repositoryRoot).exists(repositoryName))
                 .isFalse();
     }
 
     private static NativeGitRepository nativeRepository(
             Path repositoryRoot,
             String repositoryName) {
-        return new FileNativeGitRepositoryProvider(repositoryRoot)
+        return NativeGitRepositoryProvider.file(repositoryRoot)
                 .find(repositoryName)
                 .valueOrFailure("repository");
     }

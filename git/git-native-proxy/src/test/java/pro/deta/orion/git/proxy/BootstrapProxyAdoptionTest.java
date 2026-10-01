@@ -1,8 +1,10 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -43,8 +45,8 @@ class BootstrapProxyAdoptionTest {
             String name = provider.prepareProvisional("material", source("HTTPS://GIT.EXAMPLE:443/repo"));
             assertThat(configurationName).isEqualTo(name);
             assertThat(name).isEqualTo("bootstrap");
-            NativeGitRepository materialRepository = provider.openForRead(name).valueOrFailure("material");
-            NativeGitRepository configurationRepository = provider.openForRead(configurationName)
+            NativeGitRepository materialRepository = provider.provider().openForRead(name).valueOrFailure("material");
+            NativeGitRepository configurationRepository = provider.provider().openForRead(configurationName)
                     .valueOrFailure("configuration");
             assertThat(configurationRepository).isSameAs(materialRepository);
 
@@ -58,8 +60,8 @@ class BootstrapProxyAdoptionTest {
             assertThat(provider.adoptProvisional(adopted, secrets)).isSameAs(adopted);
             assertThat(configurationRepository.refs()).isEmpty();
             assertThat(materialRepository.refs()).isEmpty();
-            assertThat(provider.repositoryNames()).isEmpty();
-            assertThat(provider.isPublicRepositoryName(name)).isFalse();
+            assertThat(provider.provider().repositoryNames()).isEmpty();
+            assertThat(provider.provider().isPublicRepositoryName(name)).isFalse();
         }
     }
 
@@ -147,8 +149,8 @@ class BootstrapProxyAdoptionTest {
         return source;
     }
 
-    private static ProxyAwareNativeGitRepositoryProvider provider(String token) {
-        return new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider(),
+    private static NativeGitRepositoryFactory provider(String token) {
+        return new NativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(),
                 new BootstrapSecretResolver(Map.of("TOKEN", token)), (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> List.of());
     }

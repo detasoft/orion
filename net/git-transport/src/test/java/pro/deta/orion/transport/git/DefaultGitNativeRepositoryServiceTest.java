@@ -8,10 +8,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.capability.GitCapabilities;
@@ -54,14 +52,15 @@ import static pro.deta.orion.git.parser.v2.data.RefUpdateResult.Status.*;
 import static pro.deta.orion.transport.git.GitWireTestClient.*;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
-class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvider, GitNativeRepositoryAccessHook {
+class DefaultGitNativeRepositoryServiceTest extends NativeGitRepositoryProvider
+        implements GitNativeRepositoryAccessHook {
     @Override
     public void close() {
         backend.close();
         if (replacement != null) replacement.close();
     }
 
-    private NativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+    private NativeGitRepositoryProvider backend = NativeGitRepositoryProvider.inMemory();
     private NativeGitRepositoryProvider replacement;
     private final List<String> calls = new ArrayList<>();
     private final DefaultGitNativeRepositoryService service = new DefaultGitNativeRepositoryService(this);
@@ -174,7 +173,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
 
     @Test
     void keepsPersistedPackWhenAtomicRefTransactionIsStale(@TempDir Path directory) throws Exception {
-        backend = new FileNativeGitRepositoryProvider(directory);
+        backend = NativeGitRepositoryProvider.file(directory);
         NativeGitRepository repository = createRepository(backend, "demo");
         repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("a", new byte[]{0});
@@ -196,7 +195,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
         } finally {
             backend.close();
         }
-        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.refs()).containsEntry("refs/heads/main", initial);
             reopened.index().withAccess(access2 -> {
@@ -234,7 +233,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
     @Test
     void retainsRepositoryOpenedBeforeRefAuthorization() throws Exception {
         NativeGitRepository original = createRepository(backend, "demo");
-        replacement = new InMemoryNativeGitRepositoryProvider();
+        replacement = NativeGitRepositoryProvider.inMemory();
         NativeGitRepository other = createRepository(replacement, "demo");
         try (GitRepositoryContext context = service.open(receiveRequest("demo"), this)) {
             List<RefUpdateResult> results = context.publish(Optional.empty(),
@@ -529,7 +528,7 @@ class DefaultGitNativeRepositoryServiceTest implements NativeGitRepositoryProvid
             List<RefUpdate> updates, boolean atomic) {
         publishCalls++;
         if (!rejectPublication) {
-            return NativeGitRepositoryProvider.super.publish(repository, received, updates, atomic);
+            return super.publish(repository, received, updates, atomic);
         }
         List<RefUpdateResult> results = new ArrayList<>();
         for (RefUpdate update : updates) {

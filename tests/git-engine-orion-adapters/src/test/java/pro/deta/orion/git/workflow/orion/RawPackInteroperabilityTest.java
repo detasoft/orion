@@ -16,7 +16,7 @@ import pro.deta.orion.git.client.GitTransportScheme;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitUploadPackRequest;
 import pro.deta.orion.git.client.GitUploadPackResult;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
@@ -83,7 +83,7 @@ class RawPackInteroperabilityTest {
             GitRemoteRepository remote = server.createRemoteRepository(directory.resolve("server"), "project.git");
             source.addRemote("origin", remote);
             source.push("origin", "main");
-            FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory.resolve("copy"));
+            NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory.resolve("copy"));
             try (NativeGitRepository copy = provider.create("project").valueOrFailure("repository")) {
                 fetch(client, remote, common, List.of(), copy);
                 source.writeFile("README.md", "updated\n");

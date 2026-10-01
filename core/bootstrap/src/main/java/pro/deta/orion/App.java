@@ -87,8 +87,8 @@ public class App {
                         .configurationCipherCapability(bootstrap.configurationCipher())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
                         .sshHostKeyCapability(bootstrap.sshHostKeys())
-                        .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
-                        .configuredRepositoryProvider(bootstrap.storageProvider())
+                        .nativeGitRepositoryProvider(bootstrap.repositoryFactory())
+                        .configuredRepositoryFactory(bootstrap.storageFactory())
                         .s3Transport(bootstrap.s3Transport())
                         .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();

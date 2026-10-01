@@ -131,7 +131,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {
-        try (NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("nested/remove.txt", new byte[]{1});
@@ -171,7 +171,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void invalidOrConflictingDeletionDoesNotPublishAnything() throws Exception {
-        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        try (NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository")) {
             repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("config.txt", bytes("initial"));
@@ -199,7 +199,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void fileSavePublishesAReadablePack() throws Exception {
-        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
             repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("config.txt", bytes("first"));
@@ -216,7 +216,7 @@ class NativeGitFileUpdateTest {
                 return null;
             });
         }
-        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(directory)) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(directory)) {
             NativeGitRepository reopened = provider.find("demo").valueOrFailure("repository");
             assertThat(reopened.files().readBytes("main", "config.txt")).isEqualTo(bytes("first"));
         }
@@ -224,7 +224,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void staleFileSaveRetainsValidatedPackWithoutChangingTheBranch() throws Exception {
-        NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository");
         repository.files().withAccess("main", "first", GitCommitAuthor.EMPTY, fileAccess -> {
             fileAccess.write("config.txt", bytes("first"));
@@ -264,7 +264,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void preparedPackIsIndependentOfItsReadersAndUnderstoodByJGit() throws Exception {
-        NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository repository = NativeGitRepositoryProvider.inMemory()
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {
@@ -291,7 +291,7 @@ class NativeGitFileUpdateTest {
             }
         }
 
-        NativeGitRepository another = new InMemoryNativeGitRepositoryProvider()
+        NativeGitRepository another = NativeGitRepositoryProvider.inMemory()
                 .create("another").valueOrFailure("repository");
         for (NativeGitRepository target : List.of(repository, another)) {
             assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
@@ -303,7 +303,7 @@ class NativeGitFileUpdateTest {
 
     @Test
     void corruptOrIncompletePackCannotPublishRefs() throws Exception {
-        NativeGitRepository repository = new FileNativeGitRepositoryProvider(directory)
+        NativeGitRepository repository = NativeGitRepositoryProvider.file(directory)
                 .create("demo").valueOrFailure("repository");
         FileTestSupport.Prepared update = FileTestSupport.prepared(repository.files(), "main", "prepared",
                 GitCommitAuthor.EMPTY, fileAccess -> {

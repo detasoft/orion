@@ -5,7 +5,7 @@ import org.eclipse.jgit.lib.ObjectInserter;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -61,12 +61,12 @@ final class FileGitCompatibilityExporter implements GitCompatibilityExporter {
         }
         Path temporary = Files.createTempDirectory(parent, ".orion-git-export-");
         boolean published = false;
-        try (FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(sourceStore)) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.file(sourceStore)) {
             if (!provider.exists(repositoryName)) {
                 throw new IOException("Source repository does not exist: " + repositoryName);
             }
-            try (NativeGitRepository source = provider.find(repositoryName).valueOrFailure("source repository");
-                 Repository target = FileRepositoryBuilder.create(temporary.toFile())) {
+            NativeGitRepository source = provider.find(repositoryName).valueOrFailure("source repository");
+            try (Repository target = FileRepositoryBuilder.create(temporary.toFile())) {
                 if (source.hashAlgorithm() != GitHashAlgorithm.SHA1) {
                     throw new IOException("Only SHA-1 source repositories can be exported to Git SHA-1");
                 }

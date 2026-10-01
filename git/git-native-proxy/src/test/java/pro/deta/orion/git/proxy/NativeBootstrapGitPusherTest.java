@@ -10,7 +10,7 @@ import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.FileMode;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -30,7 +30,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncStatus.*;
+import static pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncStatus.*;
 import pro.deta.orion.test.integration.git.FileTestSupport;
 
 class NativeBootstrapGitPusherTest {
@@ -171,7 +171,7 @@ class NativeBootstrapGitPusherTest {
     }
 
     private NativeGitRepository repository(BootstrapGitLocation location) {
-        return new InMemoryNativeGitRepositoryProvider()
+        return NativeGitRepositoryProvider.inMemory()
                 .create(location.proxyName())
                 .valueOrFailure("create proxy");
     }

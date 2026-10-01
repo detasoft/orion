@@ -1,5 +1,6 @@
 package pro.deta.orion.git.s3;
 
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -74,8 +75,8 @@ class S3GitDataIT {
     @Test
     void appliesAllChangedRefsAtomicallyAcrossIndependentProvidersAndMergesOtherRefs() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-refs-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider one = provider(server);
-             S3NativeGitRepositoryProvider two = provider(server);
+             NativeGitRepositoryProvider one = provider(server);
+             NativeGitRepositoryProvider two = provider(server);
              NativeGitRepository first = one.create("repo").valueOrFailure("create");
              NativeGitRepository second = two.find("repo").valueOrFailure("open")) {
             RefId main = new RefId("refs/heads/main");
@@ -98,7 +99,7 @@ class S3GitDataIT {
             });
             assertThatThrownBy(stale::apply).isInstanceOf(GitRefConflictException.class);
             assertThat(second.refs()).containsExactlyEntriesOf(Map.of(other.value(), b.toHex()));
-            try (S3NativeGitRepositoryProvider reopened = provider(server);
+            try (NativeGitRepositoryProvider reopened = provider(server);
                  NativeGitRepository persisted = reopened.find("repo").valueOrFailure("reopen after conflict")) {
                 assertThat(persisted.readObject(a).orElseThrow().data()).containsExactly(1);
                 assertThat(persisted.readObject(b).orElseThrow().data()).containsExactly(2);
@@ -117,7 +118,7 @@ class S3GitDataIT {
     @Test
     void uploadsLargeStagingFilesInPartsAndReadsTheirTailAfterReopen() throws Exception {
         try (MinioS3TestServer server = MinioS3TestServer.start("orion-multipart-" + UUID.randomUUID());
-             S3NativeGitRepositoryProvider provider = provider(server);
+             NativeGitRepositoryProvider provider = provider(server);
              NativeGitRepository repository = provider.create("repo").valueOrFailure("create")) {
             PackId id = PackId.create();
             long offset = 65L * 1024 * 1024;
@@ -162,8 +163,8 @@ class S3GitDataIT {
         }
     }
 
-    private static S3NativeGitRepositoryProvider provider(MinioS3TestServer server) {
-        return new S3NativeGitRepositoryProvider("s3://" + server.bucketName() + "/repos", server.endpoint(),
+    private static NativeGitRepositoryProvider provider(MinioS3TestServer server) {
+        return S3NativeGitRepositoryFactory.repositories("s3://" + server.bucketName() + "/repos", server.endpoint(),
                 Map.of("accessKeyId", server.accessKeyId(), "secretAccessKey", "env:SECRET"),
                 Map.of("SECRET", server.secretAccessKey()));
     }
