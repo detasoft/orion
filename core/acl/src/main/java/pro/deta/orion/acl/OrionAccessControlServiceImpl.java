@@ -105,7 +105,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void loadAccessControlOnStart() {
         try {
-            preparationSubscription = editor.onPrepare(this::prepareAccessControl);
+            preparationSubscription = editor.onPrepare("add internal server keys to root", this::prepareAccessControl);
             changeSubscription = configurationStorage.onChange(initiator -> requestToUpdate());
             synchronized (editor) {
                 Result<ConfigurationFile> initial = initialConfiguration
@@ -800,7 +800,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void requestToUpdate() {
         try {
-            editor.reload("configuration repository change");
+            editor.onStorageChange();
         } catch (RuntimeException failure) {
             log.error("Retaining the last valid configuration after reload failure", failure);
         }
@@ -868,21 +868,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private ConfigurationFile prepareAccessControl(ConfigurationFile loadedSnapshot) {
-        ConfigurationFile preparedSnapshot = loadedSnapshot;
         AccessControlDraft draft = accessControlDraft(loadedSnapshot);
         List<AccessControlDraft.User> roots = rootUsers(draft);
         if (roots.size() == 1 && synchronizeInternalServerKeysToRoot(roots.getFirst())) {
-            editor.edit(loadedSnapshot).update(document -> document.replaceAccessControl(draft.toAccessControl()))
-                    .apply("add internal server keys to root", UserEmail.EMPTY);
-            preparedSnapshot = switch (loadValidatedConfigurationFile()) {
-                case Result.Success<ConfigurationFile>(var snapshot) -> snapshot;
-                case Result.Failure<ConfigurationFile> failure -> throw new IllegalStateException(
-                        "Cannot reload ACL after internal server-key synchronization: [" + failure.code() + "] "
-                                + failure.message(),
-                        failure.throwable());
-            };
+            OrionDocument document = parseOrionConfiguration(loadedSnapshot.content());
+            return new ConfigurationFile(
+                    serializeOrionConfiguration(document.replaceAccessControl(draft.toAccessControl())),
+                    loadedSnapshot.revision());
         }
-        return preparedSnapshot;
+        return loadedSnapshot;
     }
 
     private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft.User rootUser) {

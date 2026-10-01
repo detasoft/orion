@@ -1049,6 +1049,69 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
+    @Test
+    void internalServerKeySynchronizationDoesNotReloadInsideSaveNotification() {
+        AccessControlDraft primary = new AccessControlDraft();
+        primary.getUsers().add(user("root")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+        InMemoryStorage storage = new InMemoryStorage(
+                new ConfigurationFile(serialize(primary.toAccessControl()), Optional.of("version-one")));
+        storage.notifyDuringSave = true;
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new OrionConfiguration(),
+                testCipher(), testMaterial(), desired);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
+                new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
+                testServerIdentity(List.of(KEY_THREE.getPublic())), desired, editor, Optional.empty());
+
+        try {
+            service.onStart();
+            assertThat(storage.saveCount).isEqualTo(1);
+            assertThat(storage.loadDuringSave).isFalse();
+            assertThat(desired.current().revision()).isEqualTo(storage.snapshot.revision());
+            assertThat(service.listSshCredentials("root"))
+                    .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
+                            assertThat(success.credentials()).contains(descriptor(KEY_THREE.getPublic())));
+        } finally {
+            service.onStop();
+        }
+    }
+
+    @Test
+    void internalServerKeySynchronizationRetriesAgainstConcurrentConfiguration() {
+        AccessControlDraft initial = new AccessControlDraft();
+        initial.getUsers().add(user("root")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+        AccessControlDraft winning = new AccessControlDraft();
+        winning.getUsers().add(user("root")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+        winning.getUsers().add(user("alice")
+                .addCredential(AccessControl.CredentialType.ARGON2, "alice-hash"));
+        InMemoryStorage storage = new InMemoryStorage(
+                new ConfigurationFile(serialize(initial.toAccessControl()), Optional.of("version-one")));
+        storage.concurrentReplacement = new ConfigurationFile(
+                serialize(winning.toAccessControl()), Optional.of("version-two"));
+        OrionDesiredState desired = new OrionDesiredState();
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new OrionConfiguration(),
+                testCipher(), testMaterial(), desired);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
+                new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
+                testServerIdentity(List.of(KEY_THREE.getPublic())), desired, editor, Optional.empty());
+
+        try {
+            service.onStart();
+            assertThat(storage.saveCount).isEqualTo(1);
+            assertThat(desired.current().revision()).contains("version-two");
+            assertThat(credentials(storage.snapshot, "alice"))
+                    .singleElement().extracting(AccessControl.Credential::getValue).isEqualTo("alice-hash");
+            assertThat(service.listSshCredentials("root"))
+                    .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
+                            assertThat(success.credentials()).contains(descriptor(KEY_THREE.getPublic())));
+        } finally {
+            service.onStop();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void createsDefaultOrganizationOnlyForNewConfigurationAndPreservesItOnRestart(boolean resetRoot)
@@ -1478,6 +1541,10 @@ class OrionAccessControlServiceImplTest {
 
     private static final class InMemoryStorage implements OrionConfigurationStorage {
         private Consumer<String> changeListener = ignored -> {};
+        private boolean notifyDuringSave;
+        private boolean saving;
+        private boolean loadDuringSave;
+        private ConfigurationFile concurrentReplacement;
 
         @Override
         public ChangeSubscription onChange(Consumer<String> listener) {
@@ -1501,6 +1568,7 @@ class OrionAccessControlServiceImplTest {
         @Override
         public Result<ConfigurationFile> load() {
             loadCount++;
+            if (saving) loadDuringSave = true;
             if (loadUnavailable) {
                 return new Result.Failure<>(Result.FailureCode.GENERAL);
             }
@@ -1509,6 +1577,11 @@ class OrionAccessControlServiceImplTest {
 
         @Override
         public void save(ConfigurationFile snapshot, String message, UserEmail author) {
+            if (concurrentReplacement != null) {
+                this.snapshot = concurrentReplacement;
+                concurrentReplacement = null;
+                throw new OrionConfigurationConcurrentUpdateException("simulated winning revision", null);
+            }
             if (blockCredentialRemoval && message.startsWith("remove SSH credential")) {
                 credentialRemovalSaveEntered.countDown();
                 try {
@@ -1526,6 +1599,14 @@ class OrionAccessControlServiceImplTest {
             }
             this.snapshot = snapshot;
             saveCount++;
+            if (notifyDuringSave) {
+                saving = true;
+                try {
+                    changeListener.accept("synchronous save notification");
+                } finally {
+                    saving = false;
+                }
+            }
         }
 
     }

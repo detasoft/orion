@@ -12,6 +12,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -25,8 +26,9 @@ public final class OrionConfigurationEditor {
     private final ConfigurationCipherCapability configurationCipher;
     private final ConfigurationMaterialCapability configurationMaterial;
     private final KeyMaterialScope materialScope;
-    private final CopyOnWriteArrayList<UnaryOperator<ConfigurationFile>> preparations =
+    private final CopyOnWriteArrayList<Preparation> preparations =
             new CopyOnWriteArrayList<>();
+    private boolean saving;
 
     @Inject
     public OrionConfigurationEditor(OrionConfigurationStorage storage,
@@ -58,9 +60,16 @@ public final class OrionConfigurationEditor {
         return new Edit(snapshot, document(snapshot).valueOrFailure("Cannot validate configuration for update"));
     }
 
-    public OrionConfigurationStorage.ChangeSubscription onPrepare(UnaryOperator<ConfigurationFile> preparation) {
-        preparations.add(Objects.requireNonNull(preparation, "preparation"));
+    public OrionConfigurationStorage.ChangeSubscription onPrepare(String message,
+            UnaryOperator<ConfigurationFile> operation) {
+        Preparation preparation = new Preparation(Objects.requireNonNull(message, "message"),
+                Objects.requireNonNull(operation, "preparation"));
+        preparations.add(preparation);
         return () -> preparations.remove(preparation);
+    }
+
+    public synchronized void onStorageChange() {
+        if (!saving) reload("configuration repository change");
     }
 
     public synchronized OrionDesiredState.Snapshot reload(String initiator) {
@@ -68,9 +77,26 @@ public final class OrionConfigurationEditor {
     }
 
     public synchronized OrionDesiredState.Snapshot reload(ConfigurationFile snapshot) {
-        document(snapshot).valueOrFailure("Invalid configuration for reload");
-        for (UnaryOperator<ConfigurationFile> preparation : preparations) {
-            snapshot = Objects.requireNonNull(preparation.apply(snapshot), "prepared configuration");
+        while (true) {
+            document(snapshot).valueOrFailure("Invalid configuration for reload");
+            boolean retry = false;
+            for (Preparation preparation : preparations) {
+                ConfigurationFile prepared = Objects.requireNonNull(preparation.operation().apply(snapshot),
+                        "prepared configuration");
+                if (Arrays.equals(snapshot.content(), prepared.content())) continue;
+                document(prepared).valueOrFailure("Invalid prepared configuration");
+                try {
+                    save(prepared, preparation.message(), UserEmail.EMPTY);
+                } catch (OrionConfigurationConcurrentUpdateException conflict) {
+                    snapshot = storage.load().valueOrFailure("Cannot reload configuration after concurrent update");
+                    retry = true;
+                    break;
+                }
+                snapshot = storage.load().valueOrFailure("Cannot reload prepared configuration");
+                retry = true;
+                break;
+            }
+            if (!retry) break;
         }
         OrionDocument document = document(snapshot).valueOrFailure("Invalid prepared configuration");
         if (desiredState.isPublished()) {
@@ -84,6 +110,15 @@ public final class OrionConfigurationEditor {
         }
         desiredState.publish(document, snapshot.revision());
         return desiredState.current();
+    }
+
+    private void save(ConfigurationFile file, String message, UserEmail author) {
+        saving = true;
+        try {
+            storage.save(file, message, author);
+        } finally {
+            saving = false;
+        }
     }
 
     public Result<OrionDocument> document(ConfigurationFile snapshot) {
@@ -181,7 +216,7 @@ public final class OrionConfigurationEditor {
                 closed = true;
                 message = Objects.requireNonNullElse(message, "");
                 author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
-                storage.save(updated, message, author);
+                save(updated, message, author);
                 try {
                     return reload(author + " " + message);
                 } catch (RuntimeException failure) {
@@ -201,4 +236,6 @@ public final class OrionConfigurationEditor {
             }
         }
     }
+
+    private record Preparation(String message, UnaryOperator<ConfigurationFile> operation) {}
 }
