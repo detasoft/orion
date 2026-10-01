@@ -94,7 +94,10 @@ public final class ScopedLogs {
             trigger.start();
             file.setRollingPolicy(rolling);
             file.setTriggeringPolicy(trigger);
-            file.start();
+            // Logback checks a shared file-collision map during start; both sift appenders use this context.
+            synchronized (ctx) {
+                file.start();
+            }
             return file;
         });
         sift.start();

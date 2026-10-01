@@ -2,6 +2,7 @@ package pro.deta.orion.util;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -74,7 +75,7 @@ class ScopedLogsTest {
         assertThat(MDC.get("unrelated")).isEqualTo("retained");
     }
 
-    @Test
+    @RepeatedTest(50)
     void isolatesConcurrentUsersAndTasksOnReusedThreads() throws Exception {
         LogInitializer logging = new LogInitializer();
         logging.configureScopedLogs(root);
