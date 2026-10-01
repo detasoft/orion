@@ -164,17 +164,14 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         try {
             NativeGitRepository repository = backend.find(repositoryName)
                     .valueOrFailure("Cannot open bootstrap repository");
-            if (!repository.refs().containsKey(refName)) {
+            String revision = repository.refs().get(refName);
+            if (revision == null) {
                 if (allowMissing) {
                     return resolved(id, repositoryName, refName, path, Optional.empty(), allowMissing);
                 }
                 throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
             try {
-                String revision = repository.refs().get(refName);
-                if (revision == null) {
-                    throw new GitRepositoryFileNotFoundException("Branch not found: " + refName);
-                }
                 repository.files().readFile(new pro.deta.orion.git.parser.v2.id.ObjectId(revision), path,
                         (type, size, base, input) -> Boolean.TRUE);
                 return resolved(id, repositoryName, refName, path, Optional.of(revision), allowMissing);
