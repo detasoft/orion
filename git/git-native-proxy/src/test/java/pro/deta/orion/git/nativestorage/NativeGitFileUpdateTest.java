@@ -16,6 +16,7 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -30,6 +31,103 @@ import pro.deta.orion.test.integration.git.FileTestSupport;
 class NativeGitFileUpdateTest {
     @TempDir
     private Path directory;
+
+    @Test
+    void nestedWriteCannotReplaceAnExistingFileWithADirectory() throws Exception {
+        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("demo").valueOrFailure("repository")) {
+            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
+                access.write("folder", bytes("original"));
+                access.apply();
+                return null;
+            });
+            String initial = repository.refs().get("refs/heads/main");
+
+            assertThatThrownBy(() -> repository.files().withAccess("main", "invalid", GitCommitAuthor.EMPTY,
+                    access -> {
+                        access.write("folder/child.txt", bytes("new"));
+                        access.apply();
+                        return null;
+                    })).isInstanceOf(IOException.class);
+
+            assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
+            assertThat(repository.files().readBytes("main", "folder")).isEqualTo(bytes("original"));
+        }
+    }
+
+    @Test
+    void writingAFileCannotSilentlyReplaceAnExistingDirectory() throws Exception {
+        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("demo").valueOrFailure("repository")) {
+            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
+                access.write("folder/keep.txt", bytes("original"));
+                access.apply();
+                return null;
+            });
+            String initial = repository.refs().get("refs/heads/main");
+
+            assertThatThrownBy(() -> repository.files().withAccess("main", "invalid", GitCommitAuthor.EMPTY,
+                    access -> {
+                        access.write("folder", bytes("replacement"));
+                        access.apply();
+                        return null;
+                    })).isInstanceOf(IOException.class);
+
+            assertThat(repository.refs()).containsEntry("refs/heads/main", initial);
+            assertThat(repository.files().readBytes("main", "folder/keep.txt"))
+                    .isEqualTo(bytes("original"));
+        }
+    }
+
+    @Test
+    void nestedWritePreservesUntouchedSubtreeWithoutPackingItsObjects() throws Exception {
+        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("demo").valueOrFailure("repository")) {
+            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
+                access.write("left/config.txt", bytes("before"));
+                access.write("right/keep.txt", bytes("keep"));
+                access.apply();
+                return null;
+            });
+
+            repository.files().withAccess("main", "update", GitCommitAuthor.EMPTY, access -> {
+                access.write("left/config.txt", bytes("after"));
+                assertThat(access.pack().objectCount()).isEqualTo(4);
+                access.apply();
+                return null;
+            });
+
+            assertThat(repository.files().readBytes("main", "left/config.txt")).isEqualTo(bytes("after"));
+            assertThat(repository.files().readBytes("main", "right/keep.txt")).isEqualTo(bytes("keep"));
+        }
+    }
+
+    @Test
+    void explicitChangesCanReplaceAFileWithADirectoryAndBack() throws Exception {
+        try (NativeGitRepository repository = new InMemoryNativeGitRepositoryProvider()
+                .create("demo").valueOrFailure("repository")) {
+            repository.files().withAccess("main", "initial", GitCommitAuthor.EMPTY, access -> {
+                access.write("entry", bytes("file"));
+                access.apply();
+                return null;
+            });
+            repository.files().withAccess("main", "file to directory", GitCommitAuthor.EMPTY, access -> {
+                access.delete("entry");
+                access.write("entry/child", bytes("nested"));
+                access.apply();
+                return null;
+            });
+            assertThat(repository.files().readBytes("main", "entry/child")).isEqualTo(bytes("nested"));
+
+            repository.files().withAccess("main", "directory to file", GitCommitAuthor.EMPTY, access -> {
+                access.delete("entry/child");
+                access.write("entry", bytes("file again"));
+                access.apply();
+                return null;
+            });
+            assertThat(repository.files().readBytes("main", "entry")).isEqualTo(bytes("file again"));
+        }
+    }
 
     @Test
     void deletionAndReplacementPublishTogetherAndPreserveOtherFiles() throws Exception {

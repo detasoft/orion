@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -42,14 +43,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.zip.Deflater;
 
 import static pro.deta.orion.git.fileapi.GitFileApi.*;
 
 /**
  * File changes against captured refs. Each write consumes exactly the declared number of bytes from a
- * borrowed input and stores compressed content immediately; only tree entries remain in memory.
+ * borrowed input and stores compressed content immediately; only changed paths and the entries of
+ * each directory being rebuilt remain in memory.
  * Pack export freezes the changes without publishing them. Apply publishes the pack and updates refs
  * through the repository's publication policy. Discard releases resources and is harmless after completion.
  */
@@ -61,14 +62,13 @@ public final class GitFileAccess implements Modification {
     private final GitStorageAccess storage;
     private final RefId ref;
     private final Optional<ObjectId> parent;
+    private final Map<String, TreeEntry> rootEntries;
     private final boolean initializeDefaultHead;
     private final String message;
     private final GitCommitAuthor author;
     private final Set<ObjectId> objects = new HashSet<>();
-    private final Set<String> written = new HashSet<>();
     private final Set<String> deleted = new HashSet<>();
-    private final TreeMap<String, TreeEntry> entries = new TreeMap<>((left, right) -> Arrays.compareUnsigned(
-            left.getBytes(StandardCharsets.UTF_8), right.getBytes(StandardCharsets.UTF_8)));
+    private final Map<String, TreeEntry> entries = new HashMap<>();
     private PackMetadata pack;
     private List<RefUpdate> updates;
     private boolean finished;
@@ -87,9 +87,8 @@ public final class GitFileAccess implements Modification {
         this.initializeDefaultHead = initializeDefaultHead
                 && !ref.value().equals(repository.defaultHead())
                 && !refs.containsKey(new RefId(repository.defaultHead()));
-        if (parent.isPresent()) {
-            readTreeEntries(rootTreeId(parent.get(), readObject(parent.get())), "", entries);
-        }
+        rootEntries = parent.isPresent()
+                ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
         storage = repository.storage().createAccess();
         try {
             bytes = storage.newPack(packId);
@@ -117,7 +116,6 @@ public final class GitFileAccess implements Modification {
         }
         ObjectId id = writeObject(GitObjectType.BLOB, size, input);
         entries.put(normalized, new TreeEntry(mode, normalized.substring(normalized.lastIndexOf('/') + 1), id));
-        written.add(normalized);
     }
 
     public void write(String path, byte[] content) throws IOException {
@@ -134,7 +132,7 @@ public final class GitFileAccess implements Modification {
     public void delete(String path) throws IOException {
         requireEditable();
         String normalized = gitPath(path);
-        if (written.contains(normalized)) {
+        if (entries.containsKey(normalized)) {
             throw new IllegalArgumentException("Git file is both saved and deleted: " + normalized);
         }
         entries.remove(normalized);
@@ -147,7 +145,9 @@ public final class GitFileAccess implements Modification {
             return pack;
         }
         try {
-            ObjectId tree = writeTree("", entries);
+            Set<String> changedPaths = new HashSet<>(entries.keySet());
+            changedPaths.addAll(deleted);
+            ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
             ObjectId commit = writeCommit(tree, parent.orElse(null), message, author);
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
@@ -316,57 +316,107 @@ public final class GitFileAccess implements Modification {
         }
     }
 
-    private void readTreeEntries(
-            ObjectId treeId,
-            String prefix,
-            TreeMap<String, TreeEntry> entries) throws GitOperationException {
+    private Optional<ObjectId> writeTree(String prefix, ObjectId previousTree, Set<String> changedPaths)
+            throws IOException {
+        Map<String, TreeEntry> directory;
+        if (prefix.isEmpty()) {
+            directory = new HashMap<>(rootEntries);
+        } else {
+            try {
+                directory = readTree(previousTree);
+            } catch (GitOperationException failure) {
+                throw new IOException("Cannot read tree: " + previousTree, failure);
+            }
+        }
+        Set<String> changedNames = new HashSet<>();
+        for (String path : changedPaths) {
+            if (!path.startsWith(prefix)) {
+                continue;
+            }
+            String relative = path.substring(prefix.length());
+            int slash = relative.indexOf('/');
+            changedNames.add(slash < 0 ? relative : relative.substring(0, slash));
+        }
+        for (String name : changedNames) {
+            String path = prefix + name;
+            TreeEntry replacement = entries.get(path);
+            boolean remove = deleted.contains(path);
+            boolean nestedChange = false;
+            for (String changed : changedPaths) {
+                if (changed.startsWith(path + "/")) {
+                    nestedChange = true;
+                    break;
+                }
+            }
+            TreeEntry previous = directory.get(name);
+            if (nestedChange) {
+                if (replacement != null && (previous == null || previous.mode() != FileMode.TREE)) {
+                    throw new IOException("Git file conflicts with a changed directory: " + path);
+                }
+                if (previous != null && previous.mode() == FileMode.TREE && remove) {
+                    throw new IOException("Git path is a directory: " + path);
+                }
+                if (previous != null && previous.mode() != FileMode.TREE && !remove) {
+                    throw new IOException("Git path is not a directory: " + path);
+                }
+                ObjectId previousChild = previous != null && previous.mode() == FileMode.TREE
+                        ? previous.objectId() : null;
+                Optional<ObjectId> updated = writeTree(path + "/", previousChild, changedPaths);
+                if (replacement != null) {
+                    if (updated.isPresent()) {
+                        throw new IOException("Git file conflicts with a changed directory: " + path);
+                    }
+                    directory.put(name, replacement);
+                } else if (updated.isPresent()) {
+                    directory.put(name, new TreeEntry(FileMode.TREE, name, updated.orElseThrow()));
+                } else {
+                    directory.remove(name);
+                }
+            } else if (replacement != null) {
+                if (previous != null && previous.mode() == FileMode.TREE) {
+                    throw new IOException("Git path is a directory: " + path);
+                }
+                directory.put(name, replacement);
+            } else if (remove) {
+                if (previous != null && previous.mode() == FileMode.TREE) {
+                    throw new IOException("Git path is a directory: " + path);
+                }
+                directory.remove(name);
+            }
+        }
+        if (directory.isEmpty() && !prefix.isEmpty()) {
+            return Optional.empty();
+        }
+        List<TreeEntry> sorted = new ArrayList<>(directory.values());
+        sorted.sort((left, right) -> Arrays.compareUnsigned(treeSortName(left), treeSortName(right)));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        for (TreeEntry entry : sorted) {
+            writeTreeEntry(output, entry.mode(), entry.name(), entry.objectId());
+        }
+        return Optional.of(writeObject(GitObjectType.TREE, output.toByteArray()));
+    }
+
+    private Map<String, TreeEntry> readTree(ObjectId treeId) throws GitOperationException {
+        Map<String, TreeEntry> directory = new HashMap<>();
+        if (treeId == null) {
+            return directory;
+        }
         LooseObject tree = readObject(treeId);
         if (tree.type() != GitObjectType.TREE) {
             throw new GitOperationException("Tree target is not a tree: " + treeId);
         }
         byte[] data = tree.data();
-        int offset = 0;
-        while (offset < data.length) {
+        for (int offset = 0; offset < data.length;) {
             ParsedTreeEntry parsed = parseTreeEntry(treeId, data, offset);
-            String path = prefix + parsed.entry().name();
-            if (parsed.entry().mode() == FileMode.TREE) {
-                readTreeEntries(parsed.entry().objectId(), path + "/", entries);
-            } else {
-                entries.put(path, parsed.entry());
-            }
+            directory.put(parsed.entry().name(), parsed.entry());
             offset = parsed.nextOffset();
         }
+        return directory;
     }
 
-    private ObjectId writeTree(
-            String prefix,
-            TreeMap<String, TreeEntry> entries) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        String previousDirectory = null;
-        for (Map.Entry<String, TreeEntry> entry : entries.tailMap(prefix).entrySet()) {
-            if (!entry.getKey().startsWith(prefix)) {
-                break;
-            }
-            String relative = entry.getKey().substring(prefix.length());
-            if (relative.isEmpty()) {
-                continue;
-            }
-            int slash = relative.indexOf('/');
-            if (slash >= 0) {
-                String directory = relative.substring(0, slash);
-                if (!directory.equals(previousDirectory)) {
-                    previousDirectory = directory;
-                    ObjectId treeId = writeTree(
-                            prefix + directory + "/",
-                            entries);
-                    writeTreeEntry(output, FileMode.TREE, directory, treeId);
-                }
-                continue;
-            }
-            writeTreeEntry(output, entry.getValue().mode(), relative, entry.getValue().objectId());
-        }
-        ObjectId treeId = writeObject(GitObjectType.TREE, output.toByteArray());
-        return treeId;
+    private static byte[] treeSortName(TreeEntry entry) {
+        String name = entry.name() + (entry.mode() == FileMode.TREE ? "/" : "");
+        return name.getBytes(StandardCharsets.UTF_8);
     }
 
     private ObjectId writeCommit(
