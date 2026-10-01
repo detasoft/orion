@@ -70,7 +70,6 @@
 
   <modules>
     <module>bom</module>
-    <module>session-host</module>
     <module>agent</module>
     <module>core</module>
     <module>connectors</module>

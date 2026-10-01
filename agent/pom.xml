@@ -18,6 +18,7 @@
         <module>agent-protocol</module>
         <module>agent-session-server</module>
         <module>agent-provisioning</module>
+        <module>session-host</module>
     </modules>
 
 </project>
