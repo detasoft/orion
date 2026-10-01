@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,7 +71,7 @@ class ConfiguredStorageManagementTest {
                 Optional.of(organization), revision(), true, input(secret));
         assertThat(result).isInstanceOf(StorageManagement.Success.class);
         assertThat(secret).containsOnly('\0');
-        assertThat(new String(storage.snapshot.files().get("config.xml"), java.nio.charset.StandardCharsets.UTF_8))
+        assertThat(new String(storage.snapshot.content(), java.nio.charset.StandardCharsets.UTF_8))
                 .doesNotContain("private-access-secret");
         Connection.S3 connection = (Connection.S3) desired.current().document().organizations()
                 .getFirst().connections().getFirst();
@@ -394,25 +395,23 @@ class ConfiguredStorageManagementTest {
     }
 
     private static final class MemoryStorage implements AccessControlStorage {
-        private AccessControlSnapshot snapshot;
+        private ConfigurationFile snapshot;
         private int saves;
 
         void set(OrionDocument document) throws Exception {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             OrionXml.write(document, output);
-            snapshot = new AccessControlSnapshot(Map.of("config.xml", output.toByteArray()), Optional.of("v0"));
+            snapshot = new ConfigurationFile(output.toByteArray(), Optional.of("v0"));
         }
 
         @Override
-        public Result<AccessControlSnapshot> load() { return Result.of(snapshot); }
+        public Result<ConfigurationFile> load() { return Result.of(snapshot); }
         @Override
-        public String primaryPath() { return "config.xml"; }
-        @Override
-        public void save(AccessControlSnapshot updated, String message, UserEmail author) {
-            if (!snapshot.version().equals(updated.version())) {
+        public void save(ConfigurationFile updated, String message, UserEmail author) {
+            if (!snapshot.revision().equals(updated.revision())) {
                 throw new AccessControlConcurrentUpdateException("Changed", null);
             }
-            snapshot = new AccessControlSnapshot(updated.files(), Optional.of("v" + ++saves));
+            snapshot = new ConfigurationFile(updated.content(), Optional.of("v" + ++saves));
         }
     }
 }

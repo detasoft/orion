@@ -1,5 +1,6 @@
 package pro.deta.orion.acl.storage;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.fileapi.GitFileAccess;
@@ -15,7 +16,6 @@ import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -39,7 +39,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     }
 
     @Override
-    public Result<AccessControlSnapshot> load() {
+    public Result<ConfigurationFile> load() {
         NativeGitRepository repository;
         try {
             repository = repositoryProvider.openForRead(repositoryName)
@@ -54,7 +54,7 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             }
             byte[] content = repository.files().readFile(new ObjectId(revision), path,
                     (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
-            return new Result.Success<>(new AccessControlSnapshot(Map.of(path, content), Optional.of(revision)));
+            return new Result.Success<>(new ConfigurationFile(content, Optional.of(revision)));
         } catch (GitRepositoryFileNotFoundException error) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | RuntimeException error) {
@@ -63,9 +63,9 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     }
 
     @Override
-    public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
-        Objects.requireNonNull(snapshot, "snapshot");
-        byte[] content = Objects.requireNonNull(snapshot.files().get(path), "configuration content");
+    public void save(ConfigurationFile file, String message, UserEmail author) {
+        Objects.requireNonNull(file, "configuration file");
+        byte[] content = file.content();
         message = Objects.requireNonNullElse(message, "");
         author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
         try {
@@ -74,10 +74,10 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                     .valueOrFailure("Cannot open native repository " + repositoryName);
             CheckedFunction<GitFileAccess, Void> update = access -> {
                 byte[] previous = null;
-                if (snapshot.version().isPresent()) {
+                if (file.revision().isPresent()) {
                     try {
                         previous = repository.files().readFile(
-                                new ObjectId(snapshot.version().orElseThrow()), path,
+                                new ObjectId(file.revision().orElseThrow()), path,
                                 (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
                     } catch (GitRepositoryFileNotFoundException missing) {
                         // The configuration file has not been created at this revision yet.
@@ -89,8 +89,8 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                 access.apply();
                 return null;
             };
-            if (snapshot.version().isPresent()) {
-                repository.files().withAccess(configurationRef, snapshot.version().orElseThrow(),
+            if (file.revision().isPresent()) {
+                repository.files().withAccess(configurationRef, file.revision().orElseThrow(),
                         message, commitAuthor, update);
             } else {
                 repository.files().withAccess(configurationRef, message, commitAuthor, update);
@@ -100,11 +100,6 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         } catch (Exception error) {
             throw new IllegalStateException("Cannot save ACL to native repository " + repositoryName, error);
         }
-    }
-
-    @Override
-    public String primaryPath() {
-        return path;
     }
 
     @Override

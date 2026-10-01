@@ -18,7 +18,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
@@ -85,7 +85,7 @@ class AcmeConfigurationServiceTest {
             AcmeConfigurationService.View view = service.save(new AcmeConfigurationService.Settings("r1",
                     "letsencrypt", "", "admin@example.test", List.of("example.test"), "", null, reference), "root");
             assertThat(view.accountMaterial()).isEqualTo(reference);
-            assertThat(OrionXml.read(new java.io.ByteArrayInputStream(storage.snapshot.files().get("orion.xml")))
+            assertThat(OrionXml.read(new java.io.ByteArrayInputStream(storage.snapshot.content()))
                     .system().https().orElseThrow().acme().orElseThrow().accountMaterial()).contains(reference);
             acl.reload("restart");
             assertThat(service.view().accountMaterial()).isEqualTo(reference);
@@ -214,7 +214,7 @@ class AcmeConfigurationServiceTest {
 
             assertThat(result.revision()).isEqualTo("r2");
             assertThat(result.eabConfigured()).isTrue();
-            assertThat(storage.snapshot.files().get("orion.xml"))
+            assertThat(storage.snapshot.content())
                     .asString(StandardCharsets.UTF_8).doesNotContain(EAB_KEY);
             acl.reload("restart");
             assertThat(service.view()).isEqualTo(result);
@@ -362,28 +362,24 @@ class AcmeConfigurationServiceTest {
     }
 
     private static final class MemoryStorage implements AccessControlStorage {
-        private AccessControlSnapshot snapshot;
+        private ConfigurationFile snapshot;
 
         private MemoryStorage() throws Exception {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             OrionXml.write(
                     OrionDocument.withAccessControl(new AccessControl()), output);
-            snapshot = new AccessControlSnapshot(
-                    Map.of("orion.xml", output.toByteArray()), Optional.of("r1"));
+            snapshot = new ConfigurationFile(output.toByteArray(), Optional.of("r1"));
         }
 
         @Override
-        public Result<AccessControlSnapshot> load() {
+        public Result<ConfigurationFile> load() {
             return new Result.Success<>(snapshot);
         }
 
         @Override
-        public String primaryPath() { return "orion.xml"; }
-
-        @Override
-        public void save(AccessControlSnapshot next,
+        public void save(ConfigurationFile next,
                 String message, UserEmail author) {
-            snapshot = new AccessControlSnapshot(next.files(), Optional.of("r2"));
+            snapshot = new ConfigurationFile(next.content(), Optional.of("r2"));
         }
     }
 }

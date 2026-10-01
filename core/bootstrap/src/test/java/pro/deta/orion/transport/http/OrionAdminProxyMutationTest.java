@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -158,7 +159,6 @@ class OrionAdminProxyMutationTest {
             f.work.remove().run();
 
             assertThat(f.storage.saves).isEqualTo(saves + 1);
-            assertThat(f.storage.snapshot.files()).containsOnlyKeys("orion.xml");
             f.acl.reload("verify host key persistence");
             var binding = f.desired.current().document().system().proxies().getFirst();
             assertThat(binding.knownHosts(f.desired.current().document().system())).containsExactlyInAnyOrder(previous, f.hostKey());
@@ -324,10 +324,8 @@ class OrionAdminProxyMutationTest {
             String secret = f.desired.current().document().system().proxies().getFirst().secret(f.desired
                     .current().document().system()).orElseThrow();
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("first-private-token".toCharArray());
-            assertThat(new String(f.storage.snapshot.files().get("orion.xml")))
+            assertThat(new String(f.storage.snapshot.content()))
                     .doesNotContain("first-private-token");
-            assertThat(f.storage.snapshot.files()).containsOnlyKeys("orion.xml");
-
             Reply replaced = f.post(f.command("replace-credential", "credential", null, "second-private-token"));
             assertThat(replaced.status).isEqualTo(200);
             assertThat(f.secrets.resolveSystem(secret)).isEqualTo("second-private-token".toCharArray());
@@ -380,7 +378,7 @@ class OrionAdminProxyMutationTest {
     void refreshesTheReadRevisionAfterAnExternalConfigurationChange() throws Exception {
         try (var f = new Fixture()) {
             var old = f.command("create", "credential", f.upstream(), "private-token");
-            f.storage.snapshot = new AccessControlSnapshot(f.storage.snapshot.files(), Optional.of("external"));
+            f.storage.snapshot = new ConfigurationFile(f.storage.snapshot.content(), Optional.of("external"));
             assertThat(f.post(old).status).isEqualTo(409);
             Reply listing = f.request("GET", Map.of(), true);
             assertThat(listing.json.get("revision").asText()).isEqualTo("external");
@@ -394,9 +392,9 @@ class OrionAdminProxyMutationTest {
         try (var f = new Fixture()) {
             var first = f.command("create", "credential", f.upstream(), "private-token");
             assertThat(f.post(first).status).isEqualTo(201);
-            String version = f.storage.snapshot.version().orElseThrow();
+            String version = f.storage.snapshot.revision().orElseThrow();
             assertThat(f.post(first).status).isEqualTo(409);
-            assertThat(f.storage.snapshot.version()).contains(version);
+            assertThat(f.storage.snapshot.revision()).contains(version);
             f.storage.conflict = true;
             Reply race = f.post(f.command("replace-credential", "credential", null, "new-private-token"));
             assertThat(race.status).isEqualTo(409);
@@ -673,7 +671,7 @@ class OrionAdminProxyMutationTest {
     }
 
     private static final class MemoryStorage implements AccessControlStorage {
-        AccessControlSnapshot snapshot;
+        ConfigurationFile snapshot;
         int saves;
         boolean conflict;
         boolean failSave;
@@ -681,16 +679,15 @@ class OrionAdminProxyMutationTest {
         MemoryStorage() throws IOException {
             var output = new ByteArrayOutputStream();
             OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), output);
-            snapshot = new AccessControlSnapshot(Map.of("orion.xml", output.toByteArray()), Optional.of("0"));
+            snapshot = new ConfigurationFile(output.toByteArray(), Optional.of("0"));
         }
-        @Override public Result<AccessControlSnapshot> load() { return new Result.Success<>(snapshot); }
-        @Override public String primaryPath() { return "orion.xml"; }
-        @Override public void save(AccessControlSnapshot next, String message, UserEmail author) {
+        @Override public Result<ConfigurationFile> load() { return new Result.Success<>(snapshot); }
+        @Override public void save(ConfigurationFile next, String message, UserEmail author) {
             if (failSave) throw new IllegalStateException("storage unavailable");
-            if (conflict || !snapshot.version().equals(next.version())) {
+            if (conflict || !snapshot.revision().equals(next.revision())) {
                 throw new AccessControlConcurrentUpdateException("configuration conflict", null);
             }
-            snapshot = new AccessControlSnapshot(next.files(), Optional.of(Integer.toString(++saves)));
+            snapshot = new ConfigurationFile(next.content(), Optional.of(Integer.toString(++saves)));
         }
     }
 

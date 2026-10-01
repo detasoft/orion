@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.storage.*;
@@ -35,15 +36,14 @@ final class StorageManagementFixture {
         OrionDesiredState desired = new OrionDesiredState();
         desired.publish(document, Optional.of("v1"));
         AccessControlStorage storage = new AccessControlStorage() {
-            private AccessControlSnapshot snapshot = snapshot(document, "v1");
+            private ConfigurationFile snapshot = snapshot(document, "v1");
             private int revision = 1;
-            @Override public Result<AccessControlSnapshot> load() { return Result.of(snapshot); }
-            @Override public String primaryPath() { return "config.xml"; }
-            @Override public void save(AccessControlSnapshot updated, String message, UserEmail author) {
-                if (!snapshot.version().equals(updated.version())) {
+            @Override public Result<ConfigurationFile> load() { return Result.of(snapshot); }
+            @Override public void save(ConfigurationFile updated, String message, UserEmail author) {
+                if (!snapshot.revision().equals(updated.revision())) {
                     throw new AccessControlConcurrentUpdateException("Changed", null);
                 }
-                snapshot = new AccessControlSnapshot(updated.files(), Optional.of("v" + ++revision));
+                snapshot = new ConfigurationFile(updated.content(), Optional.of("v" + ++revision));
             }
         };
         OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
@@ -75,11 +75,11 @@ final class StorageManagementFixture {
                 });
     }
 
-    private static AccessControlSnapshot snapshot(OrionDocument document, String revision) {
+    private static ConfigurationFile snapshot(OrionDocument document, String revision) {
         try {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             OrionXml.write(document, output);
-            return new AccessControlSnapshot(Map.of("config.xml", output.toByteArray()), Optional.of(revision));
+            return new ConfigurationFile(output.toByteArray(), Optional.of(revision));
         } catch (java.io.IOException failure) {
             throw new AssertionError(failure);
         }

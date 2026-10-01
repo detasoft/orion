@@ -1,5 +1,6 @@
 package pro.deta.orion.acl.storage;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,7 +21,6 @@ import pro.deta.orion.util.Result;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -66,12 +66,9 @@ class NativeGitAccessControlStorageTest {
                 provider).resolve();
 
         assertThat(storage).isInstanceOf(NativeGitAccessControlStorage.class);
-        assertThat(storage.primaryPath()).isEqualTo(ACL_PATH);
         assertThat(storage.createIfMissing()).isFalse();
-        assertThat(storage.load().valueOrFailure("resolved ACL").files())
-                .containsOnlyKeys(ACL_PATH)
-                .containsEntry(ACL_PATH, bytes("resolved acl"));
-        storage.save(new AccessControlSnapshot(Map.of(ACL_PATH, bytes("updated ACL")),
+        assertThat(storage.load().valueOrFailure("resolved ACL").content()).isEqualTo(bytes("resolved acl"));
+        storage.save(new ConfigurationFile(bytes("updated ACL"),
                 Optional.of(repository.refs().get("refs/heads/main"))), "update", UserEmail.EMPTY);
         assertThat(repository.files().readBytes("refs/heads/main", secondaryPath))
                 .isEqualTo(bytes("resolved roles"));
@@ -101,13 +98,11 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage storage = new AccessControlStorageResolver(
                 new BootstrapRepositorySources(List.of(source)), provider).resolve();
 
-        AccessControlSnapshot loaded = storage.load().valueOrFailure("selected ACL");
-        assertThat(loaded.files())
-                .containsEntry(ACL_PATH, bytes("selected ACL"));
-        assertThat(storage.primaryPath()).isEqualTo(ACL_PATH);
+        ConfigurationFile loaded = storage.load().valueOrFailure("selected ACL");
+        assertThat(loaded.content()).isEqualTo(bytes("selected ACL"));
         assertThat(storage.createIfMissing()).isFalse();
         storage.save(
-                new AccessControlSnapshot(Map.of(ACL_PATH, bytes("versioned update")), loaded.version()),
+                new ConfigurationFile(bytes("versioned update"), loaded.revision()),
                 "versioned update", UserEmail.EMPTY);
 
         assertThat(selected.files().readBytes(ref, ACL_PATH)).isEqualTo(bytes("versioned update"));
@@ -133,18 +128,17 @@ class NativeGitAccessControlStorageTest {
         assertThat(((Result.Failure<?>) storage.load()).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
 
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("initial acl")),
+                new ConfigurationFile(bytes("initial acl"), Optional.empty()),
                 useDefaults ? null : "bootstrap ACL",
                 useDefaults ? null : new UserEmail("root", "root@example.test"));
 
-        AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load");
-        assertThat(snapshot.files()).containsOnlyKeys(ACL_PATH);
-        assertThat(snapshot.files().get(ACL_PATH)).isEqualTo(bytes("initial acl"));
-        assertThat(snapshot.version()).isPresent();
+        ConfigurationFile snapshot = storage.load().valueOrFailure("ACL should load");
+        assertThat(snapshot.content()).isEqualTo(bytes("initial acl"));
+        assertThat(snapshot.revision()).isPresent();
         assertThat(storage.createIfMissing()).isTrue();
         assertThat(provider.repositoryNames()).containsExactly("internal/configuration");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
-        byte[] commit = repository.readObject(new ObjectId(snapshot.version().orElseThrow()))
+        byte[] commit = repository.readObject(new ObjectId(snapshot.revision().orElseThrow()))
                 .orElseThrow().data();
         String identity = useDefaults ? "orion <orion@localhost>" : "root <root@example.test>";
         assertThat(new String(commit, StandardCharsets.UTF_8))
@@ -157,13 +151,13 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage first = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
         first.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("persisted acl")),
+                new ConfigurationFile(bytes("persisted acl"), Optional.empty()),
                 "bootstrap ACL", UserEmail.EMPTY);
 
         AccessControlStorage restarted = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
 
-        assertThat(restarted.load().valueOrFailure("ACL should survive restart").files().get(ACL_PATH))
+        assertThat(restarted.load().valueOrFailure("ACL should survive restart").content())
                 .isEqualTo(bytes("persisted acl"));
     }
 
@@ -180,7 +174,7 @@ class NativeGitAccessControlStorageTest {
         });
         AccessControlStorage storage = preparedStorage(provider);
 
-        Result<AccessControlSnapshot> result = storage.load();
+        Result<ConfigurationFile> result = storage.load();
 
         assertThat(result).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) result).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
@@ -199,11 +193,9 @@ class NativeGitAccessControlStorageTest {
         });
         AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
 
-        Result<AccessControlSnapshot> result = storage.load();
+        Result<ConfigurationFile> result = storage.load();
 
-        assertThat(result.valueOrFailure("configured ACL").files())
-                .containsOnlyKeys(ACL_PATH)
-                .containsEntry(ACL_PATH, bytes("primary ACL"));
+        assertThat(result.valueOrFailure("configured ACL").content()).isEqualTo(bytes("primary ACL"));
     }
 
     @Test
@@ -215,7 +207,7 @@ class NativeGitAccessControlStorageTest {
                 ignored -> changes.incrementAndGet());
 
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("first")),
+                new ConfigurationFile(bytes("first"), Optional.empty()),
                 "first", UserEmail.EMPTY);
         provider.find("internal/configuration").valueOrFailure("repository").files()
                 .withAccess("refs/heads/other", "other branch", GitCommitAuthor.EMPTY, fileAccess -> {
@@ -224,11 +216,11 @@ class NativeGitAccessControlStorageTest {
             return null;
         });
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("second")),
+                new ConfigurationFile(bytes("second"), Optional.empty()),
                 "second", UserEmail.EMPTY);
         subscription.close();
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("third")),
+                new ConfigurationFile(bytes("third"), Optional.empty()),
                 "third", UserEmail.EMPTY);
 
         assertThat(changes).hasValue(2);
@@ -239,9 +231,9 @@ class NativeGitAccessControlStorageTest {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         AccessControlStorage storage = preparedStorage(provider);
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("version one")),
+                new ConfigurationFile(bytes("version one"), Optional.empty()),
                 "version one", UserEmail.EMPTY);
-        AccessControlSnapshot stale = storage.load().valueOrFailure("version one");
+        ConfigurationFile stale = storage.load().valueOrFailure("version one");
         NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
         repository.files().withAccess("refs/heads/configuration", "version two", GitCommitAuthor.EMPTY,
                 fileAccess -> {
@@ -277,7 +269,7 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage storage = resolvedStorage(provider, ACL_PATH);
 
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
+                new ConfigurationFile(bytes("created"), Optional.empty()),
                 "created", UserEmail.EMPTY);
 
         assertThat(repository.files().readBytes("refs/heads/configuration", ACL_PATH))
@@ -298,10 +290,10 @@ class NativeGitAccessControlStorageTest {
             return null;
         });
 
-        AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load through provider");
+        ConfigurationFile snapshot = storage.load().valueOrFailure("ACL should load through provider");
 
         assertThat(provider.reads).hasValue(1);
-        assertThat(snapshot.files().get(ACL_PATH)).isEqualTo(bytes("provider acl"));
+        assertThat(snapshot.content()).isEqualTo(bytes("provider acl"));
     }
 
     @Test
@@ -311,7 +303,7 @@ class NativeGitAccessControlStorageTest {
         AccessControlStorage storage = preparedStorage(provider);
 
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_PATH, bytes("provider acl")),
+                new ConfigurationFile(bytes("provider acl"), Optional.empty()),
                 "provider ACL", UserEmail.EMPTY);
 
         assertThat(provider.saves).hasValue(1);

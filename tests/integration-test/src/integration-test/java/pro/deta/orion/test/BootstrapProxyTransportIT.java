@@ -107,7 +107,7 @@ class BootstrapProxyTransportIT {
                         assertThat(lifecycle.runApplication())
                                 .isEqualTo(RUNNING);
                         var current = new AtomicReference<>(OrionXml.read(new ByteArrayInputStream(
-                                storage.load().valueOrFailure("runtime configuration").files().get("orion.xml"))));
+                                storage.load().valueOrFailure("runtime configuration").content())));
                         assertThat(cache).isEqualTo("bootstrap");
                         assertThat(current.get().system().proxies()).isEmpty();
                         assertThat(current.get().system().secrets()).isEmpty();
@@ -183,13 +183,14 @@ class BootstrapProxyTransportIT {
                             .repositoryName().orElseThrow();
                     var provider = restarted.repositoryProvider();
                     var storage = new AccessControlStorageResolver(restarted.repositorySources(), provider).resolve();
-                    var before = storage.load().valueOrFailure("configuration before adoption").version();
+                    var before = storage.load().valueOrFailure("configuration before adoption").revision();
                     var component = runtimeComponent(configuration, restarted);
                     var lifecycle = component.orionApplicationLifecycle();
                     try {
                         assertThat(lifecycle.runApplication())
                                 .isEqualTo(RUNNING);
-                        assertThat(storage.load().valueOrFailure("configuration after adoption").version()).isEqualTo(before);
+                        assertThat(storage.load().valueOrFailure("configuration after adoption").revision())
+                                .isEqualTo(before);
                         assertThat(provider.openForRead(cache)).isNotNull();
                         stopped = true;
                         upstream.close();

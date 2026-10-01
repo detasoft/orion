@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.*;
@@ -342,7 +343,7 @@ class OrionOidcOnboardingTest {
             Reply listing = f.request("GET", "/api/admin/invitations", Map.of(), Map.of(), null, f.admin);
             assertThat(listing.json.path("organizations")).hasSize(2);
             String invitation = f.invite("acme");
-            assertThat(new String(f.storage.snapshot.files().get("orion.xml"), StandardCharsets.UTF_8))
+            assertThat(new String(f.storage.snapshot.content(), StandardCharsets.UTF_8))
                     .doesNotContain(invitation);
             f.acl.reload("restart before accepting invitation");
             Login login = f.start("acme", invitation);
@@ -501,7 +502,7 @@ class OrionOidcOnboardingTest {
                     f.material.configurationCipher());
             assertThat(secrets.resolveOrganization(f.desired.current().document(), id, provider.secret()))
                     .isEqualTo("private-google-secret".toCharArray());
-            assertThat(new String(f.storage.snapshot.files().get("orion.xml"), StandardCharsets.UTF_8))
+            assertThat(new String(f.storage.snapshot.content(), StandardCharsets.UTF_8))
                     .doesNotContain("private-google-secret");
             assertThat(f.accounts.invitation(id, invite)).isNotNull();
             assertThat(f.accounts.organization(new OrganizationId("default")).oidcProviders()).hasSize(1);
@@ -707,7 +708,7 @@ class OrionOidcOnboardingTest {
             }
             ByteArrayOutputStream xml = new ByteArrayOutputStream();
             OrionXml.write(document, xml);
-            storage.snapshot = new AccessControlSnapshot(Map.of("orion.xml", xml.toByteArray()), Optional.of("0"));
+            storage.snapshot = new ConfigurationFile(xml.toByteArray(), Optional.of("0"));
             acl = new OrionAccessControlServiceImpl(storage, new OrionPasswordHashingService(),
                     OrionRuntimeOptions.defaults(), material.serverIdentity(), desired,
                     new pro.deta.orion.schema.config.OrionConfiguration(),
@@ -862,16 +863,15 @@ class OrionOidcOnboardingTest {
     }
 
     private static final class MemoryStorage implements AccessControlStorage {
-        AccessControlSnapshot snapshot;
+        ConfigurationFile snapshot;
         int saves;
         boolean conflict;
-        @Override public Result<AccessControlSnapshot> load() { return new Result.Success<>(snapshot); }
-        @Override public String primaryPath() { return "orion.xml"; }
-        @Override public void save(AccessControlSnapshot next, String message, UserEmail author) {
-            if (conflict || !snapshot.version().equals(next.version())) {
+        @Override public Result<ConfigurationFile> load() { return new Result.Success<>(snapshot); }
+        @Override public void save(ConfigurationFile next, String message, UserEmail author) {
+            if (conflict || !snapshot.revision().equals(next.revision())) {
                 throw new AccessControlConcurrentUpdateException("configuration conflict", null);
             }
-            snapshot = new AccessControlSnapshot(next.files(), Optional.of(Integer.toString(++saves)));
+            snapshot = new ConfigurationFile(next.content(), Optional.of(Integer.toString(++saves)));
         }
     }
     private static final class Body extends ServletInputStream {

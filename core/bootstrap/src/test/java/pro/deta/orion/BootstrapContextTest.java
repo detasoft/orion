@@ -15,7 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
@@ -152,7 +152,7 @@ class BootstrapContextTest {
             assertThat(configurationRepository).isEqualTo("orion");
             assertThat(materialRepository).isEqualTo(configurationRepository);
             assertThat(context.repositoryProvider().repositoryNames()).containsExactly("orion");
-            assertThat(context.initialConfiguration().orElseThrow().version())
+            assertThat(context.initialConfiguration().orElseThrow().revision())
                     .contains(context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                             .revision().orElseThrow());
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
@@ -249,9 +249,9 @@ class BootstrapContextTest {
         };
 
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, observedBackend)) {
-            AccessControlSnapshot pinned = context.initialConfiguration().orElseThrow();
-            assertThat(pinned.version()).contains(firstCommit);
-            assertThat(pinned.files().get("orion.xml")).isEqualTo(bytes("first configuration"));
+            ConfigurationFile pinned = context.initialConfiguration().orElseThrow();
+            assertThat(pinned.revision()).contains(firstCommit);
+            assertThat(pinned.content()).isEqualTo(bytes("first configuration"));
             assertThat(repository.refs().get("refs/heads/main")).isNotEqualTo(firstCommit);
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
         }
@@ -692,16 +692,17 @@ class BootstrapContextTest {
                         .repositoryName()).isPresent();
                 AccessControlStorage storage = new AccessControlStorageResolver(
                         context.repositorySources(), context.repositoryProvider()).resolve();
-                storage.save(AccessControlSnapshot.singleFile("orion.xml", xml()),
+                storage.save(new ConfigurationFile(xml(), Optional.empty()),
                         "initial ACL", UserEmail.EMPTY);
-                AccessControlSnapshot first = storage.load().valueOrFailure("initial ACL");
-                firstRevision = first.version().orElseThrow();
+                ConfigurationFile first = storage.load().valueOrFailure("initial ACL");
+                firstRevision = first.revision().orElseThrow();
                 byte[] updated = bytes(new String(xml(), StandardCharsets.UTF_8) + "\n<!-- updated -->");
-                storage.save(new AccessControlSnapshot(Map.of("orion.xml", updated), first.version()),
+                storage.save(new ConfigurationFile(updated, first.revision()),
                         "update configuration", UserEmail.EMPTY);
-                assertThat(storage.load().valueOrFailure("updated ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
-                assertThatThrownBy(() -> storage.save(new AccessControlSnapshot(
-                                Map.of("orion.xml", bytes("stale replacement")), first.version()),
+                assertThat(storage.load().valueOrFailure("updated ACL").revision().orElseThrow())
+                        .isNotEqualTo(firstRevision);
+                assertThatThrownBy(() -> storage.save(new ConfigurationFile(
+                                bytes("stale replacement"), first.revision()),
                         "stale update", UserEmail.EMPTY))
                         .isInstanceOf(AccessControlConcurrentUpdateException.class);
             }
@@ -711,7 +712,8 @@ class BootstrapContextTest {
             try (BootstrapContext reopened = BootstrapContext.open(configuration, ENVIRONMENT, borrow(backend))) {
                 AccessControlStorage storage = new AccessControlStorageResolver(
                         reopened.repositorySources(), reopened.repositoryProvider()).resolve();
-                assertThat(storage.load().valueOrFailure("reopened ACL").version().orElseThrow()).isNotEqualTo(firstRevision);
+                assertThat(storage.load().valueOrFailure("reopened ACL").revision().orElseThrow())
+                        .isNotEqualTo(firstRevision);
             }
         }
     }
@@ -889,7 +891,7 @@ class BootstrapContextTest {
             assertThat(context.repositoryProvider().repositoryNames()).isEmpty();
             assertThat(context.repositoryProvider().isPublicRepositoryName(source.repositoryName().orElseThrow()))
                     .isFalse();
-            assertThat(storage.files.get("extra.xml")).isEqualTo(xml());
+            assertThat(storage.content).isEqualTo(xml());
         }
     }
 
@@ -907,9 +909,9 @@ class BootstrapContextTest {
                     new InMemoryNativeGitRepositoryProvider())) {
                 AccessControlStorage storage = new AccessControlStorageResolver(
                         first.repositorySources(), first.repositoryProvider()).resolve();
-                Optional<String> initialRevision = storage.load().valueOrFailure("configuration").version();
+                Optional<String> initialRevision = storage.load().valueOrFailure("configuration").revision();
                 adopted = adopt(first, storage);
-                adoptedRevision = storage.load().valueOrFailure("configuration").version();
+                adoptedRevision = storage.load().valueOrFailure("configuration").revision();
                 assertThat(adopted.system().proxies()).isEmpty();
                 assertThat(adoptedRevision).isEqualTo(initialRevision);
             }
@@ -918,7 +920,7 @@ class BootstrapContextTest {
                 AccessControlStorage storage = new AccessControlStorageResolver(
                         restarted.repositorySources(), restarted.repositoryProvider()).resolve();
                 assertThat(adopt(restarted, storage)).isEqualTo(adopted);
-                assertThat(storage.load().valueOrFailure("configuration").version()).isEqualTo(adoptedRevision);
+                assertThat(storage.load().valueOrFailure("configuration").revision()).isEqualTo(adoptedRevision);
                 String cache = restarted.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                         .repositoryName().orElseThrow();
                 assertThat(restarted.repositoryProvider().isPublicRepositoryName(cache)).isFalse();
@@ -932,7 +934,7 @@ class BootstrapContextTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"material", "primary", "secondary", "added", "removed"})
+    @ValueSource(strings = {"material", "configuration"})
     void rechecksConfigurationWhenTheRepositoryAdvancesBeforeAdoptionSave(String changedFile) throws Exception {
         OrionConfiguration configuration = configuration();
         Upstream upstream = upstream("revision-before-save", Map.of("orion.xml", xml()));
@@ -949,16 +951,9 @@ class BootstrapContextTest {
         OrionXml.write(OrionDocument.withAccessControl(changedAcl), output);
         byte[] changedXml = output.toByteArray();
         storage.afterLoad = () -> {
-            Map<String, byte[]> changed = new LinkedHashMap<>(storage.files);
-            switch (changedFile) {
-                case "primary" -> changed.put("orion.xml", changedXml);
-                case "secondary" -> changed.put("extra.xml", changedXml);
-                case "added" -> changed.put("concurrent.xml", changedXml);
-                case "removed" -> changed.remove("extra.xml");
-                default -> {
-                }
+            if ("configuration".equals(changedFile)) {
+                storage.content = changedXml;
             }
-            storage.files = Map.copyOf(changed);
             storage.version++;
         };
         try (Git ignored = upstream.git(); Git ignoredMaterial = materialUpstream.git();
@@ -967,17 +962,12 @@ class BootstrapContextTest {
             if ("material".equals(changedFile)) {
                 assertThat(adopted.orElseThrow().system().proxies()).hasSize(1);
                 assertThat(storage.saves).isEqualTo(1);
-                assertThat(storage.files.get("extra.xml")).isEqualTo(xml());
+                assertThat(OrionXml.read(new ByteArrayInputStream(storage.content))
+                        .system().proxies()).hasSize(1);
             } else {
                 assertThat(adopted).isEmpty();
                 assertThat(storage.saves).isZero();
-                switch (changedFile) {
-                    case "primary" -> assertThat(storage.files.get("orion.xml")).isEqualTo(changedXml);
-                    case "secondary" -> assertThat(storage.files.get("extra.xml")).isEqualTo(changedXml);
-                    case "added" -> assertThat(storage.files.get("concurrent.xml")).isEqualTo(changedXml);
-                    case "removed" -> assertThat(storage.files).doesNotContainKey("extra.xml");
-                    default -> throw new AssertionError("Unexpected configuration change");
-                }
+                assertThat(storage.content).isEqualTo(changedXml);
             }
             String cache = context.repositorySources().required(BootstrapRepositorySources.CONFIGURATION)
                     .repositoryName().orElseThrow();
@@ -996,7 +986,7 @@ class BootstrapContextTest {
     }
 
     @Test
-    void defersAdoptionOfANewerRevisionAndPreservesConcurrentFileEdits() throws Exception {
+    void defersAdoptionOfANewerRevisionAndPreservesConcurrentConfigurationEdit() throws Exception {
         exerciseAdoptionSave(AdoptionStorage.Mode.CONCURRENT_EDIT, true);
     }
 
@@ -1011,8 +1001,8 @@ class BootstrapContextTest {
     }
 
     @Test
-    void validatesSecondaryConfigurationFilesBeforeSavingAdoption() throws Exception {
-        exerciseAdoptionSave(AdoptionStorage.Mode.INVALID_SECONDARY, false);
+    void validatesConfigurationBeforeSavingAdoption() throws Exception {
+        exerciseAdoptionSave(AdoptionStorage.Mode.INVALID_CONFIGURATION, false);
     }
 
     private void exerciseAdoptionSave(AdoptionStorage.Mode mode, boolean success) throws Exception {
@@ -1024,10 +1014,12 @@ class BootstrapContextTest {
         Upstream materialUpstream = upstream("material-to-adopt", Map.of("material.p12", materialBytes(configuration)));
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         AdoptionStorage storage = new AdoptionStorage(xml());
-        storage.mode = mode;
+        storage.mode = mode == AdoptionStorage.Mode.INVALID_CONFIGURATION
+                ? AdoptionStorage.Mode.NORMAL : mode;
         try (var ignored = upstream.git(); var ignoredMaterial = materialUpstream.git();
              BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
             OrionDesiredState.Snapshot approved = approved(storage);
+            storage.mode = mode;
             if (mode == AdoptionStorage.Mode.CONCURRENT_WINNER
                     || mode == AdoptionStorage.Mode.LOST_RESPONSE
                     || mode == AdoptionStorage.Mode.CONCURRENT_EDIT
@@ -1035,7 +1027,8 @@ class BootstrapContextTest {
                 assertThat(adoptApproved(context, storage, approved)).isEmpty();
                 assertThat(storage.saves).isEqualTo(1);
                 if (mode == AdoptionStorage.Mode.CONCURRENT_EDIT) {
-                    assertThat(storage.files.get("concurrent.xml")).isEqualTo(xml());
+                    assertThat(new String(storage.content, StandardCharsets.UTF_8))
+                            .contains("<!-- concurrent edit -->");
                 }
                 storage.mode = AdoptionStorage.Mode.NORMAL;
                 assertThat(adopt(context, storage).system().proxies()).hasSize(1);
@@ -1048,15 +1041,15 @@ class BootstrapContextTest {
             } else {
                 String message = switch (mode) {
                     case UNVERSIONED -> "requires a configuration revision";
-                    case INVALID_SECONDARY -> "Cannot validate proxy configuration";
+                    case INVALID_CONFIGURATION -> "Cannot validate proxy configuration";
                     default -> "save failed";
                 };
-                assertThatThrownBy(() -> adopt(context, storage))
+                assertThatThrownBy(() -> adoptApproved(context, storage, approved))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining(message);
-                assertThat(OrionXml.read(new ByteArrayInputStream(storage.files.get("orion.xml")))
+                assertThat(OrionXml.read(new ByteArrayInputStream(storage.content))
                         .system().proxies()).isEmpty();
                 int expectedSaves = switch (mode) {
-                    case UNVERSIONED, INVALID_SECONDARY -> 0;
+                    case UNVERSIONED, INVALID_CONFIGURATION -> 0;
                     default -> 1;
                 };
                 assertThat(storage.saves).isEqualTo(expectedSaves);
@@ -1079,28 +1072,25 @@ class BootstrapContextTest {
     private static final class AdoptionStorage implements AccessControlStorage {
         enum Mode {
             NORMAL, CONCURRENT_WINNER, CONCURRENT_EDIT, LOST_RESPONSE, FAIL_SAVE,
-            REPEATED_CONFLICT, UNVERSIONED, INVALID_SECONDARY
+            REPEATED_CONFLICT, UNVERSIONED, INVALID_CONFIGURATION
         }
 
-        private Map<String, byte[]> files;
+        private byte[] content;
         private int version = 1;
         private int saves;
         private Mode mode = Mode.NORMAL;
         private Runnable afterLoad;
 
         private AdoptionStorage(byte[] xml) {
-            files = Map.of("orion.xml", xml, "extra.xml", xml);
+            content = xml;
         }
 
         @Override
-        public Result<AccessControlSnapshot> load() {
+        public Result<ConfigurationFile> load() {
             var revision = mode == Mode.UNVERSIONED
                     ? Optional.<String>empty() : Optional.of(Integer.toString(version));
-            Map<String, byte[]> loaded = new LinkedHashMap<>(files);
-            if (mode == Mode.INVALID_SECONDARY) {
-                loaded.put("extra.xml", bytes("invalid"));
-            }
-            AccessControlSnapshot snapshot = new AccessControlSnapshot(loaded, revision);
+            byte[] loaded = mode == Mode.INVALID_CONFIGURATION ? bytes("invalid") : content;
+            ConfigurationFile snapshot = new ConfigurationFile(loaded, revision);
             Runnable callback = afterLoad;
             afterLoad = null;
             if (callback != null) {
@@ -1110,8 +1100,8 @@ class BootstrapContextTest {
         }
 
         @Override
-        public void save(AccessControlSnapshot snapshot, String message, UserEmail author) {
-            assertThat(snapshot.version()).contains(Integer.toString(version));
+        public void save(ConfigurationFile snapshot, String message, UserEmail author) {
+            assertThat(snapshot.revision()).contains(Integer.toString(version));
             saves++;
             if (mode == Mode.FAIL_SAVE) {
                 throw new IllegalStateException("save failed");
@@ -1121,14 +1111,13 @@ class BootstrapContextTest {
                 throw new AccessControlConcurrentUpdateException("concurrent edit", null);
             }
             if (mode == Mode.CONCURRENT_EDIT) {
-                Map<String, byte[]> changed = new LinkedHashMap<>(files);
-                changed.put("concurrent.xml", files.get("extra.xml"));
-                files = Map.copyOf(changed);
+                content = (new String(content, StandardCharsets.UTF_8) + "\n<!-- concurrent edit -->")
+                        .getBytes(StandardCharsets.UTF_8);
                 version++;
                 mode = Mode.NORMAL;
                 throw new AccessControlConcurrentUpdateException("concurrent edit", null);
             }
-            files = snapshot.files();
+            content = snapshot.content();
             version++;
             if (mode == Mode.CONCURRENT_WINNER) {
                 throw new AccessControlConcurrentUpdateException("another bootstrap won", null);
@@ -1138,10 +1127,6 @@ class BootstrapContextTest {
             }
         }
 
-        @Override
-        public String primaryPath() {
-            return "orion.xml";
-        }
     }
 
     @Test
@@ -1161,7 +1146,7 @@ class BootstrapContextTest {
                 var storage = new AccessControlStorageResolver(context.repositorySources(),
                         context.repositoryProvider()).resolve();
                 var snapshot = storage.load().valueOrFailure("runtime configuration");
-                assertThat(OrionXml.read(new ByteArrayInputStream(snapshot.files().get("orion.xml")))
+                assertThat(OrionXml.read(new ByteArrayInputStream(snapshot.content()))
                         .system().proxies()).isEmpty();
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
@@ -1182,7 +1167,7 @@ class BootstrapContextTest {
         NativeGitRepository repository = backend.find("orion").valueOrFailure("configuration repository");
 
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
-            String approvedCommit = context.initialConfiguration().orElseThrow().version().orElseThrow();
+            String approvedCommit = context.initialConfiguration().orElseThrow().revision().orElseThrow();
             switch (change) {
                 case "invalid-xml" -> repository.files().withAccess("refs/heads/main",
                         "invalid update after bootstrap input load", GitCommitAuthor.EMPTY, fileAccess -> {
@@ -1337,7 +1322,7 @@ class BootstrapContextTest {
                 AccessControlStorage local = new AccessControlStorageResolver(
                         context.repositorySources(), context.repositoryProvider()).resolve();
                 assertThat(OrionXml.read(new ByteArrayInputStream(
-                        local.load().valueOrFailure("published configuration").files().get("orion.xml")))
+                        local.load().valueOrFailure("published configuration").content()))
                         .system().proxies()).hasSize(remoteMaterial ? 1 : 0);
                 assertThatThrownBy(() -> context.repositoryProvider().adoptProvisional(
                         OrionDocument.withAccessControl(new AccessControl()), component.configurationSecrets()))
@@ -1400,11 +1385,10 @@ class BootstrapContextTest {
     }
 
     private static OrionDesiredState.Snapshot approved(AccessControlStorage storage) {
-        AccessControlSnapshot snapshot = storage.load().valueOrFailure("configuration for adoption");
+        ConfigurationFile snapshot = storage.load().valueOrFailure("configuration for adoption");
         try {
-            OrionDocument document = OrionXml.read(new ByteArrayInputStream(
-                    snapshot.files().get(storage.primaryPath())));
-            return new OrionDesiredState.Snapshot(document, snapshot.version());
+            OrionDocument document = OrionXml.read(new ByteArrayInputStream(snapshot.content()));
+            return new OrionDesiredState.Snapshot(document, snapshot.revision());
         } catch (java.io.IOException failure) {
             throw new IllegalStateException("Cannot parse approved configuration", failure);
         }

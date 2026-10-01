@@ -6,7 +6,7 @@ import dagger.Component;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -73,7 +73,7 @@ public interface OrionComponent {
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
         @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
         @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
-        @BindsInstance Builder initialConfiguration(Optional<AccessControlSnapshot> snapshot);
+        @BindsInstance Builder initialConfiguration(Optional<ConfigurationFile> snapshot);
         @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);

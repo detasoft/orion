@@ -1,5 +1,6 @@
 package pro.deta.orion.acl.storage;
 
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.internal.UserEmail;
 
@@ -7,11 +8,9 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 public interface AccessControlStorage {
-    Result<AccessControlSnapshot> load();
+    Result<ConfigurationFile> load();
 
-    void save(AccessControlSnapshot snapshot, String message, UserEmail author);
-
-    String primaryPath();
+    void save(ConfigurationFile file, String message, UserEmail author);
 
     default boolean createIfMissing() {
         return false;

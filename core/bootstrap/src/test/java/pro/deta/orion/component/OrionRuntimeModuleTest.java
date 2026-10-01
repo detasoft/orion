@@ -18,7 +18,7 @@ import pro.deta.orion.schema.orion.ScopedGrant;
 import pro.deta.orion.schema.orion.TeamId;
 import pro.deta.orion.schema.orion.RepositoryId;
 import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
@@ -295,12 +295,12 @@ class OrionRuntimeModuleTest {
         AccessControlStorage storage = runtimeAccessControlStorage(configuration);
 
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_FILE, "native acl".getBytes(StandardCharsets.UTF_8)),
+                new ConfigurationFile("native acl".getBytes(StandardCharsets.UTF_8), Optional.empty()),
                 "native acl", new UserEmail("tester", "tester@example.test"));
 
-        AccessControlSnapshot snapshot =
+        ConfigurationFile snapshot =
                 storage.load().valueOrFailure("ACL should load from local storage");
-        assertEquals("native acl", new String(snapshot.files().get(ACL_FILE), StandardCharsets.UTF_8));
+        assertEquals("native acl", new String(snapshot.content(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -310,14 +310,14 @@ class OrionRuntimeModuleTest {
 
         AccessControlStorage storage = resolvedStorage(configuration, provider);
         storage.save(
-                AccessControlSnapshot.singleFile(ACL_FILE, "versioned acl".getBytes(StandardCharsets.UTF_8)),
+                new ConfigurationFile("versioned acl".getBytes(StandardCharsets.UTF_8), Optional.empty()),
                 "versioned acl", UserEmail.EMPTY);
 
         assertInstanceOf(NativeGitAccessControlStorage.class, storage);
         assertEquals(List.of("internal/settings"), provider.repositoryNames());
         assertEquals(
                 "versioned acl",
-                new String(storage.load().valueOrFailure("ACL should load").files().get(ACL_FILE),
+                new String(storage.load().valueOrFailure("ACL should load").content(),
                         StandardCharsets.UTF_8));
     }
 
@@ -363,9 +363,9 @@ class OrionRuntimeModuleTest {
     }
 
     private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {
-        AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load from storage");
+        ConfigurationFile snapshot = storage.load().valueOrFailure("ACL should load from storage");
         AccessControl accessControl =
-                OrionXml.read(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)))
+                OrionXml.read(new ByteArrayInputStream(snapshot.content()))
                         .system().accessControl();
         assertEquals(1, accessControl.getUsers().size());
         assertEquals(userId, accessControl.getUsers().getFirst().getId());

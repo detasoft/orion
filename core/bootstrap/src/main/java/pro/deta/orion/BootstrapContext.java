@@ -1,7 +1,7 @@
 package pro.deta.orion;
 
 import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
-import pro.deta.orion.acl.storage.AccessControlSnapshot;
+import pro.deta.orion.OrionAccessControlService.ConfigurationFile;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationSecrets;
@@ -45,7 +45,6 @@ import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,14 +63,14 @@ public final class BootstrapContext implements AutoCloseable {
     private final ConfiguredNativeGitRepositoryProvider storageProvider;
     private final S3Transport s3Transport;
     private final SshHostKeyCapability sshHostKeys;
-    private final Optional<AccessControlSnapshot> initialConfiguration;
+    private final Optional<ConfigurationFile> initialConfiguration;
 
     private BootstrapContext(
             ProxyAwareNativeGitRepositoryProvider repositoryProvider,
             BootstrapRepositorySources repositorySources,
             OrionKeyMaterial keyMaterial,
             SshHostKeyCapability sshHostKeys,
-            Optional<AccessControlSnapshot> initialConfiguration,
+            Optional<ConfigurationFile> initialConfiguration,
             ConfiguredNativeGitRepositoryProvider storageProvider, S3Transport s3Transport) {
         this.repositoryProvider = repositoryProvider;
         this.repositorySources = repositorySources;
@@ -143,7 +142,7 @@ public final class BootstrapContext implements AutoCloseable {
                     createIfMissing);
             BootstrapRepositorySources sources = new BootstrapRepositorySources(
                     List.of(configurationSource, materialSource));
-            Optional<AccessControlSnapshot> initialConfiguration;
+            Optional<ConfigurationFile> initialConfiguration;
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 ResolvedBootstrapSource selectedMaterial = materialSource;
                 CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
@@ -198,7 +197,7 @@ public final class BootstrapContext implements AutoCloseable {
         return repositorySources;
     }
 
-    public Optional<AccessControlSnapshot> initialConfiguration() {
+    public Optional<ConfigurationFile> initialConfiguration() {
         return initialConfiguration;
     }
 
@@ -224,17 +223,17 @@ public final class BootstrapContext implements AutoCloseable {
         }
     }
 
-    private static Optional<AccessControlSnapshot> loadInitialConfiguration(
+    private static Optional<ConfigurationFile> loadInitialConfiguration(
             BootstrapRepositorySources sources,
             ProxyAwareNativeGitRepositoryProvider provider) {
         AccessControlStorage storage = new AccessControlStorageResolver(sources, provider).resolve();
         return switch (storage.load()) {
-            case Result.Success<AccessControlSnapshot>(var snapshot) -> Optional.of(snapshot);
-            case Result.Failure<AccessControlSnapshot> failure -> {
+            case Result.Success<ConfigurationFile>(var file) -> Optional.of(file);
+            case Result.Failure<ConfigurationFile> failure -> {
                 if (failure.code() == Result.FailureCode.NOT_FOUND && storage.createIfMissing()) {
                     yield Optional.empty();
                 }
-                throw new IllegalStateException("Configuration snapshot is unavailable", failure.throwable());
+                throw new IllegalStateException("Configuration file is unavailable", failure.throwable());
             }
         };
     }
@@ -246,16 +245,16 @@ public final class BootstrapContext implements AutoCloseable {
         Objects.requireNonNull(approved, "approved configuration");
         RuntimeException lastSaveFailure = null;
         for (int attempt = 0; attempt <= 3; attempt++) {
-            Result<AccessControlSnapshot> loaded = storage.load();
-            if (!(loaded instanceof Result.Success<AccessControlSnapshot> success)) {
+            Result<ConfigurationFile> loaded = storage.load();
+            if (!(loaded instanceof Result.Success<ConfigurationFile> success)) {
                 return Optional.empty();
             }
-            AccessControlSnapshot snapshot = success.value();
-            if (!snapshot.version().equals(approved.revision())) {
+            ConfigurationFile file = success.value();
+            if (!file.revision().equals(approved.revision())) {
                 return Optional.empty();
             }
-            OrionDocument current = proxyConfiguration(snapshot, storage.primaryPath());
-            if (snapshot.version().isEmpty()) {
+            OrionDocument current = proxyConfiguration(file);
+            if (file.revision().isEmpty()) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
@@ -269,30 +268,24 @@ public final class BootstrapContext implements AutoCloseable {
             if (attempt == 3) {
                 throw new IllegalStateException("Proxy configuration kept changing during adoption", lastSaveFailure);
             }
-            Result<AccessControlSnapshot> prepared = storage.load();
-            if (!(prepared instanceof Result.Success<AccessControlSnapshot> preparedSuccess)) {
+            Result<ConfigurationFile> prepared = storage.load();
+            if (!(prepared instanceof Result.Success<ConfigurationFile> preparedSuccess)) {
                 return Optional.empty();
             }
-            AccessControlSnapshot preparedSnapshot = preparedSuccess.value();
-            Map<String, byte[]> currentFiles = snapshot.files();
-            Map<String, byte[]> preparedFiles = preparedSnapshot.files();
-            if (preparedSnapshot.version().isEmpty() || !currentFiles.keySet().equals(preparedFiles.keySet())) {
+            ConfigurationFile preparedFile = preparedSuccess.value();
+            if (preparedFile.revision().isEmpty()
+                    || !Arrays.equals(file.content(), preparedFile.content())) {
                 return Optional.empty();
             }
-            for (Map.Entry<String, byte[]> file : currentFiles.entrySet()) {
-                if (!Arrays.equals(file.getValue(), preparedFiles.get(file.getKey()))) {
-                    return Optional.empty();
-                }
-            }
-            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(preparedFiles);
+            byte[] updated;
             try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 OrionXml.write(candidate, output);
-                updatedFiles.put(storage.primaryPath(), output.toByteArray());
+                updated = output.toByteArray();
             } catch (IOException failure) {
-                throw new IllegalStateException("Cannot serialize proxy configuration");
+                throw new IllegalStateException("Cannot serialize proxy configuration", failure);
             }
             try {
-                storage.save(new AccessControlSnapshot(updatedFiles, preparedSnapshot.version()),
+                storage.save(new ConfigurationFile(updated, preparedFile.revision()),
                         "Adopt bootstrap Git proxies", UserEmail.EMPTY);
                 return Optional.of(candidate);
             } catch (RuntimeException failure) {
@@ -302,22 +295,12 @@ public final class BootstrapContext implements AutoCloseable {
         throw new IllegalStateException("Proxy adoption did not converge");
     }
 
-    private static OrionDocument proxyConfiguration(AccessControlSnapshot snapshot, String primaryPath) {
-        OrionDocument primary = null;
-        for (var entry : snapshot.files().entrySet()) {
-            try (var input = new ByteArrayInputStream(entry.getValue())) {
-                OrionDocument parsed = OrionXml.read(input);
-                if (entry.getKey().equals(primaryPath)) {
-                    primary = parsed;
-                }
-            } catch (IOException failure) {
-                throw new IllegalStateException("Cannot validate proxy configuration");
-            }
+    private static OrionDocument proxyConfiguration(ConfigurationFile file) {
+        try (ByteArrayInputStream input = new ByteArrayInputStream(file.content())) {
+            return OrionXml.read(input);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot validate proxy configuration", failure);
         }
-        if (primary == null) {
-            throw new IllegalStateException("Primary proxy configuration is unavailable");
-        }
-        return primary;
     }
 
     public ConfigurationCipherCapability configurationCipher() {
