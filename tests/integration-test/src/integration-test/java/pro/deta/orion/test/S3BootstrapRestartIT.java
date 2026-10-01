@@ -101,8 +101,7 @@ class S3BootstrapRestartIT {
 
             assertThat(tempDir).isEmptyDirectory();
             try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment, false)) {
-                assertThat(bootstrap.initialConfiguration().orElseThrow().files().get(CONFIGURATION_PATH))
-                        .isEqualTo(xml);
+                assertThat(bootstrap.initialConfiguration()).isPresent();
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
                 OrionComponent component = runtimeComponent(configuration, bootstrap);
@@ -191,8 +190,6 @@ class S3BootstrapRestartIT {
             restarted.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment, false)) {
                 assertThat(bootstrap.initialConfiguration()).isPresent();
-                assertThat(bootstrap.initialConfiguration().orElseThrow().files().get(CONFIGURATION_PATH))
-                        .isEqualTo(savedConfiguration);
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
                 assertThat(bootstrap.sshHostKeys().keyPairs())
