@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.schema.orion.RepositoryName;
 
 import java.io.IOException;
@@ -58,29 +59,29 @@ class GitRefsStorageTest {
     @Test
     void sharesRefsAndBothFormsOfHeadAcrossAccesses() throws Exception {
         factory.withAccess(index -> {
-            assertThat(index.snapshotRefs()).isEqualTo(new RefsSnapshot(Map.of(), new Head.Symbolic(MAIN)));
+            assertThat(index.snapshotRefs(new RefSelection.All())).isEqualTo(new RefsSnapshot(Map.of(), new Head.Symbolic(MAIN)));
             ObjectId first = publish("first");
             ObjectId second = publish("second");
             assertThat(nativeRepository.publishRefs(List.of(create(MAIN, first)), true))
                     .extracting(RefUpdateResult::status).containsExactly(APPLIED);
-            RefsSnapshot before = index.snapshotRefs();
+            RefsSnapshot before = index.snapshotRefs(new RefSelection.All());
             nativeRepository.publishRefs(
                     List.of(new RefUpdate(MAIN, Optional.of(first), Optional.of(second))), true);
             {
                 GitIndexAccess reopenedIndex = factory.createAccess();
                 try {
-                    assertThat(reopenedIndex.snapshotRefs().refs())
+                    assertThat(reopenedIndex.snapshotRefs(new RefSelection.All()).refs())
                             .containsExactlyEntriesOf(Map.of(MAIN, second));
                     assertThat(before.refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
 
                     Head detached = new Head.Detached(new CommitId(second.toBytes()));
                     updateHead(detached);
-                    assertThat(index.snapshotRefs().head()).isEqualTo(detached);
+                    assertThat(index.snapshotRefs(new RefSelection.All()).head()).isEqualTo(detached);
                     updateHead(new Head.Symbolic(OTHER));
-                    assertThat(reopenedIndex.snapshotRefs().head()).isEqualTo(new Head.Symbolic(OTHER));
+                    assertThat(reopenedIndex.snapshotRefs(new RefSelection.All()).head()).isEqualTo(new Head.Symbolic(OTHER));
                     nativeRepository.publishRefs(
                             List.of(new RefUpdate(MAIN, Optional.of(second), Optional.empty())), true);
-                    assertThat(reopenedIndex.snapshotRefs().refs()).isEmpty();
+                    assertThat(reopenedIndex.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
                     assertThat(Files.isRegularFile(repository.resolve("refs.mv"))).isTrue();
                 } finally {
                     reopenedIndex.discard();
@@ -100,11 +101,11 @@ class GitRefsStorageTest {
                     new RefUpdate(MAIN, Optional.of(second), Optional.of(first)), create(OTHER, second));
             assertThat(nativeRepository.publishRefs(updates, true)).extracting(RefUpdateResult::status)
                     .containsExactly(EXPECTED_OLD_MISMATCH, ATOMIC_ABORTED);
-            assertThat(index.snapshotRefs().refs())
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs())
                     .containsExactlyEntriesOf(Map.of(MAIN, first));
             assertThat(nativeRepository.publishRefs(updates, false)).extracting(RefUpdateResult::status)
                     .containsExactly(EXPECTED_OLD_MISMATCH, APPLIED);
-            assertThat(index.snapshotRefs().refs()).containsExactlyInAnyOrderEntriesOf(
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsExactlyInAnyOrderEntriesOf(
                     Map.of(MAIN, first, OTHER, second));
             assertThat(nativeRepository.publishRefs(List.of(create(MAIN, first)), true))
                     .extracting(RefUpdateResult::status).containsExactly(EXPECTED_OLD_MISMATCH);
@@ -118,18 +119,18 @@ class GitRefsStorageTest {
             ObjectId first = publish("first");
             assertThat(nativeRepository.publishRefs(List.of(create(MAIN, first), create(OTHER, MISSING)), true))
                     .extracting(RefUpdateResult::status).containsExactly(ATOMIC_ABORTED, OBJECT_NOT_FOUND);
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             assertThatThrownBy(() -> nativeRepository.publishRefs(
                     List.of(create(MAIN, first), create(MAIN, first)), true))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> nativeRepository.publishRefs(
                     List.of(create(new RefId("HEAD"), first)), true))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             assertThat(nativeRepository.publishRefs(
                     List.of(create(MAIN, first), create(OTHER, MISSING)), false))
                     .extracting(RefUpdateResult::status).containsExactly(APPLIED, OBJECT_NOT_FOUND);
-            assertThat(index.snapshotRefs().refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsExactlyEntriesOf(Map.of(MAIN, first));
             return null;
         });
     }
@@ -152,14 +153,14 @@ class GitRefsStorageTest {
             assertThat(atomic).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
             assertThat(atomic).extracting(RefUpdateResult::status)
                     .containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED, ATOMIC_ABORTED, ATOMIC_ABORTED);
-            assertThat(index.snapshotRefs().refs())
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs())
                     .containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, first, stale, first));
 
             List<RefUpdateResult> independent = nativeRepository.publishRefs(updates, false);
             assertThat(independent).extracting(RefUpdateResult::update).containsExactlyElementsOf(updates);
             assertThat(independent).extracting(RefUpdateResult::status)
                     .containsExactly(OBJECT_NOT_FOUND, APPLIED, EXPECTED_OLD_MISMATCH, APPLIED);
-            assertThat(index.snapshotRefs().refs())
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs())
                     .containsExactlyInAnyOrderEntriesOf(Map.of(stale, first, created, second));
             return null;
         });
@@ -172,7 +173,7 @@ class GitRefsStorageTest {
             assertThatThrownBy(() -> nativeRepository.publishRefs(
                     List.of(create(MAIN, MISSING), create(MAIN, first)), false))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             return null;
         });
     }
@@ -201,7 +202,7 @@ class GitRefsStorageTest {
                         right.get(10, TimeUnit.SECONDS).getFirst().status()))
                         .containsExactlyInAnyOrder(APPLIED, EXPECTED_OLD_MISMATCH);
             }
-            assertThat(reader.snapshotRefs().refs().get(MAIN)).isIn(second, third);
+            assertThat(reader.findRef(MAIN).orElseThrow()).isIn(second, third);
             return null;
         });
     }
@@ -230,7 +231,7 @@ class GitRefsStorageTest {
                 Future<?> reading = executor.submit(() -> {
                     start.await();
                     for (int iteration = 0; iteration < 40; iteration++) {
-                        RefsSnapshot snapshot = readerIndex.snapshotRefs();
+                        RefsSnapshot snapshot = readerIndex.snapshotRefs(new RefSelection.All());
                         assertThat(snapshot.refs().get(MAIN)).isEqualTo(snapshot.refs().get(OTHER));
                         assertThat(snapshot.head()).isEqualTo(new Head.Symbolic(MAIN));
                     }

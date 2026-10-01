@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.v2.fetch.NegotiationMessage;
 import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.pkt.SideBand;
@@ -90,7 +91,7 @@ public class FetchCommand implements GitCommand {
             throws IOException {
         NegotiationContext context = new NegotiationContext(request, storage, repository.index(), advertisedCapabilities);
         FetchNegotiatorIterator iterator = new FetchNegotiatorIterator(context, transport);
-        RefsSnapshot snapshot = repository.index().snapshotRefs();
+        RefsSnapshot snapshot = repository.index().snapshotRefs(new RefSelection.All());
         if (!request.wantRefs().isEmpty()) {
             context.resolveWantedRefs(snapshot);
         }

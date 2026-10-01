@@ -5,6 +5,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
@@ -47,7 +48,7 @@ class GitFileAccessLifecycleTest {
                 return proxy(GitStorageAccess.class, (accessProxy, accessMethod, accessArgs) -> {
                     if (accessMethod.getName().equals("discard")) {
                         calls.add("storage");
-                        assertThat(delegate.snapshotRefs().refs()).isEmpty();
+                        assertThat(delegate.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
                         delegateStorage.discard();
                         if (failPack) throw packFailure;
                         return null;
@@ -69,7 +70,7 @@ class GitFileAccessLifecycleTest {
                 }
                 access.discard();
                 assertThat(calls).containsExactly("storage", "index");
-                assertThatThrownBy(delegate::snapshotRefs).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> delegate.snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
             } finally {
                 delegate.discard();
             }

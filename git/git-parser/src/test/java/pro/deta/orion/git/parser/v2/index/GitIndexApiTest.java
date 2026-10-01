@@ -45,7 +45,7 @@ class GitIndexApiTest {
             try {
                 first.addObject(object);
                 first.discard();
-                assertThatThrownBy(first::snapshotRefs).isInstanceOf(IOException.class);
+                assertThatThrownBy(() -> first.snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
                 assertThat(second.objects(object.packId())).containsExactly(object);
                 second.publishIndex(pack(object.packId(), "b", 1));
             } finally {
@@ -322,7 +322,7 @@ class GitIndexApiTest {
                         .isInstanceOf(IllegalArgumentException.class);
                 assertThat(index.objects(packId)).isEmpty();
                 assertThat(index.packs()).isEmpty();
-                assertThat(index.snapshotRefs().refs()).isEmpty();
+                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             } finally {
                 index.discard();
             }
@@ -351,7 +351,7 @@ class GitIndexApiTest {
                 assertThat(index.updateRefs(List.of(new RefUpdate(ref, Optional.empty(), Optional.of(objectId))), true))
                         .extracting(RefUpdateResult::status).containsExactly(RefUpdateResult.Status.APPLIED);
                 index.updateHead(head);
-                assertThat(index.snapshotRefs().head()).isEqualTo(head);
+                assertThat(index.snapshotRefs(new RefSelection.All()).head()).isEqualTo(head);
                 assertThatThrownBy(() -> index.publishIndex(pack(PackId.create(), "a", 0)))
                         .isInstanceOf(IllegalArgumentException.class);
                 index.apply();
@@ -365,8 +365,8 @@ class GitIndexApiTest {
             factory.withAccess(reopened -> {
                 assertThat(reopened.locations(objectId)).containsExactly(object);
                 assertThat(reopened.packs(pack.packChecksum())).containsExactly(pack);
-                assertThat(reopened.snapshotRefs().refs()).containsEntry(ref, objectId);
-                assertThat(reopened.snapshotRefs().head()).isEqualTo(head);
+                assertThat(reopened.snapshotRefs(new RefSelection.All()).refs()).containsEntry(ref, objectId);
+                assertThat(reopened.snapshotRefs(new RefSelection.All()).head()).isEqualTo(head);
                 return null;
             });
             byte[] original = Files.readAllBytes(directory.resolve("refs.mv"));

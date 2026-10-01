@@ -17,6 +17,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.object.LooseObject;
 import pro.deta.orion.git.parser.v2.pack.PackIngestor;
@@ -149,7 +150,7 @@ public class NativeGitRepository implements AutoCloseable {
         try {
             return index.withAccess(access -> {
                 Map<String, String> refs = new LinkedHashMap<>();
-                for (Map.Entry<RefId, ObjectId> ref : access.snapshotRefs().refs().entrySet()) {
+                for (Map.Entry<RefId, ObjectId> ref : access.snapshotRefs(new RefSelection.All()).refs().entrySet()) {
                     refs.put(ref.getKey().value(), ref.getValue().toHex());
                 }
                 return Map.copyOf(refs);

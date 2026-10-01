@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 
@@ -61,7 +62,12 @@ class S3GitIndexTest {
                     assertThat(first.activeAccesses()).isEmpty();
                     assertThat(second.activeAccesses()).isEmpty();
                     first.withAccess(access -> {
-                        assertThat(access.snapshotRefs().refs()).hasSize(sameRef ? 1 : 2);
+                        assertThat(access.snapshotRefs(new RefSelection.All()).refs()).hasSize(sameRef ? 1 : 2);
+                        assertThat(access.findRef(left)).isPresent();
+                        assertThat(access.snapshotRefs(new RefSelection.Pattern("refs/heads/l*")).refs())
+                                .containsOnlyKeys(left);
+                        assertThat(access.snapshotRefs(new RefSelection.Substring("right")).refs())
+                                .hasSize(sameRef ? 0 : 1);
                         return null;
                     });
                 }

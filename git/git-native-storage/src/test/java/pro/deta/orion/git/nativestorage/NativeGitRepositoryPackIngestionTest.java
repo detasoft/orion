@@ -5,6 +5,7 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.GitStorageApi;
@@ -54,7 +55,7 @@ class NativeGitRepositoryPackIngestionTest {
                 assertThat(index.activeAccesses()).isEmpty();
                 repository.index().withAccess(access1 -> {
                     assertThat(access1.packs()).isEmpty();
-                    assertThat(access1.snapshotRefs().refs()).isEmpty();
+                    assertThat(access1.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
                     return null;
                 });
             }

@@ -15,6 +15,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.git.parser.v2.storage.local.LocalGitStorage;
@@ -101,7 +102,7 @@ class PackIngestorTest {
         GitStorageAccess storage = storageApi.createAccess();
         try (LocalGitIndex index = new LocalGitIndex(directory)) {
             index.withAccess(access -> {
-                assertThat(access.snapshotRefs().refs()).containsEntry(ref, target);
+                assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsEntry(ref, target);
                 assertThat(access.packs(uploaded.getFirst().packChecksum()))
                         .containsExactlyInAnyOrderElementsOf(uploaded);
                 assertThat(access.locations(target)).hasSize(2);
@@ -221,7 +222,7 @@ class PackIngestorTest {
                                 assertThat(index.packs()).isEqualTo(published);
                                 assertThat(index.locations(previous)).hasSize(1);
                                 assertThat(index.locations(PackTestData.objectId(GitObjectType.BLOB, new byte[]{1, 2, 3}))).isEmpty();
-                                assertThat(index.snapshotRefs().refs()).isEmpty();
+                                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
                                 assertThat(input.readUnsignedByte()).isEqualTo(42);
                             }
                         }

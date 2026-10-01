@@ -44,7 +44,7 @@ class GitIndexModificationTest {
                 index.close();
                 assertThatThrownBy(index::createAccess).hasMessageContaining("closed");
                 writer.apply();
-                assertThat(reader.snapshotRefs().refs()).containsEntry(MAIN, TARGET);
+                assertThat(reader.snapshotRefs(new RefSelection.All()).refs()).containsEntry(MAIN, TARGET);
                 return null;
             }));
         }
@@ -59,14 +59,14 @@ class GitIndexModificationTest {
                 captured.set(access);
                 return null;
             });
-            assertThatThrownBy(() -> captured.get().snapshotRefs()).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> captured.get().snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
             IOException failure = new IOException("Operation failed");
             assertThatThrownBy(() -> index.withAccess(List.of(update()), access -> {
                 captured.set(access);
                 throw failure;
             })).isSameAs(failure);
-            assertThatThrownBy(() -> captured.get().snapshotRefs()).isInstanceOf(IOException.class);
-            Map<RefId, ObjectId> refs = index.withAccess(access -> access.snapshotRefs().refs());
+            assertThatThrownBy(() -> captured.get().snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
+            Map<RefId, ObjectId> refs = index.withAccess(access -> access.snapshotRefs(new RefSelection.All()).refs());
             assertThat(refs).isEmpty();
         }
     }
@@ -80,7 +80,7 @@ class GitIndexModificationTest {
             });
             assertFileUnlocked();
             index.withAccess(access -> {
-                assertThat(access.snapshotRefs().refs()).containsEntry(MAIN, TARGET);
+                assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsEntry(MAIN, TARGET);
                 return null;
             });
             assertFileUnlocked();
@@ -128,7 +128,7 @@ class GitIndexModificationTest {
         start.await(5, TimeUnit.SECONDS);
         return index.withAccess(access -> {
             opened.await(5, TimeUnit.SECONDS);
-            assertThat(access.snapshotRefs().refs()).isEmpty();
+            assertThat(access.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             return null;
         });
     }

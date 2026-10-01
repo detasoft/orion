@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsRequest;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -44,7 +45,7 @@ public final class RefsCommand implements GitCommand {
         if (request.unborn() && !unbornAllowed) {
             throw new IOException("ls-refs unborn was not advertised");
         }
-        RefsSnapshot snapshot = index.snapshotRefs();
+        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.All());
         GitProtocolContext.Writer writer = protocolContext.writer();
         if (request.matches(HEAD.value())) {
             writeHead(snapshot, request, writer);

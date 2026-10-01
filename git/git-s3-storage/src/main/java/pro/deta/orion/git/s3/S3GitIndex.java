@@ -12,6 +12,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -133,12 +134,14 @@ final class S3GitIndex implements GitIndexAccess {
     }
 
     @Override
-    public RefsSnapshot snapshotRefs() throws IOException {
+    public RefsSnapshot snapshotRefs(RefSelection selection) throws IOException {
+        Objects.requireNonNull(selection, "selection");
         requireOpen();
         RefsSnapshot current = owner.refs().snapshot();
         Map<RefId, ObjectId> refs = new LinkedHashMap<>(current.refs());
         overlay(refs, originalRefs);
         overlay(refs, changedRefs);
+        refs.keySet().removeIf(ref -> !selection.matches(ref));
         return new RefsSnapshot(refs, changedHead == null ? current.head() : changedHead);
     }
 

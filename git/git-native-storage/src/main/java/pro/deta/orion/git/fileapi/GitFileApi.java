@@ -85,8 +85,7 @@ public final class GitFileApi {
         Objects.requireNonNull(operation, "operation");
         RefId ref = new RefId(branchRefName(branch));
         return repository.index().withAccess(writableRefs(ref), Optional.of(PackId.create()),
-                index -> run(index, branch,
-                        Optional.ofNullable(index.snapshotRefs().refs().get(ref)), message, author, operation));
+                index -> run(index, branch, index.findRef(ref), message, author, operation));
     }
 
     private Set<RefId> writableRefs(RefId ref) {

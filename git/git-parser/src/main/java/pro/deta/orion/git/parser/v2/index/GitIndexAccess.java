@@ -8,6 +8,7 @@ import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.io.IOException;
 import java.util.List;
@@ -44,7 +45,11 @@ public interface GitIndexAccess extends Modification {
 
     PackMetadata publishIndex(PackMetadata pack) throws IOException;
 
-    RefsSnapshot snapshotRefs() throws IOException;
+    RefsSnapshot snapshotRefs(RefSelection selection) throws IOException;
+
+    default Optional<ObjectId> findRef(RefId ref) throws IOException {
+        return Optional.ofNullable(snapshotRefs(new RefSelection.One(ref)).refs().get(ref));
+    }
 
     void updateHead(Head head) throws IOException;
 

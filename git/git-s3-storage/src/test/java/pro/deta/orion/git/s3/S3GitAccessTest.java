@@ -3,6 +3,7 @@ package pro.deta.orion.git.s3;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 
 import java.io.IOException;
@@ -24,14 +25,14 @@ class S3GitAccessTest {
             GitIndexAccess index = repository.index().createAccess();
             GitStorageAccess storage = repository.storage().createAccess();
             repository.close();
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             index.apply();
             index.discard();
             storage.discard();
             storage.discard();
             assertThatThrownBy(repository.index()::createAccess).isInstanceOf(IOException.class);
             assertThatThrownBy(repository.storage()::createAccess).isInstanceOf(IOException.class);
-            assertThatThrownBy(index::snapshotRefs).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> index.snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
         }
     }
 }

@@ -83,10 +83,9 @@ public final class GitFileAccess implements Modification {
         this.parent = parent;
         this.message = message;
         this.author = author;
-        Map<RefId, ObjectId> refs = index.snapshotRefs().refs();
         this.initializeDefaultHead = initializeDefaultHead
                 && !ref.value().equals(repository.defaultHead())
-                && !refs.containsKey(new RefId(repository.defaultHead()));
+                && index.findRef(new RefId(repository.defaultHead())).isEmpty();
         rootEntries = parent.isPresent()
                 ? readTree(rootTreeId(parent.get(), readObject(parent.get()))) : Map.of();
         storage = repository.storage().createAccess();

@@ -37,6 +37,39 @@ class GitIndexAccessRefsTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void selectsRefsByExactNamePatternAndLiteralSubstring(boolean local) throws Exception {
+        GitIndexApi index = index(local);
+        RefId tag = new RefId("refs/tags/main");
+        RefId nestedTag = new RefId("refs/tags/releases/main");
+        publish(index, MAIN, null, FIRST);
+        publish(index, OTHER, null, SECOND);
+        publish(index, tag, null, FIRST);
+        publish(index, nestedTag, null, SECOND);
+        index.withAccess(Set.of(MAIN, tag), access -> {
+            stage(access, MAIN, FIRST, SECOND);
+            assertThat(access.findRef(MAIN)).contains(SECOND);
+            assertThat(access.snapshotRefs(new RefSelection.One(MAIN)).refs())
+                    .containsExactlyEntriesOf(Map.of(MAIN, SECOND));
+            assertThat(access.snapshotRefs(new RefSelection.Pattern("refs/*/main")).refs())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, SECOND, tag, FIRST, nestedTag, SECOND));
+            assertThat(access.snapshotRefs(new RefSelection.Pattern("refs/heads/*")).refs())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, SECOND, OTHER, SECOND));
+            assertThat(access.snapshotRefs(new RefSelection.Pattern("refs/heads")).refs()).isEmpty();
+            assertThat(access.snapshotRefs(new RefSelection.Substring("tags/")).refs())
+                    .containsExactlyInAnyOrderEntriesOf(Map.of(tag, FIRST, nestedTag, SECOND));
+            assertThat(access.snapshotRefs(new RefSelection.Substring("tags/*")).refs()).isEmpty();
+            assertThat(access.snapshotRefs(new RefSelection.Pattern("*")).refs()).hasSize(4);
+            assertThat(access.snapshotRefs(new RefSelection.All()).refs()).hasSize(4);
+            assertThat(access.snapshotRefs(new RefSelection.Head()).refs()).isEmpty();
+            assertThat(access.snapshotRefs(new RefSelection.Head()).head())
+                    .isEqualTo(access.snapshotRefs(new RefSelection.All()).head());
+            assertThat(access.findRef(new RefId("refs/heads/missing"))).isEmpty();
+            return null;
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void rejectsStaleExpectationsWhenOpeningAndStillAllowsReopening(boolean local) throws Exception {
         GitIndexApi index = index(local);
         publish(index, MAIN, null, FIRST);
@@ -60,7 +93,7 @@ class GitIndexAccessRefsTest {
         GitIndexApi index = index(local);
         index.withAccess(Set.of(MAIN), access -> {
             stage(access, MAIN, null, FIRST);
-            assertThat(access.snapshotRefs().refs()).containsEntry(MAIN, FIRST);
+            assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsEntry(MAIN, FIRST);
             assertRefs(index, Map.of());
             access.discard();
             access.discard();
@@ -97,14 +130,14 @@ class GitIndexAccessRefsTest {
         publish(index, MAIN, null, FIRST);
         index.withAccess(Set.of(MAIN, OTHER), access -> {
             publish(index, MAIN, FIRST, SECOND);
-            assertThat(access.snapshotRefs().refs()).containsEntry(MAIN, FIRST);
+            assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsEntry(MAIN, FIRST);
             access.updateRefs(List.of(update(MAIN, FIRST, null), update(OTHER, null, FIRST)), true);
             assertThatThrownBy(access::apply)
                     .isInstanceOfSatisfying(GitRefConflictException.class, conflict -> {
                         assertThat(conflict.update()).isEqualTo(update(MAIN, FIRST, null));
                         assertThat(conflict.actual()).contains(SECOND);
             });
-            assertThatThrownBy(access::snapshotRefs).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> access.snapshotRefs(new RefSelection.All())).isInstanceOf(IOException.class);
             return null;
         });
         assertRefs(index, Map.of(MAIN, SECOND));
@@ -152,7 +185,7 @@ class GitIndexAccessRefsTest {
              ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             firstIndex.withAccess(reader -> {
                 for (int attempt = 0; attempt < 20; attempt++) {
-                    ObjectId previous = reader.snapshotRefs().refs().get(MAIN);
+                    ObjectId previous = reader.findRef(MAIN).orElse(null);
                     ObjectId firstTarget = new ObjectId(String.format("%040x", attempt * 2 + 1));
                     ObjectId secondTarget = new ObjectId(String.format("%040x", attempt * 2 + 2));
                     firstIndex.withAccess(List.of(update(MAIN, previous, firstTarget),
@@ -165,7 +198,7 @@ class GitIndexAccessRefsTest {
                             boolean firstWon = left.get(10, TimeUnit.SECONDS);
                             assertThat(right.get(10, TimeUnit.SECONDS)).isEqualTo(!firstWon);
                             ObjectId winner = firstWon ? firstTarget : secondTarget;
-                            assertThat(reader.snapshotRefs().refs())
+                            assertThat(reader.snapshotRefs(new RefSelection.All()).refs())
                                     .containsExactlyInAnyOrderEntriesOf(Map.of(MAIN, winner, OTHER, winner));
                             return null;
                         });
@@ -235,7 +268,7 @@ class GitIndexAccessRefsTest {
 
     private static void assertRefs(GitIndexApi index, Map<RefId, ObjectId> expected) throws IOException {
         index.withAccess(access -> {
-            assertThat(access.snapshotRefs().refs()).containsExactlyInAnyOrderEntriesOf(expected);
+            assertThat(access.snapshotRefs(new RefSelection.All()).refs()).containsExactlyInAnyOrderEntriesOf(expected);
             return null;
         });
     }

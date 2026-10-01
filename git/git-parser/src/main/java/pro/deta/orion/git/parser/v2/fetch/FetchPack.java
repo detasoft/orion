@@ -11,6 +11,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.git.parser.v2.read.GitObjectLinks;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -181,7 +182,7 @@ public final class FetchPack {
         if (refs.isEmpty()) {
             return result;
         }
-        RefsSnapshot snapshot = index.snapshotRefs();
+        RefsSnapshot snapshot = index.snapshotRefs(new RefSelection.All());
         Map<RefId, ObjectId> storedRefs = snapshot.refs();
         ArrayDeque<ObjectId> pending = new ArrayDeque<>();
         for (String ref : refs) {
@@ -330,18 +331,17 @@ public final class FetchPack {
 
     private void includeTags() throws IOException {
         Map<ObjectId, GitObjectLinks> tags = new LinkedHashMap<>();
-        for (Map.Entry<RefId, ObjectId> ref : index.snapshotRefs().refs().entrySet()) {
-            if (ref.getKey().value().startsWith("refs/tags/")) {
-                ObjectId id = ref.getValue();
-                Set<ObjectId> visited = new HashSet<>();
-                while (!objects.contains(id) && !common.contains(id) && visited.add(id)) {
-                    GitObjectLinks links = readLinks(id);
-                    if (links.type() != GitObjectType.TAG) {
-                        break;
-                    }
-                    tags.put(id, links);
-                    id = links.targets().getFirst();
+        for (Map.Entry<RefId, ObjectId> ref : index.snapshotRefs(
+                new RefSelection.Pattern("refs/tags/*")).refs().entrySet()) {
+            ObjectId id = ref.getValue();
+            Set<ObjectId> visited = new HashSet<>();
+            while (!objects.contains(id) && !common.contains(id) && visited.add(id)) {
+                GitObjectLinks links = readLinks(id);
+                if (links.type() != GitObjectType.TAG) {
+                    break;
                 }
+                tags.put(id, links);
+                id = links.targets().getFirst();
             }
         }
         boolean changed;

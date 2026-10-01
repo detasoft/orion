@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.id.RefId;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.read.GitObjectRead;
@@ -58,12 +59,12 @@ class InMemoryStorageTest {
                         assertThat(publishRefs(
                                 storage, indexApi, List.of(update(FIRST, null, old)), true).getFirst().status())
                                 .isEqualTo(APPLIED);
-                        RefsSnapshot before = index.snapshotRefs();
+                        RefsSnapshot before = index.snapshotRefs(new RefSelection.All());
                         List<RefUpdate> changes = List.of(update(SECOND, null, next), update(FIRST, next, old));
                         assertThat(publishRefs(
                                 storage, indexApi, changes, true)).extracting(RefUpdateResult::status)
                                 .containsExactly(ATOMIC_ABORTED, EXPECTED_OLD_MISMATCH);
-                        assertThat(index.snapshotRefs()).isEqualTo(before);
+                        assertThat(index.snapshotRefs(new RefSelection.All())).isEqualTo(before);
                         assertThat(publishRefs(
                                 storage, indexApi, List.of(update(SECOND, null, absent), update(FIRST, next, old)), true))
                                 .extracting(RefUpdateResult::status).containsExactly(OBJECT_NOT_FOUND, ATOMIC_ABORTED);
@@ -71,11 +72,11 @@ class InMemoryStorageTest {
                                 storage, indexApi, changes, false)).extracting(RefUpdateResult::status)
                                 .containsExactly(APPLIED, EXPECTED_OLD_MISMATCH);
                         assertThat(before.refs()).containsExactly(Map.entry(FIRST, old));
-                        assertThat(index.snapshotRefs().refs()).containsEntry(SECOND, next);
+                        assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(SECOND, next);
                         assertThat(publishRefs(
                                 storage, indexApi, List.of(update(SECOND, next, null)), false).getFirst().status())
                                 .isEqualTo(APPLIED);
-                        assertThat(index.snapshotRefs()).isEqualTo(before);
+                        assertThat(index.snapshotRefs(new RefSelection.All())).isEqualTo(before);
                         assertThatThrownBy(() -> publishRefs(
                                 storage, indexApi, List.of(update(FIRST, old, next),
                                 update(FIRST, old, next)), true)).isInstanceOf(IllegalArgumentException.class);
@@ -151,7 +152,7 @@ class InMemoryStorageTest {
                             Future<?> reader = executor.submit(() -> {
                                 start.countDown();
                                 for (int i = 0; i < 2000; i++) {
-                                    Map<RefId, ObjectId> refs = index.snapshotRefs().refs();
+                                    Map<RefId, ObjectId> refs = index.snapshotRefs(new RefSelection.All()).refs();
                                     assertThat(refs.get(FIRST)).isEqualTo(refs.get(SECOND));
                                 }
                                 return null;
@@ -217,8 +218,8 @@ class InMemoryStorageTest {
                         ObjectId object = PackTestData.store(first, firstOwner, GitObjectType.BLOB, new byte[]{1});
                         Head detached = new Head.Detached(new CommitId(object.toBytes()));
                         firstIndex.updateHead(detached);
-                        assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
-                        assertThat(secondIndex.snapshotRefs().head())
+                        assertThat(firstIndex.snapshotRefs(new RefSelection.All()).head()).isEqualTo(detached);
+                        assertThat(secondIndex.snapshotRefs(new RefSelection.All()).head())
                                 .isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
                         assertThat(GitObjectRead.exists(second, secondIndex, object)).isFalse();
                         assertThat(secondIndex.packs()).isEmpty();
@@ -230,9 +231,9 @@ class InMemoryStorageTest {
                         first.apply();
                         assertThatThrownBy(() -> first.exists(attempt.packId()))
                                 .isInstanceOf(ClosedChannelException.class);
-                        assertThat(firstIndex.snapshotRefs().head()).isEqualTo(detached);
+                        assertThat(firstIndex.snapshotRefs(new RefSelection.All()).head()).isEqualTo(detached);
                         firstIndex.discard();
-                        assertThatThrownBy(firstIndex::snapshotRefs).isInstanceOf(ClosedChannelException.class);
+                        assertThatThrownBy(() -> firstIndex.snapshotRefs(new RefSelection.All())).isInstanceOf(ClosedChannelException.class);
                         assertThatThrownBy(() -> first.newPack(PackId.create()))
                                 .isInstanceOf(ClosedChannelException.class);
                         assertThat(secondIndex.packs()).isEmpty();
@@ -262,7 +263,7 @@ class InMemoryStorageTest {
                                 .isEqualTo(APPLIED);
                         IndexedObject location = index.locations(object).getFirst();
                         index.discard();
-                        assertThatThrownBy(index::snapshotRefs).isInstanceOf(ClosedChannelException.class);
+                        assertThatThrownBy(() -> index.snapshotRefs(new RefSelection.All())).isInstanceOf(ClosedChannelException.class);
                         assertThat(storage.exists(location.packId())).isTrue();
                         assertThat(GitObjectRead.<GitObjectType>read(storage, location, (type, size, base, input) -> type))
                                 .isEqualTo(GitObjectType.BLOB);

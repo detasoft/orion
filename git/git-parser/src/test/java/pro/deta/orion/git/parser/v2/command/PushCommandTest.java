@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -71,7 +72,7 @@ class PushCommandTest {
                     byte[] response = execute(storageApi, request(pack(delta(base, new byte[]{1, 1, 1, 2})),
                             ZERO + " " + result + " " + REF + "\0report-status"));
                     assertThat(response).isEqualTo(report("unpack ok\n", "ok " + REF + "\n"));
-                    assertThat(index.snapshotRefs().refs()).containsEntry(REF, result);
+                    assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, result);
                     GitStorageAccess reader = storageApi.createAccess();
                     try {
                         assertThat(GitObjectRead.read(reader, index, result,
@@ -110,7 +111,7 @@ class PushCommandTest {
             {
                 GitIndexAccess reopenedIndex = indexApi.createAccess();
                 try {
-                    assertThat(reopenedIndex.snapshotRefs().refs()).containsEntry(REF, result);
+                    assertThat(reopenedIndex.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, result);
                     assertThat(GitObjectRead.read(reopened, reopenedIndex, result, new ResolvedGitObjectRead<>(reopened, reopenedIndex,
                             (type, size, unused, input) -> input.readBytes((int) size))))
                             .hasValueSatisfying(content -> assertThat(content).containsExactly(1, 2, 3, 4));
@@ -144,7 +145,7 @@ class PushCommandTest {
                 }
 
                 assertThat(index.packs()).isEmpty();
-                assertThat(index.snapshotRefs().refs()).isEmpty();
+                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             }
             return null;
         });
@@ -163,16 +164,16 @@ class PushCommandTest {
             byte[] created = execute(storageApi,
                     request(pack(blob(new byte[]{1})), ZERO + " " + first + " " + REF + "\0" + capabilities));
             assertThat(status(created, capabilities)).isEqualTo(expected);
-            assertThat(index.snapshotRefs().refs()).containsEntry(REF, first);
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, first);
             byte[] updated = execute(storageApi,
                     request(pack(blob(new byte[]{2})), first + " " + second + " " + REF + "\0" + capabilities));
             assertThat(status(updated, capabilities)).isEqualTo(expected);
-            assertThat(index.snapshotRefs().refs()).containsEntry(REF, second);
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, second);
             byte[] deleted = execute(storageApi, request(new byte[0], second + " " + ZERO + " " + REF
                     + "\0" + capabilities));
             assertThat(status(deleted, capabilities)).isEqualTo(expected);
             indexApi.withAccess(access -> {
-                assertThat(access.snapshotRefs().refs()).isEmpty();
+                assertThat(access.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
                 return null;
             });
             return null;
@@ -191,7 +192,7 @@ class PushCommandTest {
                 runPush(storageApi, advertised(), context(input, new ByteArrayOutputStream()));
                 assertThat(input.readUnsignedByte()).isEqualTo(42);
             }
-            assertThat(index.snapshotRefs().refs()).containsEntry(REF, id);
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, id);
             return null;
         });
     }
@@ -214,11 +215,11 @@ class PushCommandTest {
                     ZERO + " " + next + " " + other));
             assertThat(response).isEqualTo(report("unpack ok\n", "ng " + REF + " stale info\n",
                     atomic ? "ng " + other + " atomic push failure\n" : "ok " + other + "\n"));
-            assertThat(index.snapshotRefs().refs()).containsEntry(REF, first);
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(REF, first);
             if (atomic) {
-                assertThat(index.snapshotRefs().refs()).doesNotContainKey(other);
+                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).doesNotContainKey(other);
             } else {
-                assertThat(index.snapshotRefs().refs()).containsEntry(other, next);
+                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsEntry(other, next);
             }
             assertThat(GitObjectRead.exists(storage, index, next)).isTrue();
             return null;
@@ -234,7 +235,7 @@ class PushCommandTest {
             byte[] response = execute(storageApi, request(pack(),
                     ZERO + " " + missing + " " + REF + "\0report-status"));
             assertThat(response).isEqualTo(report("unpack ok\n", "ng " + REF + " missing necessary objects\n"));
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             return null;
         });
     }
@@ -256,7 +257,7 @@ class PushCommandTest {
                     ZERO + " " + next + " refs/tags/other"));
             assertThat(status(response, "side-band-64k")).isEqualTo(report("unpack unpacker error\n",
                     "ng " + REF + " unpacker error\n", "ng refs/tags/other unpacker error\n"));
-            assertThat(index.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, first);
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsOnlyKeys(REF).containsEntry(REF, first);
             assertThat(GitObjectRead.exists(storage, index, next)).isFalse();
             return null;
         });
@@ -272,7 +273,7 @@ class PushCommandTest {
             assertThat(execute(storageApi, request(new byte[0], id + " " + ZERO + " " + REF + "\0side-band-64k")))
                     .isEqualTo("0000".getBytes(StandardCharsets.US_ASCII));
             assertThat(execute(storageApi, request(new byte[0]))).isEmpty();
-            assertThat(index.snapshotRefs().refs()).isEmpty();
+            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).isEmpty();
             return null;
         });
     }
@@ -315,7 +316,7 @@ class PushCommandTest {
                     assertThatThrownBy(() -> runPush(storageApi, advertised(), context(input, new ByteArrayOutputStream())))
                             .isInstanceOf(IOException.class);
                 }
-                assertThat(index.snapshotRefs().refs()).containsOnlyKeys(REF).containsEntry(REF, existing);
+                assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsOnlyKeys(REF).containsEntry(REF, existing);
                 assertThat(GitObjectRead.exists(storage, index, new ObjectId(id))).isFalse();
             }
 

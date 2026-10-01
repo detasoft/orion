@@ -14,6 +14,7 @@ import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.RefId;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.lsrefs.LsRefsArgument;
 import pro.deta.orion.git.parser.v2.pkt.GitPktLine;
 import pro.deta.orion.git.parser.v2.proto.GitProtocolContext;
@@ -236,7 +237,7 @@ public final class GitBlockingWireSession {
 
     private GitV1Advertisement legacyAdvertisement(GitRepositoryContext repository,
             GitCapabilities capabilities, InitialRequestService service) throws IOException {
-        RefsSnapshot snapshot = repository.index().snapshotRefs();
+        RefsSnapshot snapshot = repository.index().snapshotRefs(new RefSelection.All());
         List<GitAdvertisedRef> refs = new ArrayList<>();
         ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
                 ? snapshot.refs().get(symbolic.target())

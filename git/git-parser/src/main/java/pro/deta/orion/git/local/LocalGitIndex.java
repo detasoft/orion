@@ -20,6 +20,7 @@ import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -360,7 +361,8 @@ public final class LocalGitIndex implements GitIndexApi {
         }
 
         @Override
-        public RefsSnapshot snapshotRefs() throws IOException {
+        public RefsSnapshot snapshotRefs(RefSelection selection) throws IOException {
+            Objects.requireNonNull(selection, "selection");
             return withStore(false, store -> {
                 Map<String, String> values = readRefs(store);
                 Head head = changedHead == null ? readHead(values)
@@ -377,6 +379,7 @@ public final class LocalGitIndex implements GitIndexApi {
                 }
                 overlay(refs, originalRefs);
                 overlay(refs, changedRefs);
+                refs.keySet().removeIf(ref -> !selection.matches(ref));
                 return new RefsSnapshot(refs, head);
             });
         }

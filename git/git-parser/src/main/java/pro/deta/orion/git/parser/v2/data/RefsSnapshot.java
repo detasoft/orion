@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Holds refs and HEAD read together through a GitIndexAccess, including its captured and pending refs.
+ * Holds selected refs and HEAD read together through a GitIndexAccess, including captured and pending refs.
  * Owns an immutable copy of the ref map; HEAD is represented separately by head.
  * A symbolic HEAD may target a ref absent from the map, including in an empty repository.
  * Constructing this value does not read storage or establish consistency between independently read values.

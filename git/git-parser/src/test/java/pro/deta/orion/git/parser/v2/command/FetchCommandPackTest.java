@@ -19,6 +19,7 @@ import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import pro.deta.orion.git.parser.v2.index.GitIndexApi;
 import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.local.LocalGitIndex;
+import pro.deta.orion.git.parser.v2.index.RefSelection;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.pack.PackTestData;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
@@ -535,7 +536,7 @@ class FetchCommandPackTest implements BufferedByteInputV2.Source {
                                         .hasMessageContaining(missingObject ? wanted : "Depth must be positive");
                             }
                             assertThat(response.toByteArray()).isEmpty();
-                            assertThat(index.snapshotRefs().refs()).containsOnlyKeys(main).containsEntry(main, tip);
+                            assertThat(index.snapshotRefs(new RefSelection.All()).refs()).containsOnlyKeys(main).containsEntry(main, tip);
                             assertThat(GitObjectRead.exists(storage, index, tip)).isTrue();
                         }
                         return null;
