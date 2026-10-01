@@ -18,7 +18,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
-import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -43,15 +43,13 @@ class NativeSshCredentialPersistenceTest {
                 "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",
                 "users.xml", Optional.empty(), false);
         OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(source, provider);
-        AccessControlDraft primary = new AccessControlDraft();
-        AccessControlDraft.User alice = new AccessControlDraft.User();
-        alice.setId("alice");
-        alice.setEmail("alice@example.test");
-        primary.getUsers().add(alice);
+        AccessControl.User alice = new AccessControl.User("alice", null, null, "alice@example.test",
+                List.of(), List.of(), List.of());
+        AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
         ByteArrayOutputStream users = new ByteArrayOutputStream();
-        OrionXml.write(OrionDocument.withAccessControl(primary.toAccessControl()), users);
+        OrionXml.write(OrionDocument.withAccessControl(primary), users);
         ByteArrayOutputStream roles = new ByteArrayOutputStream();
-        OrionXml.write(OrionDocument.withAccessControl(new AccessControlDraft().toAccessControl()), roles);
+        OrionXml.write(OrionDocument.withAccessControl(new AccessControl()), roles);
         byte[] unchanged = roles.toByteArray();
         repository.files().withAccess("refs/heads/main", "seed", GitCommitAuthor.EMPTY, access -> {
             access.write("users.xml", users.toByteArray());

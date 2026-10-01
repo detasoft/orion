@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -536,13 +535,31 @@ public class AccessRulesTest {
                 .toAccessControl();
     }
 
-    private static AccessControlDraft.Grant repositoryGrantDraft(String repositoryName) {
+    private static GrantFixture repositoryGrantDraft(String repositoryName) {
         return grantDraft("repository")
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
     }
 
-    private static AccessControlDraft.Grant grantDraft(String id) {
-        return new AccessControlDraft.Grant(id, new java.util.ArrayList<>());
+    private static GrantFixture grantDraft(String id) {
+        return new GrantFixture(id);
+    }
+
+    private static final class GrantFixture {
+        private final String id;
+        private final java.util.List<AccessControl.GrantExpression> info = new java.util.ArrayList<>();
+
+        private GrantFixture(String id) {
+            this.id = id;
+        }
+
+        GrantFixture addKey(AccessControl.GrantKey key, String value) {
+            info.add(new AccessControl.GrantExpression(key, value));
+            return this;
+        }
+
+        AccessControl.Grant toAccessControl() {
+            return new AccessControl.Grant(id, info);
+        }
     }
 
     private static SecurityContext securityContext(InternalUserImpl userIdentity) {

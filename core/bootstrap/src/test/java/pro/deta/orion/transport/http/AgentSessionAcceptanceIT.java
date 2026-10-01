@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.agent.protocol.SessionCommandOutcome;
 import pro.deta.orion.agentd.session.JsonSessionManifestReader;
 import org.junit.jupiter.api.Test;
@@ -274,8 +273,9 @@ class AgentSessionAcceptanceIT {
                 public void service(HttpServletRequest request, HttpServletResponse response)
                         throws IOException, ServletException {
                     if ("Bearer acceptance-admin".equals(request.getHeader("Authorization"))) {
-                        AccessControl.Grant grant = new AccessControlDraft.Grant("admin", new ArrayList<>())
-                                .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING).toAccessControl();
+                        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
+                                new AccessControl.GrantExpression(
+                                        AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()
                                         .withUserIdentity(new InternalUserImpl("admin", List.of(grant))));

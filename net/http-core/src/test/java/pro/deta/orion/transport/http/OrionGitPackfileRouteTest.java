@@ -18,7 +18,6 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.util.Result;
@@ -30,7 +29,6 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -233,11 +231,8 @@ class OrionGitPackfileRouteTest {
 
     private static SecurityContext repositorySecurityContext(
             String repositoryName) {
-        AccessControl.Grant grant = new AccessControlDraft.Grant(
-                "repository",
-                new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("repository", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",

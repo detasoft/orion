@@ -11,7 +11,6 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.GitCredentialKind;
 import pro.deta.orion.schema.orion.GitProxyBinding;
@@ -25,7 +24,6 @@ import java.io.StringWriter;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -88,10 +86,10 @@ class OrionAdminProxiesRouteTest {
     void rejectsAnonymousReadOnlyAndRepositoryScopedUsersBeforeReadingConfiguration() throws Exception {
         for (SecurityContext context : List.of(SecurityContext.createContext(), context(),
                 context(grant(AccessControl.GrantKey.READ)),
-                context(new AccessControlDraft.Grant("repository-access", new ArrayList<>())
-                        .addKey(AccessControl.GrantKey.REPOSITORY, "team/repository")
-                        .addKey(AccessControl.GrantKey.READ, "true")
-                        .addKey(AccessControl.GrantKey.READ_WRITE, "true").toAccessControl()))) {
+                context(new AccessControl.Grant("repository-access", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/repository"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true")))))) {
             var response = get(context);
             assertThat(response.status).isEqualTo(403);
             assertThat(response.body.toString()).isEmpty();
@@ -117,7 +115,7 @@ class OrionAdminProxiesRouteTest {
     }
 
     private static AccessControl.Grant grant(AccessControl.GrantKey key) {
-        return new AccessControlDraft.Grant("access", new ArrayList<>()).addKey(key, "true").toAccessControl();
+        return new AccessControl.Grant("access", List.of(new AccessControl.GrantExpression(key, "true")));
     }
 
     private static SecurityContext context(AccessControl.Grant... grants) {

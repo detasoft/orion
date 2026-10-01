@@ -86,20 +86,26 @@ class BootstrapProxyEndpointIT {
                     .valueOrFailure("bootstrap upstream");
             var document = OrionXml.read(new ByteArrayInputStream(
                     upstream.accessControlService().accessControlConfigurationFile().content()));
-            var aclDraft = document.system().accessControl().toDraft();
-            var rootDraft = aclDraft.getUsers().getFirst();
-            rootDraft.getCredentials().clear();
-            rootDraft.addCredential(AccessControl.CredentialType.SHA1,
-                    new OrionPasswordHashingService().calculateHash(
-                            PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray()));
+            AccessControl currentAcl = document.system().accessControl();
+            AccessControl.User currentRoot = currentAcl.getUsers().getFirst();
+            List<AccessControl.Grant> grants = new ArrayList<>(currentRoot.getGrants());
             for (String name : List.of("proxy/system/*", "bootstrap")) {
-                rootDraft.addGrant("probe-" + rootDraft.getGrants().size())
-                        .addKey(AccessControl.GrantKey.REPOSITORY, name)
-                        .addKey(AccessControl.GrantKey.READ, "true")
-                        .addKey(AccessControl.GrantKey.BRANCH, "*");
+                grants.add(new AccessControl.Grant("probe-" + grants.size(), List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, name),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, "*"))));
             }
+            AccessControl.User updatedRoot = new AccessControl.User(currentRoot.getId(), currentRoot.getFirst(),
+                    currentRoot.getLast(), currentRoot.getEmail(), List.of(new AccessControl.Credential(
+                            AccessControl.CredentialType.SHA1,
+                            new OrionPasswordHashingService().calculateHash(
+                                    PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray()))),
+                    currentRoot.getRoles(), grants);
+            List<AccessControl.User> users = new ArrayList<>(currentAcl.getUsers());
+            users.set(0, updatedRoot);
             var xml = new ByteArrayOutputStream();
-            OrionXml.write(document.replaceAccessControl(aclDraft.toAccessControl()), xml);
+            OrionXml.write(document.replaceAccessControl(
+                    new AccessControl(users, currentAcl.getRoles(), currentAcl.getGrants())), xml);
             repository.files().withAccess(REF, "seed inputs", GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("orion.xml", xml.toByteArray());
                 fileAccess.write("material.p12", materialBytes(target, environment));

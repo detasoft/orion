@@ -2,7 +2,6 @@ package pro.deta.orion.transport.git.auth;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
@@ -139,15 +138,13 @@ class AuthenticatedRepositoryAccessHookTest {
 
     @Test
     void updateCannotBorrowBranchFromReadOnlyGrant() {
-        AccessControl.Grant readWrite = new AccessControlDraft.Grant("writer", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "dev")
-                .toAccessControl();
-        AccessControl.Grant read = new AccessControlDraft.Grant("reader", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.BRANCH, "main")
-                .toAccessControl();
+        AccessControl.Grant readWrite = new AccessControl.Grant("writer", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "project"),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, "dev")));
+        AccessControl.Grant read = new AccessControl.Grant("reader", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "project"),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, "main")));
         AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
                 SecurityContext.createContext().withUserIdentity(
                         new InternalUserImpl("developer", List.of(readWrite, read))));
@@ -230,54 +227,38 @@ class AuthenticatedRepositoryAccessHookTest {
             String repositoryName,
             boolean write,
             boolean create) {
-        AccessControlDraft.Grant grant =
-                new AccessControlDraft.Grant(
-                        "repository",
-                        new ArrayList<>())
-                        .addKey(
-                                AccessControl.GrantKey.REPOSITORY,
-                                repositoryName);
+        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
         if (write) {
-            grant.addKey(
-                    AccessControl.GrantKey.READ_WRITE,
-                    AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         }
         if (create) {
-            grant.addKey(
-                    AccessControl.GrantKey.CREATE,
-                    AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",
-                        List.of(grant.toAccessControl())));
+                        List.of(new AccessControl.Grant("repository", expressions))));
     }
 
     private static SecurityContext branchSecurityContext(
             String repositoryName,
             String branchName,
             boolean force) {
-        AccessControlDraft.Grant grant =
-                new AccessControlDraft.Grant(
-                        "repository",
-                        new ArrayList<>())
-                        .addKey(
-                                AccessControl.GrantKey.REPOSITORY,
-                                repositoryName)
-                        .addKey(
-                                AccessControl.GrantKey.BRANCH,
-                                branchName)
-                        .addKey(
-                                AccessControl.GrantKey.READ_WRITE,
-                                AccessControl.TRUE_STRING);
+        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, branchName));
+        expressions.add(new AccessControl.GrantExpression(
+                AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         if (force) {
-            grant.addKey(
-                    AccessControl.GrantKey.FORCE,
-                    AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",
-                        List.of(grant.toAccessControl())));
+                        List.of(new AccessControl.Grant("repository", expressions))));
     }
 }

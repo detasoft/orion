@@ -38,7 +38,6 @@ import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
@@ -57,6 +56,7 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -260,29 +260,33 @@ class InternalConfigurationRepositoryLifecycleIT {
             addKey(first, "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
             oldRootToken = issueTokenForSshKey(first, "root", rootKey);
             aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
-            AccessControlDraft draft = OrionXml.read(new ByteArrayInputStream(
+            AccessControl acl = OrionXml.read(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()))
-                            .system().accessControl().toDraft();
-            AccessControlDraft.User root = draft.getUsers().stream()
+                            .system().accessControl();
+            AccessControl.User root = acl.getUsers().stream()
                     .filter(candidate -> "root".equalsIgnoreCase(candidate.getId()))
                     .findFirst()
                     .orElseThrow();
-            root.setFirst("Recovery");
-            root.setLast("Administrator");
-            root.setEmail("recovery-root@example.test");
-            root.addCredential(
-                    AccessControl.CredentialType.SHA1,
+            List<AccessControl.Credential> credentials = new ArrayList<>(root.getCredentials());
+            credentials.add(new AccessControl.Credential(AccessControl.CredentialType.SHA1,
                     new OrionPasswordHashingService().calculateHash(
                             PasswordHashingAlgorithm.SHA1,
-                            "legacy-root-password".toCharArray()));
-            root.addCredential(
+                            "legacy-root-password".toCharArray())));
+            credentials.add(new AccessControl.Credential(
                     AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
                     "legacy-jwt-key",
-                    "legacy-jwt-public-key");
-            root.addGrant("ROOT_DIRECT")
-                    .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
+                    "legacy-jwt-public-key"));
+            List<AccessControl.Grant> grants = new ArrayList<>(root.getGrants());
+            grants.add(new AccessControl.Grant("ROOT_DIRECT", List.of(
+                    new AccessControl.GrantExpression(
+                            AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING))));
+            AccessControl.User updatedRoot = new AccessControl.User(root.getId(), "Recovery", "Administrator",
+                    "recovery-root@example.test", credentials, root.getRoles(), grants);
+            List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+            users.set(users.indexOf(root), updatedRoot);
             OrionDocument replacement = OrionXml.read(
-                    new ByteArrayInputStream(accessControlBytes(draft.toAccessControl())));
+                    new ByteArrayInputStream(accessControlBytes(
+                            new AccessControl(users, acl.getRoles(), acl.getGrants()))));
             first.configurationEditor().edit(first.orionAccessControlService()
                     .accessControlConfigurationFile().revision().orElseThrow())
                     .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
@@ -982,10 +986,10 @@ class InternalConfigurationRepositoryLifecycleIT {
     private static byte[] aclBytes(String userId, String password) throws Exception {
         OrionPasswordHashingService hashingService = new OrionPasswordHashingService();
         String hash = hashingService.calculateHash(PasswordHashingAlgorithm.SHA1, password.toCharArray());
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, hash));
-        return accessControlBytes(draft.toAccessControl());
+        AccessControl.User user = new AccessControl.User(userId, null, null, userId + "@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, hash)),
+                List.of(), List.of());
+        return accessControlBytes(new AccessControl(List.of(user), List.of(), List.of()));
     }
 
     private static byte[] missingRootAclBytes() throws Exception {
@@ -993,23 +997,23 @@ class InternalConfigurationRepositoryLifecycleIT {
         String hash = hashingService.calculateHash(
                 PasswordHashingAlgorithm.SHA1,
                 "alice-password".toCharArray());
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser("alice", "alice@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, hash)
-                .addRole("ALICE"));
-        draft.getRoles().add(ACLUtil.createRole("ALICE").addGrantReference("ALICE_READ"));
-        draft.getGrants().add(ACLUtil.createGrant("ALICE_READ")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "alice/**")
-                .addKey(AccessControl.GrantKey.READ, "true"));
-        draft.getRoles().add(ACLUtil.createRole("ROOT").addGrantReference("APPLICATION_CONTROL"));
-        draft.getGrants().add(ACLUtil.createGrant("CONNECT")
-                .addKey(AccessControl.GrantKey.NETWORK_SOURCE, "192.0.2.1"));
-        draft.getGrants().add(ACLUtil.createGrant("ALL_REPOSITORY")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "restricted")
-                .addKey(AccessControl.GrantKey.READ, "false"));
-        draft.getGrants().add(ACLUtil.createGrant("APPLICATION_CONTROL")
-                .addKey(AccessControl.GrantKey.ADMIN, "false"));
-        return accessControlBytes(draft.toAccessControl());
+        AccessControl.User alice = new AccessControl.User("alice", null, null, "alice@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, hash)),
+                List.of("ALICE"), List.of());
+        AccessControl acl = new AccessControl(List.of(alice), List.of(
+                new AccessControl.Role("ALICE", List.of(), List.of("ALICE_READ")),
+                new AccessControl.Role("ROOT", List.of(), List.of("APPLICATION_CONTROL"))), List.of(
+                new AccessControl.Grant("ALICE_READ", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "alice/**"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true"))),
+                new AccessControl.Grant("CONNECT", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.NETWORK_SOURCE, "192.0.2.1"))),
+                new AccessControl.Grant("ALL_REPOSITORY", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "restricted"),
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "false"))),
+                new AccessControl.Grant("APPLICATION_CONTROL", List.of(
+                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "false")))));
+        return accessControlBytes(acl);
     }
 
     private static byte[] duplicateRootAclBytes() throws Exception {

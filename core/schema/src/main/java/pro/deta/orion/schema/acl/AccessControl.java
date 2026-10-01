@@ -27,10 +27,6 @@ public final class AccessControl {
         this.grants = copyGrants(grants);
     }
 
-    public AccessControlDraft toDraft() {
-        return AccessControlDraft.from(this);
-    }
-
     private static List<User> copyUsers(List<User> source) {
         List<User> result = new ArrayList<>();
         for (User user : listOrEmpty(source)) {

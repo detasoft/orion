@@ -21,7 +21,6 @@ import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 
@@ -32,7 +31,6 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -468,9 +466,9 @@ class OrionGitRouteNativeTest {
                 Map.of(), new byte[0], repositoryWriteSecurityContext()), denied.proxy());
         assertThat(denied.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
         assertThat(provider.exists(REPOSITORY_NAME)).isFalse();
-        AccessControl.Grant grant = new AccessControlDraft.Grant("create", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
-                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING).toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("create", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME),
+                new AccessControl.GrantExpression(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)));
         SecurityContext creator = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("creator", List.of(grant)));
         ResponseRecorder allowed = new ResponseRecorder();
@@ -671,11 +669,8 @@ class OrionGitRouteNativeTest {
     }
 
     private static SecurityContext repositorySecurityContext(String name) {
-        AccessControl.Grant grant = new AccessControlDraft.Grant(
-                "repository",
-                new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, name)
-                .toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("repository", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, name)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",
@@ -683,14 +678,10 @@ class OrionGitRouteNativeTest {
     }
 
     private static SecurityContext repositoryWriteSecurityContext() {
-        AccessControl.Grant grant = new AccessControlDraft.Grant(
-                "repository",
-                new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
-                .addKey(
-                        AccessControl.GrantKey.READ_WRITE,
-                        AccessControl.TRUE_STRING)
-                .toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("repository", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME),
+                new AccessControl.GrantExpression(
+                        AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",

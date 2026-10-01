@@ -29,7 +29,6 @@ import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.terminal.TerminalCommandRenderer;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
@@ -432,7 +431,7 @@ class ReadOnlyDomainCommandCatalogTest {
     }
 
     private static AccessControl.Grant grant(AccessControl.GrantKey key, String value) {
-        return new AccessControlDraft.Grant("test", new ArrayList<>()).addKey(key, value).toAccessControl();
+        return new AccessControl.Grant("test", List.of(new AccessControl.GrantExpression(key, value)));
     }
 
     private static OperatorDomainViews.RepositoryView repository(

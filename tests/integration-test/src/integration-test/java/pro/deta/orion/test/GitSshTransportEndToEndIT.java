@@ -27,9 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
-import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -59,6 +57,7 @@ import java.security.PublicKey;
 import java.util.Arrays;
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -1504,12 +1503,20 @@ class GitSshTransportEndToEndIT {
     }
 
     private static AccessControl configurationPushAccessControl(boolean recovered) {
-        AccessControlDraft draft = accessControlFor(TRUSTED_USER_KEY.getPublic()).toDraft();
-        allowRepository(draft.getUsers().getFirst(), "orion");
+        AccessControl base = accessControlFor(TRUSTED_USER_KEY.getPublic());
+        AccessControl.User original = base.getUsers().getFirst();
+        List<AccessControl.Grant> grants = new ArrayList<>(original.getGrants());
+        grants.add(repositoryGrant("orion", true));
+        AccessControl.User updated = new AccessControl.User(original.getId(), original.getFirst(),
+                original.getLast(), original.getEmail(), original.getCredentials(),
+                original.getRoles(), grants);
+        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
+        users.set(0, updated);
         if (recovered) {
-            draft.getUsers().add(ACLUtil.createUser("recovered-user", "recovered@example.test"));
+            users.add(new AccessControl.User("recovered-user", null, null, "recovered@example.test",
+                    List.of(), List.of(), List.of()));
         }
-        return draft.toAccessControl();
+        return new AccessControl(users, base.getRoles(), base.getGrants());
     }
 
     private static String serializeAccessControl(AccessControl accessControl) throws IOException {
@@ -1554,34 +1561,33 @@ class GitSshTransportEndToEndIT {
          * the full SSH transport path and repository lifecycle, not fine-grained ACL matching; narrower ACL
          * behavior is covered by unit tests around access rules.
          */
-        AccessControlDraft draft = new AccessControlDraft();
-        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
-        allowRepository(user, "project");
-        allowRepository(user, "fetch-project");
-        draft.getUsers().add(user);
-        return draft.toAccessControl();
+        AccessControl.User user = new AccessControl.User(USERNAME, null, null, "e2e@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                        KeyUtils.publicKeyToString(userPublicKey))), List.of(),
+                List.of(repositoryGrant("project", true), repositoryGrant("fetch-project", true)));
+        return new AccessControl(List.of(user), List.of(), List.of());
     }
 
     private static AccessControl accessControlForReadOnlyRepository(PublicKey userPublicKey, String repositoryName) {
-        AccessControlDraft draft = new AccessControlDraft();
-        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
-        user.addGrant("REPOSITORY_" + repositoryName)
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "*");
-        draft.getUsers().add(user);
-        return draft.toAccessControl();
+        AccessControl.User user = new AccessControl.User(USERNAME, null, null, "e2e@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                        KeyUtils.publicKeyToString(userPublicKey))), List.of(),
+                List.of(repositoryGrant(repositoryName, false)));
+        return new AccessControl(List.of(user), List.of(), List.of());
     }
 
-    private static void allowRepository(AccessControlDraft.User user, String repositoryName) {
-        user.addGrant("REPOSITORY_" + repositoryName)
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "*");
+    private static AccessControl.Grant repositoryGrant(String repositoryName, boolean write) {
+        List<AccessControl.GrantExpression> info = new ArrayList<>();
+        info.add(new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
+        info.add(new AccessControl.GrantExpression(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
+        if (write) {
+            info.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+            info.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
+        }
+        info.add(new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, "*"));
+        return new AccessControl.Grant("REPOSITORY_" + repositoryName, info);
     }
 
     private static KeyPair loadTestRsaKeyPair(String resourceName) {

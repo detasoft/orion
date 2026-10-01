@@ -23,7 +23,6 @@ import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
@@ -31,7 +30,6 @@ import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.HexFormat;
 import java.util.Random;
@@ -116,10 +114,10 @@ class S3GitTransportIT {
             connector.setHost("127.0.0.1");
             connector.setPort(0);
             server.addConnector(connector);
-            AccessControl.Grant grant = new AccessControlDraft.Grant("test", new ArrayList<>())
-                    .addKey(AccessControl.GrantKey.REPOSITORY, "*")
-                    .addKey(AccessControl.GrantKey.READ_WRITE, "true")
-                    .addKey(AccessControl.GrantKey.CREATE, "true").toAccessControl();
+            AccessControl.Grant grant = new AccessControl.Grant("test", List.of(
+                    new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
+                    new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
+                    new AccessControl.GrantExpression(AccessControl.GrantKey.CREATE, "true")));
             SecurityContext actor = SecurityContext.createContext()
                     .withUserIdentity(new InternalUserImpl("tester", List.of(grant)));
             OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),

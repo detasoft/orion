@@ -25,7 +25,6 @@ import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.OrionDocument;
 
 import java.io.ByteArrayInputStream;
@@ -33,7 +32,6 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -103,8 +101,8 @@ class AcmeAdministrationTest {
     }
 
     static SecurityContext admin() {
-        AccessControl.Grant grant = new AccessControlDraft.Grant("admin", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.ADMIN, "true").toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
     }
 

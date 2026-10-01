@@ -14,7 +14,6 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
@@ -143,14 +142,16 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
     }
 
     private static AccessControl defaultAccessControlWithUsers(String... extraUserIds) {
-        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(
-                TEST_PASSWORD_HASH,
-                AccessControl.CredentialType.SHA1).toDraft();
+        AccessControl base = ACLUtil.generateDefaultAccessControl(
+                TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
+        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
         for (String userId : extraUserIds) {
-            draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                    .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
+            users.add(new AccessControl.User(userId, null, null, userId + "@example.test",
+                    List.of(new AccessControl.Credential(
+                            AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                    List.of(), List.of()));
         }
-        return draft.toAccessControl();
+        return new AccessControl(users, base.getRoles(), base.getGrants());
     }
 
     private static byte[] serialize(OrionDocument document) throws IOException {

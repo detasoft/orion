@@ -45,8 +45,6 @@ import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
@@ -182,7 +180,7 @@ class BootstrapContextTest {
         AtomicInteger configurationReads = new AtomicInteger();
         AtomicInteger materialReads = new AtomicInteger();
         NativeGitRepository observed = new NativeGitRepository(
-                "orion", repository.storage(), repository.index(), "refs/heads/main") {
+                "orion", repository.storage(), repository.index()) {
             @Override
             public Optional<LooseObject> readObject(ObjectId id) {
                 Optional<LooseObject> object = repository.readObject(id);
@@ -1226,10 +1224,11 @@ class BootstrapContextTest {
         NativeGitRepository repository = backend.find("orion").valueOrFailure("configuration repository");
 
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
-            AccessControlDraft draft = new AccessControlDraft();
-            draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
+            AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+                    "later-user", null, null, "later@example.test", List.of(), List.of(), List.of())),
+                    List.of(), List.of());
             ByteArrayOutputStream output = new ByteArrayOutputStream();
-            OrionXml.write(OrionDocument.withAccessControl(draft.toAccessControl()), output);
+            OrionXml.write(OrionDocument.withAccessControl(acl), output);
             repository.files().withAccess("refs/heads/main", "valid update after bootstrap input load",
                     GitCommitAuthor.EMPTY, fileAccess -> {
                 fileAccess.write("orion.xml", output.toByteArray());
@@ -1292,11 +1291,12 @@ class BootstrapContextTest {
                         unrelated.alias(), () -> first, component.configurationSecrets()).isFailure()).isFalse();
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
 
-                AccessControlDraft draft = new AccessControlDraft();
-                draft.getUsers().add(ACLUtil.createUser("later-user", "later@example.test"));
+                AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+                        "later-user", null, null, "later@example.test", List.of(), List.of(), List.of())),
+                        List.of(), List.of());
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
-                        draft.toAccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
+                        acl, Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
                 OrionXml.write(valid, output);
                 source.files().withAccess("refs/heads/main", "valid C after invalid B", GitCommitAuthor.EMPTY,
                         fileAccess -> {

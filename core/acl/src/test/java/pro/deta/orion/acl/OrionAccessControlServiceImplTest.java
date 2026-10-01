@@ -53,7 +53,6 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
@@ -72,6 +71,7 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.Optional;
@@ -92,7 +92,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void stagesTwoSshKeysAndPublishesOnlyOnce() {
-        AccessControlDraft initial = new AccessControlDraft();
+        AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
         try (ServiceFixture fixture = fixture(initial);
                 OrionConfigurationEdit edit = fixture.editor.edit()) {
@@ -114,7 +114,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void discardedAndConflictingEditsPublishNothing() {
-        AccessControlDraft initial = new AccessControlDraft();
+        AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
         try (ServiceFixture fixture = fixture(initial)) {
             try (OrionConfigurationEdit edit = fixture.editor.edit()) {
@@ -156,7 +156,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void externalReloadPreparesRootServerKeysBeforePublication() {
-        AccessControlDraft initial = new AccessControlDraft();
+        AclFixture initial = new AclFixture();
         initial.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         try (ServiceFixture fixture = fixture(initial,
@@ -201,7 +201,7 @@ class OrionAccessControlServiceImplTest {
         } finally {
             service.onStop();
         }
-        AccessControlDraft root = new AccessControlDraft();
+        AclFixture root = new AclFixture();
         root.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         storage.snapshot = new ConfigurationFile(serialize(root.toAccessControl()), storage.snapshot.revision());
@@ -232,7 +232,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void createsAUserInTheConfigurationFile() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice"));
 
         try (ServiceFixture fixture = fixture(primary)) {
@@ -255,7 +255,7 @@ class OrionAccessControlServiceImplTest {
                 List.of(actor), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(actor), List.of(), List.of())), List.of(org));
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("system/alice"),
                     Optional.empty(), document)).isFalse();
             assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("acme/alice"),
@@ -266,7 +266,7 @@ class OrionAccessControlServiceImplTest {
     @Test
     void userMutationsArePersistedAndActiveWhenTheyReturn() throws Exception {
         OrionPasswordHashingService hashing = new OrionPasswordHashingService();
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             fixture.createOrUpdateUser(userUpdate("alice",
                     hashing.calculateHash(pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2,
                             "first-password".toCharArray())));
@@ -286,7 +286,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void configurationStatusTracksStoredValidationSeparatelyFromActiveRevision() {
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             OrionAccessControlServiceImpl.ConfigurationStatus initial = fixture.service.configurationStatus();
             assertThat(initial.storedRevision()).contains("version-one");
             assertThat(initial.activeRevision()).contains("version-one");
@@ -317,7 +317,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void organizationIdentityCannotIssueTokenAsSystemUserWithSameId() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice"));
         try (ServiceFixture fixture = fixture(primary)) {
             InternalUserImpl identity = new InternalUserImpl("alice", new OrganizationId("acme"),
@@ -403,18 +403,18 @@ class OrionAccessControlServiceImplTest {
                 return super.comparePassword(algorithm, expected, provided);
             }
         };
-        AccessControlDraft primary = new AccessControlDraft();
-        AccessControlDraft.User alice = user("alice");
+        AclFixture primary = new AclFixture();
+        AclFixture.User alice = user("alice");
         String passwordHash = hashing.calculateHash(PasswordHashingAlgorithm.SHA1, "password".toCharArray());
         alice.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
         alice.addRole("operators");
         primary.getUsers().add(alice);
-        AccessControlDraft.User bob = user("bob");
+        AclFixture.User bob = user("bob");
         bob.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
         primary.getUsers().add(bob);
-        AccessControlDraft.Role role = new AccessControlDraft.Role();
+        AclFixture.Role role = new AclFixture.Role();
         role.setId("operators");
-        AccessControlDraft.Grant grant = new AccessControlDraft.Grant();
+        AclFixture.Grant grant = new AclFixture.Grant();
         grant.setId("operator-rights");
         grant.addKey(AccessControl.GrantKey.READ, "team/*");
         AccessControl.Grant originalGrant = grant.toAccessControl();
@@ -454,7 +454,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void updatesConfigurationAtTheReadRevisionInOneFile() throws Exception {
-        try (var fixture = fixture(new AccessControlDraft())) {
+        try (var fixture = fixture(new AclFixture())) {
             var result = fixture.editor.edit("version-one").update(document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
@@ -470,7 +470,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void rejectsStalePrimaryConfigurationBeforeInvokingTheMutation() {
-        try (var fixture = fixture(new AccessControlDraft())) {
+        try (var fixture = fixture(new AclFixture())) {
             int saves = fixture.storage.saveCount;
             assertThatThrownBy(() -> fixture.editor.edit("stale").update(document -> {
                 throw new AssertionError("A stale mutation must not consume credentials");
@@ -482,7 +482,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void reportsAStaleRevisionEvenWhenTheNewHeadIsInvalid() {
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             fixture.storage.snapshot = new ConfigurationFile("<invalid".getBytes(StandardCharsets.UTF_8), Optional.of("version-two"));
             assertThatThrownBy(() -> fixture.editor.edit("version-one").update(document -> {
                 throw new AssertionError("A stale mutation must not parse or change the new head");
@@ -666,8 +666,8 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void listsCanonicalDeduplicatedSshCredentialsForOnlyTheSelectedUser() {
-        AccessControlDraft primary = new AccessControlDraft();
-        AccessControlDraft.User alice = user("alice")
+        AclFixture primary = new AclFixture();
+        AclFixture.User alice = user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
                 .addCredential(AccessControl.CredentialType.ARGON2, "password-hash")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
@@ -688,7 +688,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void reportsMalformedStoredSshCredentialsWithoutHidingThem() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
 
@@ -701,7 +701,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void atomicallyAddsCanonicalKeysToTheConfigurationFile() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.ARGON2, "password-hash"));
         primary.getUsers().add(user("bob")
@@ -729,7 +729,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void invalidAdditionAndMissingUserDoNotMutateTheSnapshot() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice"));
 
         try (ServiceFixture fixture = fixture(primary)) {
@@ -745,7 +745,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void mapsAStaleConditionalSaveToConcurrentUpdateWithoutActivatingTheDraft() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice"));
 
         try (ServiceFixture fixture = fixture(primary)) {
@@ -760,7 +760,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void addedRootKeysRetainTheExistingAuthenticationGeneration() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root").addCredential(
                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                 "root-auth-generation:generation-one",
@@ -779,7 +779,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void removesEveryDuplicateOfAUniqueKeyWithoutTouchingOtherCredentialsOrUsers() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
@@ -809,7 +809,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void removalRejectsMissingAmbiguousMalformedAndUnforcedLastKeyWithoutSaving() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic())));
@@ -833,7 +833,7 @@ class OrionAccessControlServiceImplTest {
             assertThat(fixture.storage.saveCount).isEqualTo(1);
         }
 
-        AccessControlDraft malformed = new AccessControlDraft();
+        AclFixture malformed = new AclFixture();
         malformed.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
         try (ServiceFixture fixture = fixture(malformed)) {
@@ -846,7 +846,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void forcedNonRootRemovalCanRemoveTheLastKeyAndRepeatingItIsMissing() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
@@ -865,7 +865,7 @@ class OrionAccessControlServiceImplTest {
     @Test
     void rootRemovalPreservesGenerationUntilForcedLastKeyCreatesFailClosedState() {
         String generation = "generation-one";
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("RoOt")
                 .addCredential(
                         AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
@@ -923,7 +923,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void tokenAuthenticationReturnsValidatedTokenIdentity() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
@@ -947,7 +947,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void lockedRootIsSkippedByEveryPublicKeyResolver() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(
                         AccessControl.CredentialType.ARGON2,
@@ -969,7 +969,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void adminUserUpdateWritesOnlyTheConfigurationFile() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
@@ -989,7 +989,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void adminUpdateWaitsForCredentialMutationAndCannotResurrectRootKey() throws Exception {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
@@ -1030,7 +1030,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void internalServerKeySynchronizationKeepsOtherUsersInTheConfigurationFile() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
                 .addCredential(AccessControl.CredentialType.ARGON2, "alice-hash"));
         primary.getUsers().add(user("root")
@@ -1051,7 +1051,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void internalServerKeySynchronizationDoesNotReloadInsideSaveNotification() {
-        AccessControlDraft primary = new AccessControlDraft();
+        AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         InMemoryStorage storage = new InMemoryStorage(
@@ -1079,10 +1079,10 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void internalServerKeySynchronizationRetriesAgainstConcurrentConfiguration() {
-        AccessControlDraft initial = new AccessControlDraft();
+        AclFixture initial = new AclFixture();
         initial.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
-        AccessControlDraft winning = new AccessControlDraft();
+        AclFixture winning = new AclFixture();
         winning.getUsers().add(user("root")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         winning.getUsers().add(user("alice")
@@ -1177,7 +1177,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void doesNotInsertDefaultOrganizationIntoExistingConfiguration() {
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             assertThat(parseDocument(fixture.storage.snapshot.content()).organizations()).isEmpty();
         }
     }
@@ -1230,7 +1230,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void userUpdatePersistsReadWriteGrantWithoutSeparateReadFlag() {
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             fixture.createOrUpdateUser(new AccessControlUserUpdate(
                     "alice", "alice@example.test", List.of(),
                     List.of(new AccessControlRepositoryGrantUpdate("project", false, true, false, false, "dev"))));
@@ -1246,7 +1246,7 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void reportsInvalidUserInputWithoutMutatingStorage() {
-        try (ServiceFixture fixture = fixture(new AccessControlDraft())) {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
             ConfigurationFile original = fixture.storage.snapshot;
             assertThatThrownBy(() -> fixture.createOrUpdateUser(
                     new AccessControlUserUpdate(" ", "", List.of(), List.of())))
@@ -1259,18 +1259,18 @@ class OrionAccessControlServiceImplTest {
         }
     }
 
-    private static ServiceFixture fixture(AccessControlDraft draft) {
+    private static ServiceFixture fixture(AclFixture draft) {
         return fixture(draft, testServerIdentity());
     }
 
     private static ServiceFixture fixture(
-            AccessControlDraft draft,
+            AclFixture draft,
             ServerIdentityCapability serverIdentity) {
         return fixture(draft, serverIdentity, new OrionPasswordHashingService());
     }
 
     private static ServiceFixture fixture(
-            AccessControlDraft draft,
+            AclFixture draft,
             ServerIdentityCapability serverIdentity,
             OrionPasswordHashingService hashing) {
         InMemoryStorage storage = new InMemoryStorage(
@@ -1293,11 +1293,94 @@ class OrionAccessControlServiceImplTest {
         return new ServiceFixture(service, storage, editor);
     }
 
-    private static AccessControlDraft.User user(String id) {
-        AccessControlDraft.User user = new AccessControlDraft.User();
+    private static AclFixture.User user(String id) {
+        AclFixture.User user = new AclFixture.User();
         user.setId(id);
         user.setEmail(id + "@example.test");
         return user;
+    }
+
+    private static final class AclFixture {
+        private final List<User> users = new ArrayList<>();
+        private final List<Role> roles = new ArrayList<>();
+        private final List<Grant> grants = new ArrayList<>();
+
+        List<User> getUsers() { return users; }
+        List<Role> getRoles() { return roles; }
+        List<Grant> getGrants() { return grants; }
+
+        AccessControl toAccessControl() {
+            List<AccessControl.User> immutableUsers = new ArrayList<>();
+            for (User user : users) immutableUsers.add(user.toAccessControl());
+            List<AccessControl.Role> immutableRoles = new ArrayList<>();
+            for (Role role : roles) immutableRoles.add(role.toAccessControl());
+            List<AccessControl.Grant> immutableGrants = new ArrayList<>();
+            for (Grant grant : grants) immutableGrants.add(grant.toAccessControl());
+            return new AccessControl(immutableUsers, immutableRoles, immutableGrants);
+        }
+
+        private static final class User {
+            private String id;
+            private String email;
+            private final List<AccessControl.Credential> credentials = new ArrayList<>();
+            private final List<String> roles = new ArrayList<>();
+
+            void setId(String id) { this.id = id; }
+            void setEmail(String email) { this.email = email; }
+            List<String> getRoles() { return roles; }
+
+            User addCredential(AccessControl.CredentialType type, String value) {
+                return addCredential(type, null, value);
+            }
+
+            User addCredential(AccessControl.CredentialType type, String keyId, String value) {
+                credentials.add(new AccessControl.Credential(type, keyId, value));
+                return this;
+            }
+
+            User addRole(String role) {
+                roles.add(role);
+                return this;
+            }
+
+            AccessControl.User toAccessControl() {
+                return new AccessControl.User(id, null, null, email, credentials, roles, List.of());
+            }
+        }
+
+        private static final class Role {
+            private String id;
+            private final List<Grant> grants = new ArrayList<>();
+            private final List<String> references = new ArrayList<>();
+
+            void setId(String id) { this.id = id; }
+            void addGrant(Grant grant) { grants.add(grant); }
+            void addGrantReference(String id) { references.add(id); }
+
+            AccessControl.Role toAccessControl() {
+                List<AccessControl.Grant> immutableGrants = new ArrayList<>();
+                for (Grant grant : grants) immutableGrants.add(grant.toAccessControl());
+                return new AccessControl.Role(id, immutableGrants, references);
+            }
+        }
+
+        private static final class Grant {
+            private String id;
+            private final List<AccessControl.GrantExpression> info = new ArrayList<>();
+
+            void setId(String id) { this.id = id; }
+            String getId() { return id; }
+            List<AccessControl.GrantExpression> getInfo() { return info; }
+
+            Grant addKey(AccessControl.GrantKey key, String value) {
+                info.add(new AccessControl.GrantExpression(key, value));
+                return this;
+            }
+
+            AccessControl.Grant toAccessControl() {
+                return new AccessControl.Grant(id, info);
+            }
+        }
     }
 
     private static AccessControlUserUpdate userUpdate(String id, String passwordHash) {

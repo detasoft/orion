@@ -8,9 +8,7 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
-import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -134,16 +132,16 @@ class RuntimeHttpAdminAclUpdateIT {
                     orion.component().configurationEditor(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
-            AccessControlDraft draft = OrionXml.read(new ByteArrayInputStream(
-                    initial.body().getBytes(StandardCharsets.UTF_8))).system().accessControl().toDraft();
-            AccessControlDraft.User operator = AccessControlDraft.User.from(
-                    draft.getUsers().getFirst().toAccessControl());
-            operator.setId("operator");
-            operator.setEmail("operator@example.test");
-            operator.getCredentials().clear();
-            operator.addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
-            draft.getUsers().add(operator);
-            byte[] xml = serialize(draft.toAccessControl());
+            AccessControl acl = OrionXml.read(new ByteArrayInputStream(
+                    initial.body().getBytes(StandardCharsets.UTF_8))).system().accessControl();
+            AccessControl.User root = acl.getUsers().getFirst();
+            AccessControl.User operator = new AccessControl.User("operator", root.getFirst(), root.getLast(),
+                    "operator@example.test", List.of(new AccessControl.Credential(
+                            AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                    root.getRoles(), root.getGrants());
+            List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+            users.add(operator);
+            byte[] xml = serialize(new AccessControl(users, acl.getRoles(), acl.getGrants()));
             RuntimeHttpTestSupport.updateConfiguration(orion, xml, initial.etag());
 
             String operatorToken = TestBearerTokens.issueToken(orion.httpUrl("/api/admin/token"),
@@ -341,19 +339,22 @@ class RuntimeHttpAdminAclUpdateIT {
     }
 
     private static AccessControl accessControlWithPasswordUser(String userId) {
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
-        return draft.toAccessControl();
+        return new AccessControl(List.of(passwordUser(userId)), List.of(), List.of());
     }
 
     private static byte[] withPasswordUser(String originalXml, String userId) throws IOException {
-        AccessControlDraft draft = OrionXml.read(
+        AccessControl acl = OrionXml.read(
                 new ByteArrayInputStream(originalXml.getBytes(StandardCharsets.UTF_8)))
-                        .system().accessControl().toDraft();
-        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH));
-        return serialize(draft.toAccessControl());
+                        .system().accessControl();
+        List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+        users.add(passwordUser(userId));
+        return serialize(new AccessControl(users, acl.getRoles(), acl.getGrants()));
+    }
+
+    private static AccessControl.User passwordUser(String userId) {
+        return new AccessControl.User(userId, null, null, userId + "@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                List.of(), List.of());
     }
 
     private static byte[] serialize(AccessControl accessControl) throws IOException {

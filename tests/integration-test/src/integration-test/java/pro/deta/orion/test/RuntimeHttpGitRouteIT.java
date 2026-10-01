@@ -18,7 +18,6 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
@@ -42,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -481,28 +481,34 @@ class RuntimeHttpGitRouteIT {
             boolean create,
             String branch,
             boolean force) {
-        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(
-                TEST_PASSWORD_HASH,
-                AccessControl.CredentialType.SHA1).toDraft();
-        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, USERNAME + "@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
-        AccessControlDraft.Grant grant = user.addGrant("REPOSITORY_" + repositoryName)
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .addKey(AccessControl.GrantKey.BRANCH, branch);
+        AccessControl base = ACLUtil.generateDefaultAccessControl(
+                TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
+        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, branch));
         if (read) {
-            grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
         }
         if (write) {
-            grant.addKey(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         }
         if (create) {
-            grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
         if (force) {
-            grant.addKey(AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING);
+            expressions.add(new AccessControl.GrantExpression(
+                    AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
         }
-        draft.getUsers().add(user);
-        return draft.toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("REPOSITORY_" + repositoryName, expressions);
+        AccessControl.User user = new AccessControl.User(USERNAME, null, null, USERNAME + "@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                List.of(), List.of(grant));
+        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
+        users.add(user);
+        return new AccessControl(users, base.getRoles(), base.getGrants());
     }
 
     private static byte[] serialize(AccessControl accessControl) throws Exception {

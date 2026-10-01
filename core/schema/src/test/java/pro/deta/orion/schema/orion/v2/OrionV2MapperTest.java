@@ -7,7 +7,6 @@ import jakarta.xml.bind.annotation.XmlRootElement;
 import jakarta.xml.bind.annotation.XmlType;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
@@ -135,16 +134,10 @@ class OrionV2MapperTest {
 
     @Test
     void roundTripsTheCurrentDocument() {
-        AccessControlDraft acl = new AccessControlDraft();
-        acl.getUsers().add(new AccessControlDraft.User(
-                "root",
-                "Root",
-                "User",
-                "root@example.test",
-                new ArrayList<>(),
-                new ArrayList<>(),
-                new ArrayList<>()));
-        OrionDocument document = document(acl.toAccessControl(), List.of(
+        AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+                "root", "Root", "User", "root@example.test", List.of(), List.of(), List.of())),
+                List.of(), List.of());
+        OrionDocument document = document(acl, List.of(
                 organization("acme", List.of(team("platform", List.of(repository("api")))))));
 
         OrionV2 dto = OrionV2Mapper.fromCurrent(document);
@@ -417,14 +410,11 @@ class OrionV2MapperTest {
 
     @Test
     void sortsIdentifierAddressedCollectionsForStableOutput() {
-        AccessControlDraft acl = new AccessControlDraft();
-        acl.getUsers().add(user("z-user"));
-        acl.getUsers().add(user("a-user"));
-        acl.getRoles().add(role("z-role"));
-        acl.getRoles().add(role("a-role"));
-        acl.getGrants().add(grant("z-grant"));
-        acl.getGrants().add(grant("a-grant"));
-        OrionDocument document = document(acl.toAccessControl(), List.of(
+        AccessControl acl = new AccessControl(
+                List.of(user("z-user"), user("a-user")),
+                List.of(role("z-role"), role("a-role")),
+                List.of(grant("z-grant"), grant("a-grant")));
+        OrionDocument document = document(acl, List.of(
                 organization("z-org", List.of()),
                 organization("a-org", List.of(
                         team("z-team", List.of()),
@@ -818,17 +808,16 @@ class OrionV2MapperTest {
                 List.of(), java.util.Optional.empty());
     }
 
-    private static AccessControlDraft.User user(String id) {
-        return new AccessControlDraft.User(
-                id, null, null, null, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+    private static AccessControl.User user(String id) {
+        return new AccessControl.User(id, null, null, null, List.of(), List.of(), List.of());
     }
 
-    private static AccessControlDraft.Role role(String id) {
-        return new AccessControlDraft.Role(id, new ArrayList<>(), new ArrayList<>());
+    private static AccessControl.Role role(String id) {
+        return new AccessControl.Role(id, List.of(), List.of());
     }
 
-    private static AccessControlDraft.Grant grant(String id) {
-        return new AccessControlDraft.Grant(id, new ArrayList<>());
+    private static AccessControl.Grant grant(String id) {
+        return new AccessControl.Grant(id, List.of());
     }
 
     private static OrionV2 dto(List<OrionV2.Organization> organizations) {

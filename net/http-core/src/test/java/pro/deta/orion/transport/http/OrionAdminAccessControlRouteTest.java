@@ -15,9 +15,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -40,10 +38,11 @@ class OrionAdminAccessControlRouteTest {
     @ParameterizedTest
     @ValueSource(strings = {"alice", "José-東京-Ирина"})
     void exportsOriginalXmlBytesAndRejectsUploads(String userId) throws Exception {
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser(userId, "user@example.test"));
+        AccessControl.User user = new AccessControl.User(userId, null, null, "user@example.test",
+                List.of(), List.of(), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        OrionXml.write(OrionDocument.withAccessControl(draft.toAccessControl()), output);
+        AccessControl acl = new AccessControl(List.of(user), List.of(), List.of());
+        OrionXml.write(OrionDocument.withAccessControl(acl), output);
         byte[] content = output.toByteArray();
         OrionAccessControlService accessControl = (OrionAccessControlService) Proxy.newProxyInstance(
                 OrionAccessControlService.class.getClassLoader(), new Class<?>[]{OrionAccessControlService.class},
@@ -53,8 +52,8 @@ class OrionAdminAccessControlRouteTest {
                     }
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });
-        AccessControl.Grant grant = ACLUtil.createGrant("admin")
-                .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING).toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(

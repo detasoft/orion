@@ -37,7 +37,6 @@ import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -214,9 +213,15 @@ class OrionRuntimeModuleTest {
         assertThat(acl.canAdminister(PrincipalAddress.parse("acme/root"),
                 Optional.of(ConfigurationScope.parse("acme")))).isFalse();
         assertThat(acl.canAdminister(PrincipalAddress.parse("system/reviewer"), Optional.empty())).isFalse();
-        AccessControlDraft locked = ACLUtil.generateDefaultAccessControl("hash").toDraft();
-        locked.getUsers().getFirst().getCredentials().getFirst().setKeyId("root-auth-locked:test");
-        desired.publish(base.replaceAccessControl(locked.toAccessControl()), Optional.empty());
+        AccessControl initial = ACLUtil.generateDefaultAccessControl("hash");
+        AccessControl.User originalRoot = initial.getUsers().getFirst();
+        AccessControl.Credential password = originalRoot.getCredentials().getFirst();
+        AccessControl.User lockedRoot = new AccessControl.User(originalRoot.getId(), originalRoot.getFirst(),
+                originalRoot.getLast(), originalRoot.getEmail(), List.of(new AccessControl.Credential(
+                        password.getType(), "root-auth-locked:test", password.getValue())),
+                originalRoot.getRoles(), originalRoot.getGrants());
+        AccessControl locked = new AccessControl(List.of(lockedRoot), initial.getRoles(), initial.getGrants());
+        desired.publish(base.replaceAccessControl(locked), Optional.empty());
         assertThat(acl.canAdminister(root, Optional.empty())).isFalse();
         desired.publish(base, Optional.empty());
         assertThat(acl.canAdminister(root, Optional.empty())).isFalse();
@@ -362,10 +367,10 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControl accessControlWithUser(String userId) {
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                .addCredential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH));
-        return draft.toAccessControl();
+        AccessControl.User user = new AccessControl.User(userId, null, null, userId + "@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH)),
+                List.of(), List.of());
+        return new AccessControl(List.of(user), List.of(), List.of());
     }
 
     private void assertStorageLoadsUser(OrionConfigurationStorage storage, String userId) throws Exception {

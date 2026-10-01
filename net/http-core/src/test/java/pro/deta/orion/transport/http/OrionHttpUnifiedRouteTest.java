@@ -25,7 +25,6 @@ import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -36,7 +35,6 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -362,9 +360,8 @@ class OrionHttpUnifiedRouteTest {
     }
 
     private static SecurityContext adminContext() {
-        AccessControl.Grant grant = new AccessControlDraft.Grant("admin", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)
-                .toAccessControl();
+        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
+                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
     }

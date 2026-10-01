@@ -27,7 +27,6 @@ import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
@@ -46,6 +45,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -455,13 +455,15 @@ class OrionStartupIT {
     }
 
     private static AccessControl accessControlWithUsers(String... userIds) {
-        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl("remote-root-password-hash").toDraft();
+        AccessControl base = ACLUtil.generateDefaultAccessControl("remote-root-password-hash");
+        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
         for (String userId : userIds) {
             if (!"root".equalsIgnoreCase(userId)) {
-                draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test"));
+                users.add(new AccessControl.User(userId, null, null, userId + "@example.test",
+                        List.of(), List.of(), List.of()));
             }
         }
-        return draft.toAccessControl();
+        return new AccessControl(users, base.getRoles(), base.getGrants());
     }
 
     private static Map<String, Object> validateOrionXml(StartedOrion orion, byte[] content) throws IOException {
