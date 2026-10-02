@@ -14,6 +14,8 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.index.memory.InMemoryIndex;
 import pro.deta.orion.git.parser.v2.storage.memory.InMemoryStorage;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -103,10 +105,10 @@ class NativeGitRepositoryTest {
     }
 
     @Test
-    void exposesIdentityAndFreshRefSnapshots() {
+    void exposesIdentityAndFreshRefSnapshots() throws Exception {
         try (NativeGitRepository repository = repository()) {
             assertThat(repository.name()).isEqualTo("demo.git");
-            assertThat(repository.defaultHead()).isEqualTo("refs/heads/main");
+            assertThat(repository.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
             Map<String, String> before = repository.refs();
             ObjectId blob = repository.writeObject(GitObjectType.BLOB, "published".getBytes(StandardCharsets.UTF_8));
             RefUpdateResult result = repository.updateRef("refs/heads/main", NULL_ID, blob.toHex());

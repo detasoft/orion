@@ -7,7 +7,6 @@ import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
 import pro.deta.orion.git.parser.v2.GitRepositoryContext;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
-import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -140,17 +139,6 @@ public class NativeGitRepository implements AutoCloseable {
 
     public GitFileApi files() {
         return new GitFileApi(this);
-    }
-
-    public String defaultHead() {
-        try {
-            return switch (index.getHEAD()) {
-                case Head.Symbolic symbolic -> symbolic.target().value();
-                case Head.Detached ignored -> "HEAD";
-            };
-        } catch (IOException failure) {
-            throw new UncheckedIOException(failure);
-        }
     }
 
     public Map<String, String> refs() {

@@ -680,8 +680,8 @@ class GitSshTransportEndToEndIT {
         assertThat(whoami.output()).isEqualTo("userId=" + USERNAME + "\n");
         assertThat(repositories.exitStatus()).isZero();
         assertThat(repositories.output().lines()).containsExactly(
-                "id\tname\tdefaultHead\trefCount",
-                "project\tproject\trefs/heads/main\t0");
+                "id\tname\thead\trefCount",
+                "project\tproject\tref: refs/heads/main\t0");
         assertThat(repositories.output()).doesNotContain("\u001b[", "@orion] >");
         String jsonOutput = "{\"columns\":[\"id\",\"refCount\"],"
                 + "\"rows\":[{\"id\":\"project\",\"refCount\":0}],"

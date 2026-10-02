@@ -12,6 +12,9 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
@@ -63,7 +66,7 @@ class S3RepositoryManagementIT {
             reopened.activate(() -> fixture.desired().current().document(), secrets, name -> false);
             NativeGitRepository repository = reopened.find("acme/team/archive").valueOrFailure("reopen");
             assertThat(repository.name()).isEqualTo("acme/team/archive");
-            assertThat(repository.defaultHead()).isEqualTo("refs/heads/main");
+            assertThat(repository.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
             assertThat(repository.refs()).isEmpty();
             assertThat(management.createRepository(actor, "acme/team/archive", Optional.of(binding)))
                     .isEqualTo(new StorageManagement.Success<>(new StorageManagement.Created(false)));

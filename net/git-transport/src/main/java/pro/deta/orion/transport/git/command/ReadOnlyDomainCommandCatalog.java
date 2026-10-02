@@ -28,6 +28,8 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -51,7 +53,7 @@ public final class ReadOnlyDomainCommandCatalog {
     private static final List<CommandColumn> REPOSITORY_COLUMNS = List.of(
             CommandColumn.text("id"),
             CommandColumn.text("name"),
-            CommandColumn.text("defaultHead"),
+            CommandColumn.text("head"),
             CommandColumn.number("refCount"));
     private static final List<CommandColumn> SESSION_COLUMNS = List.of(
             CommandColumn.text("id"),
@@ -582,10 +584,17 @@ public final class ReadOnlyDomainCommandCatalog {
             rows.add(List.of(
                     CommandValue.text(repository.id()),
                     value(repository.name()),
-                    CommandValue.text(repository.defaultHead()),
+                    CommandValue.text(headText(repository.head())),
                     CommandValue.number(repository.refCount())));
         }
         return CommandResult.Rows.unqueried(REPOSITORY_COLUMNS, rows);
+    }
+
+    private static String headText(Head head) {
+        return switch (head) {
+            case Head.Symbolic symbolic -> "ref: " + symbolic.target().value();
+            case Head.Detached detached -> "detached: " + detached.target().toHex();
+        };
     }
 
     private static CommandResult.ObjectValue repositoryObject(OperatorDomainViews.RepositoryView repository) {
@@ -593,7 +602,7 @@ public final class ReadOnlyDomainCommandCatalog {
                 "id", repository.id(),
                 "name", value(repository.name()),
                 "repositoryName", repository.repositoryName(),
-                "defaultHead", repository.defaultHead(),
+                "head", headText(repository.head()),
                 "refCount", repository.refCount()));
     }
 

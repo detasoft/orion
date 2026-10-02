@@ -39,7 +39,8 @@ class GitFileAccessTest {
                 index.apply();
                 return null;
             });
-            assertThat(repository.defaultHead()).isEqualTo("refs/heads/trunk");
+            assertThat(repository.index().getHEAD())
+                    .isEqualTo(new Head.Symbolic(new RefId("refs/heads/trunk")));
             repository.files().withAccess("topic", "first", GitCommitAuthor.EMPTY, access -> {
                 access.write("file", new byte[]{1});
                 access.apply();
@@ -54,7 +55,7 @@ class GitFileAccessTest {
                 index.apply();
                 return null;
             });
-            assertThat(repository.defaultHead()).isEqualTo("HEAD");
+            assertThat(repository.index().getHEAD()).isEqualTo(new Head.Detached(detached));
             repository.files().withAccess("other", "second", GitCommitAuthor.EMPTY, access -> {
                 access.write("file", new byte[]{2});
                 access.apply();
@@ -201,7 +202,8 @@ class GitFileAccessTest {
                 return null;
             });
             String revision = repository.refs().get("refs/heads/" + branch);
-            assertThat(revision).isNotNull().isEqualTo(repository.refs().get(repository.defaultHead()));
+            Head.Symbolic head = (Head.Symbolic) repository.index().getHEAD();
+            assertThat(revision).isNotNull().isEqualTo(repository.refs().get(head.target().value()));
             byte[] bytes = repository.files().readFile(new ObjectId(revision), "material.p12",
                     (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
             assertThat(bytes).containsExactly(1);

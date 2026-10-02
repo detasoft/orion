@@ -10,6 +10,9 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -78,7 +81,8 @@ class S3NativeGitRepositoryFactoryTest {
                 try (NativeGitRepository opened = factory.open(name).valueOrFailure("open")) {
                     assertThat(opened).isNotSameAs(created);
                     assertThat(opened.name()).isEqualTo(name.value());
-                    assertThat(opened.defaultHead()).isEqualTo("refs/heads/main");
+                    assertThat(opened.index().getHEAD())
+                            .isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
                 }
             }
             factory.close();

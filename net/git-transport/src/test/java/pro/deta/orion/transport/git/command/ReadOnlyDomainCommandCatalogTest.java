@@ -36,6 +36,10 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.CommitId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -110,9 +114,11 @@ class ReadOnlyDomainCommandCatalogTest {
     void addressesNavigationOperatorRepositoryIdsInDispatchAndCompletion() {
         source.repositories = available(List.of(
                 new OperatorDomainViews.RepositoryView(
-                        "%2E", Optional.empty(), ".", "refs/heads/main", 2, Optional.empty()),
+                        "%2E", Optional.empty(), ".",
+                        new Head.Symbolic(new RefId("refs/heads/main")), 2, Optional.empty()),
                 new OperatorDomainViews.RepositoryView(
-                        "%2E%2E", Optional.empty(), "..", "refs/heads/main", 2, Optional.empty())));
+                        "%2E%2E", Optional.empty(), "..",
+                        new Head.Symbolic(new RefId("refs/heads/main")), 2, Optional.empty())));
         UserIdentity reader = admin();
 
         assertThat(dispatch("/repository/%2E show", reader))
@@ -121,6 +127,20 @@ class ReadOnlyDomainCommandCatalogTest {
                 .complete(context(reader), CommandPath.root(), "/repository/%", 13)
                 .candidates())
                 .containsExactly("%2E/", "%2E%2E/");
+    }
+
+    @Test
+    void rendersDetachedCommitInRepositoryRowsAndObjects() {
+        String commit = "1234567890abcdef1234567890abcdef12345678";
+        source.repositories = available(List.of(new OperatorDomainViews.RepositoryView(
+                "detached", Optional.of("detached"), "team/detached",
+                new Head.Detached(new CommitId(commit)), 0, Optional.empty())));
+
+        CommandResult.Rows rows = (CommandResult.Rows) dispatch("/repository ls", admin());
+        assertThat(rows.values()).containsExactly(row("detached", "detached", "detached: " + commit, 0));
+        CommandResult.ObjectValue object =
+                (CommandResult.ObjectValue) dispatch("/repository/detached show", admin());
+        assertThat(object.fields()).contains(Map.entry("head", CommandValue.text("detached: " + commit)));
     }
 
     @Test
@@ -137,11 +157,11 @@ class ReadOnlyDomainCommandCatalogTest {
                 List.of(
                         CommandColumn.text("id"),
                         CommandColumn.text("name"),
-                        CommandColumn.text("defaultHead"),
+                        CommandColumn.text("head"),
                         CommandColumn.number("refCount")),
                 List.of(
-                        row("visible-1", "primary", "refs/heads/main", 2),
-                        row("visible-2", "shared", "refs/heads/main", 2))));
+                        row("visible-1", "primary", "ref: refs/heads/main", 2),
+                        row("visible-2", "shared", "ref: refs/heads/main", 2))));
         assertThat(dispatch("/repository/visible-1 show", reader))
                 .isEqualTo(repositoryObject("visible-1", "primary"));
         assertThat(dispatch("/repository/visible- show", reader)).isEqualTo(new CommandResult.Failure(
@@ -208,7 +228,7 @@ class ReadOnlyDomainCommandCatalogTest {
                         List.of(
                                 CommandColumn.text("id"),
                                 CommandColumn.text("name"),
-                                CommandColumn.text("defaultHead"),
+                                CommandColumn.text("head"),
                                 CommandColumn.number("refCount")),
                         List.of()));
 
@@ -244,9 +264,9 @@ class ReadOnlyDomainCommandCatalogTest {
                 List.of(
                         CommandColumn.text("id"),
                         CommandColumn.text("name"),
-                        CommandColumn.text("defaultHead"),
+                        CommandColumn.text("head"),
                         CommandColumn.number("refCount")),
-                List.of(row("repo-a", "shared", "refs/heads/main", 2))));
+                List.of(row("repo-a", "shared", "ref: refs/heads/main", 2))));
         assertFailure(dispatch("/organization/org-b/user ls", reader), CommandFailureCode.MISSING_RESOURCE);
 
         assertThat(dispatch("/organization/org-b/user ls", admin())).isEqualTo(rows(
@@ -450,7 +470,7 @@ class ReadOnlyDomainCommandCatalogTest {
                 id,
                 Optional.of(name),
                 repositoryName,
-                "refs/heads/main",
+                new Head.Symbolic(new RefId("refs/heads/main")),
                 2,
                 Optional.ofNullable(organizationId));
     }
@@ -479,7 +499,7 @@ class ReadOnlyDomainCommandCatalogTest {
                 "id", id,
                 "name", name.isEmpty() ? null : name,
                 "repositoryName", repositoryName,
-                "defaultHead", "refs/heads/main",
+                "head", "ref: refs/heads/main",
                 "refCount", 2);
     }
 

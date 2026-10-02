@@ -18,6 +18,9 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.util.Result;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -53,7 +56,7 @@ class FileNativeGitRepositoryProviderTest {
     }
 
     @Test
-    void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) {
+    void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider first =
                 new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = first.create(
@@ -69,7 +72,7 @@ class FileNativeGitRepositoryProviderTest {
                 .valueOrFailure("repository");
 
         assertThat(reopened.name()).isEqualTo("team/project");
-        assertThat(reopened.defaultHead()).isEqualTo("refs/heads/main");
+        assertThat(reopened.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
         assertThat(reopened.refs())
                 .containsEntry("refs/heads/main", blob.toHex());
         assertThat(reopened.readObject(blob))

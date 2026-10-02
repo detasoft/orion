@@ -2,6 +2,9 @@ package pro.deta.orion.transport.git.command.read;
 
 import org.junit.jupiter.api.Test;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -47,7 +50,8 @@ class OperatorDomainContractsTest {
     @Test
     void domainViewsValidateRequiredValuesAndCounts() {
         OperatorDomainViews.RepositoryView repository = new OperatorDomainViews.RepositoryView(
-                "repo", Optional.of("demo"), "internal/demo", "refs/heads/main", 2, Optional.of("org"));
+                "repo", Optional.of("demo"), "internal/demo",
+                new Head.Symbolic(new RefId("refs/heads/main")), 2, Optional.of("org"));
         OperatorDomainViews.OrganizationView organization =
                 new OperatorDomainViews.OrganizationView("org", Optional.of("acme"));
         OperatorDomainViews.UserView user =
@@ -63,10 +67,12 @@ class OperatorDomainContractsTest {
 
         assertThat(List.of(repository, organization, user, session, proxy, resources, service)).hasSize(7);
         assertThatThrownBy(() -> new OperatorDomainViews.RepositoryView(
-                " ", Optional.empty(), "repo", "head", 0, Optional.empty()))
+                " ", Optional.empty(), "repo",
+                new Head.Symbolic(new RefId("refs/heads/main")), 0, Optional.empty()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new OperatorDomainViews.RepositoryView(
-                "id", Optional.empty(), "repo", "head", -1, Optional.empty()))
+                "id", Optional.empty(), "repo",
+                new Head.Symbolic(new RefId("refs/heads/main")), -1, Optional.empty()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new OperatorDomainViews.SystemResourceView(0, 0, 0, 0))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -106,7 +112,7 @@ class OperatorDomainContractsTest {
 
     private static OperatorDomainViews.RepositoryView repository(String id, Optional<String> name) {
         return new OperatorDomainViews.RepositoryView(
-                id, name, "repository", "refs/heads/main", 0, Optional.empty());
+                id, name, "repository", new Head.Symbolic(new RefId("refs/heads/main")), 0, Optional.empty());
     }
 
     private static OperatorDomainViews.OrganizationView organization(String id, Optional<String> name) {

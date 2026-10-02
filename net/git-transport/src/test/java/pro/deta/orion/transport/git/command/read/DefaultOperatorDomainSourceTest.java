@@ -9,6 +9,10 @@ import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.util.Result;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.CommitId;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -27,14 +31,35 @@ class DefaultOperatorDomainSourceTest {
 
         assertThat(result.value()).containsExactly(
                 new OperatorDomainViews.RepositoryView(
-                        "demo", Optional.of("demo"), "demo", "refs/heads/main", 0, Optional.empty()),
+                        "demo", Optional.of("demo"), "demo",
+                        new Head.Symbolic(new RefId("refs/heads/main")), 0, Optional.empty()),
                 new OperatorDomainViews.RepositoryView(
                         "internal%2Fconfiguration",
                         Optional.empty(),
                         "internal/configuration",
-                        "refs/heads/main",
+                        new Head.Symbolic(new RefId("refs/heads/main")),
                         0,
                         Optional.empty()));
+    }
+
+    @Test
+    void readsCurrentSymbolicAndDetachedHeadFromTheIndex() throws Exception {
+        try (InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider()) {
+            NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
+            DefaultOperatorDomainSource source = source(provider, emptyRuntime(), () -> resources());
+            Head symbolic = new Head.Symbolic(new RefId("refs/heads/trunk"));
+            Head detached = new Head.Detached(new CommitId("1234567890abcdef1234567890abcdef12345678"));
+            for (Head head : List.of(symbolic, detached)) {
+                repository.index().withAccess(index -> {
+                    index.updateHead(head);
+                    index.apply();
+                    return null;
+                });
+                assertThat(availableSnapshot(source.repositories()).value())
+                        .extracting(OperatorDomainViews.RepositoryView::head)
+                        .containsExactly(head);
+            }
+        }
     }
 
     @Test

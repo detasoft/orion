@@ -7,6 +7,9 @@ import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.util.Result;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -34,14 +37,15 @@ class S3NativeGitRepositoryProviderIT {
             assertFailure(first.find("team/repo"), Result.FailureCode.NOT_FOUND);
             NativeGitRepository created = first.create("team%2Frepo").valueOrFailure("create");
             assertThat(created.name()).isEqualTo("team/repo");
-            assertThat(created.defaultHead()).isEqualTo("refs/heads/main");
+            assertThat(created.index().getHEAD()).isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
             assertThat(created.refs()).isEmpty();
             created.close();
             assertFailure(second.create("team/repo"), Result.FailureCode.FILE_ALREADY_EXISTS);
             assertThat(second.exists("team/repo")).isTrue();
             try (NativeGitRepository reopened = second.find("team/repo").valueOrFailure("reopen")) {
                 assertThat(reopened.name()).isEqualTo("team/repo");
-                assertThat(reopened.defaultHead()).isEqualTo("refs/heads/main");
+                assertThat(reopened.index().getHEAD())
+                        .isEqualTo(new Head.Symbolic(new RefId("refs/heads/main")));
             }
             first.create("alpha").valueOrFailure("create alpha").close();
             assertThat(second.repositoryNames()).containsExactly("alpha", "team/repo");

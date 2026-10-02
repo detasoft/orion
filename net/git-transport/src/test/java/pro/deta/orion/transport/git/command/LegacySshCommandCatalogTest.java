@@ -59,6 +59,9 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+import pro.deta.orion.git.parser.v2.id.RefId;
+
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
@@ -289,12 +292,12 @@ class LegacySshCommandCatalogTest {
                         List.of(
                                 CommandColumn.text("id"),
                                 CommandColumn.text("name"),
-                                CommandColumn.text("defaultHead"),
+                                CommandColumn.text("head"),
                                 CommandColumn.number("refCount")),
                         List.of(List.of(
                                 CommandValue.text("project"),
                                 CommandValue.text("project"),
-                                CommandValue.text("refs/heads/main"),
+                                CommandValue.text("ref: refs/heads/main"),
                                 CommandValue.number(1))),
                         RowOutputFormat.AUTO,
                         Optional.of(new RowPage(1, 100, 1, OptionalInt.empty(), false))));
@@ -495,7 +498,7 @@ class LegacySshCommandCatalogTest {
                     "project",
                     java.util.Optional.of("project"),
                     "project",
-                    "refs/heads/main",
+                    new Head.Symbolic(new RefId("refs/heads/main")),
                     1,
                     java.util.Optional.empty())));
         }

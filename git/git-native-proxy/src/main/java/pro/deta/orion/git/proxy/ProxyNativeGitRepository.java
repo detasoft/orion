@@ -146,11 +146,6 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
-    public String defaultHead() {
-        return repository().defaultHead();
-    }
-
-    @Override
     public Map<String, String> refs() {
         return repository().refs();
     }

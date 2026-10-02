@@ -9,6 +9,7 @@ import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineStatus;
 import pro.deta.orion.util.Result;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -45,13 +46,13 @@ public final class DefaultOperatorDomainSource implements OperatorDomainSource {
                         pathToken(repositoryName),
                         alias(repositoryName),
                         repositoryName,
-                        repository.defaultHead(),
+                        repository.index().getHEAD(),
                         repository.refs().size(),
                         Optional.empty()));
             }
             repositories.sort(java.util.Comparator.comparing(OperatorDomainViews.RepositoryView::id));
             return new OperatorQueryResult.AvailableSnapshot<>(repositories);
-        } catch (RuntimeException failure) {
+        } catch (IOException | RuntimeException failure) {
             return new OperatorQueryResult.Failed<>("repository", failure);
         }
     }

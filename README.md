@@ -353,8 +353,9 @@ whoami
 /system/service ls
 ```
 
-Repository rows contain `id`, `name`, `defaultHead`, and `refCount`; repository
-objects additionally contain the backing `repositoryName`. Session rows and
+Repository rows contain `id`, `name`, `head`, and `refCount`; repository
+objects additionally contain the backing `repositoryName`. The current `head` is
+rendered as `ref: <ref-name>` or `detached: <commit-id>`. Session rows and
 objects contain `id`, `name`, `state`, `ownerId`, and `repositoryName`. Proxy
 rows contain `id`, `name`, `state`, `repositoryName`, and `remote`. System
 resources report processor and heap byte counts. Service rows contain `id`,

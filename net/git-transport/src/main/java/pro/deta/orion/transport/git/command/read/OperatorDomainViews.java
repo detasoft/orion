@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git.command.read;
 
+import pro.deta.orion.git.parser.v2.data.Head;
+
 import java.util.Objects;
 import java.util.Optional;
 
@@ -11,14 +13,14 @@ public final class OperatorDomainViews {
             String id,
             Optional<String> name,
             String repositoryName,
-            String defaultHead,
+            Head head,
             int refCount,
             Optional<String> organizationId) {
         public RepositoryView {
             id = pathSegment(id, "id");
             name = optionalPathAlias(name, "name");
             repositoryName = required(repositoryName, "repositoryName");
-            defaultHead = required(defaultHead, "defaultHead");
+            Objects.requireNonNull(head, "head");
             if (refCount < 0) {
                 throw new IllegalArgumentException("refCount must not be negative");
             }
