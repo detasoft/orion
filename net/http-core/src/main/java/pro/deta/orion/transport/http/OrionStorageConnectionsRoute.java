@@ -5,7 +5,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.StorageManagement;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.io.IOException;
 import java.util.Optional;

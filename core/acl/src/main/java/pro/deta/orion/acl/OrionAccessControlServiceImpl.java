@@ -5,7 +5,7 @@ import pro.deta.orion.config.ConfigurationFile;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.schema.orion.PrincipalAddress;
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.auth.check.ScopedAccess;
 import pro.deta.orion.auth.check.GrantMatcher;
 import pro.deta.orion.auth.check.MatcherUtils;
@@ -42,8 +42,9 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -676,7 +677,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             || !oidcGeneration(credential.getKeyId(), credential.getValue()).equals(generation)) {
                         continue;
                     }
-                    for (pro.deta.orion.schema.orion.OidcProvider provider : organization.oidcProviders()) {
+                    for (OidcProvider provider : organization.oidcProviders()) {
                         if (provider.issuer().toString().equals(credential.getKeyId())) {
                             return TokenAuthenticationResult.success(new InternalUserImpl(userId,
                                     organization.id(), () -> desiredState.current().document()),

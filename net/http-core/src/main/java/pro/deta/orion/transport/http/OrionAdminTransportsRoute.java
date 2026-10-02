@@ -6,7 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.TransportConfig;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 

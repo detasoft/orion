@@ -37,7 +37,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayOutputStream;
@@ -60,7 +60,6 @@ import java.util.EnumSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;

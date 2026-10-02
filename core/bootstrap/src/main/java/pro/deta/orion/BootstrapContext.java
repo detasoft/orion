@@ -29,7 +29,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.KeyMaterialConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;

@@ -5,8 +5,8 @@ import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEdit;
 
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;

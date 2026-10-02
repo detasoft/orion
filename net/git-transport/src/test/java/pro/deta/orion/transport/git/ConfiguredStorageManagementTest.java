@@ -16,6 +16,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.*;
 import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;

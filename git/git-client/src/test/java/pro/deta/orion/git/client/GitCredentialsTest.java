@@ -1,7 +1,7 @@
 package pro.deta.orion.git.client;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

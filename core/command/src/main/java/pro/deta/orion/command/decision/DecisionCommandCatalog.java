@@ -21,9 +21,9 @@ import pro.deta.orion.command.resource.ScopedResourceResolver;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
-import pro.deta.orion.schema.orion.UserId;
+import pro.deta.orion.schema.orion.v2.UserId;
 import pro.deta.orion.util.Result;
 
 import java.util.ArrayList;

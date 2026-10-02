@@ -8,10 +8,10 @@ import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitRemoteClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.RemoteProvider;
-import pro.deta.orion.schema.orion.RepositoryAddress;
-import pro.deta.orion.schema.orion.RepositoryRemote;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.RemoteProvider;
+import pro.deta.orion.schema.orion.v2.RepositoryAddress;
+import pro.deta.orion.schema.orion.v2.RepositoryRemote;
 
 import java.util.Arrays;
 import java.util.Locale;

@@ -16,8 +16,8 @@ import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;

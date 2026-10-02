@@ -9,7 +9,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3Transport;
 import pro.deta.orion.keymaterial.*;
-import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 
 import java.net.URI;

@@ -16,10 +16,10 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
 

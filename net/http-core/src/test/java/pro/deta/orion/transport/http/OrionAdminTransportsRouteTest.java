@@ -9,9 +9,9 @@ import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.HttpTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
 import java.net.URI;
 import java.util.List;

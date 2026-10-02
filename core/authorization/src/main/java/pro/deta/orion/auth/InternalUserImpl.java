@@ -4,8 +4,8 @@ import lombok.Getter;
 import lombok.AccessLevel;
 import lombok.ToString;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.util.List;
 import java.util.Optional;

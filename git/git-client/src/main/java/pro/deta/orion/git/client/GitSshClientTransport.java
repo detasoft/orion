@@ -9,13 +9,13 @@ import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.future.ConnectFuture;
 import org.apache.sshd.client.future.OpenFuture;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
-import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import org.apache.sshd.client.keyverifier.ServerKeyVerifier;
 import org.apache.sshd.client.session.ClientSession;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 
 import java.io.CharArrayReader;
 import java.io.IOException;

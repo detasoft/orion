@@ -34,7 +34,7 @@ import pro.deta.orion.agentd.session.ControlCommand;
 import pro.deta.orion.agentd.session.ControlEndpoint;
 import pro.deta.orion.agentd.session.ControlResult;
 import pro.deta.orion.agentd.session.SessionControlClient;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

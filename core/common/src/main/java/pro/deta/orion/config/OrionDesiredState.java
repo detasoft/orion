@@ -2,7 +2,7 @@ package pro.deta.orion.config;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.util.Objects;
 import java.util.Optional;

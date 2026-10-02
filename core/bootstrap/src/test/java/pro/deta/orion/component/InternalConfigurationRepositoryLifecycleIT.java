@@ -42,7 +42,7 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;

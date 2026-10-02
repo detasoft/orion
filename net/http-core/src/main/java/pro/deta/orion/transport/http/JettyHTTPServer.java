@@ -29,8 +29,8 @@ import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.config.HttpTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
 import java.net.MalformedURLException;
 import java.net.URL;

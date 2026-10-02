@@ -13,7 +13,7 @@ import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;

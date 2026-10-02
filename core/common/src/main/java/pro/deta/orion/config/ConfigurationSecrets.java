@@ -3,12 +3,12 @@ package pro.deta.orion.config;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
-import pro.deta.orion.schema.orion.ConfigurationScope;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
-import pro.deta.orion.schema.orion.ConfigurationSecretReference;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RepositoryAddress;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RepositoryAddress;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;

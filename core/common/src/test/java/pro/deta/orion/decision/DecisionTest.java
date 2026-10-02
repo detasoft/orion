@@ -2,7 +2,7 @@ package pro.deta.orion.decision;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;

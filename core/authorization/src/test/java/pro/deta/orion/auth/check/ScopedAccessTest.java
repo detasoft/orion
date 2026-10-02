@@ -2,19 +2,19 @@ package pro.deta.orion.auth.check;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.ConfigurationScope;
-import pro.deta.orion.schema.orion.GrantAddress;
-import pro.deta.orion.schema.orion.GrantId;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.RoleAddress;
-import pro.deta.orion.schema.orion.RoleId;
-import pro.deta.orion.schema.orion.ScopedGrant;
-import pro.deta.orion.schema.orion.ScopedRole;
-import pro.deta.orion.schema.orion.TeamId;
-import pro.deta.orion.schema.orion.UserId;
-import pro.deta.orion.schema.orion.RepositoryId;
-import pro.deta.orion.schema.orion.RepositoryPolicy;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.GrantAddress;
+import pro.deta.orion.schema.orion.v2.GrantId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.RoleAddress;
+import pro.deta.orion.schema.orion.v2.RoleId;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.ScopedRole;
+import pro.deta.orion.schema.orion.v2.TeamId;
+import pro.deta.orion.schema.orion.v2.UserId;
+import pro.deta.orion.schema.orion.v2.RepositoryId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 
 import java.util.List;
 

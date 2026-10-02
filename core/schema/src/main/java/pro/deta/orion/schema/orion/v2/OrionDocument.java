@@ -1,0 +1,423 @@
+package pro.deta.orion.schema.orion.v2;
+
+import pro.deta.orion.schema.acl.AccessControl;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+
+public record OrionDocument(SystemConfiguration system, List<Organization> organizations) {
+    public OrionDocument {
+        Objects.requireNonNull(system, "system");
+        organizations = copyOrganizations(organizations);
+        OrionDocumentGraphValidator.validate(organizations);
+        for (Organization organization : organizations) {
+            for (Team team : organization.teams()) {
+                for (Repository repository : team.repositories()) {
+                    if (repository.storage().isPresent()) {
+                        ConnectionReference reference = repository.storage().orElseThrow().connection();
+                        List<Connection> definitions = reference.scope() == ConnectionReference.Scope.SYSTEM
+                                ? system.connections() : organization.connections();
+                        if (!(findConnection(definitions, reference.name()) instanceof Connection.S3)) {
+                            throw new IllegalArgumentException("Repository storage requires an S3 connection");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static OrionDocument withAccessControl(AccessControl accessControl) {
+        return new OrionDocument(new SystemConfiguration(accessControl), List.of());
+    }
+
+    public OrionDocument replaceAccessControl(AccessControl accessControl) {
+        return new OrionDocument(
+                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies(), system.connections()),
+                organizations);
+    }
+
+    private static List<Organization> copyOrganizations(List<Organization> source) {
+        Objects.requireNonNull(source, "organizations");
+        Set<OrganizationId> ids = new HashSet<>();
+        for (Organization organization : source) {
+            Objects.requireNonNull(organization, "organization");
+            if (!ids.add(organization.id())) {
+                throw new IllegalArgumentException("duplicate organization id: " + organization.id());
+            }
+        }
+        return List.copyOf(source);
+    }
+
+    public record SystemConfiguration(
+            AccessControl accessControl,
+            Optional<OrionHttpsConfiguration> https,
+            List<ConfigurationSecret> secrets,
+            List<GitProxyBinding> proxies,
+            List<Connection> connections) {
+        public SystemConfiguration(AccessControl accessControl) {
+            this(accessControl, Optional.empty(), List.of(), List.of(), List.of());
+        }
+
+        public SystemConfiguration {
+            Objects.requireNonNull(accessControl, "accessControl");
+            https = Objects.requireNonNullElseGet(https, Optional::empty);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            connections = copyConnections(connections, secrets);
+            proxies = new ArrayList<>(copyUnique(proxies, GitProxyBinding::alias, "proxy"));
+            proxies.sort(Comparator.comparing(proxy -> proxy.alias().value()));
+            proxies = List.copyOf(proxies);
+            Set<String> upstreams = new HashSet<>();
+            Set<String> secretIds = new HashSet<>();
+            for (ConfigurationSecret secret : secrets) {
+                secretIds.add(secret.id());
+            }
+            Optional<String> acmeSecret = https.flatMap(OrionHttpsConfiguration::acme)
+                    .flatMap(OrionAcmeConfiguration::eabSecret);
+            if (acmeSecret.isPresent() && !secretIds.contains(acmeSecret.orElseThrow())) {
+                throw new IllegalArgumentException("ACME EAB secret is unavailable in system scope");
+            }
+            for (GitProxyBinding proxy : proxies) {
+                java.net.URI upstream;
+                Optional<String> secret;
+                if (proxy.source() instanceof GitProxyBinding.Direct direct) {
+                    upstream = direct.upstream();
+                    secret = direct.secret();
+                } else {
+                    GitProxyBinding.Ssh ssh = (GitProxyBinding.Ssh) proxy.source();
+                    if (!(findConnection(connections, ssh.connection().name()) instanceof Connection.Ssh connection)) {
+                        throw new IllegalArgumentException("Proxy requires an SSH connection");
+                    }
+                    upstream = connection.upstream(ssh.path());
+                    secret = connection.secret();
+                }
+                if (!upstreams.add(upstream.toASCIIString() + "#" + proxy.ref())) {
+                    throw new IllegalArgumentException("duplicate proxy upstream/ref");
+                }
+                if (secret.isPresent() && !secretIds.contains(secret.orElseThrow())) {
+                    throw new IllegalArgumentException("proxy secret is unavailable in system scope");
+                }
+            }
+        }
+    }
+
+    public record Organization(
+            OrganizationId id,
+            String displayName,
+            List<AccessControl.User> users,
+            List<ScopedGrant> grants,
+            List<ScopedRole> roles,
+            List<Team> teams,
+            List<ConfigurationSecret> secrets,
+            List<OidcProvider> oidcProviders,
+            List<OrganizationInvitation> invitations,
+            List<Connection> connections) {
+        public Organization {
+            Objects.requireNonNull(id, "id");
+            users = copyUnique(users, AccessControl.User::getId, "user");
+            grants = copyUnique(grants, ScopedGrant::id, "grant");
+            roles = copyUnique(roles, ScopedRole::id, "role");
+            teams = copyTeams(teams);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
+            invitations = copyUnique(invitations, OrganizationInvitation::tokenHash, "invitation");
+            connections = copyConnections(connections, secrets);
+            Set<String> secretIds = new HashSet<>();
+            for (ConfigurationSecret secret : secrets) {
+                secretIds.add(secret.id());
+            }
+            for (OidcProvider provider : oidcProviders) {
+                if (!secretIds.contains(provider.secret())) {
+                    throw new IllegalArgumentException("OIDC secret is unavailable in organization scope: "
+                            + provider.secret());
+                }
+            }
+        }
+
+        private static List<Team> copyTeams(List<Team> source) {
+            Objects.requireNonNull(source, "teams");
+            Set<TeamId> ids = new HashSet<>();
+            for (Team team : source) {
+                Objects.requireNonNull(team, "team");
+                if (!ids.add(team.id())) {
+                    throw new IllegalArgumentException("duplicate team id: " + team.id());
+                }
+            }
+            return List.copyOf(source);
+        }
+    }
+
+    public record Team(
+            TeamId id,
+            String displayName,
+            List<ScopedGrant> grants,
+            List<ScopedRole> roles,
+            List<Repository> repositories) {
+        public Team {
+            Objects.requireNonNull(id, "id");
+            grants = copyUnique(grants, ScopedGrant::id, "grant");
+            roles = copyUnique(roles, ScopedRole::id, "role");
+            repositories = copyRepositories(repositories);
+        }
+
+        private static List<Repository> copyRepositories(List<Repository> source) {
+            Objects.requireNonNull(source, "repositories");
+            Set<RepositoryId> ids = new HashSet<>();
+            for (Repository repository : source) {
+                Objects.requireNonNull(repository, "repository");
+                if (!ids.add(repository.id())) {
+                    throw new IllegalArgumentException("duplicate repository id: " + repository.id());
+                }
+            }
+            return List.copyOf(source);
+        }
+    }
+
+    public record Repository(
+            RepositoryId id,
+            String displayName,
+            String defaultBranch,
+            RepositoryPolicy policy,
+            List<RepositoryRemote> remotes,
+            List<ScopedGrant> grants,
+            List<ScopedRole> roles,
+            List<ConfigurationSecret> secrets,
+            Optional<S3StorageBinding> storage) {
+        public static final String DEFAULT_BRANCH = "refs/heads/main";
+
+        public Repository {
+            Objects.requireNonNull(id, "id");
+            defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
+            Objects.requireNonNull(policy, "repository policy");
+            storage = Objects.requireNonNull(storage, "repository storage");
+            remotes = copyRemotes(remotes);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            grants = copyUnique(grants, ScopedGrant::id, "grant");
+            roles = copyUnique(roles, ScopedRole::id, "role");
+        }
+
+        private static List<RepositoryRemote> copyRemotes(List<RepositoryRemote> source) {
+            Objects.requireNonNull(source, "repository remotes");
+            List<RepositoryRemote> remotes = new ArrayList<>(source);
+            Set<RemoteAlias> aliases = new HashSet<>();
+            for (RepositoryRemote remote : remotes) {
+                Objects.requireNonNull(remote, "repository remote");
+                if (!aliases.add(remote.alias())) {
+                    throw new IllegalArgumentException("duplicate remote alias: " + remote.alias());
+                }
+            }
+            remotes.sort(Comparator.comparing(remote -> remote.alias().value()));
+            return List.copyOf(remotes);
+        }
+    }
+
+    public static Connection findConnection(List<Connection> definitions, String name) {
+        for (Connection connection : definitions) {
+            if (connection.name().equals(name)) return connection;
+        }
+        throw new IllegalArgumentException("Unknown connection: " + name);
+    }
+
+    private static List<Connection> copyConnections(List<Connection> source, List<ConfigurationSecret> secrets) {
+        List<Connection> connections = copyUnique(source, Connection::name, "connection");
+        Set<String> available = new HashSet<>();
+        for (ConfigurationSecret secret : secrets) available.add(secret.id());
+        for (Connection connection : connections) {
+            List<Optional<String>> references = switch (connection) {
+                case Connection.S3 s3 -> List.of(s3.secretKey(), s3.sessionToken());
+                case Connection.Ssh ssh -> List.of(ssh.secret());
+            };
+            for (Optional<String> reference : references) {
+                if (reference.isPresent() && !available.contains(reference.orElseThrow())) {
+                    throw new IllegalArgumentException("Connection secret is unavailable in its owner scope");
+                }
+            }
+        }
+        return connections;
+    }
+
+    private static <T, I> List<T> copyUnique(
+            List<T> source,
+            java.util.function.Function<T, I> idFunction,
+            String valueName) {
+        Objects.requireNonNull(source, valueName + "s");
+        Set<I> ids = new HashSet<>();
+        for (T value : source) {
+            Objects.requireNonNull(value, valueName);
+            I id = idFunction.apply(value);
+            if (!ids.add(id)) {
+                throw new IllegalArgumentException("duplicate " + valueName + " id: " + id);
+            }
+        }
+        return List.copyOf(source);
+    }
+}
+
+final class OrionDocumentGraphValidator {
+    private final Map<RoleAddress, RoleNode> roles = new LinkedHashMap<>();
+    private final Map<GrantAddress, ScopedGrant> grants = new LinkedHashMap<>();
+    private final Map<RoleAddress, VisitState> roleStates = new LinkedHashMap<>();
+
+    private OrionDocumentGraphValidator() {
+    }
+
+    static void validate(List<OrionDocument.Organization> organizations) {
+        OrionDocumentGraphValidator validator = new OrionDocumentGraphValidator();
+        validator.indexDefinitions(organizations);
+        validator.validateUsers(organizations);
+        validator.validateRoles();
+    }
+
+    private void indexDefinitions(List<OrionDocument.Organization> organizations) {
+        for (OrionDocument.Organization organization : organizations) {
+            ConfigurationScope organizationScope = ConfigurationScope.organization(organization.id());
+            indexDefinitions(organizationScope, organization.grants(), organization.roles());
+            for (OrionDocument.Team team : organization.teams()) {
+                ConfigurationScope teamScope = ConfigurationScope.team(organization.id(), team.id());
+                indexDefinitions(teamScope, team.grants(), team.roles());
+                for (OrionDocument.Repository repository : team.repositories()) {
+                    RepositoryAddress repositoryAddress = new RepositoryAddress(
+                            organization.id(), team.id(), repository.id());
+                    ConfigurationScope repositoryScope = ConfigurationScope.repository(repositoryAddress);
+                    indexDefinitions(repositoryScope, repository.grants(), repository.roles());
+                }
+            }
+        }
+    }
+
+    private void indexDefinitions(
+            ConfigurationScope scope,
+            List<ScopedGrant> scopedGrants,
+            List<ScopedRole> scopedRoles) {
+        for (ScopedGrant grant : scopedGrants) {
+            grants.put(new GrantAddress(scope, grant.id()), grant);
+        }
+        for (ScopedRole role : scopedRoles) {
+            RoleAddress address = new RoleAddress(scope, role.id());
+            roles.put(address, new RoleNode(scope, role));
+        }
+    }
+
+    private void validateUsers(List<OrionDocument.Organization> organizations) {
+        for (OrionDocument.Organization organization : organizations) {
+            for (AccessControl.User user : organization.users()) {
+                new UserId(user.getId());
+                for (String reference : user.getRoles()) {
+                    RoleAddress assignment = RoleAddress.parse(reference);
+                    if (!organization.id().equals(assignment.scope().organizationId())) {
+                        throw new IllegalArgumentException("role assignment outside organization: " + assignment);
+                    }
+                    if (!roles.containsKey(assignment)) {
+                        throw new IllegalArgumentException("missing assigned role: " + assignment);
+                    }
+                }
+            }
+        }
+    }
+
+    private void validateRoles() {
+        for (RoleAddress address : roles.keySet()) {
+            if (roleState(address) == VisitState.UNVISITED) {
+                validateRoleGraph(address);
+            }
+        }
+    }
+
+    private void validateRoleGraph(RoleAddress root) {
+        Deque<RoleTraversalFrame> stack = new ArrayDeque<>();
+        pushRole(root, stack);
+        while (!stack.isEmpty()) {
+            RoleTraversalFrame frame = stack.peek();
+            if (frame.hasNextRoleReference()) {
+                RoleAddress reference = frame.nextRoleReference();
+                validateReferenceScope(frame.node().scope(), reference.scope(), "role", reference);
+                if (!roles.containsKey(reference)) {
+                    throw new IllegalArgumentException("missing role reference: " + reference);
+                }
+                VisitState referenceState = roleState(reference);
+                if (referenceState == VisitState.VISITING) {
+                    throw new IllegalArgumentException("role cycle closes at: " + reference);
+                }
+                if (referenceState == VisitState.UNVISITED) {
+                    pushRole(reference, stack);
+                }
+                continue;
+            }
+            validateGrantReferences(frame.node());
+            roleStates.put(frame.address(), VisitState.VISITED);
+            stack.pop();
+        }
+    }
+
+    private void pushRole(RoleAddress address, Deque<RoleTraversalFrame> stack) {
+        roleStates.put(address, VisitState.VISITING);
+        stack.push(new RoleTraversalFrame(address, roles.get(address)));
+    }
+
+    private void validateGrantReferences(RoleNode node) {
+        for (GrantAddress reference : node.role().grantReferences()) {
+            validateReferenceScope(node.scope(), reference.scope(), "grant", reference);
+            if (!grants.containsKey(reference)) {
+                throw new IllegalArgumentException("missing grant reference: " + reference);
+            }
+        }
+    }
+
+    private VisitState roleState(RoleAddress address) {
+        return roleStates.getOrDefault(address, VisitState.UNVISITED);
+    }
+
+    private static void validateReferenceScope(
+            ConfigurationScope owner,
+            ConfigurationScope referenced,
+            String referenceType,
+            Object reference) {
+        if (!referenced.isSameOrAncestorOf(owner)) {
+            throw new IllegalArgumentException(referenceType + " reference outside scope: " + reference);
+        }
+    }
+
+    private record RoleNode(ConfigurationScope scope, ScopedRole role) {
+    }
+
+    private static final class RoleTraversalFrame {
+        private final RoleAddress address;
+        private final RoleNode node;
+        private int roleReferenceIndex;
+
+        private RoleTraversalFrame(RoleAddress address, RoleNode node) {
+            this.address = address;
+            this.node = node;
+        }
+
+        private RoleAddress address() {
+            return address;
+        }
+
+        private RoleNode node() {
+            return node;
+        }
+
+        private boolean hasNextRoleReference() {
+            return roleReferenceIndex < node.role().roleReferences().size();
+        }
+
+        private RoleAddress nextRoleReference() {
+            return node.role().roleReferences().get(roleReferenceIndex++);
+        }
+    }
+
+    private enum VisitState {
+        UNVISITED,
+        VISITING,
+        VISITED
+    }
+}

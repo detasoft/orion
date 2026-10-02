@@ -10,12 +10,13 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.orion.ConfigurationScope;
-import pro.deta.orion.schema.orion.ConfigurationSecretReference;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RepositoryRemote;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RepositoryRemote;
+import pro.deta.orion.schema.orion.v2.Connection;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -151,7 +152,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
         for (OidcProvider provider : organization.oidcProviders()) {
             if (!provider.id().equals(previous.id()) && provider.secret().equals(previous.secret())) return true;
         }
-        for (pro.deta.orion.schema.orion.Connection connection : organization.connections()) {
+        for (Connection connection : organization.connections()) {
             if (connection.referencesSecret(previous.secret())) return true;
         }
         for (OrionDocument.Team team : organization.teams()) {

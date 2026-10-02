@@ -2,7 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 
 import java.net.URI;
 import java.util.Map;

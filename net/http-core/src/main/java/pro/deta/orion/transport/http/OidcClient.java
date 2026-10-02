@@ -10,8 +10,8 @@ import com.nimbusds.oauth2.sdk.id.Issuer;
 import com.nimbusds.openid.connect.sdk.Nonce;
 import com.nimbusds.openid.connect.sdk.claims.IDTokenClaimsSet;
 import com.nimbusds.openid.connect.sdk.validators.IDTokenValidator;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.OrganizationInvitation;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.OrganizationInvitation;
 
 import java.io.IOException;
 import java.io.InputStream;

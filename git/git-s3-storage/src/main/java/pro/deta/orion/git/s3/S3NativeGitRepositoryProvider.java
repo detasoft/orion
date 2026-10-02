@@ -2,7 +2,7 @@ package pro.deta.orion.git.s3;
 
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;

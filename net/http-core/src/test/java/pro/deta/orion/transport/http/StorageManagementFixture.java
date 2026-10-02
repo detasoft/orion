@@ -15,12 +15,12 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.config.*;
 import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.git.ConfiguredStorageManagement;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 final class StorageManagementFixture {

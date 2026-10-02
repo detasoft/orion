@@ -1,6 +1,5 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.parser.v2.index.GitIndexAccess;
 import io.netty.buffer.ByteBuf;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.internal.storage.pack.DeltaEncoder;
@@ -26,7 +25,7 @@ import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -34,10 +33,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
-import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;

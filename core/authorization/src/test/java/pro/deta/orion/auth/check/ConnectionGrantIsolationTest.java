@@ -8,7 +8,9 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.TeamId;
 
 import java.util.List;
 

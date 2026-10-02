@@ -10,12 +10,11 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 
 import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.ref.Reference;
 import java.net.InetAddress;

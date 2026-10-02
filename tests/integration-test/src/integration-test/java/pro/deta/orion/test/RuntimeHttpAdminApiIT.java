@@ -15,7 +15,7 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.test.integration.git.GitHttpTestServer;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.schema.orion.OrionXml;

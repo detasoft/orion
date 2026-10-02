@@ -6,6 +6,7 @@ import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.orion.v2.*;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.xpath.XPathConstants;

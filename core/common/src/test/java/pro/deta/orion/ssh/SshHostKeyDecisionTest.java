@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 

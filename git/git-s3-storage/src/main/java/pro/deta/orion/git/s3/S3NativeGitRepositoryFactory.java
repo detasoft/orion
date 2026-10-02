@@ -4,7 +4,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryFactory;
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
 import pro.deta.orion.git.parser.v2.id.RefId;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.core.exception.SdkException;

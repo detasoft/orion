@@ -17,7 +17,7 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
 import java.util.Arrays;
 import java.util.List;

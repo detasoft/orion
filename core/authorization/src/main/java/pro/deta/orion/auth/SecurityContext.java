@@ -2,7 +2,7 @@ package pro.deta.orion.auth;
 
 import lombok.ToString;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.util.List;
 import java.util.Optional;

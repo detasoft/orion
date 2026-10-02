@@ -19,11 +19,11 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 
 import java.net.InetSocketAddress;
@@ -31,7 +31,6 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 

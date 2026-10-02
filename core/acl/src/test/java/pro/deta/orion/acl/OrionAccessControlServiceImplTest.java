@@ -9,17 +9,14 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
-import pro.deta.orion.schema.orion.GrantId;
-import pro.deta.orion.schema.orion.GrantAddress;
-import pro.deta.orion.schema.orion.RoleId;
-import pro.deta.orion.schema.orion.ScopedGrant;
-import pro.deta.orion.schema.orion.ScopedRole;
-import pro.deta.orion.schema.orion.TeamId;
-import pro.deta.orion.schema.orion.RepositoryId;
-import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.v2.*;
+import pro.deta.orion.schema.orion.v2.RoleId;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.ScopedRole;
+import pro.deta.orion.schema.orion.v2.TeamId;
+import pro.deta.orion.schema.orion.v2.RepositoryId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -55,9 +52,6 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
 
@@ -256,10 +250,10 @@ class OrionAccessControlServiceImplTest {
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(actor), List.of(), List.of())), List.of(org));
         try (ServiceFixture fixture = fixture(new AclFixture())) {
-            assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("system/alice"),
+            assertThat(fixture.service.canAdminister(PrincipalAddress.parse("system/alice"),
                     Optional.empty(), document)).isFalse();
-            assertThat(fixture.service.canAdminister(pro.deta.orion.schema.orion.PrincipalAddress.parse("acme/alice"),
-                    Optional.of(pro.deta.orion.schema.orion.ConfigurationScope.parse("acme")), document)).isFalse();
+            assertThat(fixture.service.canAdminister(PrincipalAddress.parse("acme/alice"),
+                    Optional.of(ConfigurationScope.parse("acme")), document)).isFalse();
         }
     }
 
@@ -457,7 +451,7 @@ class OrionAccessControlServiceImplTest {
         try (var fixture = fixture(new AclFixture())) {
             var result = fixture.editor.edit("version-one").update(document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                            document.system().https(), List.of(new pro.deta.orion.schema.orion.ConfigurationSecret(
+                            document.system().https(), List.of(new ConfigurationSecret(
                             "credential", testEnvelope())), document.system().proxies(),
                                     document.system().connections()), document.organizations())).apply("update proxy", null);
 

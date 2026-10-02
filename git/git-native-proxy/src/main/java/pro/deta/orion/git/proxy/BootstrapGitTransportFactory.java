@@ -18,9 +18,9 @@ import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitCredentials;
 import pro.deta.orion.git.client.GitRemoteClientTransport;
 import pro.deta.orion.git.client.GitTransportScheme;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.net.http.HttpClient;
 import java.util.Arrays;
@@ -167,7 +167,7 @@ final class BootstrapGitTransportFactory {
     }
 
     private record Connection(BootstrapGitLocation location, char[] credential, GitProxyBinding binding,
-            pro.deta.orion.schema.orion.Connection.Ssh ssh) {
+            pro.deta.orion.schema.orion.v2.Connection.Ssh ssh) {
     }
 
     @FunctionalInterface

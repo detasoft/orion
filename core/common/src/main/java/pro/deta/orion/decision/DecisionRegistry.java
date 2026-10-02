@@ -1,6 +1,6 @@
 package pro.deta.orion.decision;
 
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
 

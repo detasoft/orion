@@ -6,10 +6,10 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.OrganizationInvitation;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.OrganizationInvitation;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

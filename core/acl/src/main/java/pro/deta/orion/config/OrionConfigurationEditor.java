@@ -6,6 +6,9 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;

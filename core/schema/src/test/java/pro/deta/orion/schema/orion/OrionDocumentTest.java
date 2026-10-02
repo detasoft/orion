@@ -3,6 +3,7 @@ package pro.deta.orion.schema.orion;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.v2.*;
 
 import java.util.ArrayList;
 import java.util.Collections;

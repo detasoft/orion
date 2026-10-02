@@ -2,6 +2,9 @@ package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.v2.Connection;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

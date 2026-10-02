@@ -31,12 +31,12 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
-import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 
 import java.io.ByteArrayOutputStream;

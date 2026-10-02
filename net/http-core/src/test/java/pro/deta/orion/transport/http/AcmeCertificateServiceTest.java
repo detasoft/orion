@@ -31,10 +31,10 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 
 import java.io.IOException;
 import java.net.URI;

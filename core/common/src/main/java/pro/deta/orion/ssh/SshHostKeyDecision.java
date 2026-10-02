@@ -4,7 +4,7 @@ import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
-import pro.deta.orion.schema.orion.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.util.Result;
 
 import java.security.PublicKey;

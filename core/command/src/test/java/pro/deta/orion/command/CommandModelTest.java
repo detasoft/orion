@@ -1,6 +1,6 @@
 package pro.deta.orion.command;
 
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;

@@ -4,8 +4,8 @@ import jakarta.inject.Inject;
 import pro.deta.orion.auth.StorageManagement;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.*;
-import pro.deta.orion.schema.orion.ConnectionReference;
-import pro.deta.orion.schema.orion.S3StorageBinding;
+import pro.deta.orion.schema.orion.v2.ConnectionReference;
+import pro.deta.orion.schema.orion.v2.S3StorageBinding;
 
 import java.net.URI;
 import java.util.List;

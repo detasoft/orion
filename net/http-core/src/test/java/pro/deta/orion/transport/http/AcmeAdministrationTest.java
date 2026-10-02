@@ -25,7 +25,7 @@ import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.io.ByteArrayInputStream;
 import java.io.PrintWriter;

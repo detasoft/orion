@@ -1,7 +1,7 @@
 package pro.deta.orion.auth.check.resource;
 
 import pro.deta.orion.auth.check.RootResource;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 
 /**
  * Repository-level resource used for create, read and write checks before the git service opens or creates storage.

@@ -1,5 +1,8 @@
 package pro.deta.orion.schema.orion;
 
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.UserId;
+
 import java.util.Objects;
 
 public sealed interface PrincipalAddress

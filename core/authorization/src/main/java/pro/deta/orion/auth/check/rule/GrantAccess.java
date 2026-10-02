@@ -6,11 +6,11 @@ import pro.deta.orion.auth.check.GrantMatcher;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.ScopedAccess;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
-import pro.deta.orion.schema.orion.ConfigurationScope;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RepositoryAddress;
-import pro.deta.orion.schema.orion.ScopedGrant;
-import pro.deta.orion.schema.orion.UserId;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RepositoryAddress;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.UserId;
 
 import java.util.List;
 import java.util.Optional;

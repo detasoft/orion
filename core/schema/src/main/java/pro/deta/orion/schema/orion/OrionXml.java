@@ -1,5 +1,7 @@
 package pro.deta.orion.schema.orion;
 
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;

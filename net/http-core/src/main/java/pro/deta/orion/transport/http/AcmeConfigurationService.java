@@ -15,10 +15,12 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.Connection;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 
 import java.net.URI;
 import java.security.GeneralSecurityException;
@@ -191,10 +193,10 @@ public final class AcmeConfigurationService {
         }
     }
     private static boolean sharedSecret(OrionDocument document, String id) {
-        for (pro.deta.orion.schema.orion.Connection connection : document.system().connections()) {
+        for (Connection connection : document.system().connections()) {
             if (connection.referencesSecret(id)) return true;
         }
-        for (pro.deta.orion.schema.orion.GitProxyBinding proxy : document.system().proxies()) {
+        for (GitProxyBinding proxy : document.system().proxies()) {
             if (proxy.secret(document.system()).filter(id::equals).isPresent()) return true;
         }
         return false;

@@ -16,12 +16,12 @@ import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider.SyncObservation;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.Connection;
-import pro.deta.orion.schema.orion.ConnectionReference;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.Connection;
+import pro.deta.orion.schema.orion.v2.ConnectionReference;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;

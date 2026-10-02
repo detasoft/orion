@@ -1,13 +1,13 @@
 package pro.deta.orion.auth.check;
 
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.ConfigurationScope;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.UserId;
-import pro.deta.orion.schema.orion.GrantAddress;
-import pro.deta.orion.schema.orion.RoleAddress;
-import pro.deta.orion.schema.orion.ScopedGrant;
-import pro.deta.orion.schema.orion.ScopedRole;
+import pro.deta.orion.schema.orion.v2.ConfigurationScope;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.UserId;
+import pro.deta.orion.schema.orion.v2.GrantAddress;
+import pro.deta.orion.schema.orion.v2.RoleAddress;
+import pro.deta.orion.schema.orion.v2.ScopedGrant;
+import pro.deta.orion.schema.orion.v2.ScopedRole;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

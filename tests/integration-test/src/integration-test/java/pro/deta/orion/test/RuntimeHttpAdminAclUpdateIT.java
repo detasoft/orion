@@ -14,9 +14,9 @@ import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;

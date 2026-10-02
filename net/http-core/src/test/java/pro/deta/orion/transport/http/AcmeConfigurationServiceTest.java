@@ -8,14 +8,13 @@ import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import java.time.Instant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -23,7 +22,7 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.command.DefaultCommandDispatcher;
-import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
@@ -41,8 +40,9 @@ import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.util.Result;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -335,7 +335,7 @@ class AcmeConfigurationServiceTest {
                     owner.configurationMaterial(), new OrionConfiguration());
             OrionDocument saved = service.updated(initial, settings("zerossl", "key-id", EAB_KEY));
             String original = saved.system().https().orElseThrow().acme().orElseThrow().eabSecret().orElseThrow();
-            var connection = new pro.deta.orion.schema.orion.Connection.S3("archive", Optional.empty(), "us-east-1",
+            var connection = new Connection.S3("archive", Optional.empty(), "us-east-1",
                     false, Optional.of("id"), Optional.of(original), Optional.empty());
             saved = new OrionDocument(new OrionDocument.SystemConfiguration(saved.system().accessControl(),
                     saved.system().https(), saved.system().secrets(), saved.system().proxies(), List.of(connection)),

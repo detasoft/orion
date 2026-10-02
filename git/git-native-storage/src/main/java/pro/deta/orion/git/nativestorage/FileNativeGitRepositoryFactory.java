@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.parser.v2.data.GitHashAlgorithm;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;

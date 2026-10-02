@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.util.List;
 
@@ -47,8 +49,8 @@ class OrionStorageConnectionsRouteTest {
         StorageManagement management = StorageManagementFixture.create(new InMemoryNativeGitRepositoryProvider(), List.of());
         OrionStorageConnectionsRoute route = new OrionStorageConnectionsRoute(management, mapper);
         for (SecurityContext context : List.of(SecurityContext.createContext(), SecurityContext.createContext()
-                .withUserIdentity(new InternalUserImpl("alice", new pro.deta.orion.schema.orion.OrganizationId("acme"),
-                        () -> pro.deta.orion.schema.orion.OrionDocument.withAccessControl(
+                .withUserIdentity(new InternalUserImpl("alice", new OrganizationId("acme"),
+                        () -> OrionDocument.withAccessControl(
                                 new pro.deta.orion.schema.acl.AccessControl()))))) {
             assertThat(route.doGet(StorageManagementFixture.request("", context, null)).status()).isEqualTo(403);
             assertThat(route.doPost(StorageManagementFixture.request("""

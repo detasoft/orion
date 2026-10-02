@@ -1,7 +1,7 @@
 package pro.deta.orion.config;
 
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.util.function.UnaryOperator;
 

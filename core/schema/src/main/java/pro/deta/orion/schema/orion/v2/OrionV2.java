@@ -67,7 +67,7 @@ public class OrionV2 {
         private String upstream;
         @XmlElement(required = true)
         private String ref;
-        private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
+        private GitCredentialKind credentialKind;
         private String secret;
         private String username;
         private SshProxy ssh;
@@ -125,7 +125,7 @@ public class OrionV2 {
         private Integer port;
         private String username;
         @XmlElement(required = true)
-        private pro.deta.orion.schema.orion.GitCredentialKind credentialKind;
+        private GitCredentialKind credentialKind;
         @XmlElement(required = true)
         private String secret;
         @XmlElementWrapper(name = "knownHosts")

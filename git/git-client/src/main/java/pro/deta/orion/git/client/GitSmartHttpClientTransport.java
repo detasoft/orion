@@ -4,7 +4,7 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
-import pro.deta.orion.schema.orion.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

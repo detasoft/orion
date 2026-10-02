@@ -21,7 +21,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.*;
+import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
 
 import java.net.URI;
@@ -192,7 +193,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     }
 
     private boolean connectionAllowed(SecurityContext actor, OrionDocument document, Optional<OrganizationId> owner,
-            String name, AccessControl.GrantKey action) {
+                                      String name, AccessControl.GrantKey action) {
         if (admin(actor, document)) return true;
         UserIdentity identity = actor.getUserIdentity();
         if (identity.isAnonymous() || owner.isEmpty() || !identity.getOrganizationId().equals(owner)) return false;

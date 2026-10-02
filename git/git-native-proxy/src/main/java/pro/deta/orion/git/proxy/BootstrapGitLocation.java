@@ -1,9 +1,9 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.net.URI;
 import java.net.URLDecoder;

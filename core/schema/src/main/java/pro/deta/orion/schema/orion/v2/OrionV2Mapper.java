@@ -1,35 +1,6 @@
 package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
-import pro.deta.orion.schema.orion.ConfigurationSecretReference;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.Connection;
-import pro.deta.orion.schema.orion.ConnectionReference;
-import pro.deta.orion.schema.orion.S3StorageBinding;
-import pro.deta.orion.schema.orion.GrantAddress;
-import pro.deta.orion.schema.orion.GrantId;
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrganizationInvitation;
-import pro.deta.orion.schema.orion.OidcProvider;
-import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
-import pro.deta.orion.schema.orion.OrionMaterialReference;
-import pro.deta.orion.schema.orion.RemoteAlias;
-import pro.deta.orion.schema.orion.RemoteProvider;
-import pro.deta.orion.schema.orion.RemoteRefMapping;
-import pro.deta.orion.schema.orion.RemoteRole;
-import pro.deta.orion.schema.orion.RemoteTrigger;
-import pro.deta.orion.schema.orion.RemoteUpdatePolicy;
-import pro.deta.orion.schema.orion.RepositoryId;
-import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.schema.orion.RepositoryRemote;
-import pro.deta.orion.schema.orion.RoleAddress;
-import pro.deta.orion.schema.orion.RoleId;
-import pro.deta.orion.schema.orion.ScopedGrant;
-import pro.deta.orion.schema.orion.ScopedRole;
-import pro.deta.orion.schema.orion.TeamId;
 
 import java.net.URI;
 import java.util.ArrayList;

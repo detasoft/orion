@@ -1,10 +1,10 @@
 package pro.deta.orion.auth.check;
 
-import pro.deta.orion.schema.orion.OrganizationId;
-import pro.deta.orion.schema.orion.OrionDocument;
-import pro.deta.orion.schema.orion.RepositoryId;
-import pro.deta.orion.schema.orion.RepositoryPolicy;
-import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.orion.v2.RepositoryId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
+import pro.deta.orion.schema.orion.v2.TeamId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;

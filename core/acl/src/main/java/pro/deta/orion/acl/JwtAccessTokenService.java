@@ -1,6 +1,7 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -78,7 +79,7 @@ final class JwtAccessTokenService {
                         AUTHENTICATION_GENERATION_CLAIM,
                         jsonString(authenticationGeneration));
         if (organization != null) {
-            new pro.deta.orion.schema.orion.OrganizationId(organization);
+            new OrganizationId(organization);
             generationClaim += ",\"orion_org\":" + jsonString(organization);
         }
         String payload = ("{\"iss\":\"%s\",\"aud\":\"%s\",\"sub\":%s,\"purpose\":\"%s\","
@@ -195,7 +196,7 @@ final class JwtAccessTokenService {
         String organization = stringClaim(payload, "orion_org");
         if (containsClaim(payload, "orion_org")) {
             try {
-                new pro.deta.orion.schema.orion.OrganizationId(organization);
+                new OrganizationId(organization);
             } catch (RuntimeException invalid) {
                 return VerificationResult.failure("JWT organization is invalid");
             }

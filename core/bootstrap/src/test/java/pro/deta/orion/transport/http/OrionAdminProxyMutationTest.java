@@ -36,9 +36,11 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 
 import java.io.*;
@@ -354,8 +356,8 @@ class OrionAdminProxyMutationTest {
             assertThat(f.post(implicit).status).isEqualTo(400);
             f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 var first = document.system().proxies().getFirst();
-                var second = new pro.deta.orion.schema.orion.GitProxyBinding(
-                        new pro.deta.orion.schema.orion.RemoteAlias("second"), first.source(), "third");
+                var second = new GitProxyBinding(
+                        new RemoteAlias("second"), first.source(), "third");
                 return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                         document.system().https(), document.system().secrets(), List.of(first, second),
                                 document.system().connections()),
@@ -476,10 +478,10 @@ class OrionAdminProxyMutationTest {
             assertThat(f.post(create).status).isEqualTo(201);
             f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 var first = document.system().proxies().getFirst();
-                var source = (pro.deta.orion.schema.orion.GitProxyBinding.Ssh) first.source();
-                var second = new pro.deta.orion.schema.orion.GitProxyBinding(
-                        new pro.deta.orion.schema.orion.RemoteAlias("second"),
-                        new pro.deta.orion.schema.orion.GitProxyBinding.Ssh(source.connection(), "/second"), "main");
+                var source = (GitProxyBinding.Ssh) first.source();
+                var second = new GitProxyBinding(
+                        new RemoteAlias("second"),
+                        new GitProxyBinding.Ssh(source.connection(), "/second"), "main");
                 var system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                         system.secrets(), List.of(first, second), system.connections()), document.organizations());

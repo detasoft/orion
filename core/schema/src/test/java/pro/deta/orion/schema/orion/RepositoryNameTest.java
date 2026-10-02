@@ -1,6 +1,7 @@
 package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 
 import java.util.List;
 

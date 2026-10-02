@@ -18,10 +18,10 @@ import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.PrincipalAddress;
-import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
@@ -30,7 +30,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;

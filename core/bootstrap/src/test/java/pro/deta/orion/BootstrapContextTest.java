@@ -7,7 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 import pro.deta.orion.config.LocationConfigurationProvider;
 
 import java.net.InetSocketAddress;
-import pro.deta.orion.schema.orion.ConfigurationSecret;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
@@ -48,11 +48,11 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
-import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
-import pro.deta.orion.schema.orion.GitProxyBinding;
-import pro.deta.orion.schema.orion.GitCredentialKind;
-import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.GitCredentialKind;
+import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.util.Result;
 

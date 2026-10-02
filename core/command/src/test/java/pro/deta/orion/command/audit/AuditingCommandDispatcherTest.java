@@ -1,12 +1,11 @@
 package pro.deta.orion.command.audit;
 
 import java.util.Optional;
-import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.AccessDecision;
-import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandColumn;

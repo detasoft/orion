@@ -3,6 +3,10 @@ package pro.deta.orion.schema.orion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
+import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.net.URI;
 import java.util.ArrayList;
