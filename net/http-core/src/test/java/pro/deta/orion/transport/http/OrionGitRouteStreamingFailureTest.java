@@ -15,6 +15,8 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.util.Result;
@@ -80,8 +82,8 @@ class OrionGitRouteStreamingFailureTest {
             @Override
             public void service(HttpServletRequest request, HttpServletResponse response)
                     throws IOException, ServletException {
-                AccessControl.Grant grant = new AccessControl.Grant("repository", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/project")));
+                Grant grant = new Grant("repository", List.of(
+                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/project")));
                 request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                         SecurityContext.createContext().withUserIdentity(
                                 new InternalUserImpl("git-user", List.of(grant))));

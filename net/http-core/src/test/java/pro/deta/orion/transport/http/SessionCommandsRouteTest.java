@@ -36,6 +36,8 @@ import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 
 import java.io.IOException;
 import java.net.URI;
@@ -189,8 +191,8 @@ class SessionCommandsRouteTest {
                 public void service(HttpServletRequest request, HttpServletResponse response)
                         throws IOException, ServletException {
                     if ("admin".equals(request.getHeader("Authorization"))) {
-                        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
-                                new AccessControl.GrantExpression(
+                        Grant grant = new Grant("admin", List.of(
+                                new GrantExpression(
                                         AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()

@@ -5,6 +5,9 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.orion.v2.*;
 
@@ -158,7 +161,7 @@ class OrionXmlTest {
         OrionDocument document = read(xml);
 
         assertThat(document.organizations().getFirst().users().getFirst())
-                .isEqualTo(document.system().accessControl().getUsers().getFirst());
+                .isEqualTo(document.system().accessControl().users().getFirst());
         assertThat(read(write(document))).isEqualTo(document);
     }
 
@@ -176,9 +179,9 @@ class OrionXmlTest {
         assertThat(serialized).contains("<team id=\"platform\">");
         assertThat(serialized).contains("<repository id=\"api\">");
         OrionDocument.Organization organization = document.organizations().getFirst();
-        assertThat(organization.users()).extracting(AccessControl.User::getId)
+        assertThat(organization.users()).extracting(User::id)
                 .containsExactly("alice", "blocked");
-        assertThat(organization.users().getFirst().getRoles()).containsExactly("acme/member");
+        assertThat(organization.users().getFirst().roles()).containsExactly("acme/member");
         assertThat(organization.grants()).extracting(grant -> grant.id().value())
                 .containsExactly("read");
         assertThat(organization.roles()).extracting(role -> role.id().value())
@@ -204,11 +207,11 @@ class OrionXmlTest {
                 .containsExactly("upstream");
         assertThat(serialized).contains("<reference>github-token</reference>");
         assertThat(serialized).doesNotContain("github-token@");
-        assertThat(document.system().accessControl().getUsers()).extracting(AccessControl.User::getId)
+        assertThat(document.system().accessControl().users()).extracting(User::id)
                 .containsExactly("root");
-        assertThat(document.system().accessControl().getRoles()).extracting(AccessControl.Role::getId)
+        assertThat(document.system().accessControl().roles()).extracting(Role::id)
                 .containsExactly("ROOT");
-        assertThat(document.system().accessControl().getGrants()).extracting(AccessControl.Grant::getId)
+        assertThat(document.system().accessControl().grants()).extracting(Grant::id)
                 .containsExactly("ALL_REPOSITORY");
         assertThat(OrionXml.currentSchemaVersion()).isEqualTo(OrionXmlSchemaVersion.V2);
     }
@@ -293,8 +296,8 @@ class OrionXmlTest {
 
     @Test
     void writesEquivalentDocumentsDeterministically() throws Exception {
-        AccessControl.User alpha = user("alpha");
-        AccessControl.User zulu = user("zulu");
+        User alpha = user("alpha");
+        User zulu = user("zulu");
         OrionDocument.Organization alphaOrganization = organization("alpha");
         OrionDocument.Organization zuluOrganization = organization("zulu");
         OrionDocument first = document(
@@ -366,10 +369,10 @@ class OrionXmlTest {
         assertThat(document.organizations().getFirst().teams().getFirst().repositories())
                 .extracting(repository -> repository.id().value())
                 .containsExactly("a-repo", "z-repo");
-        assertThat(document.system().accessControl().getUsers()).extracting(AccessControl.User::getId)
+        assertThat(document.system().accessControl().users()).extracting(User::id)
                 .containsExactly("a-user", "z-user");
-        assertThat(document.system().accessControl().getGrants().getFirst().getInfo())
-                .extracting(expression -> expression.getKey().name())
+        assertThat(document.system().accessControl().grants().getFirst().info())
+                .extracting(expression -> expression.key().name())
                 .containsExactly("READ", "READ_WRITE");
     }
 
@@ -720,8 +723,8 @@ class OrionXmlTest {
         return new OrionDocument(new OrionDocument.SystemConfiguration(accessControl), organizations);
     }
 
-    private static AccessControl.User user(String id) {
-        return new AccessControl.User(id, null, null, null, List.of(), List.of(), List.of());
+    private static User user(String id) {
+        return new User(id, null, null, null, List.of(), List.of(), List.of());
     }
 
     private static OrionDocument.Organization organization(String id) {

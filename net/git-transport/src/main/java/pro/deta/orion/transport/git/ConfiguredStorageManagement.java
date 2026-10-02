@@ -21,6 +21,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
@@ -199,8 +200,8 @@ public final class ConfiguredStorageManagement implements StorageManagement {
         if (identity.isAnonymous() || owner.isEmpty() || !identity.getOrganizationId().equals(owner)) return false;
         return ScopedAccess.allows(organization(document, owner.orElseThrow()), new UserId(identity.getUserId()),
                 ConfigurationScope.organization(owner.orElseThrow()), expressions -> {
-                    for (AccessControl.GrantExpression expression : expressions) {
-                        switch (expression.getKey()) {
+                    for (GrantExpression expression : expressions) {
+                        switch (expression.key()) {
                             case REPOSITORY, BRANCH, NETWORK_SOURCE, NETWORK_PORT, ADMIN, SHUTDOWN -> { return false; }
                             default -> { }
                         }

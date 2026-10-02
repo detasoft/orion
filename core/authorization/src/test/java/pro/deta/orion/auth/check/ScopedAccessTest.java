@@ -2,6 +2,8 @@ package pro.deta.orion.auth.check;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
 import pro.deta.orion.schema.orion.v2.GrantId;
@@ -73,7 +75,7 @@ class ScopedAccessTest {
             OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                     OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(), List.of(),
                     List.of(allow), List.of(role), List.of(), java.util.Optional.empty());
-            AccessControl.User user = new AccessControl.User("alice", null, null, null, List.of(),
+            User user = new User("alice", null, null, null, List.of(),
                     List.of("acme/team/repo/local"), List.of());
             OrionDocument.Organization organization = new OrionDocument.Organization(base.id(), "",
                     List.of(user), base.grants(), base.roles(),
@@ -93,7 +95,7 @@ class ScopedAccessTest {
 
     private static OrionDocument.Organization organization(List<String> assignments, ScopedGrant.Effect effect) {
         ScopedGrant grant = new ScopedGrant(new GrantId("admin"), effect,
-                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
         ConfigurationScope org = ConfigurationScope.parse("acme");
         ScopedRole ancestor = new ScopedRole(new RoleId(effect == ScopedGrant.Effect.ALLOW ? "allow" : "deny"),
                 List.of(), List.of(new GrantAddress(org, grant.id())));
@@ -102,7 +104,7 @@ class ScopedAccessTest {
         ScopedRole inherited = new ScopedRole(new RoleId("inherited"),
                 List.of(new RoleAddress(org, ancestor.id())), List.of());
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"),
-                "Acme", List.of(new AccessControl.User("alice", null, null, null, List.of(), assignments, List.of())),
+                "Acme", List.of(new User("alice", null, null, null, List.of(), assignments, List.of())),
                 List.of(grant), List.of(ancestor),
                 List.of(new OrionDocument.Team(new TeamId("team"), "Team",
                         List.of(new ScopedGrant(grant.id(), ScopedGrant.Effect.ALLOW, grant.expressions())),

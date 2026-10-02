@@ -1,6 +1,7 @@
 package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -112,7 +113,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
     public record Organization(
             OrganizationId id,
             String displayName,
-            List<AccessControl.User> users,
+            List<User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<Team> teams,
@@ -122,7 +123,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<Connection> connections) {
         public Organization {
             Objects.requireNonNull(id, "id");
-            users = copyUnique(users, AccessControl.User::getId, "user");
+            users = copyUnique(users, User::id, "user");
             grants = copyUnique(grants, ScopedGrant::id, "grant");
             roles = copyUnique(roles, ScopedRole::id, "role");
             teams = copyTeams(teams);
@@ -308,9 +309,9 @@ final class OrionDocumentGraphValidator {
 
     private void validateUsers(List<OrionDocument.Organization> organizations) {
         for (OrionDocument.Organization organization : organizations) {
-            for (AccessControl.User user : organization.users()) {
-                new UserId(user.getId());
-                for (String reference : user.getRoles()) {
+            for (User user : organization.users()) {
+                new UserId(user.id());
+                for (String reference : user.roles()) {
                     RoleAddress assignment = RoleAddress.parse(reference);
                     if (!organization.id().equals(assignment.scope().organizationId())) {
                         throw new IllegalArgumentException("role assignment outside organization: " + assignment);

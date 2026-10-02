@@ -9,6 +9,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -134,14 +136,14 @@ class RuntimeHttpAdminAclUpdateIT {
                     "GET", orion.httpUrl("/api/admin/acl"), TestBearerTokens.bearer(rootToken));
             AccessControl acl = OrionXml.read(new ByteArrayInputStream(
                     initial.body().getBytes(StandardCharsets.UTF_8))).system().accessControl();
-            AccessControl.User root = acl.getUsers().getFirst();
-            AccessControl.User operator = new AccessControl.User("operator", root.getFirst(), root.getLast(),
-                    "operator@example.test", List.of(new AccessControl.Credential(
+            User root = acl.users().getFirst();
+            User operator = new User("operator", root.first(), root.last(),
+                    "operator@example.test", List.of(new Credential(
                             AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
-                    root.getRoles(), root.getGrants());
-            List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+                    root.roles(), root.grants());
+            List<User> users = new ArrayList<>(acl.users());
             users.add(operator);
-            byte[] xml = serialize(new AccessControl(users, acl.getRoles(), acl.getGrants()));
+            byte[] xml = serialize(new AccessControl(users, acl.roles(), acl.grants()));
             RuntimeHttpTestSupport.updateConfiguration(orion, xml, initial.etag());
 
             String operatorToken = TestBearerTokens.issueToken(orion.httpUrl("/api/admin/token"),
@@ -346,14 +348,14 @@ class RuntimeHttpAdminAclUpdateIT {
         AccessControl acl = OrionXml.read(
                 new ByteArrayInputStream(originalXml.getBytes(StandardCharsets.UTF_8)))
                         .system().accessControl();
-        List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+        List<User> users = new ArrayList<>(acl.users());
         users.add(passwordUser(userId));
-        return serialize(new AccessControl(users, acl.getRoles(), acl.getGrants()));
+        return serialize(new AccessControl(users, acl.roles(), acl.grants()));
     }
 
-    private static AccessControl.User passwordUser(String userId) {
-        return new AccessControl.User(userId, null, null, userId + "@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+    private static User passwordUser(String userId) {
+        return new User(userId, null, null, userId + "@example.test",
+                List.of(new Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
                 List.of(), List.of());
     }
 
@@ -374,8 +376,8 @@ class RuntimeHttpAdminAclUpdateIT {
     private static List<String> userIds(byte[] content) throws IOException {
         AccessControl accessControl = OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
         List<String> userIds = new ArrayList<>();
-        for (AccessControl.User user : accessControl.getUsers()) {
-            userIds.add(user.getId());
+        for (User user : accessControl.users()) {
+            userIds.add(user.id());
         }
         return userIds;
     }

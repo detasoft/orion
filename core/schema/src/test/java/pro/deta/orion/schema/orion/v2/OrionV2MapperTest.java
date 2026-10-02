@@ -7,6 +7,11 @@ import jakarta.xml.bind.annotation.XmlRootElement;
 import jakarta.xml.bind.annotation.XmlType;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -115,7 +120,7 @@ class OrionV2MapperTest {
 
     @Test
     void roundTripsTheCurrentDocument() {
-        AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+        AccessControl acl = new AccessControl(List.of(new User(
                 "root", "Root", "User", "root@example.test", List.of(), List.of(), List.of())),
                 List.of(), List.of());
         OrionDocument document = document(acl, List.of(
@@ -268,8 +273,8 @@ class OrionV2MapperTest {
         OrionDocument.Organization mapped = OrionV2Mapper.toCurrent(dto(List.of(organization)))
                 .organizations().getFirst();
 
-        assertThat(mapped.users().getFirst().getCredentials()).isEmpty();
-        assertThat(mapped.users().getFirst().getRoles()).isEmpty();
+        assertThat(mapped.users().getFirst().credentials()).isEmpty();
+        assertThat(mapped.users().getFirst().roles()).isEmpty();
         assertThat(mapped.roles().getFirst().roleReferences()).isEmpty();
         assertThat(mapped.roles().getFirst().grantReferences()).isEmpty();
         assertThat(mapped.grants().getFirst().expressions()).isEmpty();
@@ -420,13 +425,13 @@ class OrionV2MapperTest {
 
     @Test
     void sortsNestedAclCollectionsForStableOutput() {
-        AccessControl.Credential ssh = new AccessControl.Credential(
+        Credential ssh = new Credential(
                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "z-key", "z-value");
-        AccessControl.Credential password = new AccessControl.Credential(
+        Credential password = new Credential(
                 AccessControl.CredentialType.ARGON2, "a-key", "a-value");
-        AccessControl.Grant zGrant = new AccessControl.Grant("z-grant", List.of());
-        AccessControl.Grant aGrant = new AccessControl.Grant("a-grant", List.of());
-        AccessControl.User user = new AccessControl.User(
+        Grant zGrant = new Grant("z-grant", List.of());
+        Grant aGrant = new Grant("a-grant", List.of());
+        User user = new User(
                 "root",
                 null,
                 null,
@@ -434,15 +439,15 @@ class OrionV2MapperTest {
                 List.of(ssh, password),
                 List.of("z-role", "a-role"),
                 List.of(zGrant, aGrant));
-        AccessControl.Role role = new AccessControl.Role(
+        Role role = new Role(
                 "root-role",
                 List.of(zGrant, aGrant),
                 List.of("z-grant", "a-grant"));
-        AccessControl.Grant expressions = new AccessControl.Grant(
+        Grant expressions = new Grant(
                 "expressions",
                 List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "z"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "a")));
+                        new GrantExpression(AccessControl.GrantKey.READ_WRITE, "z"),
+                        new GrantExpression(AccessControl.GrantKey.READ, "a")));
         OrionDocument document = document(
                 new AccessControl(List.of(user), List.of(role), List.of(expressions)),
                 List.of());
@@ -532,15 +537,15 @@ class OrionV2MapperTest {
                 "api", List.of(repositoryGrant), List.of(repositoryRole));
         OrionDocument.Team team = domainTeam(
                 "platform", List.of(teamGrant), List.of(teamRole), List.of(repository));
-        AccessControl.User alex = domainUser(
+        User alex = domainUser(
                 "alex",
                 List.of(
-                        new AccessControl.Credential(AccessControl.CredentialType.ARGON2, "argon2-verifier"),
-                        new AccessControl.Credential(
+                        new Credential(AccessControl.CredentialType.ARGON2, "argon2-verifier"),
+                        new Credential(
                                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "workstation", "ssh-ed25519 AQID"),
-                        new AccessControl.Credential(AccessControl.CredentialType.SHA1, "sha1-verifier")),
+                        new Credential(AccessControl.CredentialType.SHA1, "sha1-verifier")),
                 List.of("acme/member", "acme/platform/api/member", "acme/platform/member"));
-        AccessControl.User blocked = domainUser("blocked", List.of(), List.of());
+        User blocked = domainUser("blocked", List.of(), List.of());
         OrionDocument.Organization acme = domainOrganization(
                 "acme",
                 List.of(alex, blocked),
@@ -551,7 +556,7 @@ class OrionV2MapperTest {
         ScopedGrant betaGrant = domainGrant(
                 "access", ScopedGrant.Effect.DENY, expression(AccessControl.GrantKey.READ, "true"));
         ScopedRole betaRole = domainRole("member", List.of(), List.of("beta/access"));
-        AccessControl.User betaAlex = domainUser(
+        User betaAlex = domainUser(
                 "alex", List.of(), List.of("beta/member"));
         OrionDocument.Organization beta = domainOrganization(
                 "beta",
@@ -574,8 +579,8 @@ class OrionV2MapperTest {
 
         OrionDocument.Team aTeam = orderingTeam("a-team", reversed);
         OrionDocument.Team zTeam = domainTeam("z-team", List.of(), List.of(), List.of());
-        AccessControl.User aUser = orderingUser("a-user", reversed);
-        AccessControl.User zUser = orderingUser("z-user", reversed);
+        User aUser = orderingUser("a-user", reversed);
+        User zUser = orderingUser("z-user", reversed);
         OrionDocument.Organization acme = domainOrganization(
                 "acme",
                 reversed ? List.of(zUser, aUser) : List.of(aUser, zUser),
@@ -632,18 +637,18 @@ class OrionV2MapperTest {
                 reversed ? List.of(zRole, root, aRole) : List.of(aRole, root, zRole));
     }
 
-    private static AccessControl.User orderingUser(String id, boolean reversed) {
-        AccessControl.Credential aArgon2 = new AccessControl.Credential(
+    private static User orderingUser(String id, boolean reversed) {
+        Credential aArgon2 = new Credential(
                 AccessControl.CredentialType.ARGON2, "a-verifier");
-        AccessControl.Credential zArgon2 = new AccessControl.Credential(
+        Credential zArgon2 = new Credential(
                 AccessControl.CredentialType.ARGON2, "z-verifier");
-        AccessControl.Credential sha1 = new AccessControl.Credential(
+        Credential sha1 = new Credential(
                 AccessControl.CredentialType.SHA1, "a-verifier");
-        AccessControl.Credential anonymousKey = new AccessControl.Credential(
+        Credential anonymousKey = new Credential(
                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "ssh-ed25519 AQID");
-        AccessControl.Credential namedKey = new AccessControl.Credential(
+        Credential namedKey = new Credential(
                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "z-key", "ssh-ed25519 BAUG");
-        List<AccessControl.Credential> credentials = reversed
+        List<Credential> credentials = reversed
                 ? List.of(namedKey, anonymousKey, sha1, zArgon2, aArgon2)
                 : List.of(aArgon2, zArgon2, sha1, anonymousKey, namedKey);
         return domainUser(
@@ -653,9 +658,9 @@ class OrionV2MapperTest {
     }
 
     private static ScopedGrant orderedGrant(String id, boolean reversed) {
-        AccessControl.GrantExpression aRead = expression(AccessControl.GrantKey.READ, "a-read");
-        AccessControl.GrantExpression zRead = expression(AccessControl.GrantKey.READ, "z-read");
-        AccessControl.GrantExpression write = expression(AccessControl.GrantKey.READ_WRITE, "write");
+        GrantExpression aRead = expression(AccessControl.GrantKey.READ, "a-read");
+        GrantExpression zRead = expression(AccessControl.GrantKey.READ, "z-read");
+        GrantExpression write = expression(AccessControl.GrantKey.READ_WRITE, "write");
         return new ScopedGrant(
                 new GrantId(id),
                 ScopedGrant.Effect.ALLOW,
@@ -694,17 +699,17 @@ class OrionV2MapperTest {
                 .hasMessage(message);
     }
 
-    private static AccessControl.User domainUser(
+    private static User domainUser(
             String id,
-            List<AccessControl.Credential> credentials,
+            List<Credential> credentials,
             List<String> roles) {
-        return new AccessControl.User(
+        return new User(
                 id, id + " first", id + " last", id + "@example.test", credentials, roles, List.of());
     }
 
     private static OrionDocument.Organization domainOrganization(
             String id,
-            List<AccessControl.User> users,
+            List<User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
@@ -749,12 +754,12 @@ class OrionV2MapperTest {
     private static ScopedGrant domainGrant(
             String id,
             ScopedGrant.Effect effect,
-            AccessControl.GrantExpression... expressions) {
+            GrantExpression... expressions) {
         return new ScopedGrant(new GrantId(id), effect, List.of(expressions));
     }
 
-    private static AccessControl.GrantExpression expression(AccessControl.GrantKey key, String value) {
-        return new AccessControl.GrantExpression(key, value);
+    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+        return new GrantExpression(key, value);
     }
 
     private static List<String> addresses(boolean reversed, String first, String second) {
@@ -789,16 +794,16 @@ class OrionV2MapperTest {
                 List.of(), java.util.Optional.empty());
     }
 
-    private static AccessControl.User user(String id) {
-        return new AccessControl.User(id, null, null, null, List.of(), List.of(), List.of());
+    private static User user(String id) {
+        return new User(id, null, null, null, List.of(), List.of(), List.of());
     }
 
-    private static AccessControl.Role role(String id) {
-        return new AccessControl.Role(id, List.of(), List.of());
+    private static Role role(String id) {
+        return new Role(id, List.of(), List.of());
     }
 
-    private static AccessControl.Grant grant(String id) {
-        return new AccessControl.Grant(id, List.of());
+    private static Grant grant(String id) {
+        return new Grant(id, List.of());
     }
 
     private static OrionV2 dto(List<OrionV2.Organization> organizations) {

@@ -724,7 +724,7 @@ link. Only its SHA-256 digest is persisted under the organization's `<invitation
 The invitee opens the link, signs in with the organization's provider, and sets
 first and last names. The verified email must match the invitation. Account
 creation and invitation consumption are saved together with a configuration
-revision check. The resulting `AccessControl.User` stores an `OIDC_SUBJECT`
+revision check. The resulting `User` stores an `OIDC_SUBJECT`
 credential binding the issuer and subject; later sign-ins use that binding.
 New users receive read access to repositories in their own organization.
 Organization users cannot access system administration.

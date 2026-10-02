@@ -8,6 +8,9 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.BranchAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
 import pro.deta.orion.schema.orion.v2.GrantId;
@@ -70,7 +73,7 @@ class HierarchicalAccessRulesTest {
 
     @Test
     void directAndRoleBranchRestrictionsRetainTheirCombinationPolicy() {
-        AccessControl.Grant direct = new AccessControl.Grant("direct", List.of(
+        Grant direct = new Grant("direct", List.of(
                 expression(AccessControl.GrantKey.REPOSITORY, "acme/**"), expression(READ_WRITE, "true")));
         ScopedGrant restricted = new ScopedGrant(new GrantId("write"), ScopedGrant.Effect.ALLOW,
                 List.of(expression(READ_WRITE, "true"), expression(BRANCH, "dev")));
@@ -108,7 +111,7 @@ class HierarchicalAccessRulesTest {
 
     @Test
     void directRepositoryGrantStillAllowsReadButAdministrationAloneDoesNot() {
-        AccessControl.Grant direct = new AccessControl.Grant("direct",
+        Grant direct = new Grant("direct",
                 List.of(expression(AccessControl.GrantKey.REPOSITORY, "acme/**")));
         SecurityContext reader = context(document(List.of(), List.of(direct), List.of()));
         assertThat(fetch(reader, "main")).isTrue();
@@ -122,8 +125,8 @@ class HierarchicalAccessRulesTest {
     void sameNameUsersAreResolvedOnlyInTheirOwnOrganization() {
         OrionDocument base = document(List.of(), List.of(), List.of());
         OrionDocument.Organization acme = base.organizations().getFirst();
-        AccessControl.User otherUser = new AccessControl.User("alice", null, null, null, List.of(), List.of(),
-                List.of(new AccessControl.Grant("read", List.of(expression(READ, "true")))));
+        User otherUser = new User("alice", null, null, null, List.of(), List.of(),
+                List.of(new Grant("read", List.of(expression(READ, "true")))));
         OrionDocument.Organization other = new OrionDocument.Organization(new OrganizationId("other"), "",
                 List.of(otherUser), List.of(), List.of(), acme.teams(), List.of(), List.of(), List.of(), acme.connections());
         OrionDocument document = new OrionDocument(base.system(), List.of(acme, other));
@@ -151,7 +154,7 @@ class HierarchicalAccessRulesTest {
         OrionDocument.Repository sibling = new OrionDocument.Repository(new RepositoryId("sibling"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
-        AccessControl.User user = new AccessControl.User("alice", null, null, null, List.of(),
+        User user = new User("alice", null, null, null, List.of(),
                 List.of("acme/team/repo/local"), List.of());
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "", List.of(), List.of(),
                 List.of(repository, sibling));
@@ -169,7 +172,7 @@ class HierarchicalAccessRulesTest {
     void assignedDenyOverridesDirectAndRoleAllowsRegardlessOfGrantOrder() {
         ScopedGrant allow = grant("allow", ScopedGrant.Effect.ALLOW, READ_WRITE);
         ScopedGrant deny = grant("deny", ScopedGrant.Effect.DENY, READ_WRITE);
-        AccessControl.Grant direct = new AccessControl.Grant("direct", List.of(expression(READ_WRITE, "true")));
+        Grant direct = new Grant("direct", List.of(expression(READ_WRITE, "true")));
         for (List<ScopedGrant> grants : List.of(List.of(allow, deny), List.of(deny, allow))) {
             SecurityContext context = context(document(List.of("acme/developer"), List.of(direct), grants));
             assertThat(RepositoryAccessRules.read().evaluate(context, REPOSITORY).allowed()).isFalse();
@@ -215,18 +218,18 @@ class HierarchicalAccessRulesTest {
     }
 
     private static ScopedGrant grant(String id, ScopedGrant.Effect effect, AccessControl.GrantKey... keys) {
-        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        List<GrantExpression> expressions = new ArrayList<>();
         for (AccessControl.GrantKey key : keys) expressions.add(expression(key, "true"));
         return new ScopedGrant(new GrantId(id), effect, expressions);
     }
 
-    private static AccessControl.GrantExpression expression(AccessControl.GrantKey key, String value) {
-        return new AccessControl.GrantExpression(key, value);
+    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+        return new GrantExpression(key, value);
     }
 
-    private static OrionDocument document(List<String> assignments, List<AccessControl.Grant> direct,
+    private static OrionDocument document(List<String> assignments, List<Grant> direct,
             List<ScopedGrant> grants) {
-        AccessControl.User user = new AccessControl.User("alice", null, null, null, List.of(), assignments, direct);
+        User user = new User("alice", null, null, null, List.of(), assignments, direct);
         List<GrantAddress> references = new ArrayList<>();
         for (ScopedGrant grant : grants) {
             references.add(new GrantAddress(ConfigurationScope.parse("acme"), grant.id()));

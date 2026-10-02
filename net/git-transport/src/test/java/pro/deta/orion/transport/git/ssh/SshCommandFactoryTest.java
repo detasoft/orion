@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import org.apache.sshd.common.AttributeRepository;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
@@ -547,9 +549,9 @@ class SshCommandFactoryTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         provider.create("demo").valueOrFailure("repository");
         TestChannelSession channel = channel(true);
-        AccessControl.Grant grant = new AccessControl.Grant("repository", List.of(
-                new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "demo"),
-                new AccessControl.GrantExpression(
+        Grant grant = new Grant("repository", List.of(
+                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "demo"),
+                new GrantExpression(
                         AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
         channel.getSession().setAttribute(SSH_AUTHENTICATED_USER,
                 new InternalUserImpl("operator", List.of(grant)));

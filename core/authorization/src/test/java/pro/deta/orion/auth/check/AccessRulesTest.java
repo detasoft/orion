@@ -8,6 +8,9 @@ import pro.deta.orion.schema.orion.v2.TeamId;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -46,7 +49,7 @@ public class AccessRulesTest {
     @Test
     void confinesOrganizationUsersEvenWithWildcardAndSystemGrants() {
         AccessControl acl = ACLUtil.generateDefaultAccessControl("unused");
-        SecurityContext scoped = organizationContext("root", acl.getGrants());
+        SecurityContext scoped = organizationContext("root", acl.grants());
         for (AccessRule<RepositoryResource> rule : List.of(RepositoryAccessRules.read(),
                 RepositoryAccessRules.write(), RepositoryAccessRules.create(), RepositoryAccessRules.force())) {
             assertThat(rule.evaluate(scoped, RepositoryResource.of("acme/team/repo")).allowed()).isTrue();
@@ -62,8 +65,8 @@ public class AccessRulesTest {
                 ApplicationShutdownResource.applicationShutdown()).allowed()).isFalse();
     }
 
-    private static SecurityContext organizationContext(String userId, List<AccessControl.Grant> grants) {
-        AccessControl.User user = new AccessControl.User(userId, null, null, null, List.of(), List.of(), grants);
+    private static SecurityContext organizationContext(String userId, List<Grant> grants) {
+        User user = new User(userId, null, null, null, List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
@@ -89,7 +92,7 @@ public class AccessRulesTest {
     @Test
     void defaultAclStillAllowsNestedRepositoriesAndBranches() {
         AccessControl acl = ACLUtil.generateDefaultAccessControl("unused-test-hash");
-        SecurityContext root = securityContext(new InternalUserImpl("root", acl.getGrants()));
+        SecurityContext root = securityContext(new InternalUserImpl("root", acl.grants()));
         assertThatCode(() -> requireRepositoryRead(root, "team/sub/api")).doesNotThrowAnyException();
         assertThatCode(() -> requireRepositoryWrite(root, "team/sub/api")).doesNotThrowAnyException();
         assertThatCode(() -> requireBranchFetch(root, "team/sub/api", "feature/nested"))
@@ -185,7 +188,7 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("repository create");
 
-        AccessControl.Grant createGrant = repositoryGrantDraft("project")
+        Grant createGrant = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
@@ -199,7 +202,7 @@ public class AccessRulesTest {
 
     @Test
     public void createAccessAllowsRepositoryPatternGrant() {
-        AccessControl.Grant createGrant = repositoryGrantDraft("team/*")
+        Grant createGrant = repositoryGrantDraft("team/*")
                 .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
@@ -210,14 +213,14 @@ public class AccessRulesTest {
 
     @Test
     public void writeAccessRequiresRepositoryWriteGrant() {
-        AccessControl.Grant repositoryGrant = grantDraft("repository-only")
+        Grant repositoryGrant = grantDraft("repository-only")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
                 .toAccessControl();
         SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
         assertThatThrownBy(() -> requireRepositoryWrite(reader, "project"))
                 .isInstanceOf(OrionSecurityException.class);
 
-        AccessControl.Grant writeGrant = grantDraft("write")
+        Grant writeGrant = grantDraft("write")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
@@ -231,7 +234,7 @@ public class AccessRulesTest {
 
     @Test
     public void forceAccessRequiresRepositoryForceGrant() {
-        AccessControl.Grant writeGrant = grantDraft("write")
+        Grant writeGrant = grantDraft("write")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
@@ -239,7 +242,7 @@ public class AccessRulesTest {
         assertThatThrownBy(() -> requireRepositoryForce(writer, "project"))
                 .isInstanceOf(OrionSecurityException.class);
 
-        AccessControl.Grant forceGrant = grantDraft("force")
+        Grant forceGrant = grantDraft("force")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.FORCE, TRUE_STRING)
@@ -259,7 +262,7 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("application shutdown");
 
-        AccessControl.Grant shutdownGrant = grantDraft("shutdown")
+        Grant shutdownGrant = grantDraft("shutdown")
                 .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING)
                 .toAccessControl();
         SecurityContext operator = securityContext(new InternalUserImpl("operator", List.of(shutdownGrant)));
@@ -275,7 +278,7 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("application admin");
 
-        AccessControl.Grant adminGrant = grantDraft("admin")
+        Grant adminGrant = grantDraft("admin")
                 .addKey(AccessControl.GrantKey.ADMIN, TRUE_STRING)
                 .toAccessControl();
         SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
@@ -413,7 +416,7 @@ public class AccessRulesTest {
 
     @Test
     void branchPushAllowsGrantedBranchAndDeniesOtherBranches() {
-        AccessControl.Grant grant = repositoryGrantDraft("project")
+        Grant grant = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "master")
                 .toAccessControl();
@@ -427,7 +430,7 @@ public class AccessRulesTest {
 
     @Test
     void readOnlyBranchGrantDoesNotExpandPushBranches() {
-        AccessControl.Grant write = repositoryGrantDraft("project")
+        Grant write = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "dev")
                 .toAccessControl();
@@ -442,7 +445,7 @@ public class AccessRulesTest {
 
     @Test
     void readOnlyWildcardDoesNotExpandPushBranches() {
-        AccessControl.Grant write = repositoryGrantDraft("team/**")
+        Grant write = repositoryGrantDraft("team/**")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "dev")
                 .toAccessControl();
@@ -457,7 +460,7 @@ public class AccessRulesTest {
 
     @Test
     void readOnlyBranchRestrictionDoesNotNarrowUnrestrictedWriteGrant() {
-        AccessControl.Grant write = repositoryGrantDraft("project")
+        Grant write = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
@@ -468,10 +471,10 @@ public class AccessRulesTest {
 
     @Test
     void writeBranchRestrictionsRetainTheirExistingCombinationPolicy() {
-        AccessControl.Grant unrestricted = repositoryGrantDraft("project")
+        Grant unrestricted = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
-        AccessControl.Grant restricted = repositoryGrantDraft("project")
+        Grant restricted = repositoryGrantDraft("project")
                 .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "dev")
                 .toAccessControl();
@@ -525,11 +528,11 @@ public class AccessRulesTest {
         accessEnforcer().require(securityContext, ClientConnectionResource.of(remoteAddress), ConnectionAccessRules.localOnly());
     }
 
-    private static AccessControl.Grant repositoryGrant(String repositoryName) {
+    private static Grant repositoryGrant(String repositoryName) {
         return repositoryGrantDraft(repositoryName).toAccessControl();
     }
 
-    private static AccessControl.Grant repositoryGrant(String repositoryName, String branchName) {
+    private static Grant repositoryGrant(String repositoryName, String branchName) {
         return repositoryGrantDraft(repositoryName)
                 .addKey(AccessControl.GrantKey.BRANCH, branchName)
                 .toAccessControl();
@@ -546,19 +549,19 @@ public class AccessRulesTest {
 
     private static final class GrantFixture {
         private final String id;
-        private final java.util.List<AccessControl.GrantExpression> info = new java.util.ArrayList<>();
+        private final java.util.List<GrantExpression> info = new java.util.ArrayList<>();
 
         private GrantFixture(String id) {
             this.id = id;
         }
 
         GrantFixture addKey(AccessControl.GrantKey key, String value) {
-            info.add(new AccessControl.GrantExpression(key, value));
+            info.add(new GrantExpression(key, value));
             return this;
         }
 
-        AccessControl.Grant toAccessControl() {
-            return new AccessControl.Grant(id, info);
+        Grant toAccessControl() {
+            return new Grant(id, info);
         }
     }
 

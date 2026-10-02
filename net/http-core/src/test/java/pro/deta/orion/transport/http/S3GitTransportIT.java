@@ -23,6 +23,8 @@ import pro.deta.orion.git.parser.v2.index.IndexedObject;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
 import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
@@ -114,10 +116,10 @@ class S3GitTransportIT {
             connector.setHost("127.0.0.1");
             connector.setPort(0);
             server.addConnector(connector);
-            AccessControl.Grant grant = new AccessControl.Grant("test", List.of(
-                    new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
-                    new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
-                    new AccessControl.GrantExpression(AccessControl.GrantKey.CREATE, "true")));
+            Grant grant = new Grant("test", List.of(
+                    new GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
+                    new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
+                    new GrantExpression(AccessControl.GrantKey.CREATE, "true")));
             SecurityContext actor = SecurityContext.createContext()
                     .withUserIdentity(new InternalUserImpl("tester", List.of(grant)));
             OrionGitRoute route = new OrionGitRoute(new DefaultGitNativeRepositoryService(provider),

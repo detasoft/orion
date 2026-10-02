@@ -1,6 +1,6 @@
 package pro.deta.orion.auth;
 
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
@@ -18,7 +18,7 @@ public interface UserIdentity {
 
     Optional<OrganizationId> getOrganizationId();
 
-    List<AccessControl.Grant> getGrants();
+    List<Grant> getGrants();
 
     default Optional<OrionDocument.Organization> currentOrganization() {
         return Optional.empty();

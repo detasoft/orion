@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git.ssh;
 
+import pro.deta.orion.schema.acl.User;
 import jakarta.inject.Inject;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -133,10 +134,10 @@ public class SshCommandFactory implements CommandFactory {
                         edit, pending.expectedGeneration(), pending.publicKeys());
                 if (result instanceof SshKeyEnrollmentResult.Success) {
                     String email = "root@orion.pro";
-                    for (pro.deta.orion.schema.acl.AccessControl.User user
-                            : edit.document().system().accessControl().getUsers()) {
-                        if (user.getId().equalsIgnoreCase("root")) {
-                            email = java.util.Objects.requireNonNullElse(user.getEmail(), email);
+                    for (pro.deta.orion.schema.acl.User user
+                            : edit.document().system().accessControl().users()) {
+                        if (user.id().equalsIgnoreCase("root")) {
+                            email = java.util.Objects.requireNonNullElse(user.email(), email);
                             break;
                         }
                     }

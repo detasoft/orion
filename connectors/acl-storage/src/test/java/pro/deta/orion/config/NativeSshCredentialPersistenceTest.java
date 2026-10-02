@@ -19,6 +19,7 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -43,7 +44,7 @@ class NativeSshCredentialPersistenceTest {
                 "configuration", "local:acl", Optional.of("acl"), "refs/heads/main",
                 "users.xml", Optional.empty(), false);
         OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(source, provider);
-        AccessControl.User alice = new AccessControl.User("alice", null, null, "alice@example.test",
+        User alice = new User("alice", null, null, "alice@example.test",
                 List.of(), List.of(), List.of());
         AccessControl primary = new AccessControl(List.of(alice), List.of(), List.of());
         ByteArrayOutputStream users = new ByteArrayOutputStream();

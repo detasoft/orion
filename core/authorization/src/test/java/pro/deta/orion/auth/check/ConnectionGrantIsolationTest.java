@@ -8,6 +8,9 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
@@ -19,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConnectionGrantIsolationTest {
     @Test
     void connectionActionsNeverAuthorizeRepositoryOrSystemAdministrationEvenWithMixedSelectors() {
-        AccessControl.Grant grant = new AccessControl.Grant("connection", List.of(
+        Grant grant = new Grant("connection", List.of(
                 expression(AccessControl.GrantKey.CONNECTION, "*"),
                 expression(AccessControl.GrantKey.REPOSITORY, "**"),
                 expression(AccessControl.GrantKey.CREATE, "true"),
@@ -37,7 +40,7 @@ class ConnectionGrantIsolationTest {
         assertThat(pro.deta.orion.auth.check.rule.BranchAccessRules.push().evaluate(system,
                 new pro.deta.orion.auth.check.resource.BranchResource(RepositoryResource.of("acme/team/new"),
                         "refs/heads/main")).allowed()).isFalse();
-        AccessControl.User user = new AccessControl.User("alice", "", "", "", List.of(), List.of(), List.of(grant));
+        User user = new User("alice", "", "", "", List.of(), List.of(), List.of(grant));
         OrionDocument.Organization organization = new OrionDocument.Organization(new OrganizationId("acme"), "",
                 List.of(user), List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("team"), "",
                 List.of(), List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
@@ -49,7 +52,7 @@ class ConnectionGrantIsolationTest {
                 RepositoryResource.of("acme/team/new")).allowed()).isFalse();
     }
 
-    private static AccessControl.GrantExpression expression(AccessControl.GrantKey key, String value) {
-        return new AccessControl.GrantExpression(key, value);
+    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+        return new GrantExpression(key, value);
     }
 }

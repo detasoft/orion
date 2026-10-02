@@ -1,6 +1,8 @@
 package pro.deta.orion.auth.check;
 
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.UserId;
@@ -29,7 +31,7 @@ public final class ScopedAccess {
     }
 
     public static boolean allows(OrionDocument.Organization organization, UserId userId,
-            ConfigurationScope target, Predicate<List<AccessControl.GrantExpression>> matches) {
+            ConfigurationScope target, Predicate<List<GrantExpression>> matches) {
         boolean allowed = false;
         for (AssignedGrant grant : assignedGrants(organization, userId, target, false)) {
             if (matches.test(grant.expressions())) {
@@ -40,7 +42,7 @@ public final class ScopedAccess {
         return allowed;
     }
 
-    public record AssignedGrant(ScopedGrant.Effect effect, List<AccessControl.GrantExpression> expressions) {
+    public record AssignedGrant(ScopedGrant.Effect effect, List<GrantExpression> expressions) {
         public AssignedGrant {
             expressions = List.copyOf(expressions);
         }
@@ -49,9 +51,9 @@ public final class ScopedAccess {
     public static List<AssignedGrant> assignedGrants(OrionDocument.Organization organization, UserId userId,
             ConfigurationScope target, boolean allowMissingRepository) {
         if (!organization.id().equals(target.organizationId())) return List.of();
-        AccessControl.User user = null;
-        for (AccessControl.User candidate : organization.users()) {
-            if (candidate.getId().equals(userId.value())) user = candidate;
+        User user = null;
+        for (User candidate : organization.users()) {
+            if (candidate.id().equals(userId.value())) user = candidate;
         }
         if (user == null) return List.of();
 
@@ -80,11 +82,11 @@ public final class ScopedAccess {
         }
 
         List<AssignedGrant> assigned = new ArrayList<>();
-        for (AccessControl.Grant direct : user.getGrants()) {
-            assigned.add(new AssignedGrant(ScopedGrant.Effect.ALLOW, direct.getInfo()));
+        for (Grant direct : user.grants()) {
+            assigned.add(new AssignedGrant(ScopedGrant.Effect.ALLOW, direct.info()));
         }
         ArrayDeque<RoleAddress> pending = new ArrayDeque<>();
-        for (String assignment : user.getRoles()) {
+        for (String assignment : user.roles()) {
             RoleAddress address = RoleAddress.parse(assignment);
             if (address.scope().isSameOrAncestorOf(target)) pending.add(address);
         }

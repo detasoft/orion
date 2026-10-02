@@ -45,6 +45,7 @@ import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
@@ -943,7 +944,7 @@ class BootstrapContextTest {
         configuration.getBootstrap().getKeyMaterial().setLocation("git+" + materialUpstream.bare().toUri());
         AdoptionStorage storage = new AdoptionStorage(xml());
         OrionDesiredState.Snapshot approved = approved(storage);
-        AccessControl changedAcl = new AccessControl(List.of(new AccessControl.User(
+        AccessControl changedAcl = new AccessControl(List.of(new User(
                 "concurrent-user", "", "", "", List.of(), List.of(), List.of())), List.of(), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(changedAcl), output);
@@ -1224,7 +1225,7 @@ class BootstrapContextTest {
         NativeGitRepository repository = backend.find("orion").valueOrFailure("configuration repository");
 
         try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
-            AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+            AccessControl acl = new AccessControl(List.of(new User(
                     "later-user", null, null, "later@example.test", List.of(), List.of(), List.of())),
                     List.of(), List.of());
             ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -1291,7 +1292,7 @@ class BootstrapContextTest {
                         unrelated.alias(), () -> first, component.configurationSecrets()).isFailure()).isFalse();
                 assertThat(source.refs().get("refs/heads/main")).isEqualTo(invalidB);
 
-                AccessControl acl = new AccessControl(List.of(new AccessControl.User(
+                AccessControl acl = new AccessControl(List.of(new User(
                         "later-user", null, null, "later@example.test", List.of(), List.of(), List.of())),
                         List.of(), List.of());
                 ByteArrayOutputStream output = new ByteArrayOutputStream();

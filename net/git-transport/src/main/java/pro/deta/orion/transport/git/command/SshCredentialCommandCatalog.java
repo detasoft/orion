@@ -9,7 +9,7 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialFailureCode;
@@ -154,9 +154,9 @@ public final class SshCredentialCommandCatalog {
             SshCredentialUpdateResult result = mutation.apply(edit);
             if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
                 String email = "";
-                for (AccessControl.User user : edit.document().system().accessControl().getUsers()) {
-                    if (user.getId().equalsIgnoreCase(userId)) {
-                        email = Objects.requireNonNullElse(user.getEmail(), "");
+                for (User user : edit.document().system().accessControl().users()) {
+                    if (user.id().equalsIgnoreCase(userId)) {
+                        email = Objects.requireNonNullElse(user.email(), "");
                         break;
                     }
                 }

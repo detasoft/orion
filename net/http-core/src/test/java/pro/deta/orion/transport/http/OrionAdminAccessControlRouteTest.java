@@ -16,6 +16,9 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -38,7 +41,7 @@ class OrionAdminAccessControlRouteTest {
     @ParameterizedTest
     @ValueSource(strings = {"alice", "José-東京-Ирина"})
     void exportsOriginalXmlBytesAndRejectsUploads(String userId) throws Exception {
-        AccessControl.User user = new AccessControl.User(userId, null, null, "user@example.test",
+        User user = new User(userId, null, null, "user@example.test",
                 List.of(), List.of(), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         AccessControl acl = new AccessControl(List.of(user), List.of(), List.of());
@@ -52,8 +55,8 @@ class OrionAdminAccessControlRouteTest {
                     }
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });
-        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
-                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+        Grant grant = new Grant("admin", List.of(
+                new GrantExpression(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
@@ -90,7 +93,7 @@ class OrionAdminAccessControlRouteTest {
             assertThat(exported.headers().firstValue("ETag")).contains("\"revision-1\"");
             assertThat(exported.body()).isEqualTo(content);
             assertThat(OrionXml.read(new ByteArrayInputStream(exported.body()))
-                    .system().accessControl().getUsers().getFirst().getId()).isEqualTo(userId);
+                    .system().accessControl().users().getFirst().id()).isEqualTo(userId);
 
             HttpRequest upload = request.header("If-Match", exported.headers().firstValue("ETag").orElseThrow())
                     .header("Content-Type", "application/xml")

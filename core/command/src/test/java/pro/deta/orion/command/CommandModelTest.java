@@ -4,7 +4,7 @@ import pro.deta.orion.schema.orion.v2.OrganizationId;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -198,7 +198,7 @@ class CommandModelTest {
             }
 
             @Override
-            public List<AccessControl.Grant> getGrants() {
+            public List<Grant> getGrants() {
                 return List.of();
             }
         };

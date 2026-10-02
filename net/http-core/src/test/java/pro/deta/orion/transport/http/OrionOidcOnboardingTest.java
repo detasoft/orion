@@ -30,6 +30,9 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
@@ -321,12 +324,12 @@ class OrionOidcOnboardingTest {
             f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
-                    List<AccessControl.User> users = new ArrayList<>();
-                    for (AccessControl.User user : org.users()) {
+                    List<User> users = new ArrayList<>();
+                    for (User user : org.users()) {
                         if (!removed.equals("user")) {
-                            users.add(new AccessControl.User(user.getId(), user.getFirst(), user.getLast(),
-                                    user.getEmail(), removed.equals("binding") ? List.of() : user.getCredentials(),
-                                    user.getRoles(), user.getGrants()));
+                            users.add(new User(user.id(), user.first(), user.last(),
+                                    user.email(), removed.equals("binding") ? List.of() : user.credentials(),
+                                    user.roles(), user.grants()));
                         }
                     }
                     organizations.add(new OrionDocument.Organization(org.id(), org.displayName(), users,
@@ -378,7 +381,7 @@ class OrionOidcOnboardingTest {
                     .isEqualTo(403);
             assertThat(f.accounts.organization(new OrganizationId("default")).users()).isEmpty();
             assertThat(f.accounts.organization(new OrganizationId("acme")).users()).singleElement()
-                    .satisfies(user -> assertThat(user.getFirst()).isEqualTo("Alice"));
+                    .satisfies(user -> assertThat(user.first()).isEqualTo("Alice"));
             assertThat(f.accounts.organization(new OrganizationId("acme")).invitations()).isEmpty();
             assertThat(f.post("complete", Map.of("ticket", ticket, "first", "Replay"), login.cookie).status)
                     .isEqualTo(400);
@@ -603,8 +606,8 @@ class OrionOidcOnboardingTest {
         final SSLSocketFactory originalTls = HttpsURLConnection.getDefaultSSLSocketFactory();
         final RSAKey signingKey = new RSAKeyGenerator(2048).keyID("provider-key").generate();
         final SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
-                List.of(new AccessControl.Grant("admin", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
+                List.of(new Grant("admin", List.of(
+                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
         OrionHttpRouteServlet servlet;
         OrionAuthorizationFilter filter;
         final Path sessions = Files.createTempDirectory("orion-oidc-sessions-");

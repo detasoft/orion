@@ -18,6 +18,10 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -121,10 +125,10 @@ class RuntimeHttpGitRouteIT {
             assertRepositoryRef(repositoryRoot, "other/team/repo", BRANCH, otherCommit);
 
             OrionDocument.Organization acme = document.organizations().getFirst();
-            AccessControl.User assigned = acme.users().getFirst();
-            AccessControl.User revoked = new AccessControl.User(assigned.getId(), assigned.getFirst(),
-                    assigned.getLast(), assigned.getEmail(), assigned.getCredentials(), List.of(),
-                    assigned.getGrants());
+            User assigned = acme.users().getFirst();
+            User revoked = new User(assigned.id(), assigned.first(),
+                    assigned.last(), assigned.email(), assigned.credentials(), List.of(),
+                    assigned.grants());
             OrionDocument updated = new OrionDocument(document.system(), List.of(new OrionDocument.Organization(
                     acme.id(), acme.displayName(), List.of(revoked), acme.grants(), acme.roles(), acme.teams(),
                     acme.secrets(), acme.oidcProviders(), acme.invitations(), acme.connections()), document.organizations().get(1)));
@@ -153,12 +157,12 @@ class RuntimeHttpGitRouteIT {
 
     private static OrionDocument.Organization gitOrganization(String id) {
         String issuer = "https://login.example.test";
-        AccessControl.User user = new AccessControl.User("alice", null, null, null,
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+        User user = new User("alice", null, null, null,
+                List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
                 List.of(id + "/developer"), List.of());
         ScopedGrant grant = new ScopedGrant(new GrantId("write"), ScopedGrant.Effect.ALLOW, List.of(
-                new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
-                new AccessControl.GrantExpression(AccessControl.GrantKey.CREATE, "true")));
+                new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
+                new GrantExpression(AccessControl.GrantKey.CREATE, "true")));
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(),
                 List.of(GrantAddress.parse(id + "/write")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
@@ -483,32 +487,32 @@ class RuntimeHttpGitRouteIT {
             boolean force) {
         AccessControl base = ACLUtil.generateDefaultAccessControl(
                 TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
-        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
-        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
-        expressions.add(new AccessControl.GrantExpression(AccessControl.GrantKey.BRANCH, branch));
+        List<GrantExpression> expressions = new ArrayList<>();
+        expressions.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new GrantExpression(AccessControl.GrantKey.BRANCH, branch));
         if (read) {
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
         }
         if (write) {
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         }
         if (create) {
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
         if (force) {
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
         }
-        AccessControl.Grant grant = new AccessControl.Grant("REPOSITORY_" + repositoryName, expressions);
-        AccessControl.User user = new AccessControl.User(USERNAME, null, null, USERNAME + "@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+        Grant grant = new Grant("REPOSITORY_" + repositoryName, expressions);
+        User user = new User(USERNAME, null, null, USERNAME + "@example.test",
+                List.of(new Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
                 List.of(), List.of(grant));
-        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
+        List<User> users = new ArrayList<>(base.users());
         users.add(user);
-        return new AccessControl(users, base.getRoles(), base.getGrants());
+        return new AccessControl(users, base.roles(), base.grants());
     }
 
     private static byte[] serialize(AccessControl accessControl) throws Exception {

@@ -14,6 +14,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessTokenIdentity;
@@ -254,10 +256,10 @@ class OrionAuthorizationFilterTest {
                 return TokenAuthenticationResult.failure("authentication failed");
             }
 
-            List<AccessControl.Grant> grants = new ArrayList<>();
+            List<Grant> grants = new ArrayList<>();
             if (adminGrant) {
-                grants.add(new AccessControl.Grant("admin", List.of(
-                        new AccessControl.GrantExpression(
+                grants.add(new Grant("admin", List.of(
+                        new GrantExpression(
                                 AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING))));
             }
             return TokenAuthenticationResult.success(

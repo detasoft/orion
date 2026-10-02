@@ -1,6 +1,8 @@
 package pro.deta.orion.auth.check.rule;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.GrantMatcher;
 import pro.deta.orion.auth.check.AccessDecision;
@@ -35,13 +37,13 @@ final class GrantAccess {
         return !matchingGrants(userIdentity, matchers).isEmpty();
     }
 
-    static List<AccessControl.Grant> matchingGrants(UserIdentity userIdentity, GrantMatcher... matchers) {
+    static List<Grant> matchingGrants(UserIdentity userIdentity, GrantMatcher... matchers) {
         if (userIdentity == null) {
             return List.of();
         }
-        java.util.ArrayList<AccessControl.Grant> grants = new java.util.ArrayList<>();
-        for (AccessControl.Grant grant : userIdentity.getGrants()) {
-            if (!hasKey(grant.getInfo(), AccessControl.GrantKey.CONNECTION)) grants.add(grant);
+        java.util.ArrayList<Grant> grants = new java.util.ArrayList<>();
+        for (Grant grant : userIdentity.getGrants()) {
+            if (!hasKey(grant.info(), AccessControl.GrantKey.CONNECTION)) grants.add(grant);
         }
         return filterGrants(grants, matchers);
     }
@@ -74,7 +76,7 @@ final class GrantAccess {
         }
         boolean allowed = false;
         for (ScopedAccess.AssignedGrant grant : grants) {
-            List<AccessControl.GrantExpression> expressions = grant.expressions();
+            List<GrantExpression> expressions = grant.expressions();
             if (!matchesRepositoryAction(expressions, repository.repositoryName(), action)) continue;
             boolean branchRestricted = hasKey(expressions, AccessControl.GrantKey.BRANCH);
             if (grant.effect() == ScopedGrant.Effect.DENY) {
@@ -89,7 +91,7 @@ final class GrantAccess {
                 : AccessDecision.deny("missing scoped repository grant");
     }
 
-    private static boolean matchesRepositoryAction(List<AccessControl.GrantExpression> expressions,
+    private static boolean matchesRepositoryAction(List<GrantExpression> expressions,
             String repositoryName, AccessControl.GrantKey action) {
         if (hasKey(expressions, AccessControl.GrantKey.CONNECTION)
                 || hasKey(expressions, AccessControl.GrantKey.NETWORK_SOURCE)
@@ -107,16 +109,16 @@ final class GrantAccess {
         return hasKey(expressions, action);
     }
 
-    private static boolean matchesBranch(List<AccessControl.GrantExpression> expressions, String branch) {
+    private static boolean matchesBranch(List<GrantExpression> expressions, String branch) {
         return GrantMatcher.of(AccessControl.GrantKey.BRANCH,
                 value -> "*".equals(value) || branch.equals(value)).matchesAny(expressions);
     }
 
-    private static boolean hasKey(List<AccessControl.GrantExpression> expressions, AccessControl.GrantKey key) {
+    private static boolean hasKey(List<GrantExpression> expressions, AccessControl.GrantKey key) {
         return GrantMatcher.of(key).matchesAny(expressions);
     }
 
-    static List<AccessControl.Grant> branchRestrictedRepositoryGrants(UserIdentity userIdentity, String repositoryName) {
+    static List<Grant> branchRestrictedRepositoryGrants(UserIdentity userIdentity, String repositoryName) {
         return matchingGrants(
                 userIdentity,
                 repositoryGrant(repositoryName),

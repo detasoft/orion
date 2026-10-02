@@ -29,6 +29,9 @@ import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.terminal.TerminalCommandRenderer;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
@@ -52,8 +55,8 @@ class ReadOnlyDomainCommandCatalogTest {
                     new pro.deta.orion.command.CommandRowQuery());
 
     private static OrionDocument organizationDocument() {
-        AccessControl.User user = new AccessControl.User("operator", null, null, null, List.of(), List.of(),
-                ACLUtil.generateDefaultAccessControl("unused").getGrants());
+        User user = new User("operator", null, null, null, List.of(), List.of(),
+                ACLUtil.generateDefaultAccessControl("unused").grants());
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
@@ -418,7 +421,7 @@ class ReadOnlyDomainCommandCatalogTest {
                 Map.of());
     }
 
-    private static UserIdentity user(String id, AccessControl.Grant... grants) {
+    private static UserIdentity user(String id, Grant... grants) {
         return new InternalUserImpl(id, List.of(grants));
     }
 
@@ -426,12 +429,12 @@ class ReadOnlyDomainCommandCatalogTest {
         return user("admin", grant(AccessControl.GrantKey.ADMIN, TRUE_STRING));
     }
 
-    private static AccessControl.Grant repositoryGrant(String repository) {
+    private static Grant repositoryGrant(String repository) {
         return grant(AccessControl.GrantKey.REPOSITORY, repository);
     }
 
-    private static AccessControl.Grant grant(AccessControl.GrantKey key, String value) {
-        return new AccessControl.Grant("test", List.of(new AccessControl.GrantExpression(key, value)));
+    private static Grant grant(AccessControl.GrantKey key, String value) {
+        return new Grant("test", List.of(new GrantExpression(key, value)));
     }
 
     private static OperatorDomainViews.RepositoryView repository(

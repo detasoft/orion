@@ -11,6 +11,8 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
@@ -86,10 +88,10 @@ class OrionAdminProxiesRouteTest {
     void rejectsAnonymousReadOnlyAndRepositoryScopedUsersBeforeReadingConfiguration() throws Exception {
         for (SecurityContext context : List.of(SecurityContext.createContext(), context(),
                 context(grant(AccessControl.GrantKey.READ)),
-                context(new AccessControl.Grant("repository-access", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/repository"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ_WRITE, "true")))))) {
+                context(new Grant("repository-access", List.of(
+                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/repository"),
+                        new GrantExpression(AccessControl.GrantKey.READ, "true"),
+                        new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true")))))) {
             var response = get(context);
             assertThat(response.status).isEqualTo(403);
             assertThat(response.body.toString()).isEmpty();
@@ -114,11 +116,11 @@ class OrionAdminProxiesRouteTest {
         return response;
     }
 
-    private static AccessControl.Grant grant(AccessControl.GrantKey key) {
-        return new AccessControl.Grant("access", List.of(new AccessControl.GrantExpression(key, "true")));
+    private static Grant grant(AccessControl.GrantKey key) {
+        return new Grant("access", List.of(new GrantExpression(key, "true")));
     }
 
-    private static SecurityContext context(AccessControl.Grant... grants) {
+    private static SecurityContext context(Grant... grants) {
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("operator", List.of(grants)));
     }
 

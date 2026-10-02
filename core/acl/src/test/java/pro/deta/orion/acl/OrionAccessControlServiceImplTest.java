@@ -50,6 +50,11 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -234,17 +239,17 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOfSatisfying(SshCredentialListResult.Failure.class,
                             failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.USER_NOT_FOUND));
             fixture.createOrUpdateUser(userUpdate("bob", "new-password-hash"));
-            assertThat(parse(fixture.storage.snapshot.content()).getUsers())
-                    .extracting(AccessControl.User::getId).containsExactlyInAnyOrder("alice", "bob");
+            assertThat(parse(fixture.storage.snapshot.content()).users())
+                    .extracting(User::id).containsExactlyInAnyOrder("alice", "bob");
         }
     }
 
     @Test
     void connectionSelectorNeverGrantsAdministrationInSystemOrOrganizationScope() {
-        AccessControl.Grant mixed = new AccessControl.Grant("mixed", List.of(
-                new AccessControl.GrantExpression(AccessControl.GrantKey.CONNECTION, "*"),
-                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
-        AccessControl.User actor = new AccessControl.User("alice", "", "", "", List.of(), List.of(), List.of(mixed));
+        Grant mixed = new Grant("mixed", List.of(
+                new GrantExpression(AccessControl.GrantKey.CONNECTION, "*"),
+                new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+        User actor = new User("alice", "", "", "", List.of(), List.of(), List.of(mixed));
         OrionDocument.Organization org = new OrionDocument.Organization(new OrganizationId("acme"), "",
                 List.of(actor), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
@@ -273,8 +278,8 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertThat(fixture.service.authenticateUser("alice", "second-password".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Success.class);
-            assertThat(parse(fixture.storage.snapshot.content()).getUsers())
-                    .extracting(AccessControl.User::getId).containsExactly("alice");
+            assertThat(parse(fixture.storage.snapshot.content()).users())
+                    .extracting(User::id).containsExactly("alice");
         }
     }
 
@@ -326,8 +331,8 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrganizationId organization = new OrganizationId("acme");
         String issuer = "https://login.example.test";
-        AccessControl.User assigned = new AccessControl.User("alice", null, null, null,
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+        User assigned = new User("alice", null, null, null,
+                List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
                 List.of("acme/reader"), List.of());
         desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null,
@@ -346,8 +351,8 @@ class OrionAccessControlServiceImplTest {
                 ((TokenAuthenticationResult.Success) authenticated).userIdentity());
         RepositoryResource repository = RepositoryResource.of("acme/team/repo");
         assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isTrue();
-        AccessControl.User revoked = new AccessControl.User("alice", null, null, null,
-                assigned.getCredentials(), List.of(), List.of());
+        User revoked = new User("alice", null, null, null,
+                assigned.credentials(), List.of(), List.of());
         desired.publish(organizationTokenDocument(List.of(revoked)), Optional.empty());
         assertThat(RepositoryAccessRules.read().evaluate(context, repository).allowed()).isFalse();
         desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
@@ -357,9 +362,9 @@ class OrionAccessControlServiceImplTest {
         assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
     }
 
-    private static OrionDocument organizationTokenDocument(List<AccessControl.User> users) {
+    private static OrionDocument organizationTokenDocument(List<User> users) {
         ScopedGrant grant = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
-                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true")));
+                List.of(new GrantExpression(AccessControl.GrantKey.READ, "true")));
         ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(),
                 List.of(GrantAddress.parse("acme/read")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
@@ -411,7 +416,7 @@ class OrionAccessControlServiceImplTest {
         AclFixture.Grant grant = new AclFixture.Grant();
         grant.setId("operator-rights");
         grant.addKey(AccessControl.GrantKey.READ, "team/*");
-        AccessControl.Grant originalGrant = grant.toAccessControl();
+        Grant originalGrant = grant.toAccessControl();
         if (referenced) {
             role.addGrantReference(grant.getId());
             primary.getGrants().add(grant);
@@ -765,8 +770,8 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(SshCredentialUpdateResult.Success.class);
 
             assertThat(credentials(fixture.storage.snapshot, "root"))
-                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
-                    .extracting(AccessControl.Credential::getKeyId)
+                    .filteredOn(credential -> credential.type() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                    .extracting(Credential::keyId)
                     .containsOnly("root-auth-generation:generation-one");
         }
     }
@@ -792,9 +797,9 @@ class OrionAccessControlServiceImplTest {
                     SshCredentialUpdateResult.Success.class,
                     success -> assertThat(success.credentials()).containsExactly(descriptor(KEY_TWO.getPublic())));
             assertThat(credentials(fixture.storage.snapshot, "alice"))
-                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.ARGON2)
+                    .filteredOn(credential -> credential.type() == AccessControl.CredentialType.ARGON2)
                     .singleElement()
-                    .extracting(AccessControl.Credential::getValue)
+                    .extracting(Credential::value)
                     .isEqualTo("password-hash");
             assertThat(sshValues(fixture.storage.snapshot, "bob"))
                     .containsExactly(key(KEY_ONE.getPublic()));
@@ -885,7 +890,7 @@ class OrionAccessControlServiceImplTest {
                     descriptor(KEY_ONE.getPublic()).fingerprint(),
                     false)).isInstanceOf(SshCredentialUpdateResult.Success.class);
             assertThat(credentials(fixture.storage.snapshot, "root"))
-                    .extracting(AccessControl.Credential::getKeyId)
+                    .extracting(Credential::keyId)
                     .containsOnly("root-auth-generation:" + generation);
 
             assertThat(fixture.removeSshCredential(
@@ -909,7 +914,7 @@ class OrionAccessControlServiceImplTest {
             assertThat(sshValues(fixture.storage.snapshot, "root")).isEmpty();
             assertThat(credentials(fixture.storage.snapshot, "root"))
                     .singleElement()
-                    .extracting(AccessControl.Credential::getKeyId)
+                    .extracting(Credential::keyId)
                     .asString()
                     .startsWith("root-auth-locked:");
         }
@@ -972,11 +977,11 @@ class OrionAccessControlServiceImplTest {
         try (ServiceFixture fixture = fixture(primary)) {
             fixture.createOrUpdateUser(userUpdate("alice", "new-hash"));
 
-            assertThat(parse(fixture.storage.snapshot.content()).getUsers())
-                    .extracting(AccessControl.User::getId).containsExactlyInAnyOrder("root", "alice");
+            assertThat(parse(fixture.storage.snapshot.content()).users())
+                    .extracting(User::id).containsExactlyInAnyOrder("root", "alice");
             assertThat(credentials(fixture.storage.snapshot, "alice"))
                     .singleElement()
-                    .extracting(AccessControl.Credential::getValue)
+                    .extracting(Credential::value)
                     .isEqualTo("new-hash");
         }
     }
@@ -1011,13 +1016,13 @@ class OrionAccessControlServiceImplTest {
             adminUpdate.get();
             assertThat(sshValues(fixture.storage.snapshot, "root")).isEmpty();
             assertThat(credentials(fixture.storage.snapshot, "root"))
-                    .extracting(AccessControl.Credential::getKeyId)
+                    .extracting(Credential::keyId)
                     .singleElement()
                     .asString()
                     .startsWith("root-auth-locked:");
             assertThat(credentials(fixture.storage.snapshot, "alice"))
                     .singleElement()
-                    .extracting(AccessControl.Credential::getValue)
+                    .extracting(Credential::value)
                     .isEqualTo("new-hash");
         }
     }
@@ -1034,7 +1039,7 @@ class OrionAccessControlServiceImplTest {
                 primary,
                 testServerIdentity(List.of(KEY_THREE.getPublic())))) {
             assertThat(credentials(fixture.storage.snapshot, "alice"))
-                    .singleElement().extracting(AccessControl.Credential::getValue).isEqualTo("alice-hash");
+                    .singleElement().extracting(Credential::value).isEqualTo("alice-hash");
             assertThat(fixture.service.listSshCredentials("root"))
                     .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
                             assertThat(success.credentials()).containsExactlyInAnyOrder(
@@ -1097,7 +1102,7 @@ class OrionAccessControlServiceImplTest {
             assertThat(storage.saveCount).isEqualTo(1);
             assertThat(desired.current().revision()).contains("version-two");
             assertThat(credentials(storage.snapshot, "alice"))
-                    .singleElement().extracting(AccessControl.Credential::getValue).isEqualTo("alice-hash");
+                    .singleElement().extracting(Credential::value).isEqualTo("alice-hash");
             assertThat(service.listSshCredentials("root"))
                     .isInstanceOfSatisfying(SshCredentialListResult.Success.class, success ->
                             assertThat(success.credentials()).contains(descriptor(KEY_THREE.getPublic())));
@@ -1145,7 +1150,7 @@ class OrionAccessControlServiceImplTest {
             OrionDocument created = parseDocument(persisted.get().content());
             assertThat(created.organizations()).extracting(org -> org.id().value()).containsExactly("default");
             assertThat(created.organizations().getFirst().users()).isEmpty();
-            assertThat(created.system().accessControl().getUsers()).extracting(AccessControl.User::getId)
+            assertThat(created.system().accessControl().users()).extracting(User::id)
                     .contains("root");
             service.onStop();
             byte[] beforeRestart = persisted.get().content();
@@ -1230,10 +1235,10 @@ class OrionAccessControlServiceImplTest {
                     List.of(new AccessControlRepositoryGrantUpdate("project", false, true, false, false, "dev"))));
 
             AccessControl persisted = parse(fixture.storage.snapshot.content());
-            AccessControl.User alice = persisted.getUsers().stream()
-                    .filter(user -> user.getId().equals("alice")).findFirst().orElseThrow();
-            assertThat(alice.getGrants().getFirst().getInfo())
-                    .extracting(AccessControl.GrantExpression::getKey)
+            User alice = persisted.users().stream()
+                    .filter(user -> user.id().equals("alice")).findFirst().orElseThrow();
+            assertThat(alice.grants().getFirst().info())
+                    .extracting(GrantExpression::key)
                     .contains(AccessControl.GrantKey.READ_WRITE);
         }
     }
@@ -1304,11 +1309,11 @@ class OrionAccessControlServiceImplTest {
         List<Grant> getGrants() { return grants; }
 
         AccessControl toAccessControl() {
-            List<AccessControl.User> immutableUsers = new ArrayList<>();
+            List<pro.deta.orion.schema.acl.User> immutableUsers = new ArrayList<>();
             for (User user : users) immutableUsers.add(user.toAccessControl());
-            List<AccessControl.Role> immutableRoles = new ArrayList<>();
+            List<pro.deta.orion.schema.acl.Role> immutableRoles = new ArrayList<>();
             for (Role role : roles) immutableRoles.add(role.toAccessControl());
-            List<AccessControl.Grant> immutableGrants = new ArrayList<>();
+            List<pro.deta.orion.schema.acl.Grant> immutableGrants = new ArrayList<>();
             for (Grant grant : grants) immutableGrants.add(grant.toAccessControl());
             return new AccessControl(immutableUsers, immutableRoles, immutableGrants);
         }
@@ -1316,7 +1321,7 @@ class OrionAccessControlServiceImplTest {
         private static final class User {
             private String id;
             private String email;
-            private final List<AccessControl.Credential> credentials = new ArrayList<>();
+            private final List<Credential> credentials = new ArrayList<>();
             private final List<String> roles = new ArrayList<>();
 
             void setId(String id) { this.id = id; }
@@ -1328,7 +1333,7 @@ class OrionAccessControlServiceImplTest {
             }
 
             User addCredential(AccessControl.CredentialType type, String keyId, String value) {
-                credentials.add(new AccessControl.Credential(type, keyId, value));
+                credentials.add(new Credential(type, keyId, value));
                 return this;
             }
 
@@ -1337,8 +1342,8 @@ class OrionAccessControlServiceImplTest {
                 return this;
             }
 
-            AccessControl.User toAccessControl() {
-                return new AccessControl.User(id, null, null, email, credentials, roles, List.of());
+            pro.deta.orion.schema.acl.User toAccessControl() {
+                return new pro.deta.orion.schema.acl.User(id, null, null, email, credentials, roles, List.of());
             }
         }
 
@@ -1351,28 +1356,28 @@ class OrionAccessControlServiceImplTest {
             void addGrant(Grant grant) { grants.add(grant); }
             void addGrantReference(String id) { references.add(id); }
 
-            AccessControl.Role toAccessControl() {
-                List<AccessControl.Grant> immutableGrants = new ArrayList<>();
+            pro.deta.orion.schema.acl.Role toAccessControl() {
+                List<pro.deta.orion.schema.acl.Grant> immutableGrants = new ArrayList<>();
                 for (Grant grant : grants) immutableGrants.add(grant.toAccessControl());
-                return new AccessControl.Role(id, immutableGrants, references);
+                return new pro.deta.orion.schema.acl.Role(id, immutableGrants, references);
             }
         }
 
         private static final class Grant {
             private String id;
-            private final List<AccessControl.GrantExpression> info = new ArrayList<>();
+            private final List<GrantExpression> info = new ArrayList<>();
 
             void setId(String id) { this.id = id; }
             String getId() { return id; }
-            List<AccessControl.GrantExpression> getInfo() { return info; }
+            List<GrantExpression> getInfo() { return info; }
 
             Grant addKey(AccessControl.GrantKey key, String value) {
-                info.add(new AccessControl.GrantExpression(key, value));
+                info.add(new GrantExpression(key, value));
                 return this;
             }
 
-            AccessControl.Grant toAccessControl() {
-                return new AccessControl.Grant(id, info);
+            pro.deta.orion.schema.acl.Grant toAccessControl() {
+                return new pro.deta.orion.schema.acl.Grant(id, info);
             }
         }
     }
@@ -1420,23 +1425,23 @@ class OrionAccessControlServiceImplTest {
     }
 
     private static List<String> sshValues(ConfigurationFile file, String userId) {
-        for (AccessControl.User user : parse(file.content()).getUsers()) {
-            if (userId.equalsIgnoreCase(user.getId())) {
-                return user.getCredentials().stream()
-                        .filter(credential -> credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
-                        .map(AccessControl.Credential::getValue)
+        for (User user : parse(file.content()).users()) {
+            if (userId.equalsIgnoreCase(user.id())) {
+                return user.credentials().stream()
+                        .filter(credential -> credential.type() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                        .map(Credential::value)
                         .toList();
             }
         }
         return List.of();
     }
 
-    private static List<AccessControl.Credential> credentials(
+    private static List<Credential> credentials(
             ConfigurationFile file,
             String userId) {
-        for (AccessControl.User user : parse(file.content()).getUsers()) {
-            if (userId.equalsIgnoreCase(user.getId())) {
-                return user.getCredentials();
+        for (User user : parse(file.content()).users()) {
+            if (userId.equalsIgnoreCase(user.id())) {
+                return user.credentials();
             }
         }
         return List.of();

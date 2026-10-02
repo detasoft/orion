@@ -3,7 +3,7 @@ package pro.deta.orion.auth;
 import lombok.Getter;
 import lombok.AccessLevel;
 import lombok.ToString;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
@@ -21,9 +21,9 @@ public class InternalUserImpl implements UserIdentity {
     @Getter(AccessLevel.NONE)
     private final Supplier<OrionDocument> configuration;
     private final Optional<OrganizationId> organizationId;
-    private final List<AccessControl.Grant> grants;
+    private final List<Grant> grants;
 
-    public InternalUserImpl(String userId, List<AccessControl.Grant> grants) {
+    public InternalUserImpl(String userId, List<Grant> grants) {
         this.clientId = userId;
         this.organizationId = Optional.empty();
         this.grants = grants;

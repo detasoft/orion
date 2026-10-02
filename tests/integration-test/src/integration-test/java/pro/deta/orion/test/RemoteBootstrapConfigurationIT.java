@@ -113,13 +113,13 @@ class RemoteBootstrapConfigurationIT {
                     var seeded = OrionXml.read(new ByteArrayInputStream(xml));
                     var seededAcl = seeded.system().accessControl();
                     var loadedAcl = loaded.system().accessControl();
-                    assertThat(loadedAcl.getGrants()).isEqualTo(seededAcl.getGrants());
-                    assertThat(loadedAcl.getRoles()).isEqualTo(seededAcl.getRoles());
-                    assertThat(loadedAcl.getUsers()).singleElement().satisfies(root -> {
-                        var seededRoot = seededAcl.getUsers().getFirst();
+                    assertThat(loadedAcl.grants()).isEqualTo(seededAcl.grants());
+                    assertThat(loadedAcl.roles()).isEqualTo(seededAcl.roles());
+                    assertThat(loadedAcl.users()).singleElement().satisfies(root -> {
+                        var seededRoot = seededAcl.users().getFirst();
                         assertThat(root).usingRecursiveComparison().ignoringFields("credentials")
                                 .isEqualTo(seededRoot);
-                        assertThat(root.getCredentials()).containsAll(seededRoot.getCredentials());
+                        assertThat(root.credentials()).containsAll(seededRoot.credentials());
                     });
                     var http = configuration.getTransport().getHttp();
                     assertThat(RuntimeHttpTestSupport.request("GET",

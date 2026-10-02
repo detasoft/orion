@@ -38,6 +38,11 @@ import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
@@ -156,7 +161,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 AccessControl acl = OrionXml.read(
                         new ByteArrayInputStream(content))
                                 .system().accessControl();
-                assertThat(acl.getUsers()).extracting(AccessControl.User::getId).contains("root");
+                assertThat(acl.users()).extracting(User::id).contains("root");
             } finally {
                 assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
             }
@@ -219,9 +224,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl acl = OrionXml.read(new ByteArrayInputStream(
                     component.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
-            assertThat(acl.getUsers().getFirst().getCredentials())
+            assertThat(acl.users().getFirst().credentials())
                     .singleElement()
-                    .satisfies(credential -> assertThat(credential.getKeyId())
+                    .satisfies(credential -> assertThat(credential.keyId())
                             .startsWith("root-auth-generation:"));
         } finally {
             System.setOut(originalOut);
@@ -263,30 +268,30 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl acl = OrionXml.read(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
-            AccessControl.User root = acl.getUsers().stream()
-                    .filter(candidate -> "root".equalsIgnoreCase(candidate.getId()))
+            User root = acl.users().stream()
+                    .filter(candidate -> "root".equalsIgnoreCase(candidate.id()))
                     .findFirst()
                     .orElseThrow();
-            List<AccessControl.Credential> credentials = new ArrayList<>(root.getCredentials());
-            credentials.add(new AccessControl.Credential(AccessControl.CredentialType.SHA1,
+            List<Credential> credentials = new ArrayList<>(root.credentials());
+            credentials.add(new Credential(AccessControl.CredentialType.SHA1,
                     new OrionPasswordHashingService().calculateHash(
                             PasswordHashingAlgorithm.SHA1,
                             "legacy-root-password".toCharArray())));
-            credentials.add(new AccessControl.Credential(
+            credentials.add(new Credential(
                     AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
                     "legacy-jwt-key",
                     "legacy-jwt-public-key"));
-            List<AccessControl.Grant> grants = new ArrayList<>(root.getGrants());
-            grants.add(new AccessControl.Grant("ROOT_DIRECT", List.of(
-                    new AccessControl.GrantExpression(
+            List<Grant> grants = new ArrayList<>(root.grants());
+            grants.add(new Grant("ROOT_DIRECT", List.of(
+                    new GrantExpression(
                             AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING))));
-            AccessControl.User updatedRoot = new AccessControl.User(root.getId(), "Recovery", "Administrator",
-                    "recovery-root@example.test", credentials, root.getRoles(), grants);
-            List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+            User updatedRoot = new User(root.id(), "Recovery", "Administrator",
+                    "recovery-root@example.test", credentials, root.roles(), grants);
+            List<User> users = new ArrayList<>(acl.users());
             users.set(users.indexOf(root), updatedRoot);
             OrionDocument replacement = OrionXml.read(
                     new ByteArrayInputStream(accessControlBytes(
-                            new AccessControl(users, acl.getRoles(), acl.getGrants()))));
+                            new AccessControl(users, acl.roles(), acl.grants()))));
             first.configurationEditor().edit(first.orionAccessControlService()
                     .accessControlConfigurationFile().revision().orElseThrow())
                     .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
@@ -336,42 +341,42 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl acl = OrionXml.read(
                     new ByteArrayInputStream(content))
                             .system().accessControl();
-            AccessControl.User root = acl.getUsers().stream()
-                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
+            User root = acl.users().stream()
+                    .filter(user -> "root".equalsIgnoreCase(user.id()))
                     .findFirst()
                     .orElseThrow();
             AccessControl canonical = ACLUtil.generateDefaultAccessControl("unused-password-hash");
-            assertThat(root.getFirst()).isNull();
-            assertThat(root.getLast()).isNull();
-            assertThat(root.getEmail()).isEqualTo("root@orion.pro");
-            assertThat(root.getRoles()).containsExactly("ROOT");
-            assertThat(root.getGrants()).isEmpty();
-            assertThat(acl.getRoles()).hasSameSizeAs(canonical.getRoles());
-            for (AccessControl.Role expected : canonical.getRoles()) {
-                assertThat(acl.getRoles())
-                        .filteredOn(role -> expected.getId().equals(role.getId()))
+            assertThat(root.first()).isNull();
+            assertThat(root.last()).isNull();
+            assertThat(root.email()).isEqualTo("root@orion.pro");
+            assertThat(root.roles()).containsExactly("ROOT");
+            assertThat(root.grants()).isEmpty();
+            assertThat(acl.roles()).hasSameSizeAs(canonical.roles());
+            for (Role expected : canonical.roles()) {
+                assertThat(acl.roles())
+                        .filteredOn(role -> expected.id().equals(role.id()))
                         .singleElement()
                         .satisfies(actual -> assertThat(actual)
                                 .usingRecursiveComparison()
                                 .ignoringCollectionOrder()
                                 .isEqualTo(expected));
             }
-            assertThat(acl.getGrants()).hasSameSizeAs(canonical.getGrants());
-            for (AccessControl.Grant expected : canonical.getGrants()) {
-                assertThat(acl.getGrants())
-                        .filteredOn(grant -> expected.getId().equals(grant.getId()))
+            assertThat(acl.grants()).hasSameSizeAs(canonical.grants());
+            for (Grant expected : canonical.grants()) {
+                assertThat(acl.grants())
+                        .filteredOn(grant -> expected.id().equals(grant.id()))
                         .singleElement()
                         .satisfies(actual -> assertThat(actual)
                                 .usingRecursiveComparison()
                                 .ignoringCollectionOrder()
                                 .isEqualTo(expected));
             }
-            assertThat(root.getCredentials())
-                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.ARGON2)
+            assertThat(root.credentials())
+                    .filteredOn(credential -> credential.type() == AccessControl.CredentialType.ARGON2)
                     .singleElement()
-                    .satisfies(credential -> assertThat(credential.getKeyId())
+                    .satisfies(credential -> assertThat(credential.keyId())
                             .startsWith("root-auth-generation:"));
-            assertThat(root.getCredentials()).hasSize(1);
+            assertThat(root.credentials()).hasSize(1);
 
             assertThat(reset.orionAccessControlService().authenticateUserAndIssueToken(
                     "root", newPassword.getBytes(StandardCharsets.UTF_8), 600))
@@ -454,45 +459,45 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
                     reset.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
-            assertThat(recovered.getUsers())
-                    .extracting(AccessControl.User::getId)
+            assertThat(recovered.users())
+                    .extracting(User::id)
                     .containsExactlyInAnyOrder("alice", "root");
-            AccessControl.User root = recovered.getUsers().stream()
-                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
+            User root = recovered.users().stream()
+                    .filter(user -> "root".equalsIgnoreCase(user.id()))
                     .findFirst()
                     .orElseThrow();
-            assertThat(root.getEmail()).isEqualTo("root@orion.pro");
-            assertThat(root.getRoles()).containsExactly("ROOT");
-            assertThat(root.getCredentials())
-                    .extracting(AccessControl.Credential::getType)
+            assertThat(root.email()).isEqualTo("root@orion.pro");
+            assertThat(root.roles()).containsExactly("ROOT");
+            assertThat(root.credentials())
+                    .extracting(Credential::type)
                     .containsExactly(AccessControl.CredentialType.ARGON2);
 
             AccessControl canonical = ACLUtil.generateDefaultAccessControl(
                     "unused-password-hash",
                     AccessControl.CredentialType.ARGON2);
-            for (AccessControl.Role expected : canonical.getRoles()) {
-                assertThat(recovered.getRoles())
-                        .filteredOn(role -> expected.getId().equals(role.getId()))
+            for (Role expected : canonical.roles()) {
+                assertThat(recovered.roles())
+                        .filteredOn(role -> expected.id().equals(role.id()))
                         .singleElement()
                         .satisfies(actual -> assertThat(actual)
                                 .usingRecursiveComparison()
                                 .ignoringCollectionOrder()
                                 .isEqualTo(expected));
             }
-            for (AccessControl.Grant expected : canonical.getGrants()) {
-                assertThat(recovered.getGrants())
-                        .filteredOn(grant -> expected.getId().equals(grant.getId()))
+            for (Grant expected : canonical.grants()) {
+                assertThat(recovered.grants())
+                        .filteredOn(grant -> expected.id().equals(grant.id()))
                         .singleElement()
                         .satisfies(actual -> assertThat(actual)
                                 .usingRecursiveComparison()
                                 .ignoringCollectionOrder()
                                 .isEqualTo(expected));
             }
-            assertThat(recovered.getRoles())
-                    .extracting(AccessControl.Role::getId)
+            assertThat(recovered.roles())
+                    .extracting(Role::id)
                     .contains("ALICE");
-            assertThat(recovered.getGrants())
-                    .extracting(AccessControl.Grant::getId)
+            assertThat(recovered.grants())
+                    .extracting(Grant::id)
                     .contains("ALICE_READ");
         } finally {
             System.setOut(originalOut);
@@ -548,7 +553,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl primary = OrionXml.read(
                     new ByteArrayInputStream(snapshot.get(ACL_PATH)))
                             .system().accessControl();
-            assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
+            assertThat(primary.users()).extracting(User::id)
                     .containsExactlyInAnyOrder("alice", "root");
             assertThat(snapshot.get(secondaryPath)).containsExactly(secondaryAcl);
         } finally {
@@ -620,12 +625,12 @@ class InternalConfigurationRepositoryLifecycleIT {
             AccessControl recovered = OrionXml.read(new ByteArrayInputStream(
                     reset.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
-            assertThat(recovered.getUsers())
-                    .filteredOn(user -> "root".equalsIgnoreCase(user.getId()))
-                    .extracting(AccessControl.User::getId)
+            assertThat(recovered.users())
+                    .filteredOn(user -> "root".equalsIgnoreCase(user.id()))
+                    .extracting(User::id)
                     .containsExactly("root");
-            assertThat(recovered.getUsers().getFirst().getCredentials())
-                    .noneMatch(credential -> credential.getValue().equals("old-hash"));
+            assertThat(recovered.users().getFirst().credentials())
+                    .noneMatch(credential -> credential.value().equals("old-hash"));
         } finally {
             System.setOut(originalOut);
             assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -989,8 +994,8 @@ class InternalConfigurationRepositoryLifecycleIT {
     private static byte[] aclBytes(String userId, String password) throws Exception {
         OrionPasswordHashingService hashingService = new OrionPasswordHashingService();
         String hash = hashingService.calculateHash(PasswordHashingAlgorithm.SHA1, password.toCharArray());
-        AccessControl.User user = new AccessControl.User(userId, null, null, userId + "@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, hash)),
+        User user = new User(userId, null, null, userId + "@example.test",
+                List.of(new Credential(AccessControl.CredentialType.SHA1, hash)),
                 List.of(), List.of());
         return accessControlBytes(new AccessControl(List.of(user), List.of(), List.of()));
     }
@@ -1000,29 +1005,29 @@ class InternalConfigurationRepositoryLifecycleIT {
         String hash = hashingService.calculateHash(
                 PasswordHashingAlgorithm.SHA1,
                 "alice-password".toCharArray());
-        AccessControl.User alice = new AccessControl.User("alice", null, null, "alice@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, hash)),
+        User alice = new User("alice", null, null, "alice@example.test",
+                List.of(new Credential(AccessControl.CredentialType.SHA1, hash)),
                 List.of("ALICE"), List.of());
         AccessControl acl = new AccessControl(List.of(alice), List.of(
-                new AccessControl.Role("ALICE", List.of(), List.of("ALICE_READ")),
-                new AccessControl.Role("ROOT", List.of(), List.of("APPLICATION_CONTROL"))), List.of(
-                new AccessControl.Grant("ALICE_READ", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "alice/**"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "true"))),
-                new AccessControl.Grant("CONNECT", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.NETWORK_SOURCE, "192.0.2.1"))),
-                new AccessControl.Grant("ALL_REPOSITORY", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "restricted"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.READ, "false"))),
-                new AccessControl.Grant("APPLICATION_CONTROL", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "false")))));
+                new Role("ALICE", List.of(), List.of("ALICE_READ")),
+                new Role("ROOT", List.of(), List.of("APPLICATION_CONTROL"))), List.of(
+                new Grant("ALICE_READ", List.of(
+                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "alice/**"),
+                        new GrantExpression(AccessControl.GrantKey.READ, "true"))),
+                new Grant("CONNECT", List.of(
+                        new GrantExpression(AccessControl.GrantKey.NETWORK_SOURCE, "192.0.2.1"))),
+                new Grant("ALL_REPOSITORY", List.of(
+                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "restricted"),
+                        new GrantExpression(AccessControl.GrantKey.READ, "false"))),
+                new Grant("APPLICATION_CONTROL", List.of(
+                        new GrantExpression(AccessControl.GrantKey.ADMIN, "false")))));
         return accessControlBytes(acl);
     }
 
     private static byte[] noncanonicalRootAclBytes() throws Exception {
-        AccessControl.User root = new AccessControl.User(
+        User root = new User(
                 "ROOT", null, null, "old-root@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, "old-hash")),
+                List.of(new Credential(AccessControl.CredentialType.SHA1, "old-hash")),
                 List.of(), List.of());
         return accessControlBytes(new AccessControl(List.of(root), List.of(), List.of()));
     }
@@ -1133,14 +1138,14 @@ class InternalConfigurationRepositoryLifecycleIT {
         AccessControl accessControl = OrionXml.read(new ByteArrayInputStream(
                 component.orionAccessControlService().accessControlConfigurationFile().content()))
                         .system().accessControl();
-        AccessControl.User user = accessControl.getUsers().stream()
-                .filter(candidate -> userId.equals(candidate.getId()))
+        User user = accessControl.users().stream()
+                .filter(candidate -> userId.equals(candidate.id()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(user.getCredentials())
+        assertThat(user.credentials())
                 .filteredOn(credential ->
-                        credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
-                .extracting(AccessControl.Credential::getValue)
+                        credential.type() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                .extracting(Credential::value)
                 .containsExactlyInAnyOrder(expectedKeys);
     }
 

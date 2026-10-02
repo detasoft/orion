@@ -30,9 +30,10 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.schema.orion.RepositoryName;
+import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
@@ -52,7 +53,6 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -296,12 +296,11 @@ final class OrionGitServer implements GitServer {
     }
 
     private static InternalUserImpl matrixUser() {
-        AccessControl.Grant grant =
-                new AccessControlDraft.Grant("matrix", new ArrayList<>())
-                        .addKey(AccessControl.GrantKey.REPOSITORY, "*")
-                        .addKey(AccessControl.GrantKey.READ_WRITE, "true")
-                        .addKey(AccessControl.GrantKey.CREATE, "true")
-                        .addKey(AccessControl.GrantKey.FORCE, "true").toAccessControl();
+        Grant grant = new Grant("matrix", List.of(
+                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
+                new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
+                new GrantExpression(AccessControl.GrantKey.CREATE, "true"),
+                new GrantExpression(AccessControl.GrantKey.FORCE, "true")));
         return new InternalUserImpl("matrix", List.of(grant));
     }
 

@@ -50,6 +50,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
@@ -349,16 +351,16 @@ class LegacySshCommandCatalogTest {
         return dispatcher.dispatch(new CommandRequest(commandLine, context));
     }
 
-    private static UserIdentity user(List<AccessControl.Grant> grants) {
+    private static UserIdentity user(List<Grant> grants) {
         return new InternalUserImpl("operator", grants);
     }
 
-    private static AccessControl.Grant grant(AccessControl.GrantKey key) {
+    private static Grant grant(AccessControl.GrantKey key) {
         return grant(key, TRUE_STRING);
     }
 
-    private static AccessControl.Grant grant(AccessControl.GrantKey key, String value) {
-        return new AccessControl.Grant("test", List.of(new AccessControl.GrantExpression(key, value)));
+    private static Grant grant(AccessControl.GrantKey key, String value) {
+        return new Grant("test", List.of(new GrantExpression(key, value)));
     }
 
     private static void assertFailure(CommandResult result, CommandFailureCode code) {

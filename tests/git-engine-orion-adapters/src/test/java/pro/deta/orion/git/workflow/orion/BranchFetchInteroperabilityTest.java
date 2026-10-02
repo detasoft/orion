@@ -13,11 +13,11 @@ import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitWorkTree;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -82,9 +82,9 @@ class BranchFetchInteroperabilityTest {
     }
 
     private static InternalUserImpl user(String branch) {
-        AccessControl.Grant grant = new AccessControlDraft.Grant("matrix", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, "*")
-                .addKey(AccessControl.GrantKey.BRANCH, branch).toAccessControl();
+        Grant grant = new Grant("matrix", List.of(
+                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
+                new GrantExpression(AccessControl.GrantKey.BRANCH, branch)));
         return new InternalUserImpl("matrix", List.of(grant));
     }
 }

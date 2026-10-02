@@ -11,35 +11,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SettingsTest {
     @Test
     public void accessControlListsAreImmutableSnapshots() {
-        List<AccessControl.Credential> credentials = new ArrayList<>();
-        credentials.add(new AccessControl.Credential(AccessControl.CredentialType.ARGON2, "hash"));
-        List<AccessControl.User> users = new ArrayList<>();
-        users.add(new AccessControl.User("root", null, null, "root@orion.pro",
+        List<Credential> credentials = new ArrayList<>();
+        credentials.add(new Credential(AccessControl.CredentialType.ARGON2, "hash"));
+        List<User> users = new ArrayList<>();
+        users.add(new User("root", null, null, "root@orion.pro",
                 credentials, List.of(), List.of()));
         AccessControl accessControl = new AccessControl(users, List.of(), List.of());
-        credentials.add(new AccessControl.Credential(
+        credentials.add(new Credential(
                 AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "public-key"));
-        users.add(new AccessControl.User("other", null, null, "other@example.test",
+        users.add(new User("other", null, null, "other@example.test",
                 List.of(), List.of(), List.of()));
 
-        assertThat(accessControl.getUsers()).hasSize(1);
-        assertThat(accessControl.getUsers().getFirst().getCredentials()).hasSize(1);
-        assertThatThrownBy(() -> accessControl.getUsers().add(users.getLast()))
+        assertThat(accessControl.users()).hasSize(1);
+        assertThat(accessControl.users().getFirst().credentials()).hasSize(1);
+        assertThatThrownBy(() -> accessControl.users().add(users.getLast()))
                 .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> accessControl.getUsers().getFirst().getCredentials()
-                .add(new AccessControl.Credential(AccessControl.CredentialType.PLAIN, "plain")))
+        assertThatThrownBy(() -> accessControl.users().getFirst().credentials()
+                .add(new Credential(AccessControl.CredentialType.PLAIN, "plain")))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
     public void newAccessControlCanBeCreatedFromPreviousOneWithoutMutatingIt() {
         AccessControl accessControl = new AccessControl();
-        AccessControl.User root = new AccessControl.User(
+        User root = new User(
                 "root", null, null, "root@orion.pro", List.of(), List.of(), List.of());
         AccessControl changed = new AccessControl(
-                List.of(root), accessControl.getRoles(), accessControl.getGrants());
+                List.of(root), accessControl.roles(), accessControl.grants());
 
-        assertThat(accessControl.getUsers()).isEmpty();
-        assertThat(changed.getUsers()).extracting(AccessControl.User::getId).containsExactly("root");
+        assertThat(accessControl.users()).isEmpty();
+        assertThat(changed.users()).extracting(User::id).containsExactly("root");
     }
 }

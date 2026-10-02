@@ -27,6 +27,9 @@ import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
@@ -432,14 +435,14 @@ class OrionStartupIT {
 
     private static AccessControl accessControlWithUsers(String... userIds) {
         AccessControl base = ACLUtil.generateDefaultAccessControl("remote-root-password-hash");
-        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
+        List<User> users = new ArrayList<>(base.users());
         for (String userId : userIds) {
             if (!"root".equalsIgnoreCase(userId)) {
-                users.add(new AccessControl.User(userId, null, null, userId + "@example.test",
+                users.add(new User(userId, null, null, userId + "@example.test",
                         List.of(), List.of(), List.of()));
             }
         }
-        return new AccessControl(users, base.getRoles(), base.getGrants());
+        return new AccessControl(users, base.roles(), base.grants());
     }
 
     private static Map<String, Object> validateOrionXml(StartedOrion orion, byte[] content) throws IOException {
@@ -495,8 +498,8 @@ class OrionStartupIT {
     }
 
     private static boolean hasUser(AccessControl accessControl, String id) {
-        for (AccessControl.User user : accessControl.getUsers()) {
-            if (id.equals(user.getId())) {
+        for (User user : accessControl.users()) {
+            if (id.equals(user.id())) {
                 return true;
             }
         }
@@ -504,8 +507,8 @@ class OrionStartupIT {
     }
 
     private static boolean hasRole(AccessControl accessControl, String id) {
-        for (AccessControl.Role role : accessControl.getRoles()) {
-            if (id.equals(role.getId())) {
+        for (Role role : accessControl.roles()) {
+            if (id.equals(role.id())) {
                 return true;
             }
         }
@@ -513,8 +516,8 @@ class OrionStartupIT {
     }
 
     private static boolean hasGrant(AccessControl accessControl, String id) {
-        for (AccessControl.Grant grant : accessControl.getGrants()) {
-            if (id.equals(grant.getId())) {
+        for (Grant grant : accessControl.grants()) {
+            if (id.equals(grant.id())) {
                 return true;
             }
         }

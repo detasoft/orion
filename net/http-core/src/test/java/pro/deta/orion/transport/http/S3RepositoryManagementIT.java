@@ -43,7 +43,7 @@ class S3RepositoryManagementIT {
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> fixture.desired().current().document(), cipher);
             configured.activate(() -> fixture.desired().current().document(), secrets, name -> false);
             SecurityContext actor = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
-                    pro.deta.orion.schema.acl.ACLUtil.generateDefaultAccessControl("unused").getGrants()));
+                    pro.deta.orion.schema.acl.ACLUtil.generateDefaultAccessControl("unused").grants()));
             StorageManagement management = fixture.management();
             assertThat(management.saveConnection(actor, Optional.empty(), "v1", true,
                     new StorageManagement.S3Input("minio", server.endpoint(), "us-east-1", true,

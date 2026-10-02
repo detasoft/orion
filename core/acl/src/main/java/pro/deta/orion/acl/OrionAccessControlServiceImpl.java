@@ -16,6 +16,11 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -241,27 +246,27 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         AccessControl snapshot = document.system().accessControl();
         if (!(findSingleUser(snapshot, actor.userId().value())
-                instanceof Result.Success<AccessControl.User>(var user)) || isLockedRoot(user)) return false;
-        Result<List<AccessControl.Grant>> grants = mergeGrants(snapshot, user);
-        if (!(grants instanceof Result.Success<List<AccessControl.Grant>>(var assigned))) return false;
-        for (AccessControl.Grant grant : assigned) {
-            if (!GrantMatcher.of(AccessControl.GrantKey.CONNECTION).matchesAny(grant.getInfo())
-                    && GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(grant.getInfo())) return true;
+                instanceof Result.Success<User>(var user)) || isLockedRoot(user)) return false;
+        Result<List<Grant>> grants = mergeGrants(snapshot, user);
+        if (!(grants instanceof Result.Success<List<Grant>>(var assigned))) return false;
+        for (Grant grant : assigned) {
+            if (!GrantMatcher.of(AccessControl.GrantKey.CONNECTION).matchesAny(grant.info())
+                    && GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(grant.info())) return true;
         }
         return false;
     }
 
-    private static boolean matchesScopedAdministration(List<AccessControl.GrantExpression> expressions,
+    private static boolean matchesScopedAdministration(List<GrantExpression> expressions,
             ConfigurationScope scope) {
         if (!GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(expressions)) return false;
         boolean repositoryRestricted = false;
         boolean repositoryMatches = false;
-        for (AccessControl.GrantExpression expression : expressions) {
-            switch (expression.getKey()) {
+        for (GrantExpression expression : expressions) {
+            switch (expression.key()) {
                 case REPOSITORY -> {
                     repositoryRestricted = true;
                     repositoryMatches |= scope.repositoryId().isPresent()
-                            && MatcherUtils.matchExpressionValue(expression.getValue(), scope.toString());
+                            && MatcherUtils.matchExpressionValue(expression.value(), scope.toString());
                 }
                 case CONNECTION, BRANCH, NETWORK_SOURCE, NETWORK_PORT -> {
                     return false;
@@ -293,7 +298,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private SshCredentialListResult listSshCredentials(ConfigurationFile snapshot, String userId) {
         try {
-            AccessControl.User user = findUser(parseAccessControlConfiguration(snapshot.content()), userId);
+            User user = findUser(parseAccessControlConfiguration(snapshot.content()), userId);
             if (user == null) {
                 return SshCredentialListResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
@@ -340,7 +345,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             List<PublicKey> publicKeys) {
         try {
             AccessControl acl = edit.document().system().accessControl();
-            AccessControl.User user = findUser(acl, userId);
+            User user = findUser(acl, userId);
             if (user == null) {
                 return SshCredentialUpdateResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
@@ -352,11 +357,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         "Root SSH credentials are locked");
             }
             ParsedSshCredentials existing = sshCredentials(user);
-            List<AccessControl.Credential> credentials = addMissingPublicKeys(user, existing, publicKeys);
+            List<Credential> credentials = addMissingPublicKeys(user, existing, publicKeys);
             if (credentials == null) {
                 return SshCredentialUpdateResult.success(existing.descriptors(), false);
             }
-            AccessControl.User updated = withCredentials(user, credentials);
+            User updated = withCredentials(user, credentials);
             edit.update(document -> document.replaceAccessControl(replaceUser(acl, user, updated)));
             return SshCredentialUpdateResult.success(sshCredentials(updated).descriptors(), true);
         } catch (InvalidStoredSshKeyException e) {
@@ -407,7 +412,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             boolean force) {
         try {
             AccessControl acl = edit.document().system().accessControl();
-            AccessControl.User user = findUser(acl, userId);
+            User user = findUser(acl, userId);
             if (user == null) {
                 return SshCredentialUpdateResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
@@ -443,12 +448,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         "Removing the last SSH credential requires force");
             }
 
-            List<AccessControl.Credential> credentials = new ArrayList<>(user.getCredentials());
+            List<Credential> credentials = new ArrayList<>(user.credentials());
             removePublicKey(credentials, matches.getFirst().publicKey());
-            if (existing.byEncodedKey().size() == 1 && isRoot(user.getId())) {
+            if (existing.byEncodedKey().size() == 1 && isRoot(user.id())) {
                 lockRoot(credentials);
             }
-            AccessControl.User updated = withCredentials(user, credentials);
+            User updated = withCredentials(user, credentials);
             edit.update(document -> document.replaceAccessControl(replaceUser(acl, user, updated)));
             return SshCredentialUpdateResult.success(sshCredentials(updated).descriptors(), true);
         } catch (InvalidStoredSshKeyException e) {
@@ -485,8 +490,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
         AccessControl snapshot = currentAccessControl();
-        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
-        if (user instanceof Result.Success<AccessControl.User>(var u)) {
+        Result<User> user = findSingleUser(snapshot, userName);
+        if (user instanceof Result.Success<User>(var u)) {
             if (isLockedRoot(u)) {
                 return AuthenticationResult.failure("authentication failed");
             }
@@ -506,8 +511,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String userName,
             byte[] credential) {
         AccessControl snapshot = currentAccessControl();
-        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
-        if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+        Result<User> user = findSingleUser(snapshot, userName);
+        if (user instanceof Result.Success<User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
                 && performPasswordAuthentication(matchedUser, credential)) {
             String recoveryGeneration = rootRecoveryGeneration(matchedUser);
@@ -550,23 +555,23 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             List<PublicKey> publicKeys) {
         try {
             AccessControl acl = edit.document().system().accessControl();
-            List<AccessControl.User> roots = rootUsers(acl);
+            List<User> roots = rootUsers(acl);
             if (roots.size() != 1) {
                 return SshKeyEnrollmentResult.failure("key enrollment failed");
             }
-            AccessControl.User root = roots.getFirst();
+            User root = roots.getFirst();
             if (!expectedGeneration.equals(rootRecoveryGeneration(root))) {
                 return SshKeyEnrollmentResult.failure("key enrollment failed");
             }
 
-            List<AccessControl.Credential> credentials = new ArrayList<>();
+            List<Credential> credentials = new ArrayList<>();
             for (PublicKey publicKey : publicKeys) {
-                credentials.add(new AccessControl.Credential(
+                credentials.add(new Credential(
                         OPENSSH_PUBLIC_KEY,
                         generationKeyId(expectedGeneration),
                         PublicKeyEntry.toString(publicKey)));
             }
-            AccessControl.User updated = withCredentials(root, credentials);
+            User updated = withCredentials(root, credentials);
             edit.update(document -> document.replaceAccessControl(replaceUser(acl, root, updated)));
             return SshKeyEnrollmentResult.success();
         } catch (RuntimeException e) {
@@ -577,8 +582,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
         AccessControl snapshot = currentAccessControl();
-        Result<AccessControl.User> user = findSingleUser(snapshot, userName);
-        if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+        Result<User> user = findSingleUser(snapshot, userName);
+        if (user instanceof Result.Success<User>(var matchedUser)
                 && !isLockedRoot(matchedUser)
                 && performPublicKeyAuthentication(matchedUser, encodedPublicKey)) {
             return createUserIdentity(snapshot, matchedUser);
@@ -589,10 +594,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public AuthenticationResult authenticateGitSshKey(byte[] encodedPublicKey) {
-        List<AccessControl.User> matchingUsers = new ArrayList<>();
+        List<User> matchingUsers = new ArrayList<>();
         AccessControl currentAccessControl = currentAccessControl();
         if (currentAccessControl != null) {
-            for (AccessControl.User user : currentAccessControl.getUsers()) {
+            for (User user : currentAccessControl.users()) {
                 if (!isLockedRoot(user) && performPublicKeyAuthentication(user, encodedPublicKey)) {
                     matchingUsers.add(user);
                 }
@@ -619,8 +624,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     yield verifyOrganizationToken(organization, subject, authenticationGeneration, tokenId);
                 }
                 AccessControl snapshot = currentAccessControl();
-                Result<AccessControl.User> user = findSingleUser(snapshot, subject);
-                if (user instanceof Result.Success<AccessControl.User>(var u)) {
+                Result<User> user = findSingleUser(snapshot, subject);
+                if (user instanceof Result.Success<User>(var u)) {
                     if (isLockedRoot(u)) {
                         yield TokenAuthenticationResult.failure("authentication failed");
                     }
@@ -668,17 +673,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             if (!organization.id().value().equals(organizationId)) {
                 continue;
             }
-            for (AccessControl.User user : organization.users()) {
-                if (!user.getId().equals(userId)) {
+            for (User user : organization.users()) {
+                if (!user.id().equals(userId)) {
                     continue;
                 }
-                for (AccessControl.Credential credential : user.getCredentials()) {
-                    if (credential.getType() != AccessControl.CredentialType.OIDC_SUBJECT
-                            || !oidcGeneration(credential.getKeyId(), credential.getValue()).equals(generation)) {
+                for (Credential credential : user.credentials()) {
+                    if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT
+                            || !oidcGeneration(credential.keyId(), credential.value()).equals(generation)) {
                         continue;
                     }
                     for (OidcProvider provider : organization.oidcProviders()) {
-                        if (provider.issuer().toString().equals(credential.getKeyId())) {
+                        if (provider.issuer().toString().equals(credential.keyId())) {
                             return TokenAuthenticationResult.success(new InternalUserImpl(userId,
                                     organization.id(), () -> desiredState.current().document()),
                                     new AccessTokenIdentity(tokenId, organizationId + "/" + userId));
@@ -734,11 +739,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (userIdentity.getOrganizationId().isPresent()) {
             return TokenIssueResult.failure("system identity is required for system token issue");
         }
-        Result<AccessControl.User> user = findSingleUser(currentAccessControl(), userIdentity.getUserId());
-        if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
+        Result<User> user = findSingleUser(currentAccessControl(), userIdentity.getUserId());
+        if (user instanceof Result.Failure<User>(var code, var message, var throwable)) {
             return TokenIssueResult.failure("user is not available for token issue", throwable);
         }
-        if (!(user instanceof Result.Success<AccessControl.User>(var currentUser))) {
+        if (!(user instanceof Result.Success<User>(var currentUser))) {
             return TokenIssueResult.failure("user is not available for token issue");
         }
         if (isLockedRoot(currentUser)) {
@@ -818,37 +823,37 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControl canonical = ACLUtil.generateDefaultAccessControl(
                     passwordHash,
                     AccessControl.CredentialType.ARGON2);
-            AccessControl.User canonicalRoot = canonical.getUsers().getFirst();
-            AccessControl.Credential password = canonicalRoot.getCredentials().getFirst();
-            AccessControl.User root = withCredentials(canonicalRoot, List.of(new AccessControl.Credential(
-                    password.getType(), generationKeyId(authenticationGeneration), password.getValue())));
-            List<AccessControl.User> users = new ArrayList<>(current.getUsers());
-            users.removeIf(user -> isRoot(user.getId()));
+            User canonicalRoot = canonical.users().getFirst();
+            Credential password = canonicalRoot.credentials().getFirst();
+            User root = withCredentials(canonicalRoot, List.of(new Credential(
+                    password.type(), generationKeyId(authenticationGeneration), password.value())));
+            List<User> users = new ArrayList<>(current.users());
+            users.removeIf(user -> isRoot(user.id()));
             users.add(root);
-            List<AccessControl.Role> roles = new ArrayList<>(current.getRoles());
-            for (AccessControl.Role canonicalRole : canonical.getRoles()) {
-                roles.removeIf(role -> idsAreEqual(role.getId(), canonicalRole.getId()));
+            List<Role> roles = new ArrayList<>(current.roles());
+            for (Role canonicalRole : canonical.roles()) {
+                roles.removeIf(role -> idsAreEqual(role.id(), canonicalRole.id()));
                 roles.add(canonicalRole);
             }
-            List<AccessControl.Grant> grants = new ArrayList<>(current.getGrants());
-            for (AccessControl.Grant canonicalGrant : canonical.getGrants()) {
-                grants.removeIf(grant -> idsAreEqual(grant.getId(), canonicalGrant.getId()));
+            List<Grant> grants = new ArrayList<>(current.grants());
+            for (Grant canonicalGrant : canonical.grants()) {
+                grants.removeIf(grant -> idsAreEqual(grant.id(), canonicalGrant.id()));
                 grants.add(canonicalGrant);
             }
             AccessControl updated = new AccessControl(users, roles, grants);
             editor.edit(snapshot).update(document -> document.replaceAccessControl(updated)).apply(
                     "root password reset",
-                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.getEmail(), "root@orion.pro")));
+                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.email(), "root@orion.pro")));
             printAndClearPlainTextPasswordMessage(System.out, rootPassword);
         } finally {
             Arrays.fill(rootPassword, '\0');
         }
     }
 
-    private List<AccessControl.User> rootUsers(AccessControl acl) {
-        List<AccessControl.User> roots = new ArrayList<>();
-        for (AccessControl.User user : acl.getUsers()) {
-            if (isRoot(user.getId())) {
+    private List<User> rootUsers(AccessControl acl) {
+        List<User> roots = new ArrayList<>();
+        for (User user : acl.users()) {
+            if (isRoot(user.id())) {
                 roots.add(user);
             }
         }
@@ -861,10 +866,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private ConfigurationFile prepareAccessControl(ConfigurationFile loadedSnapshot) {
         AccessControl acl = parseAccessControlConfiguration(loadedSnapshot.content());
-        List<AccessControl.User> roots = rootUsers(acl);
+        List<User> roots = rootUsers(acl);
         if (roots.size() == 1) {
-            AccessControl.User root = roots.getFirst();
-            List<AccessControl.Credential> credentials = synchronizedInternalServerKeys(root);
+            User root = roots.getFirst();
+            List<Credential> credentials = synchronizedInternalServerKeys(root);
             if (credentials == null) return loadedSnapshot;
             OrionDocument document = parseOrionConfiguration(loadedSnapshot.content());
             return new ConfigurationFile(
@@ -875,16 +880,16 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return loadedSnapshot;
     }
 
-    private List<AccessControl.Credential> synchronizedInternalServerKeys(AccessControl.User rootUser) {
+    private List<Credential> synchronizedInternalServerKeys(User rootUser) {
         if (isGenerationAwareRoot(rootUser)) {
             return null;
         }
 
-        List<AccessControl.Credential> credentials = new ArrayList<>(rootUser.getCredentials());
+        List<Credential> credentials = new ArrayList<>(rootUser.credentials());
         boolean changed = removeRetainedServerKeys(credentials);
         for (PublicKey publicKey : serverPublicKeys()) {
             if (!hasPublicKeyCredential(credentials, publicKey)) {
-                credentials.add(new AccessControl.Credential(OPENSSH_PUBLIC_KEY,
+                credentials.add(new Credential(OPENSSH_PUBLIC_KEY,
                         KeyUtils.publicKeyToString(publicKey)));
                 changed = true;
             }
@@ -892,7 +897,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return changed ? credentials : null;
     }
 
-    private boolean removeRetainedServerKeys(List<AccessControl.Credential> credentials) {
+    private boolean removeRetainedServerKeys(List<Credential> credentials) {
         Set<String> retained = new HashSet<>();
         for (PublicKey publicKey : retainedServerPublicKeys()) {
             retained.add(KeyUtils.publicKeyToString(publicKey));
@@ -901,8 +906,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             return false;
         }
         return credentials.removeIf(credential ->
-                credential.getType() == OPENSSH_PUBLIC_KEY
-                        && retained.contains(credential.getValue()));
+                credential.type() == OPENSSH_PUBLIC_KEY
+                        && retained.contains(credential.value()));
     }
 
     private List<PublicKey> serverPublicKeys() {
@@ -933,30 +938,30 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return generation.isBlank() ? null : generation;
     }
 
-    private static String rootRecoveryGeneration(AccessControl.User user) {
-        if (!isRoot(user.getId()) || user.getCredentials().size() != 1) {
+    private static String rootRecoveryGeneration(User user) {
+        if (!isRoot(user.id()) || user.credentials().size() != 1) {
             return null;
         }
-        AccessControl.Credential credential = user.getCredentials().getFirst();
-        return credential.getType() == AccessControl.CredentialType.ARGON2
-                ? generationFromKeyId(credential.getKeyId())
+        Credential credential = user.credentials().getFirst();
+        return credential.type() == AccessControl.CredentialType.ARGON2
+                ? generationFromKeyId(credential.keyId())
                 : null;
     }
 
-    private static String rootAuthenticationGeneration(AccessControl.User user) {
-        if (!isRoot(user.getId()) || user.getCredentials().isEmpty()) {
+    private static String rootAuthenticationGeneration(User user) {
+        if (!isRoot(user.id()) || user.credentials().isEmpty()) {
             return null;
         }
-        AccessControl.CredentialType expectedType = user.getCredentials().size() == 1
-                && user.getCredentials().getFirst().getType() == AccessControl.CredentialType.ARGON2
+        AccessControl.CredentialType expectedType = user.credentials().size() == 1
+                && user.credentials().getFirst().type() == AccessControl.CredentialType.ARGON2
                 ? AccessControl.CredentialType.ARGON2
                 : OPENSSH_PUBLIC_KEY;
         String generation = null;
-        for (AccessControl.Credential credential : user.getCredentials()) {
-            if (credential.getType() != expectedType) {
+        for (Credential credential : user.credentials()) {
+            if (credential.type() != expectedType) {
                 return null;
             }
-            String candidate = generationFromKeyId(credential.getKeyId());
+            String candidate = generationFromKeyId(credential.keyId());
             if (candidate == null || generation != null && !generation.equals(candidate)) {
                 return null;
             }
@@ -965,14 +970,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return generation;
     }
 
-    private static boolean isGenerationAwareRoot(AccessControl.User user) {
-        if (!isRoot(user.getId())) {
+    private static boolean isGenerationAwareRoot(User user) {
+        if (!isRoot(user.id())) {
             return false;
         }
-        for (AccessControl.Credential credential : user.getCredentials()) {
-            if (credential.getKeyId() != null
-                    && (credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)
-                    || credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX))) {
+        for (Credential credential : user.credentials()) {
+            if (credential.keyId() != null
+                    && (credential.keyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)
+                    || credential.keyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX))) {
                 return true;
             }
         }
@@ -983,20 +988,20 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return userId != null && ROOT_USER_ID.equalsIgnoreCase(userId);
     }
 
-    private boolean hasPublicKeyCredential(List<AccessControl.Credential> credentials, PublicKey publicKey) {
-        for (AccessControl.Credential credential : credentials) {
-            if (credential.getType() == OPENSSH_PUBLIC_KEY
-                    && publicKeysAreEqual(credential.getValue(), publicKey.getEncoded())) {
+    private boolean hasPublicKeyCredential(List<Credential> credentials, PublicKey publicKey) {
+        for (Credential credential : credentials) {
+            if (credential.type() == OPENSSH_PUBLIC_KEY
+                    && publicKeysAreEqual(credential.value(), publicKey.getEncoded())) {
                 return true;
             }
         }
         return false;
     }
 
-    private AccessControl.User findUser(AccessControl acl, String userId) {
-        AccessControl.User matched = null;
-        for (AccessControl.User user : acl.getUsers()) {
-            if (user.getId() != null && user.getId().equalsIgnoreCase(userId)) {
+    private User findUser(AccessControl acl, String userId) {
+        User matched = null;
+        for (User user : acl.users()) {
+            if (user.id() != null && user.id().equalsIgnoreCase(userId)) {
                 if (matched != null) {
                     throw new IllegalStateException("More than one user matches the requested id");
                 }
@@ -1006,28 +1011,28 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return matched;
     }
 
-    private AccessControl.User withCredentials(
-            AccessControl.User user, List<AccessControl.Credential> credentials) {
-        return new AccessControl.User(user.getId(), user.getFirst(), user.getLast(), user.getEmail(),
-                credentials, user.getRoles(), user.getGrants());
+    private User withCredentials(
+            User user, List<Credential> credentials) {
+        return new User(user.id(), user.first(), user.last(), user.email(),
+                credentials, user.roles(), user.grants());
     }
 
     private AccessControl replaceUser(
-            AccessControl acl, AccessControl.User current, AccessControl.User replacement) {
-        List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+            AccessControl acl, User current, User replacement) {
+        List<User> users = new ArrayList<>(acl.users());
         users.set(users.indexOf(current), replacement);
-        return new AccessControl(users, acl.getRoles(), acl.getGrants());
+        return new AccessControl(users, acl.roles(), acl.grants());
     }
 
-    private ParsedSshCredentials sshCredentials(AccessControl.User user) {
+    private ParsedSshCredentials sshCredentials(User user) {
         Map<String, ParsedSshCredential> credentials = new LinkedHashMap<>();
-        for (AccessControl.Credential credential : user.getCredentials()) {
-            if (credential.getType() != OPENSSH_PUBLIC_KEY) {
+        for (Credential credential : user.credentials()) {
+            if (credential.type() != OPENSSH_PUBLIC_KEY) {
                 continue;
             }
             PublicKey publicKey;
             try {
-                publicKey = KeyUtils.readPublicKeyFromString(credential.getValue());
+                publicKey = KeyUtils.readPublicKeyFromString(credential.value());
             } catch (RuntimeException e) {
                 throw new InvalidStoredSshKeyException(e);
             }
@@ -1046,12 +1051,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new ParsedSshCredentials(credentials, descriptors);
     }
 
-    private List<AccessControl.Credential> addMissingPublicKeys(
-            AccessControl.User user,
+    private List<Credential> addMissingPublicKeys(
+            User user,
             ParsedSshCredentials existing,
             List<PublicKey> publicKeys) {
         boolean changed = false;
-        List<AccessControl.Credential> credentials = new ArrayList<>(user.getCredentials());
+        List<Credential> credentials = new ArrayList<>(user.credentials());
         String generation = rootAuthenticationGeneration(user);
         Set<String> known = new HashSet<>(existing.byEncodedKey().keySet());
         for (PublicKey publicKey : publicKeys) {
@@ -1061,9 +1066,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
             String canonical = PublicKeyEntry.toString(publicKey);
             if (generation == null) {
-                credentials.add(new AccessControl.Credential(OPENSSH_PUBLIC_KEY, canonical));
+                credentials.add(new Credential(OPENSSH_PUBLIC_KEY, canonical));
             } else {
-                credentials.add(new AccessControl.Credential(OPENSSH_PUBLIC_KEY,
+                credentials.add(new Credential(OPENSSH_PUBLIC_KEY,
                         generationKeyId(generation), canonical));
             }
             changed = true;
@@ -1071,17 +1076,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return changed ? credentials : null;
     }
 
-    private void removePublicKey(List<AccessControl.Credential> credentials, PublicKey publicKey) {
+    private void removePublicKey(List<Credential> credentials, PublicKey publicKey) {
         byte[] encoded = publicKey.getEncoded();
-        credentials.removeIf(credential -> credential.getType() == OPENSSH_PUBLIC_KEY
-                && publicKeysAreEqual(credential.getValue(), encoded));
+        credentials.removeIf(credential -> credential.type() == OPENSSH_PUBLIC_KEY
+                && publicKeysAreEqual(credential.value(), encoded));
     }
 
-    private void lockRoot(List<AccessControl.Credential> credentials) {
+    private void lockRoot(List<Credential> credentials) {
         char[] markerSecret = orionPasswordHashingService.generateRandomString(32);
         try {
             String markerHash = orionPasswordHashingService.calculateHash(ARGON2, markerSecret);
-            credentials.add(new AccessControl.Credential(
+            credentials.add(new Credential(
                     AccessControl.CredentialType.ARGON2,
                     ROOT_LOCKED_GENERATION_PREFIX + UUID.randomUUID(),
                     markerHash));
@@ -1090,41 +1095,41 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private static boolean isLockedRoot(AccessControl.User user) {
-        if (!isRoot(user.getId())) {
+    private static boolean isLockedRoot(User user) {
+        if (!isRoot(user.id())) {
             return false;
         }
-        for (AccessControl.Credential credential : user.getCredentials()) {
-            if (credential.getKeyId() != null
-                    && credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX)) {
+        for (Credential credential : user.credentials()) {
+            if (credential.keyId() != null
+                    && credential.keyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX)) {
                 return true;
             }
         }
         return false;
     }
 
-    private AuthenticationResult createUserIdentity(AccessControl snapshot, AccessControl.User u) {
-        Result<List<AccessControl.Grant>> assembledGrants = mergeGrants(snapshot, u);
+    private AuthenticationResult createUserIdentity(AccessControl snapshot, User u) {
+        Result<List<Grant>> assembledGrants = mergeGrants(snapshot, u);
         return switch (assembledGrants) {
-            case Result.Failure<List<AccessControl.Grant>>(var code, var message, var throwable) ->
-                    AuthenticationResult.failure("User " + u.getId() + " failed to auth: [" + code + "] " + message, throwable);
-            case Result.Success<List<AccessControl.Grant>>(var v) ->
-                    AuthenticationResult.success(new InternalUserImpl(u.getId(), v));
+            case Result.Failure<List<Grant>>(var code, var message, var throwable) ->
+                    AuthenticationResult.failure("User " + u.id() + " failed to auth: [" + code + "] " + message, throwable);
+            case Result.Success<List<Grant>>(var v) ->
+                    AuthenticationResult.success(new InternalUserImpl(u.id(), v));
         };
     }
 
-    private Result<List<AccessControl.Grant>> mergeGrants(AccessControl snapshot, AccessControl.User u) {
-        List<AccessControl.Grant> l = new ArrayList<>(u.getGrants());
+    private Result<List<Grant>> mergeGrants(AccessControl snapshot, User u) {
+        List<Grant> l = new ArrayList<>(u.grants());
 
-        for (String r : u.getRoles()) {
-            List<AccessControl.Role> roles = findRolesByReference(snapshot, r);
+        for (String r : u.roles()) {
+            List<Role> roles = findRolesByReference(snapshot, r);
             if (roles.size() != 1) {
                 return generalFailure("Number of roles [" + r + "] not " + roles.size());
             } else {
-                AccessControl.Role role = roles.getFirst();
-                l.addAll(role.getGrants());
-                for (String grantReference : role.getGrantReferences()) {
-                    List<AccessControl.Grant> grs = findGrantByReference(snapshot, grantReference);
+                Role role = roles.getFirst();
+                l.addAll(role.grants());
+                for (String grantReference : role.grantReferences()) {
+                    List<Grant> grs = findGrantByReference(snapshot, grantReference);
                     if (grs.size() > 1)
                         return generalFailure("Number of grants [" + grantReference + "] not " + grs.size());
                     l.addAll(grs);
@@ -1134,18 +1139,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return new Result.Success<>(l);
     }
 
-    private List<AccessControl.Role> findRolesByReference(AccessControl snapshot, String r) {
-        return snapshot.getRoles().stream().filter(r1 -> r1.getId().equalsIgnoreCase(r)).toList();
+    private List<Role> findRolesByReference(AccessControl snapshot, String r) {
+        return snapshot.roles().stream().filter(r1 -> r1.id().equalsIgnoreCase(r)).toList();
     }
 
-    private List<AccessControl.Grant> findGrantByReference(AccessControl snapshot, String grantReference) {
-        return snapshot.getGrants().stream().filter(r1 -> r1.getId().equalsIgnoreCase(grantReference)).toList();
+    private List<Grant> findGrantByReference(AccessControl snapshot, String grantReference) {
+        return snapshot.grants().stream().filter(r1 -> r1.id().equalsIgnoreCase(grantReference)).toList();
     }
 
-    private boolean performAuthentication(AccessControl.User u, byte[] encodedData) {
-        if (u.getCredentials() == null)
+    private boolean performAuthentication(User u, byte[] encodedData) {
+        if (u.credentials() == null)
             return false;
-        for (AccessControl.Credential c : u.getCredentials()) {
+        for (Credential c : u.credentials()) {
             if (credentialMatches(u, c, encodedData)) {
                 return true;
             }
@@ -1153,11 +1158,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return false;
     }
 
-    private boolean performPasswordAuthentication(AccessControl.User user, byte[] credential) {
-        for (AccessControl.Credential candidate : user.getCredentials()) {
+    private boolean performPasswordAuthentication(User user, byte[] credential) {
+        for (Credential candidate : user.credentials()) {
             if (candidate != null
-                    && (candidate.getType() == AccessControl.CredentialType.ARGON2
-                    || candidate.getType() == AccessControl.CredentialType.SHA1)
+                    && (candidate.type() == AccessControl.CredentialType.ARGON2
+                    || candidate.type() == AccessControl.CredentialType.SHA1)
                     && credentialMatches(user, candidate, credential)) {
                 return true;
             }
@@ -1182,47 +1187,47 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return List.copyOf(parsed.values());
     }
 
-    private boolean performPublicKeyAuthentication(AccessControl.User user, byte[] encodedPublicKey) {
-        if (user.getCredentials() == null) {
+    private boolean performPublicKeyAuthentication(User user, byte[] encodedPublicKey) {
+        if (user.credentials() == null) {
             return false;
         }
-        for (AccessControl.Credential credential : user.getCredentials()) {
+        for (Credential credential : user.credentials()) {
             if (credential != null
-                    && credential.getType() == OPENSSH_PUBLIC_KEY
-                    && publicKeysAreEqual(credential.getValue(), encodedPublicKey)) {
+                    && credential.type() == OPENSSH_PUBLIC_KEY
+                    && publicKeysAreEqual(credential.value(), encodedPublicKey)) {
                 return true;
             }
         }
         return false;
     }
 
-    private boolean credentialMatches(AccessControl.User user, AccessControl.Credential credential, byte[] encodedData) {
+    private boolean credentialMatches(User user, Credential credential, byte[] encodedData) {
         if (credential == null) {
             return false;
         }
         try {
             return valuesAreEqual(credential, encodedData);
         } catch (RuntimeException e) {
-            log.warn("Cannot verify {} credential for user '{}'.", credential.getType(), user.getId(), e);
+            log.warn("Cannot verify {} credential for user '{}'.", credential.type(), user.id(), e);
             return false;
         }
     }
 
-    private boolean valuesAreEqual(AccessControl.Credential c, byte[] provided) {
-        if (c.getType() == null)
+    private boolean valuesAreEqual(Credential c, byte[] provided) {
+        if (c.type() == null)
             return false;
-        return switch (c.getType()) {
+        return switch (c.type()) {
             case OPENSSH_PUBLIC_KEY -> {
-                yield publicKeysAreEqual(c.getValue(), provided);
+                yield publicKeysAreEqual(c.value(), provided);
             }
             case SHA1 -> {
-                yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
+                yield orionPasswordHashingService.comparePassword(SHA1, c.value(), provided);
             }
             case MD5 -> false;
             case PLAIN -> false;
             case SHA3_256 -> false;
             case ARGON2 -> {
-                yield orionPasswordHashingService.comparePassword(ARGON2, c.getValue(), provided);
+                yield orionPasswordHashingService.comparePassword(ARGON2, c.value(), provided);
             }
             case JWT_SIGNING_PUBLIC_KEY, OIDC_SUBJECT -> false;
         };
@@ -1241,8 +1246,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private Result<AccessControl.User> findSingleUser(AccessControl snapshot, String userName) {
-        ArrayList<AccessControl.User> result = new ArrayList<>();
+    private Result<User> findSingleUser(AccessControl snapshot, String userName) {
+        ArrayList<User> result = new ArrayList<>();
         consumeUsersInAccessControl(userName, result::add, snapshot);
         if (result.size() == 1) {
             return new Result.Success<>(result.getFirst());
@@ -1251,11 +1256,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private static void consumeUsersInAccessControl(String userId, Consumer<AccessControl.User> userConsumer, AccessControl acl) {
+    private static void consumeUsersInAccessControl(String userId, Consumer<User> userConsumer, AccessControl acl) {
         if (acl == null) // could happen as we didn't load ACL yet
             return;
-        for (AccessControl.User u : acl.getUsers()) {
-            if (u.getId() != null && u.getId().equalsIgnoreCase(userId))
+        for (User u : acl.users()) {
+            if (u.id() != null && u.id().equalsIgnoreCase(userId))
                 userConsumer.accept(u);
         }
     }
@@ -1264,54 +1269,54 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         private void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
             validateUserUpdate(userUpdate);
             AccessControl acl = edit.document().system().accessControl();
-            AccessControl.User existing = findUser(acl, userUpdate.id());
-            List<AccessControl.User> users = new ArrayList<>(acl.getUsers());
+            User existing = findUser(acl, userUpdate.id());
+            List<User> users = new ArrayList<>(acl.users());
             if (existing != null) {
                 users.remove(existing);
             }
             users.add(userFrom(userUpdate));
-            AccessControl updated = new AccessControl(users, acl.getRoles(), acl.getGrants());
+            AccessControl updated = new AccessControl(users, acl.roles(), acl.grants());
             edit.update(document -> document.replaceAccessControl(updated));
         }
 
-        private AccessControl.User userFrom(AccessControlUserUpdate userUpdate) {
-            List<AccessControl.Credential> credentials = new ArrayList<>();
-            List<AccessControl.Grant> grants = new ArrayList<>();
+        private User userFrom(AccessControlUserUpdate userUpdate) {
+            List<Credential> credentials = new ArrayList<>();
+            List<Grant> grants = new ArrayList<>();
             for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
-                credentials.add(new AccessControl.Credential(
+                credentials.add(new Credential(
                         credential.type(), credential.keyId(), credential.value()));
             }
             for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
                 grants.add(repositoryGrant(userUpdate.id(), repositoryGrant));
             }
-            return new AccessControl.User(userUpdate.id(), null, null, userUpdate.email(),
+            return new User(userUpdate.id(), null, null, userUpdate.email(),
                     credentials, List.of(), grants);
         }
 
-        private AccessControl.Grant repositoryGrant(String userId,
+        private Grant repositoryGrant(String userId,
                 AccessControlRepositoryGrantUpdate repositoryGrant) {
-            List<AccessControl.GrantExpression> expressions = new ArrayList<>();
-            expressions.add(new AccessControl.GrantExpression(
+            List<GrantExpression> expressions = new ArrayList<>();
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.REPOSITORY, repositoryGrant.repository()));
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     AccessControl.GrantKey.BRANCH, repositoryGrant.branch()));
             if (repositoryGrant.read()) {
-                expressions.add(new AccessControl.GrantExpression(
+                expressions.add(new GrantExpression(
                         AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.readWrite()) {
-                expressions.add(new AccessControl.GrantExpression(
+                expressions.add(new GrantExpression(
                         AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.create()) {
-                expressions.add(new AccessControl.GrantExpression(
+                expressions.add(new GrantExpression(
                         AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.force()) {
-                expressions.add(new AccessControl.GrantExpression(
+                expressions.add(new GrantExpression(
                         AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
             }
-            return new AccessControl.Grant(
+            return new Grant(
                     repositoryGrantId(userId, repositoryGrant.repository()), expressions);
         }
 

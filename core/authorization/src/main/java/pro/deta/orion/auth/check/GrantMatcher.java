@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantExpression;
 
 import java.util.List;
 
@@ -27,12 +28,12 @@ public class GrantMatcher {
         return true;
     }
 
-    public boolean process(AccessControl.GrantExpression expression) {
-        return expression.getKey() == key && keyValueMatcher.match(expression.getValue());
+    public boolean process(GrantExpression expression) {
+        return expression.key() == key && keyValueMatcher.match(expression.value());
     }
 
-    public boolean matchesAny(List<AccessControl.GrantExpression> info) {
-        for (AccessControl.GrantExpression ge: info) {
+    public boolean matchesAny(List<GrantExpression> info) {
+        for (GrantExpression ge: info) {
             if (process(ge))
                 return true;
         }

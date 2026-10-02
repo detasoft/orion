@@ -12,6 +12,7 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.config.*;
 import pro.deta.orion.schema.orion.*;
@@ -30,9 +31,9 @@ final class StorageManagementFixture {
 
     static State open(NativeGitRepositoryProvider repositories, List<OrionDocument.Organization> orgs,
             ConfigurationCipherCapability cipher) {
-        AccessControl.User root = new AccessControl.User("root", "", "", "", List.of(), List.of(),
-                ACLUtil.generateDefaultAccessControl("unused").getGrants());
-        AccessControl.User admin = new AccessControl.User("admin", "", "", "", List.of(), List.of(), root.getGrants());
+        User root = new User("root", "", "", "", List.of(), List.of(),
+                ACLUtil.generateDefaultAccessControl("unused").grants());
+        User admin = new User("admin", "", "", "", List.of(), List.of(), root.grants());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(root, admin), List.of(), List.of())), orgs);
         OrionDesiredState desired = new OrionDesiredState();

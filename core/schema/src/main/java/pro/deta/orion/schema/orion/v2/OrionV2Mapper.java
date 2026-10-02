@@ -1,6 +1,11 @@
 package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -243,9 +248,9 @@ public final class OrionV2Mapper {
         return providers;
     }
 
-    private static List<AccessControl.User> toCurrentUsers(List<OrionV2.User> source) {
+    private static List<User> toCurrentUsers(List<OrionV2.User> source) {
         requireUniqueIds(source, OrionV2.User::getId, "user");
-        List<AccessControl.User> users = new ArrayList<>();
+        List<User> users = new ArrayList<>();
         for (OrionV2.User user : sorted(source, Comparator.comparing(OrionV2.User::getId, NULL_SAFE_STRINGS))) {
             users.add(toCurrent(Objects.requireNonNull(user, "user")));
         }
@@ -300,7 +305,7 @@ public final class OrionV2Mapper {
         return grants;
     }
 
-    private static List<AccessControl.GrantExpression> toCurrentScopedExpressions(
+    private static List<GrantExpression> toCurrentScopedExpressions(
             List<OrionV2.ScopedGrantExpression> source) {
         List<OrionV2.ScopedGrantExpression> sortedExpressions = sorted(
                 source,
@@ -308,10 +313,10 @@ public final class OrionV2Mapper {
                                 (OrionV2.ScopedGrantExpression expression) -> enumName(expression.getKey()),
                                 NULL_SAFE_STRINGS)
                         .thenComparing(OrionV2.ScopedGrantExpression::getValue, NULL_SAFE_STRINGS));
-        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        List<GrantExpression> expressions = new ArrayList<>();
         for (OrionV2.ScopedGrantExpression expression : sortedExpressions) {
             Objects.requireNonNull(expression, "scoped grant expression");
-            expressions.add(new AccessControl.GrantExpression(
+            expressions.add(new GrantExpression(
                     enumValue(AccessControl.GrantKey.class, expression.getKey()),
                     expression.getValue()));
         }
@@ -507,12 +512,12 @@ public final class OrionV2Mapper {
         requireUniqueIds(source.getRoles(), OrionV2.Role::getId, "ACL role");
         requireUniqueIds(source.getGrants(), OrionV2.Grant::getId, "ACL grant");
 
-        List<AccessControl.User> users = toCurrentUsers(source.getUsers());
+        List<User> users = toCurrentUsers(source.getUsers());
 
         List<OrionV2.Role> sortedRoles = sorted(
                 source.getRoles(),
                 Comparator.comparing(OrionV2.Role::getId, NULL_SAFE_STRINGS));
-        List<AccessControl.Role> roles = new ArrayList<>();
+        List<Role> roles = new ArrayList<>();
         for (OrionV2.Role role : sortedRoles) {
             Objects.requireNonNull(role, "ACL role");
             roles.add(toCurrent(role));
@@ -521,7 +526,7 @@ public final class OrionV2Mapper {
         return new AccessControl(users, roles, toCurrentGrants(source.getGrants(), "ACL grant"));
     }
 
-    private static AccessControl.User toCurrent(OrionV2.User source) {
+    private static User toCurrent(OrionV2.User source) {
         requireUniqueIds(source.getGrants(), OrionV2.Grant::getId, "ACL user grant");
         List<OrionV2.Credential> sortedCredentials = sorted(
                 source.getCredentials(),
@@ -530,15 +535,15 @@ public final class OrionV2Mapper {
                                 NULL_SAFE_STRINGS)
                         .thenComparing(OrionV2.Credential::getKeyId, NULL_SAFE_STRINGS)
                         .thenComparing(OrionV2.Credential::getValue, NULL_SAFE_STRINGS));
-        List<AccessControl.Credential> credentials = new ArrayList<>();
+        List<Credential> credentials = new ArrayList<>();
         for (OrionV2.Credential credential : sortedCredentials) {
             Objects.requireNonNull(credential, "ACL credential");
-            credentials.add(new AccessControl.Credential(
+            credentials.add(new Credential(
                     enumValue(AccessControl.CredentialType.class, credential.getType()),
                     credential.getKeyId(),
                     credential.getValue()));
         }
-        return new AccessControl.User(
+        return new User(
                 source.getId(),
                 source.getFirst(),
                 source.getLast(),
@@ -548,22 +553,22 @@ public final class OrionV2Mapper {
                 toCurrentGrants(source.getGrants(), "ACL user grant"));
     }
 
-    private static AccessControl.Role toCurrent(OrionV2.Role source) {
+    private static Role toCurrent(OrionV2.Role source) {
         requireUniqueIds(source.getGrants(), OrionV2.Grant::getId, "ACL role grant");
-        return new AccessControl.Role(
+        return new Role(
                 source.getId(),
                 toCurrentGrants(source.getGrants(), "ACL role grant"),
                 sorted(source.getGrantReferences(), NULL_SAFE_STRINGS));
     }
 
-    private static List<AccessControl.Grant> toCurrentGrants(
+    private static List<Grant> toCurrentGrants(
             List<OrionV2.Grant> source,
             String description) {
         requireUniqueIds(source, OrionV2.Grant::getId, description);
         List<OrionV2.Grant> sortedGrants = sorted(
                 source,
                 Comparator.comparing(OrionV2.Grant::getId, NULL_SAFE_STRINGS));
-        List<AccessControl.Grant> grants = new ArrayList<>();
+        List<Grant> grants = new ArrayList<>();
         for (OrionV2.Grant grant : sortedGrants) {
             Objects.requireNonNull(grant, description);
             List<OrionV2.GrantExpression> sortedInfo = sorted(
@@ -572,14 +577,14 @@ public final class OrionV2Mapper {
                                     (OrionV2.GrantExpression expression) -> enumName(expression.getKey()),
                                     NULL_SAFE_STRINGS)
                             .thenComparing(OrionV2.GrantExpression::getValue, NULL_SAFE_STRINGS));
-            List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+            List<GrantExpression> expressions = new ArrayList<>();
             for (OrionV2.GrantExpression expression : sortedInfo) {
                 Objects.requireNonNull(expression, "ACL grant expression");
-                expressions.add(new AccessControl.GrantExpression(
+                expressions.add(new GrantExpression(
                         enumValue(AccessControl.GrantKey.class, expression.getKey()),
                         expression.getValue()));
             }
-            grants.add(new AccessControl.Grant(grant.getId(), expressions));
+            grants.add(new Grant(grant.getId(), expressions));
         }
         return grants;
     }
@@ -643,9 +648,9 @@ public final class OrionV2Mapper {
         return repositories;
     }
 
-    private static List<OrionV2.User> fromCurrentUsers(List<AccessControl.User> source) {
+    private static List<OrionV2.User> fromCurrentUsers(List<User> source) {
         List<OrionV2.User> users = new ArrayList<>();
-        for (AccessControl.User user : sorted(source, Comparator.comparing(AccessControl.User::getId))) {
+        for (User user : sorted(source, Comparator.comparing(User::id))) {
             users.add(fromCurrent(user));
         }
         return users;
@@ -698,18 +703,18 @@ public final class OrionV2Mapper {
     }
 
     private static List<OrionV2.ScopedGrantExpression> fromCurrentScopedExpressions(
-            List<AccessControl.GrantExpression> source) {
-        List<AccessControl.GrantExpression> sortedExpressions = sorted(
+            List<GrantExpression> source) {
+        List<GrantExpression> sortedExpressions = sorted(
                 source,
                 Comparator.comparing(
-                                (AccessControl.GrantExpression expression) -> enumName(expression.getKey()),
+                                (GrantExpression expression) -> enumName(expression.key()),
                                 NULL_SAFE_STRINGS)
-                        .thenComparing(AccessControl.GrantExpression::getValue, NULL_SAFE_STRINGS));
+                        .thenComparing(GrantExpression::value, NULL_SAFE_STRINGS));
         List<OrionV2.ScopedGrantExpression> expressions = new ArrayList<>();
-        for (AccessControl.GrantExpression expression : sortedExpressions) {
+        for (GrantExpression expression : sortedExpressions) {
             expressions.add(new OrionV2.ScopedGrantExpression(
-                    enumValue(OrionV2.GrantKey.class, expression.getKey()),
-                    expression.getValue()));
+                    enumValue(OrionV2.GrantKey.class, expression.key()),
+                    expression.value()));
         }
         return expressions;
     }
@@ -777,78 +782,78 @@ public final class OrionV2Mapper {
     }
 
     private static OrionV2.AccessControl fromCurrent(AccessControl source) {
-        requireUniqueIds(source.getUsers(), AccessControl.User::getId, "ACL user");
-        requireUniqueIds(source.getRoles(), AccessControl.Role::getId, "ACL role");
-        requireUniqueIds(source.getGrants(), AccessControl.Grant::getId, "ACL grant");
+        requireUniqueIds(source.users(), User::id, "ACL user");
+        requireUniqueIds(source.roles(), Role::id, "ACL role");
+        requireUniqueIds(source.grants(), Grant::id, "ACL grant");
 
-        List<OrionV2.User> users = fromCurrentUsers(source.getUsers());
+        List<OrionV2.User> users = fromCurrentUsers(source.users());
 
-        List<AccessControl.Role> sortedRoles = sorted(
-                source.getRoles(),
-                Comparator.comparing(AccessControl.Role::getId, NULL_SAFE_STRINGS));
+        List<Role> sortedRoles = sorted(
+                source.roles(),
+                Comparator.comparing(Role::id, NULL_SAFE_STRINGS));
         List<OrionV2.Role> roles = new ArrayList<>();
-        for (AccessControl.Role role : sortedRoles) {
+        for (Role role : sortedRoles) {
             roles.add(fromCurrent(role));
         }
 
-        return new OrionV2.AccessControl(users, roles, fromCurrentGrants(source.getGrants(), "ACL grant"));
+        return new OrionV2.AccessControl(users, roles, fromCurrentGrants(source.grants(), "ACL grant"));
     }
 
-    private static OrionV2.User fromCurrent(AccessControl.User source) {
-        List<AccessControl.Credential> sortedCredentials = sorted(
-                source.getCredentials(),
+    private static OrionV2.User fromCurrent(User source) {
+        List<Credential> sortedCredentials = sorted(
+                source.credentials(),
                 Comparator.comparing(
-                                (AccessControl.Credential credential) -> enumName(credential.getType()),
+                                (Credential credential) -> enumName(credential.type()),
                                 NULL_SAFE_STRINGS)
-                        .thenComparing(AccessControl.Credential::getKeyId, NULL_SAFE_STRINGS)
-                        .thenComparing(AccessControl.Credential::getValue, NULL_SAFE_STRINGS));
+                        .thenComparing(Credential::keyId, NULL_SAFE_STRINGS)
+                        .thenComparing(Credential::value, NULL_SAFE_STRINGS));
         List<OrionV2.Credential> credentials = new ArrayList<>();
-        for (AccessControl.Credential credential : sortedCredentials) {
+        for (Credential credential : sortedCredentials) {
             credentials.add(new OrionV2.Credential(
-                    enumValue(OrionV2.CredentialType.class, credential.getType()),
-                    credential.getKeyId(),
-                    credential.getValue()));
+                    enumValue(OrionV2.CredentialType.class, credential.type()),
+                    credential.keyId(),
+                    credential.value()));
         }
 
         return new OrionV2.User(
-                source.getId(),
-                source.getFirst(),
-                source.getLast(),
-                source.getEmail(),
+                source.id(),
+                source.first(),
+                source.last(),
+                source.email(),
                 credentials,
-                sorted(source.getRoles(), NULL_SAFE_STRINGS),
-                fromCurrentGrants(source.getGrants(), "ACL user grant"));
+                sorted(source.roles(), NULL_SAFE_STRINGS),
+                fromCurrentGrants(source.grants(), "ACL user grant"));
     }
 
-    private static OrionV2.Role fromCurrent(AccessControl.Role source) {
+    private static OrionV2.Role fromCurrent(Role source) {
         return new OrionV2.Role(
-                source.getId(),
-                fromCurrentGrants(source.getGrants(), "ACL role grant"),
-                sorted(source.getGrantReferences(), NULL_SAFE_STRINGS));
+                source.id(),
+                fromCurrentGrants(source.grants(), "ACL role grant"),
+                sorted(source.grantReferences(), NULL_SAFE_STRINGS));
     }
 
     private static List<OrionV2.Grant> fromCurrentGrants(
-            List<AccessControl.Grant> source,
+            List<Grant> source,
             String description) {
-        requireUniqueIds(source, AccessControl.Grant::getId, description);
-        List<AccessControl.Grant> sortedGrants = sorted(
+        requireUniqueIds(source, Grant::id, description);
+        List<Grant> sortedGrants = sorted(
                 source,
-                Comparator.comparing(AccessControl.Grant::getId, NULL_SAFE_STRINGS));
+                Comparator.comparing(Grant::id, NULL_SAFE_STRINGS));
         List<OrionV2.Grant> grants = new ArrayList<>();
-        for (AccessControl.Grant grant : sortedGrants) {
-            List<AccessControl.GrantExpression> sortedInfo = sorted(
-                    grant.getInfo(),
+        for (Grant grant : sortedGrants) {
+            List<GrantExpression> sortedInfo = sorted(
+                    grant.info(),
                     Comparator.comparing(
-                                    (AccessControl.GrantExpression expression) -> enumName(expression.getKey()),
+                                    (GrantExpression expression) -> enumName(expression.key()),
                                     NULL_SAFE_STRINGS)
-                            .thenComparing(AccessControl.GrantExpression::getValue, NULL_SAFE_STRINGS));
+                            .thenComparing(GrantExpression::value, NULL_SAFE_STRINGS));
             List<OrionV2.GrantExpression> expressions = new ArrayList<>();
-            for (AccessControl.GrantExpression expression : sortedInfo) {
+            for (GrantExpression expression : sortedInfo) {
                 expressions.add(new OrionV2.GrantExpression(
-                        enumValue(OrionV2.GrantKey.class, expression.getKey()),
-                        expression.getValue()));
+                        enumValue(OrionV2.GrantKey.class, expression.key()),
+                        expression.value()));
             }
-            grants.add(new OrionV2.Grant(grant.getId(), expressions));
+            grants.add(new OrionV2.Grant(grant.id(), expressions));
         }
         return grants;
     }

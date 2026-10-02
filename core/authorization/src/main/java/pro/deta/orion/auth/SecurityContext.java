@@ -1,7 +1,7 @@
 package pro.deta.orion.auth;
 
 import lombok.ToString;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import java.util.List;
@@ -36,7 +36,7 @@ public class SecurityContext {
         }
 
         @Override
-        public List<AccessControl.Grant> getGrants() {
+        public List<Grant> getGrants() {
             return List.of();
         }
     };

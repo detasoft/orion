@@ -2,6 +2,8 @@ package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.*;
 
 import java.util.ArrayList;
@@ -14,8 +16,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionAuthorizationModelTest {
     @Test
     void scopedDefinitionsDefensivelyCopyTheirOrderedReferencesAndExpressions() {
-        AccessControl.GrantExpression readExpression = expression(AccessControl.GrantKey.READ, "true");
-        List<AccessControl.GrantExpression> expressions = new ArrayList<>(List.of(readExpression));
+        GrantExpression readExpression = expression(AccessControl.GrantKey.READ, "true");
+        List<GrantExpression> expressions = new ArrayList<>(List.of(readExpression));
         ScopedGrant grant = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW, expressions);
         List<RoleAddress> roleReferences = new ArrayList<>(List.of(role("acme/base")));
         List<GrantAddress> grantReferences = new ArrayList<>(List.of(grant("acme/read")));
@@ -79,7 +81,7 @@ class OrionAuthorizationModelTest {
 
     @Test
     void ownersCopyDefinitionsAndRejectDuplicateLocalIdentifiers() {
-        List<AccessControl.User> users = new ArrayList<>(List.of(user("alice", List.of())));
+        List<User> users = new ArrayList<>(List.of(user("alice", List.of())));
         List<ScopedGrant> grants = new ArrayList<>(List.of(allow("read")));
         List<ScopedRole> roles = new ArrayList<>(List.of(roleDefinition("developer")));
         OrionDocument.Organization organization = organization("acme", users, grants, roles, List.of());
@@ -116,7 +118,7 @@ class OrionAuthorizationModelTest {
 
     @Test
     void localIdentifiersCanRepeatInDifferentScopesAndOrganizationsOwnUserIdentity() {
-        AccessControl.User alice = user("alice", List.of());
+        User alice = user("alice", List.of());
         OrionDocument document = document(
                 organization(
                         "acme",
@@ -324,8 +326,8 @@ class OrionAuthorizationModelTest {
                 List.of(),
                 List.of(roleDefinition("developer")),
                 List.of());
-        AccessControl.User memberWithoutRole = user("member", List.of());
-        AccessControl.User assignedWithoutMembership = user(
+        User memberWithoutRole = user("member", List.of());
+        User assignedWithoutMembership = user(
                 "assigned", List.of(role("acme/platform/developer")));
 
         OrionDocument document = document(organization(
@@ -363,7 +365,7 @@ class OrionAuthorizationModelTest {
 
     private static OrionDocument.Organization organization(
             String id,
-            List<AccessControl.User> users,
+            List<User> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
@@ -392,13 +394,13 @@ class OrionAuthorizationModelTest {
                 List.of(), java.util.Optional.empty());
     }
 
-    private static AccessControl.User user(
+    private static User user(
             String id, List<RoleAddress> assignments) {
         List<String> roles = new ArrayList<>();
         for (RoleAddress assignment : assignments) {
             roles.add(assignment.toString());
         }
-        return new AccessControl.User(id, null, null, null, List.of(), roles, List.of());
+        return new User(id, null, null, null, List.of(), roles, List.of());
     }
 
     private static ScopedGrant allow(String id) {
@@ -420,7 +422,7 @@ class OrionAuthorizationModelTest {
         return GrantAddress.parse(address);
     }
 
-    private static AccessControl.GrantExpression expression(AccessControl.GrantKey key, String value) {
-        return new AccessControl.GrantExpression(key, value);
+    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+        return new GrantExpression(key, value);
     }
 }

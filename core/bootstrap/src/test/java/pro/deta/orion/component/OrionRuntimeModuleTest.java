@@ -37,6 +37,10 @@ import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -135,11 +139,11 @@ class OrionRuntimeModuleTest {
         ScopedGrant grant = new ScopedGrant(
                 new GrantId("admin"),
                 ScopedGrant.Effect.ALLOW,
-                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
         ScopedRole role = new ScopedRole(
                 new RoleId("reviewer"), List.of(),
                 List.of(GrantAddress.parse("acme/admin")));
-        AccessControl.User assigned = new AccessControl.User("reviewer", null, null, null, List.of(),
+        User assigned = new User("reviewer", null, null, null, List.of(),
                 List.of("acme/reviewer"), List.of());
         PrincipalAddress actor = PrincipalAddress.parse("acme/reviewer");
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
@@ -148,7 +152,7 @@ class OrionRuntimeModuleTest {
                     Optional.of(ConfigurationScope.parse("acme/platform/api")), "Trust", "",
                     List.of(new DecisionAction("Save", false, ignored -> Result.of(null)))))
                     .valueOrFailure("register");
-            for (List<AccessControl.User> users : List.of(organization.users(), List.<AccessControl.User>of())) {
+            for (List<User> users : List.of(organization.users(), List.<User>of())) {
                 desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                         organization.id(), "", List.of(assigned), List.of(grant), List.of(role),
                         organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
@@ -214,13 +218,13 @@ class OrionRuntimeModuleTest {
                 Optional.of(ConfigurationScope.parse("acme")))).isFalse();
         assertThat(acl.canAdminister(PrincipalAddress.parse("system/reviewer"), Optional.empty())).isFalse();
         AccessControl initial = ACLUtil.generateDefaultAccessControl("hash");
-        AccessControl.User originalRoot = initial.getUsers().getFirst();
-        AccessControl.Credential password = originalRoot.getCredentials().getFirst();
-        AccessControl.User lockedRoot = new AccessControl.User(originalRoot.getId(), originalRoot.getFirst(),
-                originalRoot.getLast(), originalRoot.getEmail(), List.of(new AccessControl.Credential(
-                        password.getType(), "root-auth-locked:test", password.getValue())),
-                originalRoot.getRoles(), originalRoot.getGrants());
-        AccessControl locked = new AccessControl(List.of(lockedRoot), initial.getRoles(), initial.getGrants());
+        User originalRoot = initial.users().getFirst();
+        Credential password = originalRoot.credentials().getFirst();
+        User lockedRoot = new User(originalRoot.id(), originalRoot.first(),
+                originalRoot.last(), originalRoot.email(), List.of(new Credential(
+                        password.type(), "root-auth-locked:test", password.value())),
+                originalRoot.roles(), originalRoot.grants());
+        AccessControl locked = new AccessControl(List.of(lockedRoot), initial.roles(), initial.grants());
         desired.publish(base.replaceAccessControl(locked), Optional.empty());
         assertThat(acl.canAdminister(root, Optional.empty())).isFalse();
         desired.publish(base, Optional.empty());
@@ -232,10 +236,10 @@ class OrionRuntimeModuleTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrionDocument base = decisionAccessDocument(false);
         OrionDocument.Organization organization = base.organizations().getFirst();
-        AccessControl.User restricted = new AccessControl.User("reviewer", null, null, null, List.of(), List.of(),
-                List.of(new AccessControl.Grant("admin", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true"),
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
+        User restricted = new User("reviewer", null, null, null, List.of(), List.of(),
+                List.of(new Grant("admin", List.of(
+                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true"),
+                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
         desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                 organization.id(), "", List.of(restricted), organization.grants(), organization.roles(),
                 organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
@@ -248,9 +252,9 @@ class OrionRuntimeModuleTest {
     }
 
     private static OrionDocument decisionAccessDocument(boolean allowed) {
-        List<AccessControl.Grant> grants = allowed ? List.of(new AccessControl.Grant("admin",
-                List.of(new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")))) : List.of();
-        AccessControl.User user = new AccessControl.User("reviewer", null, null, null,
+        List<Grant> grants = allowed ? List.of(new Grant("admin",
+                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")))) : List.of();
+        User user = new User("reviewer", null, null, null,
                 List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("api"), "API",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
@@ -367,8 +371,8 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControl accessControlWithUser(String userId) {
-        AccessControl.User user = new AccessControl.User(userId, null, null, userId + "@example.test",
-                List.of(new AccessControl.Credential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH)),
+        User user = new User(userId, null, null, userId + "@example.test",
+                List.of(new Credential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH)),
                 List.of(), List.of());
         return new AccessControl(List.of(user), List.of(), List.of());
     }
@@ -378,8 +382,8 @@ class OrionRuntimeModuleTest {
         AccessControl accessControl =
                 OrionXml.read(new ByteArrayInputStream(snapshot.content()))
                         .system().accessControl();
-        assertEquals(1, accessControl.getUsers().size());
-        assertEquals(userId, accessControl.getUsers().getFirst().getId());
+        assertEquals(1, accessControl.users().size());
+        assertEquals(userId, accessControl.users().getFirst().id());
     }
 
     private OrionConfiguration configurationWithAcl(String location) {

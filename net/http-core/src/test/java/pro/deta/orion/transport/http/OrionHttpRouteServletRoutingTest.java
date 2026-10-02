@@ -288,7 +288,7 @@ class OrionHttpRouteServletRoutingTest {
 
     private static SecurityContext admin() {
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin",
-                ACLUtil.generateDefaultAccessControl("unused-test-hash").getGrants()));
+                ACLUtil.generateDefaultAccessControl("unused-test-hash").grants()));
     }
 
     private static OrionHttpRoute failingRoute(RuntimeException failure) {

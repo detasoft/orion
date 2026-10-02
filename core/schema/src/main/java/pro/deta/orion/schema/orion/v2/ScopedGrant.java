@@ -1,6 +1,6 @@
 package pro.deta.orion.schema.orion.v2;
 
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantExpression;
 
 import java.util.List;
 import java.util.Objects;
@@ -8,12 +8,12 @@ import java.util.Objects;
 public record ScopedGrant(
         GrantId id,
         Effect effect,
-        List<AccessControl.GrantExpression> expressions) {
+        List<GrantExpression> expressions) {
     public ScopedGrant {
         Objects.requireNonNull(id, "grant id");
         Objects.requireNonNull(effect, "grant effect");
         Objects.requireNonNull(expressions, "grant expressions");
-        for (AccessControl.GrantExpression expression : expressions) {
+        for (GrantExpression expression : expressions) {
             Objects.requireNonNull(expression, "grant expression");
         }
         expressions = List.copyOf(expressions);

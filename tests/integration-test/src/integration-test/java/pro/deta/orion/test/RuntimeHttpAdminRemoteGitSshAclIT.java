@@ -14,6 +14,8 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
@@ -144,14 +146,14 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
     private static AccessControl defaultAccessControlWithUsers(String... extraUserIds) {
         AccessControl base = ACLUtil.generateDefaultAccessControl(
                 TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
-        List<AccessControl.User> users = new ArrayList<>(base.getUsers());
+        List<User> users = new ArrayList<>(base.users());
         for (String userId : extraUserIds) {
-            users.add(new AccessControl.User(userId, null, null, userId + "@example.test",
-                    List.of(new AccessControl.Credential(
+            users.add(new User(userId, null, null, userId + "@example.test",
+                    List.of(new Credential(
                             AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
                     List.of(), List.of()));
         }
-        return new AccessControl(users, base.getRoles(), base.getGrants());
+        return new AccessControl(users, base.roles(), base.grants());
     }
 
     private static byte[] serialize(OrionDocument document) throws IOException {
@@ -164,8 +166,8 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
     private static List<String> userIds(byte[] content) throws IOException {
         var accessControl = OrionXml.read(new ByteArrayInputStream(content)).system().accessControl();
         List<String> userIds = new ArrayList<>();
-        for (AccessControl.User user : accessControl.getUsers()) {
-            userIds.add(user.getId());
+        for (User user : accessControl.users()) {
+            userIds.add(user.id());
         }
         return userIds;
     }

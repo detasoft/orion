@@ -1,6 +1,7 @@
 package pro.deta.orion.auth.check.rule;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.AccessRule;
@@ -69,7 +70,7 @@ public final class BranchAccessRules {
             return AccessDecision.deny(parentDeniedReason + ": " + parentDecision.reason());
         }
 
-        List<AccessControl.Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(
+        List<Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(
                 securityContext.getUserIdentity(),
                 repository.repositoryName());
         if (requireReadWrite) {
@@ -87,11 +88,11 @@ public final class BranchAccessRules {
         return AccessDecision.deny("missing branch grant for " + resource.branchName());
     }
 
-    private static boolean hasWildcardBranchGrant(List<AccessControl.Grant> branchGrants) {
+    private static boolean hasWildcardBranchGrant(List<Grant> branchGrants) {
         return !filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty();
     }
 
-    private static boolean isBranchAllowed(List<AccessControl.Grant> branchGrants, String branchName) {
+    private static boolean isBranchAllowed(List<Grant> branchGrants, String branchName) {
         return !filterGrants(
                 branchGrants,
                 GrantMatcher.of(AccessControl.GrantKey.BRANCH, grantBranchName -> Objects.equals(grantBranchName, branchName)))

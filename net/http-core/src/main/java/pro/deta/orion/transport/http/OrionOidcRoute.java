@@ -15,7 +15,7 @@ import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
@@ -210,7 +210,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             Arrays.fill(secret, '\0');
         }
         requireCurrent(attempt);
-        AccessControl.User linked = accounts.linkedUser(attempt.organization(),
+        User linked = accounts.linkedUser(attempt.organization(),
                 attempt.provider().issuer().toString(), identity.subject());
         if (linked == null && (attempt.invitation().isEmpty()
                 || !accounts.invitation(attempt.organization(), attempt.invitation()).email().equals(identity.email()))) {
@@ -230,10 +230,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private synchronized OrionHttpResponse profile(HttpServletRequest request, JsonNode body) {
         Verified login = verified(request, body);
-        AccessControl.User user = accounts.linkedUser(login.attempt().organization(),
+        User user = accounts.linkedUser(login.attempt().organization(),
                 login.attempt().provider().issuer().toString(), login.identity().subject());
-        return OrionHttpResponse.ok(Map.of("first", user == null ? login.identity().first() : safe(user.getFirst()),
-                "last", user == null ? login.identity().last() : safe(user.getLast()),
+        return OrionHttpResponse.ok(Map.of("first", user == null ? login.identity().first() : safe(user.first()),
+                "last", user == null ? login.identity().last() : safe(user.last()),
                 "email", login.identity().email(), "setup", user == null));
     }
 
@@ -245,11 +245,11 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             return OrionHttpResponse.text(503, "Too many browser sessions. Try again later.");
         }
         String issuer = attempt.provider().issuer().toString();
-        AccessControl.User linked = accounts.linkedUser(attempt.organization(), issuer, login.identity().subject());
+        User linked = accounts.linkedUser(attempt.organization(), issuer, login.identity().subject());
         String userId = linked == null
                 ? accounts.accept(attempt.organization(), attempt.invitation(), login.identity().email(), attempt.provider(),
                         login.identity().subject(), body.path("first").asText(), body.path("last").asText())
-                : linked.getId();
+                : linked.id();
         long now = clock.instant().getEpochSecond();
         long authenticatedAt = attempt.provider().reauthenticationTimeoutSeconds() == 0 ? now
                 : Math.min(now, login.identity().authenticatedAt());

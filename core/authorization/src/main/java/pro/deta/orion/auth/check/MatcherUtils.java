@@ -1,7 +1,7 @@
 package pro.deta.orion.auth.check;
 
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -66,11 +66,11 @@ public class MatcherUtils {
         return expression == pattern.length();
     }
 
-    public static List<AccessControl.Grant> filterGrants(List<AccessControl.Grant> grants, GrantMatcher... matchers) {
-        List<AccessControl.Grant> resultGrants = new ArrayList<>();
-        for (AccessControl.Grant g : grants) {
+    public static List<Grant> filterGrants(List<Grant> grants, GrantMatcher... matchers) {
+        List<Grant> resultGrants = new ArrayList<>();
+        for (Grant g : grants) {
             List<GrantMatcher> grantMatchers = new ArrayList<>(Arrays.asList(matchers));
-            grantMatchers.removeIf(gm -> gm.matchesAny(g.getInfo()));
+            grantMatchers.removeIf(gm -> gm.matchesAny(g.info()));
             if (grantMatchers.isEmpty()) // all grant matchers resolved
                 resultGrants.add(g);
             else {

@@ -6,6 +6,10 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationInvitation;
@@ -49,8 +53,8 @@ public final class OrganizationAccounts {
             if (organization.oidcProviders().isEmpty()) {
                 throw new IllegalArgumentException("Configure OIDC for this organization first");
             }
-            for (AccessControl.User user : organization.users()) {
-                if (user.getEmail() != null && user.getEmail().equalsIgnoreCase(normalized)) {
+            for (User user : organization.users()) {
+                if (user.email() != null && user.email().equalsIgnoreCase(normalized)) {
                     throw new IllegalArgumentException("A user with this email already exists");
                 }
             }
@@ -95,14 +99,14 @@ public final class OrganizationAccounts {
         throw new IllegalArgumentException("Organization is unavailable");
     }
 
-    public AccessControl.User linkedUser(OrganizationId organization, String issuer, String subject) {
-        AccessControl.User found = null;
-        for (AccessControl.User user : organization(organization).users()) {
-            for (AccessControl.Credential credential : user.getCredentials()) {
-                if (credential.getType() == AccessControl.CredentialType.OIDC_SUBJECT
-                        && Objects.equals(issuer, credential.getKeyId())
-                        && Objects.equals(subject, credential.getValue())) {
-                    if (found != null && !found.getId().equals(user.getId())) {
+    public User linkedUser(OrganizationId organization, String issuer, String subject) {
+        User found = null;
+        for (User user : organization(organization).users()) {
+            for (Credential credential : user.credentials()) {
+                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                        && Objects.equals(issuer, credential.keyId())
+                        && Objects.equals(subject, credential.value())) {
+                    if (found != null && !found.id().equals(user.id())) {
                         throw new IllegalArgumentException("Ambiguous organization account");
                     }
                     found = user;
@@ -127,23 +131,23 @@ public final class OrganizationAccounts {
             if (!invitation.email().equals(normalized)) {
                 throw new IllegalArgumentException("Invitation email does not match");
             }
-            for (AccessControl.User existing : organization.users()) {
-                if (existing.getEmail() != null && existing.getEmail().equalsIgnoreCase(normalized)) {
+            for (User existing : organization.users()) {
+                if (existing.email() != null && existing.email().equalsIgnoreCase(normalized)) {
                     throw new IllegalArgumentException("A user with this email already exists");
                 }
-                for (AccessControl.Credential credential : existing.getCredentials()) {
-                    if (credential.getType() == AccessControl.CredentialType.OIDC_SUBJECT
-                            && Objects.equals(issuer, credential.getKeyId())
-                            && Objects.equals(subject, credential.getValue())) {
+                for (Credential credential : existing.credentials()) {
+                    if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                            && Objects.equals(issuer, credential.keyId())
+                            && Objects.equals(subject, credential.value())) {
                         throw new IllegalArgumentException("Account is already linked");
                     }
                 }
             }
-            List<AccessControl.User> users = new ArrayList<>(organization.users());
-            users.add(new AccessControl.User(userId, givenName, familyName, normalized,
-                    List.of(new AccessControl.Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, subject)),
-                    List.of(), List.of(new AccessControl.Grant("organization-read", List.of(
-                            new AccessControl.GrantExpression(AccessControl.GrantKey.REPOSITORY, id + "/**"))))));
+            List<User> users = new ArrayList<>(organization.users());
+            users.add(new User(userId, givenName, familyName, normalized,
+                    List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, subject)),
+                    List.of(), List.of(new Grant("organization-read", List.of(
+                            new GrantExpression(AccessControl.GrantKey.REPOSITORY, id + "/**"))))));
             List<OrganizationInvitation> invitations = new ArrayList<>(organization.invitations());
             invitations.remove(invitation);
             return replaceAccounts(organization, users, invitations);
@@ -182,7 +186,7 @@ public final class OrganizationAccounts {
     }
 
     private static OrionDocument.Organization replaceAccounts(OrionDocument.Organization organization,
-            List<AccessControl.User> users, List<OrganizationInvitation> invitations) {
+            List<User> users, List<OrganizationInvitation> invitations) {
         return new OrionDocument.Organization(organization.id(), organization.displayName(), users,
                 organization.grants(), organization.roles(), organization.teams(), organization.secrets(),
                 organization.oidcProviders(), invitations, organization.connections());

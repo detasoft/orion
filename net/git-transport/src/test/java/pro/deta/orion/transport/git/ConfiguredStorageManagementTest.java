@@ -14,6 +14,9 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.config.*;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
@@ -45,7 +48,7 @@ class ConfiguredStorageManagementTest {
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()));
         material.generateSecretKeyIfMissing(descriptor, 256);
         cipher = KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor);
-        AccessControl.User user = new AccessControl.User("alice", "", "", "", List.of(), List.of(), List.of(
+        User user = new User("alice", "", "", "", List.of(), List.of(), List.of(
                 grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CREATE),
                 grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.READ_WRITE),
                 grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CONNECTION_USE),
@@ -282,11 +285,11 @@ class ConfiguredStorageManagementTest {
         OrionDocument.Organization org = document.organizations().getFirst();
         ConfigurationScope scope = ConfigurationScope.organization(organization);
         ScopedGrant deny = new ScopedGrant(new GrantId("deny-use"), ScopedGrant.Effect.DENY,
-                grant(AccessControl.GrantKey.CONNECTION, "archive", AccessControl.GrantKey.CONNECTION_USE).getInfo());
+                grant(AccessControl.GrantKey.CONNECTION, "archive", AccessControl.GrantKey.CONNECTION_USE).info());
         ScopedRole role = new ScopedRole(new RoleId("denied"), List.of(),
                 List.of(new GrantAddress(scope, deny.id())));
-        AccessControl.User user = new AccessControl.User("alice", "", "", "", List.of(),
-                List.of("acme/denied"), org.users().getFirst().getGrants());
+        User user = new User("alice", "", "", "", List.of(),
+                List.of("acme/denied"), org.users().getFirst().grants());
         storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                 List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                 org.invitations(), org.connections()))));
@@ -309,11 +312,11 @@ class ConfiguredStorageManagementTest {
             OrionDocument document = desired.current().document();
             OrionDocument.Organization org = document.organizations().getFirst();
             ScopedGrant deny = new ScopedGrant(new GrantId("deny-change"), ScopedGrant.Effect.DENY,
-                    grant(AccessControl.GrantKey.CONNECTION, "archive*", action).getInfo());
+                    grant(AccessControl.GrantKey.CONNECTION, "archive*", action).info());
             ScopedRole role = new ScopedRole(new RoleId("denied"), List.of(), List.of(new GrantAddress(
                     ConfigurationScope.organization(organization), deny.id())));
-            AccessControl.User user = new AccessControl.User("alice", "", "", "", List.of(), List.of("acme/denied"),
-                    org.users().getFirst().getGrants());
+            User user = new User("alice", "", "", "", List.of(), List.of("acme/denied"),
+                    org.users().getFirst().grants());
             storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(), "",
                     List.of(user), List.of(deny), List.of(role), org.teams(), org.secrets(), org.oidcProviders(),
                     org.invitations(), org.connections()))));
@@ -347,9 +350,9 @@ class ConfiguredStorageManagementTest {
     @Test
     void systemAndDefaultCredentialsRequireCurrentSystemAdministrator() throws Exception {
         OrionDocument document = desired.current().document();
-        AccessControl.User adminUser = new AccessControl.User("operator", "", "", "", List.of(), List.of(),
-                List.of(new AccessControl.Grant("admin", List.of(
-                        new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")))));
+        User adminUser = new User("operator", "", "", "", List.of(), List.of(),
+                List.of(new Grant("admin", List.of(
+                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true")))));
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(adminUser), List.of(), List.of())), document.organizations()));
         editor.reload("system administrator");
@@ -377,10 +380,10 @@ class ConfiguredStorageManagementTest {
                 java.net.URI.create("s3://test-bucket/prefix"));
     }
 
-    private void setGrants(List<AccessControl.Grant> grants, boolean reload) throws Exception {
+    private void setGrants(List<Grant> grants, boolean reload) throws Exception {
         OrionDocument document = desired.current().document();
         OrionDocument.Organization org = document.organizations().getFirst();
-        AccessControl.User user = new AccessControl.User("alice", "", "", "", List.of(), List.of(), grants);
+        User user = new User("alice", "", "", "", List.of(), List.of(), grants);
         storage.set(new OrionDocument(document.system(), List.of(new OrionDocument.Organization(org.id(),
                 org.displayName(), List.of(user), org.grants(), org.roles(), org.teams(), org.secrets(),
                 org.oidcProviders(), org.invitations(), org.connections()))));
@@ -394,10 +397,10 @@ class ConfiguredStorageManagementTest {
                 "access-id", secret, null, false);
     }
 
-    private static AccessControl.Grant grant(AccessControl.GrantKey selector, String name,
+    private static Grant grant(AccessControl.GrantKey selector, String name,
             AccessControl.GrantKey action) {
-        return new AccessControl.Grant(selector + "-" + action, List.of(
-                new AccessControl.GrantExpression(selector, name), new AccessControl.GrantExpression(action, "true")));
+        return new Grant(selector + "-" + action, List.of(
+                new GrantExpression(selector, name), new GrantExpression(action, "true")));
     }
 
     private static void assertFailure(StorageManagement.Outcome<?> result, StorageManagement.FailureCode code) {

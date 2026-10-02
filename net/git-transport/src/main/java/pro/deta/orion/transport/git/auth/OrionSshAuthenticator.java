@@ -12,7 +12,7 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.UserIdentity;
@@ -155,9 +155,9 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
                 }
                 if (success.changed()) {
                     String email = "";
-                    for (AccessControl.User user : edit.document().system().accessControl().getUsers()) {
-                        if (user.getId().equalsIgnoreCase(username)) {
-                            email = java.util.Objects.requireNonNullElse(user.getEmail(), "");
+                    for (User user : edit.document().system().accessControl().users()) {
+                        if (user.id().equalsIgnoreCase(username)) {
+                            email = java.util.Objects.requireNonNullElse(user.email(), "");
                             break;
                         }
                     }

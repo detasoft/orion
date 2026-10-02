@@ -2,6 +2,10 @@ package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
@@ -14,16 +18,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionUsersTest {
     @Test
     void sharesUserValuesBetweenSystemAndOrganizationWithoutSharingMutableCollections() {
-        List<AccessControl.Credential> credentials = new ArrayList<>(List.of(
-                new AccessControl.Credential(AccessControl.CredentialType.ARGON2, "password-verifier"),
-                new AccessControl.Credential(
+        List<Credential> credentials = new ArrayList<>(List.of(
+                new Credential(AccessControl.CredentialType.ARGON2, "password-verifier"),
+                new Credential(
                         AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "laptop", "ssh-ed25519 AQID")));
-        List<AccessControl.Grant> grants = new ArrayList<>(List.of(new AccessControl.Grant(
-                "read", List.of(new AccessControl.GrantExpression(
+        List<Grant> grants = new ArrayList<>(List.of(new Grant(
+                "read", List.of(new GrantExpression(
                         AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
-        AccessControl.User user = new AccessControl.User(
+        User user = new User(
                 "alice", "Alice", "Example", "alice@example.test", credentials, List.of(), grants);
-        List<AccessControl.User> users = new ArrayList<>(List.of(user));
+        List<User> users = new ArrayList<>(List.of(user));
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(users, List.of(), List.of())),
                 List.of(organization("acme", users), organization("other", users)));
@@ -32,13 +36,13 @@ class OrionUsersTest {
         grants.clear();
         users.clear();
 
-        AccessControl.User member = document.organizations().getFirst().users().getFirst();
-        assertThat(member).isEqualTo(document.system().accessControl().getUsers().getFirst());
+        User member = document.organizations().getFirst().users().getFirst();
+        assertThat(member).isEqualTo(document.system().accessControl().users().getFirst());
         assertThat(member).isEqualTo(document.organizations().get(1).users().getFirst());
-        assertThat(member.getCredentials()).hasSize(2);
-        assertThat(member.getCredentials().get(1).getKeyId()).isEqualTo("laptop");
-        assertThat(member.getGrants()).extracting(AccessControl.Grant::getId).containsExactly("read");
-        assertThatThrownBy(() -> member.getCredentials().clear())
+        assertThat(member.credentials()).hasSize(2);
+        assertThat(member.credentials().get(1).keyId()).isEqualTo("laptop");
+        assertThat(member.grants()).extracting(Grant::id).containsExactly("read");
+        assertThatThrownBy(() -> member.credentials().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> document.organizations().getFirst().users().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -46,12 +50,12 @@ class OrionUsersTest {
 
     @Test
     void retainsOptionalProfileFieldsAndRequiresCanonicalOrganizationUserIds() {
-        AccessControl.User user = new AccessControl.User(
+        User user = new User(
                 "alice", null, null, null, List.of(), List.of(), List.of());
         OrionDocument document = document(organization("acme", List.of(user)));
 
         assertThat(document.organizations().getFirst().users().getFirst()).isEqualTo(user);
-        AccessControl.User invalid = new AccessControl.User(
+        User invalid = new User(
                 "../alice", null, null, null, List.of(), List.of(), List.of());
         assertThatThrownBy(() -> document(organization("acme", List.of(invalid))))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -61,7 +65,7 @@ class OrionUsersTest {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
-    private static OrionDocument.Organization organization(String id, List<AccessControl.User> users) {
+    private static OrionDocument.Organization organization(String id, List<User> users) {
         return new OrionDocument.Organization(
                 new OrganizationId(id), null, users, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }

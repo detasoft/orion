@@ -25,6 +25,8 @@ import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.io.ByteArrayInputStream;
@@ -101,8 +103,8 @@ class AcmeAdministrationTest {
     }
 
     static SecurityContext admin() {
-        AccessControl.Grant grant = new AccessControl.Grant("admin", List.of(
-                new AccessControl.GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+        Grant grant = new Grant("admin", List.of(
+                new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
     }
 

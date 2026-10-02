@@ -22,7 +22,7 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Grant;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -256,7 +256,7 @@ class AuditingCommandDispatcherTest {
             }
 
             @Override
-            public List<AccessControl.Grant> getGrants() {
+            public List<Grant> getGrants() {
                 return List.of();
             }
         };
