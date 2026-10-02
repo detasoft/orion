@@ -184,58 +184,35 @@ class OrionStartupIT {
     }
 
     @Test
-    void startsWithVersionOneAclAndMigratesItWhenServerIdentityIsSynchronized() throws Exception {
+    void startsWithVersionTwoAclAndPersistsUserUpdates() throws Exception {
         Path orionRoot = tempDir.resolve("orion");
-        Path legacyAclDirectory = tempDir.resolve("legacy-acl");
-        Path legacyAclFile = legacyAclDirectory.resolve(ACL_FILE);
-        byte[] legacyAcl = """
-                <AccessControl schemaVersion="1">
-                  <users>
-                    <user>
-                      <id>root</id>
-                      <email>root@example.test</email>
-                      <credentials/>
-                      <roles/>
-                      <grants/>
-                    </user>
-                    <user>
-                      <id>legacy-user</id>
-                      <email>legacy@example.test</email>
-                      <credentials/>
-                      <roles/>
-                      <grants/>
-                    </user>
-                  </users>
-                  <roles/>
-                  <grants/>
-                </AccessControl>
-                """.getBytes(StandardCharsets.UTF_8);
-        Files.createDirectories(legacyAclDirectory);
-        Files.write(legacyAclFile, legacyAcl);
+        Path configuredAclRepository = tempDir.resolve("configured-acl.git");
+        seedRemoteAclRepository(configuredAclRepository, accessControlWithUsers("root", "configured-user"));
         OrionConfiguration configuration = serverConfiguration(orionRoot);
-        configuration.getBootstrap().getAccessControl().setLocation(legacyAclDirectory.toUri().toString());
+        configuration.getBootstrap().getAccessControl().setLocation(configuredAclRepository.toUri().toString());
         configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            assertThat(orion.accessControlService().userExists("legacy-user")).isTrue();
-            assertThat(new String(Files.readAllBytes(legacyAclFile), StandardCharsets.UTF_8))
+            assertThat(orion.accessControlService().userExists("configured-user")).isTrue();
+            assertThat(new String(readFileFromRepository(configuredAclRepository, ACL_FILE), StandardCharsets.UTF_8))
                     .contains("<orion schemaVersion=\"2\">")
                     .doesNotContain("<AccessControl");
 
             try (OrionConfigurationEdit edit = orion.component().configurationEditor().edit()) {
-                AccessControlUserUpdate update = new AccessControlUserUpdate("new-user", "new@example.test", List.of(), List.of());
+                AccessControlUserUpdate update = new AccessControlUserUpdate(
+                        "new-user", "new@example.test", List.of(), List.of());
                 orion.accessControlService().createOrUpdateUser(edit, update);
                 edit.apply("createOrUpdateUser() " + update.id(),
                         new UserEmail(update.id(), update.email()));
             }
         }
 
-        byte[] migratedAcl = Files.readAllBytes(legacyAclFile);
-        assertThat(new String(migratedAcl, StandardCharsets.UTF_8))
+        byte[] savedAcl = readFileFromRepository(configuredAclRepository, ACL_FILE);
+        assertThat(new String(savedAcl, StandardCharsets.UTF_8))
                 .contains("<orion schemaVersion=\"2\">")
                 .doesNotContain("<AccessControl");
-        AccessControl accessControl = deserialize(migratedAcl);
-        assertThat(hasUser(accessControl, "legacy-user")).isTrue();
+        AccessControl accessControl = deserialize(savedAcl);
+        assertThat(hasUser(accessControl, "configured-user")).isTrue();
         assertThat(hasUser(accessControl, "new-user")).isTrue();
     }
 

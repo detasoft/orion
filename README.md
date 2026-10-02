@@ -510,8 +510,8 @@ editor, or add a schema hint (adjust the relative path for your file):
 
 The path above is relative to a document in `orion/`. For use outside this
 checkout, place the XSD beside your XML and use `orion-v2.xsd` as the location.
-The schema describes v2 (`<orion schemaVersion="2">`); legacy v1 documents
-with an `<AccessControl>` root require conversion to v2 before using it.
+Orion reads and writes v2 (`<orion schemaVersion="2">`). Documents with an
+`<AccessControl>` root are unsupported and must be converted to v2 before loading.
 
 Run `make xml-schema` after changing the JAXB wire model to regenerate the
 checked-in XSD. A running Orion also exposes its generated schema at

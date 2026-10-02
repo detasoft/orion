@@ -9,7 +9,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
 public enum OrionXmlSchemaVersion {
-    V1("AccessControl", "1"),
     V2("orion", "2");
 
     public static final OrionXmlSchemaVersion LATEST = V2;
@@ -49,12 +48,6 @@ public enum OrionXmlSchemaVersion {
 
     private static OrionXmlSchemaVersion detect(String rootName, String rawVersion) throws IOException {
         String version = rawVersion == null ? "" : rawVersion.trim();
-        if (V1.rootName.equals(rootName)) {
-            if (version.isEmpty() || V1.value.equals(version)) {
-                return V1;
-            }
-            throw new IOException("Unsupported AccessControl XML schema version: " + version);
-        }
         if (V2.rootName.equals(rootName)) {
             if (version.isEmpty()) {
                 throw new IOException("Orion XML v2 requires schemaVersion");

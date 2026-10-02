@@ -591,16 +591,16 @@ class InternalConfigurationRepositoryLifecycleIT {
     }
 
     @Test
-    void replacesAllAmbiguousRootUsersWithOneCanonicalRecoveryRoot() throws Exception {
+    void replacesNoncanonicalRootWithOneCanonicalRecoveryRoot() throws Exception {
         OrionConfiguration configuration = configuration();
         OrionComponent first = component(configuration);
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         String versionBeforeReset;
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            repository(first).files().withAccess(CONFIGURATION_REF, "seed ambiguous root ACL",
+            repository(first).files().withAccess(CONFIGURATION_REF, "seed noncanonical root ACL",
                     GitCommitAuthor.EMPTY, fileAccess -> {
-                fileAccess.write(ACL_PATH, duplicateRootAclBytes());
+                fileAccess.write(ACL_PATH, noncanonicalRootAclBytes());
                 fileAccess.apply();
                 return null;
             });
@@ -622,7 +622,10 @@ class InternalConfigurationRepositoryLifecycleIT {
                             .system().accessControl();
             assertThat(recovered.getUsers())
                     .filteredOn(user -> "root".equalsIgnoreCase(user.getId()))
-                    .hasSize(1);
+                    .extracting(AccessControl.User::getId)
+                    .containsExactly("root");
+            assertThat(recovered.getUsers().getFirst().getCredentials())
+                    .noneMatch(credential -> credential.getValue().equals("old-hash"));
         } finally {
             System.setOut(originalOut);
             assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -1016,34 +1019,12 @@ class InternalConfigurationRepositoryLifecycleIT {
         return accessControlBytes(acl);
     }
 
-    private static byte[] duplicateRootAclBytes() throws Exception {
-        String xml = """
-                <AccessControl schemaVersion="1">
-                  <users>
-                    <user>
-                      <id>root</id>
-                      <email>first-root@example.test</email>
-                      <credentials>
-                        <credential>
-                          <type>SHA1</type>
-                          <value>first-hash</value>
-                        </credential>
-                      </credentials>
-                    </user>
-                    <user>
-                      <id>ROOT</id>
-                      <email>second-root@example.test</email>
-                      <credentials>
-                        <credential>
-                          <type>SHA1</type>
-                          <value>second-hash</value>
-                        </credential>
-                      </credentials>
-                    </user>
-                  </users>
-                </AccessControl>
-                """;
-        return xml.getBytes(StandardCharsets.UTF_8);
+    private static byte[] noncanonicalRootAclBytes() throws Exception {
+        AccessControl.User root = new AccessControl.User(
+                "ROOT", null, null, "old-root@example.test",
+                List.of(new AccessControl.Credential(AccessControl.CredentialType.SHA1, "old-hash")),
+                List.of(), List.of());
+        return accessControlBytes(new AccessControl(List.of(root), List.of(), List.of()));
     }
 
     private static byte[] defaultAclBytes(String password) throws Exception {

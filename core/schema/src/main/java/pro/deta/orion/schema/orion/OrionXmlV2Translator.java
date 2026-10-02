@@ -12,16 +12,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
-final class OrionXmlV2Translator implements OrionXmlTranslator {
+final class OrionXmlV2Translator {
     private static final JAXBContext JAXB_CONTEXT = createContext();
     private static final OrionXmlSchema XML_SCHEMA = new OrionXmlSchema();
 
-    @Override
-    public OrionXmlSchemaVersion schemaVersion() {
-        return OrionXmlSchemaVersion.V2;
-    }
-
-    @Override
     public OrionDocument read(byte[] content) throws IOException {
         OrionXmlSchema.ValidationResult validation = XML_SCHEMA.validate(new ByteArrayInputStream(content));
         if (!validation.valid()) {

@@ -305,7 +305,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer(token),
                     "application/xml",
-                    "<AccessControl><users>".getBytes(StandardCharsets.UTF_8),
+                    "<orion schemaVersion=\"2\"><system>".getBytes(StandardCharsets.UTF_8),
                     activeBefore.etag());
 
             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_BAD_METHOD);

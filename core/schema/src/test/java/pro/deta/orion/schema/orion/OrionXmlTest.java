@@ -63,66 +63,6 @@ class OrionXmlTest {
     }
 
     @Test
-    void readsLegacyPluralCollectionItemNames() throws Exception {
-        String legacyXml = """
-                <AccessControl>
-                  <users>
-                    <users>
-                      <id>root</id>
-                      <email>root@orion.pro</email>
-                      <credentials>
-                        <credentials>
-                          <type>SHA1</type>
-                          <value>root-password-hash</value>
-                        </credentials>
-                      </credentials>
-                      <roles>
-                        <roles>ROOT</roles>
-                      </roles>
-                      <grants/>
-                    </users>
-                  </users>
-                  <roles>
-                    <roles>
-                      <id>ROOT</id>
-                      <grantReferences>
-                        <grantReferences>CONNECT</grantReferences>
-                      </grantReferences>
-                      <grants/>
-                    </roles>
-                  </roles>
-                  <grants>
-                    <grants>
-                      <id>CONNECT</id>
-                      <info>
-                        <info>
-                          <key>NETWORK_SOURCE</key>
-                          <value>127.0.0.1</value>
-                        </info>
-                      </info>
-                    </grants>
-                  </grants>
-                </AccessControl>
-                """;
-
-        AccessControl acl = OrionXml.read(
-                new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8))).system().accessControl();
-
-        assertThat(acl.getUsers()).hasSize(1);
-        assertThat(acl.getUsers().getFirst().getId()).isEqualTo("root");
-        assertThat(acl.getUsers().getFirst().getCredentials()).hasSize(1);
-        assertThat(acl.getUsers().getFirst().getRoles()).containsExactly("ROOT");
-
-        assertThat(acl.getRoles()).hasSize(1);
-        assertThat(acl.getRoles().getFirst().getGrantReferences()).containsExactly("CONNECT");
-
-        assertThat(acl.getGrants()).hasSize(1);
-        assertThat(acl.getGrants().getFirst().getInfo()).hasSize(1);
-        assertThat(acl.getGrants().getFirst().getInfo().getFirst().getKey())
-                .isEqualTo(AccessControl.GrantKey.NETWORK_SOURCE);
-    }
-
-    @Test
     void requiresEabSecretInSystemScopeAndRoundTripsItsReference() throws Exception {
         String xml = testResource("pro/deta/orion/schema/orion/orion-v2.xml").replace("</acme>",
                 "<eabKeyId>external-account</eabKeyId><eabSecret>eab</eabSecret></acme>");
@@ -157,22 +97,6 @@ class OrionXmlTest {
         assertThat(document.organizations().getFirst().invitations().getFirst().email())
                 .isEqualTo("bob@example.test");
         assertThat(read(write(document))).isEqualTo(document);
-    }
-
-    @Test
-    void readsUnversionedAndExplicitLegacyAclDocuments() throws Exception {
-        String unversioned = testResource("pro/deta/orion/schema/acl/legacy-orion.xml");
-        String explicit = unversioned.replace("<AccessControl>", "<AccessControl schemaVersion=\"1\">");
-
-        OrionDocument fromUnversioned = read(unversioned);
-        OrionDocument fromExplicit = read(explicit);
-
-        assertThat(fromUnversioned).isEqualTo(fromExplicit);
-        assertThat(fromUnversioned.organizations()).isEmpty();
-        assertThat(fromUnversioned.system().https()).isEmpty();
-        assertThat(fromUnversioned.system().accessControl().getUsers().getFirst().getId()).isEqualTo("root");
-        assertThat(fromUnversioned.system().accessControl().getRoles()).isNotEmpty();
-        assertThat(fromUnversioned.system().accessControl().getGrants()).isNotEmpty();
     }
 
     @Test
@@ -659,7 +583,12 @@ class OrionXmlTest {
                 .hasMessageContaining("Unsupported Orion XML schema version: 3");
         assertThatThrownBy(() -> read("<AccessControl schemaVersion=\"2\"/>"))
                 .isInstanceOf(IOException.class)
-                .hasMessageContaining("Unsupported AccessControl XML schema version: 2");
+                .hasMessageContaining("Unsupported Orion XML root: AccessControl");
+        for (String xml : List.of("<AccessControl/>", "<AccessControl schemaVersion=\"1\"/>")) {
+            assertThatThrownBy(() -> read(xml))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Unsupported Orion XML root: AccessControl");
+        }
     }
 
     @Test
