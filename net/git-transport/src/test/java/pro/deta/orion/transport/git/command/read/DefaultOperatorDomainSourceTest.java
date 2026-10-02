@@ -43,7 +43,7 @@ class DefaultOperatorDomainSourceTest {
 
     @Test
     void readsCurrentSymbolicAndDetachedHeadFromTheIndex() throws Exception {
-        try (InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider()) {
+        try (NativeGitRepositoryProvider provider = NativeGitRepositoryProvider.inMemory()) {
             NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
             DefaultOperatorDomainSource source = source(provider, emptyRuntime(), () -> resources());
             Head symbolic = new Head.Symbolic(new RefId("refs/heads/trunk"));
