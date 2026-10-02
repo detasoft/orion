@@ -42,8 +42,8 @@ import pro.deta.orion.config.OrionConfigurationStorageResolver;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
-import pro.deta.orion.schema.config.ConfigurationProvider;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.ConfigurationProvider;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.util.ArrayList;

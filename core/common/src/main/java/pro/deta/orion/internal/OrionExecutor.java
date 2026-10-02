@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.internal.async.StackTraceCapturingCallable;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
 import java.util.concurrent.*;

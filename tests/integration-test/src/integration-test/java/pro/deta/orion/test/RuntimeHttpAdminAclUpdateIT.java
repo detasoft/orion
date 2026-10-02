@@ -13,7 +13,7 @@ import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;

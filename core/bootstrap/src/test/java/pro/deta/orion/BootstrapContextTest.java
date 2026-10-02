@@ -4,11 +4,11 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 
 import org.eclipse.jgit.api.Git;
 import com.sun.net.httpserver.HttpServer;
-import pro.deta.orion.config.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
 
 import java.net.InetSocketAddress;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import org.junit.jupiter.api.Test;
@@ -46,9 +46,9 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
-import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
+import pro.deta.orion.bootstrap.config.SshHostKeyReferenceConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;

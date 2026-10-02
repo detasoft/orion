@@ -15,7 +15,7 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;

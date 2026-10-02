@@ -3,9 +3,9 @@ package pro.deta.orion.transport;
 import dagger.Module;
 import dagger.Provides;
 import jakarta.inject.Singleton;
-import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.SshTransportConfig;
+import pro.deta.orion.bootstrap.config.GitTransportConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.SshTransportConfig;
 import pro.deta.orion.transport.git.command.SshCommandModule;
 import pro.deta.orion.transport.http.OrionHttpModule;
 

@@ -14,7 +14,7 @@ import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;

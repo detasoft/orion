@@ -20,7 +20,7 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -63,7 +63,7 @@ class NativeSshCredentialPersistenceTest {
         KeyPair key = generator.generateKeyPair();
         OrionDesiredState desired = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.schema.config.OrionConfiguration(),
+                new pro.deta.orion.bootstrap.config.OrionConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
                 pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired);
         OrionAccessControlServiceImpl service = service(storage, editor, desired);

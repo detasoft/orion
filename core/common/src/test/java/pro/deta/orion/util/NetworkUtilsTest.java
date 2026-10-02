@@ -1,7 +1,7 @@
 package pro.deta.orion.util;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.schema.config.TransportConfig;
+import pro.deta.orion.bootstrap.config.TransportConfig;
 
 import java.net.InetSocketAddress;
 

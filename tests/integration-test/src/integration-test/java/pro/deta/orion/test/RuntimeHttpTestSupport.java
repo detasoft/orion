@@ -3,7 +3,7 @@ package pro.deta.orion.test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrionDocument;

@@ -29,7 +29,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>schema</artifactId>
+            <artifactId>bootstrap-configuration</artifactId>
         </dependency>
         <dependency>
             <groupId>commons-io</groupId>

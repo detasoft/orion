@@ -3,11 +3,11 @@ package pro.deta.orion;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.schema.config.ConfigurationProvider;
-import pro.deta.orion.config.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.ConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.IOException;

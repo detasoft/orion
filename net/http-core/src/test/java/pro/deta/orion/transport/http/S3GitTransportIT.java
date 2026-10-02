@@ -25,7 +25,7 @@ import pro.deta.orion.git.s3.S3NativeGitRepositoryProvider;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
-import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 

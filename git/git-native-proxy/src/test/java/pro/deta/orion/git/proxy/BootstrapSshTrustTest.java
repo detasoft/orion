@@ -27,7 +27,7 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.Connection;

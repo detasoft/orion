@@ -10,7 +10,7 @@ import org.eclipse.jgit.transport.TransportHttp;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;

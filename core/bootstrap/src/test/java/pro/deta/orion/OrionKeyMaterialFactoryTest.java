@@ -4,8 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

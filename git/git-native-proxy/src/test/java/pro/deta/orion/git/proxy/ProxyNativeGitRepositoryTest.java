@@ -17,7 +17,7 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.PrincipalAddress;

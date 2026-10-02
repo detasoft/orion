@@ -42,7 +42,7 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.config.OrionConfigurationEditor;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.internal.UserEmail;

@@ -24,7 +24,7 @@ import pro.deta.orion.keymaterial.ConfigurationSecretEnvelope;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionDocument;

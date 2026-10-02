@@ -8,7 +8,7 @@ import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 
 import java.io.IOException;
 import java.net.InetAddress;

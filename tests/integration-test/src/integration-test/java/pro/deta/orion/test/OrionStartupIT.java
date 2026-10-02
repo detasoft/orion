@@ -30,7 +30,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 import pro.deta.orion.schema.orion.OrionXml;

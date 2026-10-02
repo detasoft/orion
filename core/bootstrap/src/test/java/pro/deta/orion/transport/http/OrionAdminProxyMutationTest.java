@@ -37,7 +37,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -440,7 +440,7 @@ class OrionAdminProxyMutationTest {
             Reply created = f.post(create);
             assertThat(created.status).isEqualTo(201);
             assertThat(created.json.at("/alias/status").asText()).isEqualTo("success");
-            var source = new pro.deta.orion.schema.config.BootstrapSourceConfig();
+            var source = new pro.deta.orion.bootstrap.config.BootstrapSourceConfig();
             source.setLocation("git+" + bare.toUri());
             source.setRef("main");
             source.setPath("file");
@@ -564,7 +564,7 @@ class OrionAdminProxyMutationTest {
                         new SigningMaterialSet(signing, List.of()), 2048, true);
             }
             editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.schema.config.OrionConfiguration(),
+                new pro.deta.orion.bootstrap.config.OrionConfiguration(),
                 material.configurationCipher(),
                 material.configurationMaterial(),
                 desired);

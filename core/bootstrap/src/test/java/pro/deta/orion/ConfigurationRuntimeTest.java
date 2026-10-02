@@ -1,8 +1,8 @@
 package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.LocationConfigurationProvider;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 import java.nio.file.Path;
 

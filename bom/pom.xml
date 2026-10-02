@@ -77,8 +77,8 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.connectors</groupId>
-                <artifactId>configuration-location</artifactId>
+                <groupId>pro.deta.orion.core</groupId>
+                <artifactId>bootstrap-configuration</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

@@ -15,8 +15,8 @@ import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.util.List;

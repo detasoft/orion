@@ -33,7 +33,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
@@ -716,7 +716,7 @@ class OrionOidcOnboardingTest {
             OrionXml.write(document, xml);
             storage.snapshot = new ConfigurationFile(xml.toByteArray(), Optional.of("0"));
             editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.schema.config.OrionConfiguration(),
+                new pro.deta.orion.bootstrap.config.OrionConfiguration(),
                 material.configurationCipher(),
                 material.configurationMaterial(),
                 desired);

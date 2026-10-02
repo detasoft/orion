@@ -55,8 +55,8 @@ import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
 

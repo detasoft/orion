@@ -16,8 +16,8 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.ConfigurationContext;
 

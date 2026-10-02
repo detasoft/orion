@@ -1,9 +1,9 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.SshTransportConfig;
+import pro.deta.orion.bootstrap.config.GitTransportConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.SshTransportConfig;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

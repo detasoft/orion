@@ -1,6 +1,6 @@
 package pro.deta.orion;
 
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 
 import java.net.URI;
 import java.nio.file.Path;

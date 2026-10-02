@@ -12,9 +12,9 @@ import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.schema.config.BootstrapSourceConfig;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
 import java.nio.file.Files;

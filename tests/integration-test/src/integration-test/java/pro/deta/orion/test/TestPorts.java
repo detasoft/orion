@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 
 final class TestPorts {
     private static final String HOST = "localhost";

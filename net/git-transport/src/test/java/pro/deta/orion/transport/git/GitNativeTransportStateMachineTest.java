@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.util.Result;

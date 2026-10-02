@@ -14,7 +14,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.schema.config.*;
+import pro.deta.orion.bootstrap.config.*;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.git.ConfiguredStorageManagement;

@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 
 import java.util.concurrent.CountDownLatch;

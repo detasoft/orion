@@ -20,7 +20,7 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.OrionConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import java.util.List;
 import java.util.Optional;
