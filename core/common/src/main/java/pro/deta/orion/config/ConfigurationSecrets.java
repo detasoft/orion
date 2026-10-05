@@ -221,7 +221,8 @@ public final class ConfigurationSecrets {
         if (owner.isEmpty()) {
             return new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
-                    secrets, document.system().proxies(), document.system().connections()),
+                    secrets, document.system().proxies(), document.system().connections(),
+                    document.system().oidcProviders()),
                     document.organizations());
         }
         ConfigurationScope scope = owner.orElseThrow();

@@ -1308,7 +1308,8 @@ class BootstrapContextTest {
                 new GitProxyBinding.Direct(unrelatedUpstream.bare().toUri(), GitCredentialKind.NONE,
                         Optional.empty(), Optional.empty()), "main");
         OrionDocument first = new OrionDocument(new OrionDocument.SystemConfiguration(
-                new AccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
+                new AccessControl(), Optional.empty(), List.of(), List.of(unrelated), List.of(),
+                List.of()), List.of());
         ByteArrayOutputStream firstXml = new ByteArrayOutputStream();
         OrionXml.write(first, firstXml);
         Upstream upstream = upstream("deferred-bootstrap", Map.of(
@@ -1349,7 +1350,8 @@ class BootstrapContextTest {
                         List.of(), List.of());
                 ByteArrayOutputStream output = new ByteArrayOutputStream();
                 OrionDocument valid = new OrionDocument(new OrionDocument.SystemConfiguration(
-                        acl, Optional.empty(), List.of(), List.of(unrelated), List.of()), List.of());
+                        acl, Optional.empty(), List.of(), List.of(unrelated), List.of(),
+                        List.of()), List.of());
                 OrionXml.write(valid, output);
                 source.files().withAccess("refs/heads/main", "valid C after invalid B", GitCommitAuthor.EMPTY,
                         fileAccess -> {
@@ -1408,7 +1410,8 @@ class BootstrapContextTest {
         Files.createDirectories(directory);
         OrionDocument invalid = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                 Optional.empty(), List.of(new ConfigurationSecret("bad", "invalid")),
-                List.of(), List.of()), List.of());
+                List.of(), List.of(),
+                List.of()), List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(invalid, output);
         seedExternalConfiguration(directory, output.toByteArray());

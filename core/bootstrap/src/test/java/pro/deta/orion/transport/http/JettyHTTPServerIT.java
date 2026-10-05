@@ -1135,7 +1135,8 @@ class JettyHTTPServerIT {
     static OrionDesiredState desiredState(Optional<OrionHttpsConfiguration> https) {
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), https, List.of(), List.of(), List.of(),
+                List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }

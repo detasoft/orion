@@ -17,6 +17,9 @@ import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RepositoryRemote;
 import pro.deta.orion.schema.orion.v2.Connection;
+import pro.deta.orion.schema.orion.v2.GitProxyBinding;
+import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -55,8 +58,15 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             }
             organizations.add(Map.of("id", organization.id().value(), "providers", providers));
         }
+        List<Map<String, Object>> systemProviders = new ArrayList<>();
+        for (OidcProvider provider : snapshot.document().system().oidcProviders()) {
+            systemProviders.add(Map.of("id", provider.id(), "issuer", provider.issuer().toString(),
+                    "clientId", provider.clientId(), "idleTimeoutSeconds", provider.idleTimeoutSeconds(),
+                    "reauthenticationTimeoutSeconds", provider.reauthenticationTimeoutSeconds()));
+        }
         return OrionHttpResponse.ok(Map.of("revision", snapshot.revision().orElse(""),
-                "organizations", organizations)).withHeader("Cache-Control", "no-store");
+                "system", Map.of("providers", systemProviders), "organizations", organizations))
+                .withHeader("Cache-Control", "no-store");
     }
 
     @Override
@@ -72,7 +82,13 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             if (bytes.length > 16384) return OrionHttpResponse.empty(413);
             JsonNode input = mapper.readTree(bytes);
             if (input == null || !input.isObject()) throw new IllegalArgumentException();
-            OrganizationId id = new OrganizationId(input.path("organization").asText());
+            String scope = input.path("scope").asText("organization");
+            if (!(scope.equals("system") || scope.equals("organization"))
+                    || scope.equals("system") && input.has("organization")) {
+                throw new IllegalArgumentException("Invalid OIDC scope");
+            }
+            OrganizationId id = scope.equals("system") ? null
+                    : new OrganizationId(input.path("organization").asText());
             String revision = input.path("revision").asText();
             OidcProvider provider = new OidcProvider(input.path("id").asText(),
                     URI.create(input.path("issuer").asText()), input.path("clientId").asText(), "placeholder",
@@ -84,7 +100,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
             editor.edit(revision).update(document -> save(document, id, provider, suppliedSecret))
-                    .apply("Configure organization OIDC provider",
+                    .apply("Configure " + scope + " OIDC provider",
                             new UserEmail(context.getUserIdentity().getUserId(), ""));
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
         } catch (OrionConfigurationConcurrentUpdateException conflict) {
@@ -111,9 +127,9 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
         for (OrionDocument.Organization candidate : document.organizations()) {
             if (candidate.id().equals(id)) organization = candidate;
         }
-        if (organization == null) throw new IllegalArgumentException();
+        if (id != null && organization == null) throw new IllegalArgumentException();
         OidcProvider previous = null;
-        for (OidcProvider provider : organization.oidcProviders()) {
+        for (OidcProvider provider : id == null ? document.system().oidcProviders() : organization.oidcProviders()) {
             if (provider.id().equals(input.id())) previous = provider;
         }
         boolean replacing = previous != null;
@@ -121,17 +137,31 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
                 || !previous.clientId().equals(input.clientId()))) {
             throw new IllegalArgumentException();
         }
-        boolean newSecret = !replacing || sharedSecret(organization, previous);
+        boolean newSecret = !replacing || (id == null ? sharedSystemSecret(document, previous)
+                : sharedSecret(organization, previous));
         String secretId = newSecret ? "oidc-" + UUID.randomUUID() : previous.secret();
         if (secret.length != 0) {
-            ConfigurationScope scope = ConfigurationScope.organization(id);
-            document = newSecret ? secrets.create(document, scope, secretId, secret)
-                    : secrets.replace(document, scope, secretId, secret);
+            if (id == null) {
+                document = newSecret ? secrets.createSystem(document, secretId, secret)
+                        : secrets.replaceSystem(document, secretId, secret);
+            } else {
+                ConfigurationScope scope = ConfigurationScope.organization(id);
+                document = newSecret ? secrets.create(document, scope, secretId, secret)
+                        : secrets.replace(document, scope, secretId, secret);
+            }
         } else {
             secretId = previous.secret();
         }
         OidcProvider updated = new OidcProvider(input.id(), input.issuer(), input.clientId(), secretId,
                 input.idleTimeoutSeconds(), input.reauthenticationTimeoutSeconds());
+        if (id == null) {
+            OrionDocument.SystemConfiguration system = document.system();
+            List<OidcProvider> providers = new ArrayList<>(system.oidcProviders());
+            if (replacing) providers.remove(previous);
+            providers.add(updated);
+            return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
+                    system.secrets(), system.proxies(), system.connections(), providers), document.organizations());
+        }
         List<OrionDocument.Organization> organizations = new ArrayList<>();
         for (OrionDocument.Organization candidate : document.organizations()) {
             if (!candidate.id().equals(id)) {
@@ -146,6 +176,23 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
                     providers, candidate.invitations(), candidate.connections()));
         }
         return new OrionDocument(document.system(), organizations);
+    }
+
+    private static boolean sharedSystemSecret(OrionDocument document, OidcProvider previous) {
+        OrionDocument.SystemConfiguration system = document.system();
+        for (OidcProvider provider : system.oidcProviders()) {
+            if (!provider.id().equals(previous.id()) && provider.secret().equals(previous.secret())) return true;
+        }
+        for (Connection connection : system.connections()) {
+            if (connection.referencesSecret(previous.secret())) return true;
+        }
+        if (system.https().flatMap(OrionHttpsConfiguration::acme)
+                .flatMap(OrionAcmeConfiguration::eabSecret)
+                .filter(previous.secret()::equals).isPresent()) return true;
+        for (GitProxyBinding proxy : system.proxies()) {
+            if (proxy.secret(system).filter(previous.secret()::equals).isPresent()) return true;
+        }
+        return false;
     }
 
     private static boolean sharedSecret(OrionDocument.Organization organization, OidcProvider previous) {

@@ -78,7 +78,8 @@ final class S3ConfigurationFixture implements AutoCloseable {
         if (system) {
             OrionDocument.SystemConfiguration owner = document.system();
             document = new OrionDocument(new OrionDocument.SystemConfiguration(owner.accessControl(), owner.https(),
-                    owner.secrets(), owner.proxies(), connections), document.organizations());
+                    owner.secrets(), owner.proxies(), connections,
+                    owner.oidcProviders()), document.organizations());
         } else {
             OrionDocument.Organization owner = document.organizations().getFirst();
             document = new OrionDocument(document.system(), List.of(new OrionDocument.Organization(owner.id(),

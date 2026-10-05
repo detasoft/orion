@@ -89,6 +89,41 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
 
     @Test
+    void systemOidcPreservesRootKeyGenerationAndRejectsLockedOrRecoveryRoot() {
+        String issuer = "https://sso.example.test";
+        OidcProvider provider = new OidcProvider("sso", URI.create(issuer), "client", "secret", 172800, 0);
+        Credential binding = new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "external-root");
+        OrionDesiredState desired = new OrionDesiredState();
+        Consumer<List<Credential>> publish = credentials -> desired.publish(new OrionDocument(
+                new OrionDocument.SystemConfiguration(new AccessControl(List.of(new User("root", null, null, null,
+                        credentials, List.of(), List.of())), List.of(), List.of()), Optional.empty(),
+                        List.of(new ConfigurationSecret("secret", "encrypted")), List.of(), List.of(),
+                        List.of(provider)), List.of()), Optional.empty());
+        publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                "root-auth-generation:first", key(KEY_ONE.getPublic()))));
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null,
+                testServerIdentity(), desired,
+                new OrionConfigurationEditor(null, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
+                Optional.empty());
+        assertThat(service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
+                .isInstanceOf(AuthenticationResult.Success.class);
+        TokenIssueResult issued = service.issueSystemOidcToken("root", provider, "external-root", 60);
+        assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
+        byte[] token = ((TokenIssueResult.Success) issued).token().getBytes(StandardCharsets.UTF_8);
+        assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Success.class);
+        publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                "root-auth-generation:second", key(KEY_ONE.getPublic()))));
+        assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+        for (String generation : List.of("root-auth-locked:locked", "root-auth-generation:recovery")) {
+            publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.ARGON2, generation, "hash")));
+            assertThat(service.findSystemOidcUser(issuer, "external-root")).isNull();
+            assertThat(service.issueSystemOidcToken("root", provider, "external-root", 60))
+                    .isInstanceOf(TokenIssueResult.Failure.class);
+            assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+        }
+    }
+
+    @Test
     void stagesTwoSshKeysAndPublishesOnlyOnce() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
@@ -143,7 +178,8 @@ class OrionAccessControlServiceImplTest {
             edit.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
                     List.of(new ConfigurationSecret("credential", testEnvelope())),
-                    document.system().proxies(), document.system().connections()), document.organizations()));
+                    document.system().proxies(), document.system().connections(),
+                    document.system().oidcProviders()), document.organizations()));
             assertThat(desired.isPublished()).isFalse();
             OrionDesiredState.Snapshot saved = edit.apply("configure secret", UserEmail.EMPTY);
             assertThat(desired.current()).isSameAs(saved);
@@ -457,7 +493,8 @@ class OrionAccessControlServiceImplTest {
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new ConfigurationSecret(
                             "credential", testEnvelope())), document.system().proxies(),
-                                    document.system().connections()), document.organizations())).apply("update proxy", null);
+                                    document.system().connections(),
+                            document.system().oidcProviders()), document.organizations())).apply("update proxy", null);
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
             assertThat(fixture.storage.snapshot.revision()).contains("version-one");
@@ -506,7 +543,8 @@ class OrionAccessControlServiceImplTest {
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
                         Optional.of(https),
-                        List.of(), List.of(), List.of()),
+                        List.of(), List.of(), List.of(),
+                        List.of()),
                 List.of());
         InMemoryStorage storage = new InMemoryStorage(new ConfigurationFile(
                 serialize(initial), Optional.of("version-one")));
@@ -572,7 +610,8 @@ class OrionAccessControlServiceImplTest {
                     Optional.of(new OrionMaterialReference("missing-identity", 1)), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    initialAcl, Optional.of(https), List.of(), List.of(), List.of()), List.of());
+                    initialAcl, Optional.of(https), List.of(), List.of(), List.of(),
+                    List.of()), List.of());
             storage.snapshot = new ConfigurationFile(serialize(candidate),
                     Optional.of("invalid-commit"));
 
@@ -612,7 +651,8 @@ class OrionAccessControlServiceImplTest {
                     URI.create("https://localhost:8443"), Optional.empty(), Optional.empty(),
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.empty());
             OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    acl, Optional.of(https), List.of(), List.of(), List.of()), List.of());
+                    acl, Optional.of(https), List.of(), List.of(), List.of(),
+                    List.of()), List.of());
             storage.snapshot = new ConfigurationFile(serialize(changed),
                     Optional.of("second-commit"));
 
@@ -650,7 +690,8 @@ class OrionAccessControlServiceImplTest {
             OrionDesiredState.Snapshot lastValid = desiredState.current();
             OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
                     new AccessControl(), Optional.empty(),
-                    List.of(new ConfigurationSecret("invalid", "not-an-envelope")), List.of(), List.of()), List.of());
+                    List.of(new ConfigurationSecret("invalid", "not-an-envelope")), List.of(), List.of(),
+                    List.of()), List.of());
             storage.snapshot = new ConfigurationFile(serialize(candidate),
                     Optional.of("invalid-commit"));
 

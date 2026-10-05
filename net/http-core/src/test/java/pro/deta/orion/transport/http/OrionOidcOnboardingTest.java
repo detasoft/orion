@@ -31,6 +31,7 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
@@ -59,6 +60,155 @@ import java.util.*;
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
+    @Test
+    void organizationWithNoProvidersDoesNotInheritSystemProviders() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
+            f.editor.edit().update(document -> {
+                List<OrionDocument.Organization> organizations = new ArrayList<>();
+                for (OrionDocument.Organization organization : document.organizations()) {
+                    organizations.add(new OrionDocument.Organization(organization.id(), organization.displayName(),
+                            organization.users(), organization.grants(), organization.roles(), organization.teams(),
+                            organization.secrets(), List.of(), organization.invitations(), organization.connections()));
+                }
+                return new OrionDocument(document.system(), organizations);
+            }).apply("disable fixture organization providers", null);
+            Reply system = f.request("GET", "/api/auth/providers", Map.of(), Map.of("scope", "system"), null, null);
+            assertThat(system.status).isEqualTo(200);
+            assertThat(system.json.path("providers").get(0).asText()).isEqualTo("corporate");
+            Reply organization = f.request("GET", "/api/auth/providers", Map.of(),
+                    Map.of("organization", "acme"), null, null);
+            assertThat(organization.status).isEqualTo(200);
+            assertThat(organization.json.path("providers").isEmpty()).isTrue();
+            assertThat(f.post("start", Map.of("organization", "acme", "provider", "corporate"), null).status)
+                    .isEqualTo(400);
+            assertThat(f.signInSystem().status).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void existingSystemUserSignsInWithItsOwnAclAndSurvivesRestart() throws Exception {
+        try (Fixture f = new Fixture()) {
+            User user = f.systemUser("operator", "external-alice", false);
+            f.configureSystem(List.of(user));
+            List<User> existingUsers = f.desired.current().document().system().accessControl().users();
+            Reply result = f.signInSystem();
+            assertThat(result.status).isEqualTo(200);
+            assertThat(result.json.path("scope").asText()).isEqualTo("system");
+            assertThat(result.json.path("organization").asText()).isEmpty();
+            assertThat(result.json.path("userId").asText()).isEqualTo("operator");
+            String token = result.json.path("token").asText();
+            TokenAuthenticationResult authentication = f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8));
+            assertThat(authentication).isInstanceOf(TokenAuthenticationResult.Success.class);
+            UserIdentity identity = ((TokenAuthenticationResult.Success) authentication).userIdentity();
+            assertThat(identity.getOrganizationId()).isEmpty();
+            SecurityContext context = SecurityContext.createContext().withUserIdentity(identity);
+            assertThat(ApplicationAccessRules.admin().evaluate(context,
+                    ApplicationAdminResource.applicationAdmin()).allowed()).isFalse();
+            assertThat(RepositoryAccessRules.read().evaluate(context,
+                    RepositoryResource.of("acme/team/repository")).allowed()).isTrue();
+            assertThat(f.desired.current().document().system().accessControl().users()).isEqualTo(existingUsers);
+            f.restart();
+            assertThat(f.post("refresh", Map.of("scope", "system"), null).status).isEqualTo(200);
+            assertThat(f.post("refresh", Map.of("organization", "acme"), null).status).isEqualTo(401);
+            assertThat(f.post("logout", Map.of(), null).status).isEqualTo(204);
+            f.restart();
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void systemLoginRejectsMissingWrongAndAmbiguousBindingsWithoutEmailLinking() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            for (List<User> users : List.of(List.<User>of(),
+                    List.of(f.systemUser("same-email", "wrong-subject", true)),
+                    List.of(f.systemUser("first", "external-alice", true),
+                            f.systemUser("second", "external-alice", false)))) {
+                f.configureSystem(users);
+                List<User> existingUsers = f.desired.current().document().system().accessControl().users();
+                Login login = f.startSystem();
+                Reply callback = f.callbackReply(login);
+                assertThat(callback.status).isEqualTo(400);
+                assertThat(f.desired.current().document().system().accessControl().users()).isEqualTo(existingUsers);
+            }
+        }
+    }
+
+    @Test
+    void systemUserBindingRemovalRevokesBrowserAndAccessToken() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
+            Reply result = f.signInSystem();
+            byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
+            assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Success.class);
+            f.editor.edit().update(document -> document.replaceAccessControl(new AccessControl()))
+                    .apply("remove fixture binding", null);
+            assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void systemSecretRotationInvalidatesAttemptsSessionsAndTokensWithoutChangingOrganizationLogin() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.signIn("corporate", f.invite("acme"));
+            String organizationCookie = f.sessionCookie;
+            f.sessionCookie = null;
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
+            Reply result = f.signInSystem();
+            byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
+            Login pending = f.startSystem();
+            f.editor.edit().update(document -> f.secrets.replaceSystem(document, "oidc", "rotated".toCharArray()))
+                    .apply("rotate fixture system secret", null);
+            assertThat(f.callbackReply(pending).status).isEqualTo(400);
+            assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            f.sessionCookie = organizationCookie;
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
+            assertThat(f.secrets.resolveOrganization(f.desired.current().document(), new OrganizationId("acme"),
+                    "oidc")).isEqualTo("secret".toCharArray());
+        }
+    }
+
+    @Test
+    void providerRemovalRevokesSystemAuthorityAndNeverFallsBackToOrganizationProvider() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
+            Reply result = f.signInSystem();
+            byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
+            f.editor.edit().update(document -> {
+                OrionDocument.SystemConfiguration system = document.system();
+                return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
+                        system.secrets(), system.proxies(), system.connections(), List.of()), document.organizations());
+            }).apply("remove fixture system providers", null);
+            assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            assertThat(f.post("start", Map.of("scope", "system", "provider", "corporate"), null).status)
+                    .isEqualTo(400);
+            assertThat(f.post("start", Map.of("scope", "system", "organization", "acme", "provider", "corporate"),
+                    null).status).isEqualTo(400);
+        }
+    }
+
+    @Test
+    void administratorConfiguresIndependentSystemOidcProvider() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Reply saved = f.request("POST", "/api/admin/oidc", Map.of("scope", "system", "id", "corporate",
+                    "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "system-secret",
+                    "revision", f.desired.current().revision().orElseThrow()), Map.of(), null, f.admin);
+            assertThat(saved.status).isEqualTo(200);
+            Reply settings = f.request("GET", "/api/admin/oidc", Map.of(), Map.of(), null, f.admin);
+            assertThat(settings.json.path("system").path("providers").get(0).path("id").asText())
+                    .isEqualTo("corporate");
+            assertThat(settings.json.toString()).doesNotContain("system-secret", "clientSecret");
+            assertThat(f.accounts.organization(new OrganizationId("acme")).oidcProviders())
+                    .extracting(OidcProvider::id).containsExactly("corporate");
+            assertThat(f.secrets.resolveOrganization(f.desired.current().document(),
+                    new OrganizationId("acme"), "oidc")).isEqualTo("secret".toCharArray());
+        }
+    }
+
     @Test
     void sessionSurvivesRestartAndLogoutIsDurable() throws Exception {
         try (Fixture f = new Fixture()) {
@@ -708,7 +858,8 @@ class OrionOidcOnboardingTest {
                 OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0)), List.of(), List.of()));
             }
             OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                    Optional.of(https), List.of(), List.of(), List.of()), organizations);
+                    Optional.of(https), List.of(), List.of(), List.of(),
+                    List.of()), organizations);
             for (String id : List.of("default", "acme")) {
                 document = secrets.replace(document, ConfigurationScope.organization(new OrganizationId(id)),
                         "oidc", "secret".toCharArray());
@@ -754,8 +905,16 @@ class OrionOidcOnboardingTest {
         }
 
         Login start(String organization, String invitation, String selectedProvider) throws Exception {
-            Reply reply = post("start", Map.of("organization", organization, "provider", selectedProvider,
-                    "invitation", invitation), null);
+            return startLogin(Map.of("organization", organization, "provider", selectedProvider,
+                    "invitation", invitation));
+        }
+
+        Login startSystem() throws Exception {
+            return startLogin(Map.of("scope", "system", "provider", "corporate"));
+        }
+
+        private Login startLogin(Map<String, Object> input) throws Exception {
+            Reply reply = post("start", input, null);
             assertThat(reply.status).isEqualTo(200);
             Map<String, String> parameters = query(URI.create(reply.json.path("url").asText()).getRawQuery());
             authorizationParameters = parameters;
@@ -764,6 +923,41 @@ class OrionOidcOnboardingTest {
             assertThat(parameters.get("code_challenge_method")).isEqualTo("S256");
             String cookie = reply.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
             return new Login(parameters.get("state"), cookie);
+        }
+
+        User systemUser(String id, String subject, boolean administrator) {
+            return new User(id, "Alice", "System", "alice@example.test",
+                    List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer.toString(), subject)),
+                    List.of(), administrator ? List.of(new Grant("admin", List.of(
+                            new GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))
+                            : List.of(new Grant("read", List.of(
+                                    new GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/team/repository"),
+                                    new GrantExpression(AccessControl.GrantKey.READ, "true")))));
+        }
+
+        void configureSystem(List<User> users) {
+            editor.edit().update(document -> {
+                OrionDocument.SystemConfiguration system = document.system();
+                OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
+                        new AccessControl(users, List.of(), List.of()), system.https(),
+                        List.of(new ConfigurationSecret("oidc", "placeholder")), system.proxies(), system.connections(),
+                        List.of(new OidcProvider("corporate", issuer, "client", "oidc",
+                                OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))), document.organizations());
+                return secrets.replaceSystem(changed, "oidc", "secret".toCharArray());
+            }).apply("configure fixture system user", null);
+        }
+
+        Reply signInSystem() throws Exception {
+            Login login = startSystem();
+            Reply reply = post("complete", Map.of("ticket", callback(login)), login.cookie);
+            assertThat(reply.status).isEqualTo(200);
+            sessionCookie = reply.headers.get("Set-Cookie").split(";", 2)[0].split("=", 2)[1];
+            return reply;
+        }
+
+        Reply callbackReply(Login login) throws Exception {
+            return request("GET", "/api/auth/oidc/callback", Map.of(),
+                    Map.of("state", login.state, "code", "valid"), login.cookie, null);
         }
 
         void saveProvider(String id, long idle, long reauthentication) throws Exception {

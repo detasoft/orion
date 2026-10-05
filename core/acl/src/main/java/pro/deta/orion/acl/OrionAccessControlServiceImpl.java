@@ -49,6 +49,7 @@ import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -519,7 +520,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 return SshKeyEnrollmentAuthentication.failure("authentication failed");
             }
             return switch (createUserIdentity(snapshot, matchedUser)) {
-                case AuthenticationResult.Success(var identity) -> SshKeyEnrollmentAuthentication.success(
+                case AuthenticationResult.Success(UserIdentity identity) -> SshKeyEnrollmentAuthentication.success(
                         identity,
                         recoveryGeneration);
                 case AuthenticationResult.Failure(var reason, var throwable) ->
@@ -622,6 +623,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 if (organization != null) {
                     yield verifyOrganizationToken(organization, subject, authenticationGeneration, tokenId);
                 }
+                if (authenticationGeneration != null && authenticationGeneration.startsWith("oidc:")) {
+                    yield verifySystemOidcToken(subject, authenticationGeneration, tokenId);
+                }
                 AccessControl snapshot = currentAccessControl();
                 Result<User> user = findSingleUser(snapshot, subject);
                 if (user instanceof Result.Success<User>(var u)) {
@@ -644,6 +648,81 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 yield TokenAuthenticationResult.failure("authentication failed");
             }
         };
+    }
+
+    public User findSystemOidcUser(String issuer, String subject) {
+        User found = null;
+        for (User user : currentAccessControl().users()) {
+            for (Credential credential : user.credentials()) {
+                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                        && Objects.equals(issuer, credential.keyId())
+                        && Objects.equals(subject, credential.value())) {
+                    if (found != null) {
+                        return null;
+                    }
+                    found = user;
+                    break;
+                }
+            }
+        }
+        if (found == null || isLockedRoot(found) || rootRecoveryGeneration(found) != null
+                || isGenerationAwareRoot(found) && rootAuthenticationGeneration(found) == null) {
+            return null;
+        }
+        return found;
+    }
+
+    public Optional<String> systemOidcGeneration(String userId, OidcProvider provider, String subject) {
+        User user = findSystemOidcUser(provider.issuer().toString(), subject);
+        OrionDocument.SystemConfiguration system = desiredState.current().document().system();
+        if (user == null || !user.id().equals(userId) || !system.oidcProviders().contains(provider)) {
+            return Optional.empty();
+        }
+        for (ConfigurationSecret secret : system.secrets()) {
+            if (secret.id().equals(provider.secret())) {
+                String binding = provider + "\n" + secret.envelope() + "\n" + rootAuthenticationGeneration(user);
+                return Optional.of("oidc:" + oidcGeneration(binding, subject));
+            }
+        }
+        return Optional.empty();
+    }
+
+    public TokenIssueResult issueSystemOidcToken(String userId, OidcProvider provider,
+            String subject, long expiresInSeconds) {
+        if (expiresInSeconds <= 0 || expiresInSeconds > 3600) {
+            return TokenIssueResult.failure("Invalid system OIDC token lifetime");
+        }
+        Optional<String> generation = systemOidcGeneration(userId, provider, subject);
+        if (generation.isEmpty()) return TokenIssueResult.failure("System OIDC account is unavailable");
+        try {
+            JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
+                    userId, expiresInSeconds, generation.orElseThrow());
+            return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
+        } catch (GeneralSecurityException failure) {
+            return TokenIssueResult.failure("Token issue failed", failure);
+        }
+    }
+
+    private TokenAuthenticationResult verifySystemOidcToken(String userId, String generation, String tokenId) {
+        AccessControl snapshot = currentAccessControl();
+        Result<User> found = findSingleUser(snapshot, userId);
+        if (!(found instanceof Result.Success<User>(User user))) {
+            return TokenAuthenticationResult.failure("System OIDC account is unavailable");
+        }
+        for (Credential credential : user.credentials()) {
+            if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT) continue;
+            for (OidcProvider provider : desiredState.current().document().system().oidcProviders()) {
+                if (!provider.issuer().toString().equals(credential.keyId())) continue;
+                if (systemOidcGeneration(userId, provider, credential.value()).filter(generation::equals).isEmpty()) {
+                    continue;
+                }
+                AuthenticationResult authenticated = createUserIdentity(snapshot, user);
+                if (authenticated instanceof AuthenticationResult.Success(UserIdentity identity)) {
+                    return TokenAuthenticationResult.success(identity, new AccessTokenIdentity(tokenId, userId));
+                }
+            }
+        }
+        return TokenAuthenticationResult.failure("System OIDC account is unavailable");
     }
 
     public TokenIssueResult issueOrganizationToken(OrganizationId organizationId, String userId,
@@ -938,10 +1017,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private static String rootRecoveryGeneration(User user) {
-        if (!isRoot(user.id()) || user.credentials().size() != 1) {
+        if (!isRoot(user.id())) return null;
+        List<Credential> credentials = primaryCredentials(user);
+        if (credentials.size() != 1) {
             return null;
         }
-        Credential credential = user.credentials().getFirst();
+        Credential credential = credentials.getFirst();
         return credential.type() == AccessControl.CredentialType.ARGON2
                 ? generationFromKeyId(credential.keyId())
                 : null;
@@ -951,12 +1032,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (!isRoot(user.id()) || user.credentials().isEmpty()) {
             return null;
         }
-        AccessControl.CredentialType expectedType = user.credentials().size() == 1
-                && user.credentials().getFirst().type() == AccessControl.CredentialType.ARGON2
+        List<Credential> authenticationCredentials = primaryCredentials(user);
+        AccessControl.CredentialType expectedType = authenticationCredentials.size() == 1
+                && authenticationCredentials.getFirst().type() == AccessControl.CredentialType.ARGON2
                 ? AccessControl.CredentialType.ARGON2
                 : OPENSSH_PUBLIC_KEY;
         String generation = null;
-        for (Credential credential : user.credentials()) {
+        for (Credential credential : authenticationCredentials) {
             if (credential.type() != expectedType) {
                 return null;
             }
@@ -967,6 +1049,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             generation = candidate;
         }
         return generation;
+    }
+
+    private static List<Credential> primaryCredentials(User user) {
+        List<Credential> credentials = new ArrayList<>();
+        for (Credential credential : user.credentials()) {
+            if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT) credentials.add(credential);
+        }
+        return credentials;
     }
 
     private static boolean isGenerationAwareRoot(User user) {
@@ -1341,6 +1431,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 if (credential.type() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY
                         && (credential.keyId() == null || credential.keyId().isBlank())) {
                     throw new AccessControlValidationException("JWT signing key id is required");
+                }
+                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT) {
+                    if (credential.keyId() == null || credential.keyId().isBlank()) {
+                        throw new AccessControlValidationException("OIDC issuer is required");
+                    }
+                    try {
+                        new OidcProvider("validation", java.net.URI.create(credential.keyId()), "validation",
+                                "validation", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+                    } catch (IllegalArgumentException invalid) {
+                        throw new AccessControlValidationException("Invalid OIDC issuer");
+                    }
                 }
                 if (credential.value() == null || credential.value().isBlank()) {
                     throw new AccessControlValidationException("Credential value is required");

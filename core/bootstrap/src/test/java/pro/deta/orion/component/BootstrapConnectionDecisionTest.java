@@ -96,7 +96,8 @@ class BootstrapConnectionDecisionTest {
             fixture.editor.edit(fixture.desired.current().revision().orElseThrow()).update(document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), document.system().secrets(),
-                            List.of(fixture.previous, unrelated), document.system().connections()),
+                            List.of(fixture.previous, unrelated), document.system().connections(),
+                            document.system().oidcProviders()),
                                     document.organizations())).apply("unrelated edit", UserEmail.EMPTY);
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).contains(unrelated);
@@ -125,7 +126,8 @@ class BootstrapConnectionDecisionTest {
 
     private static OrionDocument withBinding(GitProxyBinding binding) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(), List.of(binding), List.of()), List.of());
+                List.of(), List.of(binding), List.of(),
+                List.of()), List.of());
     }
 
     private static final class Fixture implements AutoCloseable {

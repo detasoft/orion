@@ -17,6 +17,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
+import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
@@ -42,6 +43,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Owns bounded login attempts and encrypted browser sessions. The in-process session cache has one writer;
@@ -146,18 +148,22 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private OrionHttpResponse providers(HttpServletRequest request) {
-        OrganizationId organization = new OrganizationId(request.getParameter("organization"));
+        OrganizationId organization = organization(request.getParameter("scope"), request.getParameter("organization"));
         List<String> providers = new ArrayList<>();
-        for (OidcProvider provider : accounts.organization(organization).oidcProviders()) {
+        for (OidcProvider provider : configuredProviders(organization)) {
             providers.add(provider.id());
         }
         return OrionHttpResponse.ok(Map.of("providers", providers));
     }
 
     private OrionHttpResponse start(JsonNode body) throws Exception {
-        OrganizationId organization = new OrganizationId(body.path("organization").asText());
+        OrganizationId organization = organization(body.path("scope").asText(null),
+                body.has("organization") ? body.path("organization").asText() : null);
         OidcProvider provider = provider(organization, body.path("provider").asText());
         String invitation = body.path("invitation").asText("");
+        if (organization == null && !invitation.isEmpty()) {
+            throw new IllegalArgumentException("System sign-in requires an existing account");
+        }
         if (!invitation.isEmpty()) {
             accounts.invitation(organization, invitation);
         }
@@ -166,7 +172,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         String browser = randomToken();
         Attempt attempt = new Attempt(organization, provider, metadata, invitation, browser,
                 randomToken(), randomToken(), publicOrigin().resolve("/api/auth/oidc/callback"),
-                clock.instant().plusSeconds(600).getEpochSecond());
+                clock.instant().plusSeconds(600).getEpochSecond(),
+                organization == null ? systemProviderVersion(provider) : null);
         synchronized (this) {
             cleanup();
             if (attempts.size() + verified.size() >= 1024) {
@@ -200,8 +207,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         if (issuer != null && !issuer.equals(attempt.provider().issuer().toString())) {
             throw new IllegalArgumentException("Authorization issuer mismatch");
         }
-        char[] secret = secrets.resolveOrganization(desired.current().document(), attempt.organization(),
-                attempt.provider().secret());
+        char[] secret = attempt.organization() == null
+                ? secrets.resolveSystem(desired.current().document(), attempt.provider().secret())
+                : secrets.resolveOrganization(desired.current().document(), attempt.organization(),
+                        attempt.provider().secret());
         OidcClient.Identity identity;
         try {
             identity = client.exchange(attempt.provider(), attempt.metadata(), attempt.callback(), code,
@@ -210,11 +219,12 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             Arrays.fill(secret, '\0');
         }
         requireCurrent(attempt);
-        User linked = accounts.linkedUser(attempt.organization(),
+        User linked = linkedUser(attempt.organization(),
                 attempt.provider().issuer().toString(), identity.subject());
-        if (linked == null && (attempt.invitation().isEmpty()
+        if (linked == null && (attempt.organization() == null || attempt.invitation().isEmpty()
                 || !accounts.invitation(attempt.organization(), attempt.invitation()).email().equals(identity.email()))) {
-            throw new IllegalArgumentException("An invitation for this email is required");
+            throw new IllegalArgumentException(attempt.organization() == null
+                    ? "System OIDC account is unavailable" : "An invitation for this email is required");
         }
         String ticket = randomToken();
         synchronized (this) {
@@ -230,7 +240,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private synchronized OrionHttpResponse profile(HttpServletRequest request, JsonNode body) {
         Verified login = verified(request, body);
-        User user = accounts.linkedUser(login.attempt().organization(),
+        User user = linkedUser(login.attempt().organization(),
                 login.attempt().provider().issuer().toString(), login.identity().subject());
         return OrionHttpResponse.ok(Map.of("first", user == null ? login.identity().first() : safe(user.first()),
                 "last", user == null ? login.identity().last() : safe(user.last()),
@@ -245,7 +255,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             return OrionHttpResponse.text(503, "Too many browser sessions. Try again later.");
         }
         String issuer = attempt.provider().issuer().toString();
-        User linked = accounts.linkedUser(attempt.organization(), issuer, login.identity().subject());
+        User linked = linkedUser(attempt.organization(), issuer, login.identity().subject());
+        if (attempt.organization() == null && linked == null) {
+            throw new IllegalArgumentException("System account is unavailable");
+        }
         String userId = linked == null
                 ? accounts.accept(attempt.organization(), attempt.invitation(), login.identity().email(), attempt.provider(),
                         login.identity().subject(), body.path("first").asText(), body.path("last").asText())
@@ -254,7 +267,9 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         long authenticatedAt = attempt.provider().reauthenticationTimeoutSeconds() == 0 ? now
                 : Math.min(now, login.identity().authenticatedAt());
         Session session = new Session(attempt.organization(), attempt.provider(), userId, login.identity().subject(),
-                publicOrigin(), authenticatedAt, now);
+                publicOrigin(), authenticatedAt, now, attempt.organization() == null
+                        ? acl.systemOidcGeneration(userId, attempt.provider(), login.identity().subject()).orElseThrow()
+                        : null);
         TokenIssueResult result = issueToken(session, now);
         if (!(result instanceof TokenIssueResult.Success token)) {
             throw new IllegalStateException("Account is unavailable");
@@ -272,13 +287,16 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         String key = sessionKey(cookieValue(request, SESSION_COOKIE));
         Session session = sessions.get(key);
         if (session == null) return expiredSession();
-        if ((body.has("organization") && !session.organization().value().equals(body.path("organization").asText()))
+        if ((body.has("organization")
+                && !Optional.ofNullable(session.organization()).map(OrganizationId::value).orElse("")
+                        .equals(body.path("organization").asText()))
+                || (body.has("scope") && !body.path("scope").asText()
+                        .equals(session.organization() == null ? "system" : "organization"))
                 || (body.has("userId") && !session.userId().equals(body.path("userId").asText()))) {
             return OrionHttpResponse.empty(401);
         }
         try {
-            if (!session.origin().equals(publicOrigin())
-                    || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
+            if (!current(session)) {
                 removeSession(key);
                 return expiredSession();
             }
@@ -297,6 +315,11 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private TokenIssueResult issueToken(Session session, long now) {
+        if (session.organization() == null) {
+            if (!current(session)) return TokenIssueResult.failure("System OIDC session is unavailable");
+            return acl.issueSystemOidcToken(session.userId(), session.provider(), session.subject(),
+                    Math.min(3600, session.expiresAt() - now));
+        }
         return acl.issueOrganizationToken(session.organization(), session.userId(),
                 session.provider().issuer().toString(), session.subject(), Math.min(3600, session.expiresAt() - now));
     }
@@ -313,12 +336,11 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         Session session = sessions.get(key);
         if (session == null || context.getUserIdentity().isAnonymous()
                 || !session.userId().equals(context.getUserIdentity().getUserId())
-                || !context.getUserIdentity().getOrganizationId().equals(java.util.Optional.of(session.organization()))) {
+                || !context.getUserIdentity().getOrganizationId().equals(Optional.ofNullable(session.organization()))) {
             return null;
         }
         try {
-            if (!session.origin().equals(publicOrigin())
-                    || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
+            if (!current(session)) {
                 removeSession(key);
                 return null;
             }
@@ -328,7 +350,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         }
         long now = clock.instant().getEpochSecond();
         Session active = new Session(session.organization(), session.provider(), session.userId(), session.subject(),
-                session.origin(), session.authenticatedAt(), now);
+                session.origin(), session.authenticatedAt(), now, session.systemGeneration());
         if (now != session.lastActiveAt()) saveSession(key, active);
         return sessionCookie(value, active.expiresAt() - now);
     }
@@ -341,7 +363,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private static OrionHttpResponse tokenResponse(TokenIssueResult.Success token, Session session) {
         return OrionHttpResponse.ok(Map.of("token", token.token(), "expiresAt", token.expiresAtEpochSecond(),
-                "organization", session.organization().value(), "userId", session.userId()));
+                "organization", Optional.ofNullable(session.organization()).map(OrganizationId::value).orElse(""),
+                "scope", session.organization() == null ? "system" : "organization", "userId", session.userId()));
     }
 
     private static OrionHttpResponse expiredSession() {
@@ -373,18 +396,56 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
 
     private void requireCurrent(Attempt attempt) {
         if (!provider(attempt.organization(), attempt.provider().id()).equals(attempt.provider())
+                || attempt.organization() == null
+                        && !systemProviderVersion(attempt.provider()).equals(attempt.systemProviderVersion())
                 || !publicOrigin().resolve("/api/auth/oidc/callback").equals(attempt.callback())) {
             throw new IllegalArgumentException("OIDC configuration changed");
         }
     }
 
     private OidcProvider provider(OrganizationId organization, String id) {
-        for (OidcProvider provider : accounts.organization(organization).oidcProviders()) {
+        for (OidcProvider provider : configuredProviders(organization)) {
             if (provider.id().equals(id)) {
                 return provider;
             }
         }
         throw new IllegalArgumentException("Provider is unavailable");
+    }
+
+    private List<OidcProvider> configuredProviders(OrganizationId organization) {
+        return organization == null ? desired.current().document().system().oidcProviders()
+                : accounts.organization(organization).oidcProviders();
+    }
+
+    private static OrganizationId organization(String scope, String organization) {
+        if ("system".equals(scope)) {
+            if (organization != null) throw new IllegalArgumentException("Conflicting sign-in scope");
+            return null;
+        }
+        if (scope != null && !scope.equals("organization")) {
+            throw new IllegalArgumentException("Invalid sign-in scope");
+        }
+        return new OrganizationId(organization);
+    }
+
+    private User linkedUser(OrganizationId organization, String issuer, String subject) {
+        return organization == null ? acl.findSystemOidcUser(issuer, subject)
+                : accounts.linkedUser(organization, issuer, subject);
+    }
+
+    private String systemProviderVersion(OidcProvider provider) {
+        for (ConfigurationSecret secret : desired.current().document().system().secrets()) {
+            if (secret.id().equals(provider.secret())) return sessionKey(secret.envelope());
+        }
+        throw new IllegalArgumentException("System OIDC secret is unavailable");
+    }
+
+    private boolean current(Session session) {
+        return session.origin().equals(publicOrigin())
+                && session.provider().equals(provider(session.organization(), session.provider().id()))
+                && (session.organization() != null || acl.systemOidcGeneration(session.userId(),
+                        session.provider(), session.subject()).filter(value -> value.equals(session.systemGeneration()))
+                                .isPresent());
     }
 
     URI publicOrigin() {
@@ -443,8 +504,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
                         if (session.authenticatedAt() <= 0 || session.lastActiveAt() < session.authenticatedAt()
                                 || session.lastActiveAt() > now || session.expiresAt() <= now
                                 || session.userId() == null || session.subject() == null
-                                || !session.origin().equals(publicOrigin())
-                                || !session.provider().equals(provider(session.organization(), session.provider().id()))) {
+                                || !current(session)) {
                             throw new IllegalArgumentException("Session is unavailable");
                         }
                         if (loaded.size() >= 4096) throw new IOException("Too many stored browser sessions");
@@ -536,9 +596,10 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private record Attempt(OrganizationId organization, OidcProvider provider, OidcClient.Metadata metadata,
-            String invitation, String browser, String nonce, String verifier, URI callback, long expiresAt) { }
+            String invitation, String browser, String nonce, String verifier, URI callback, long expiresAt,
+            String systemProviderVersion) { }
     private record Session(OrganizationId organization, OidcProvider provider, String userId, String subject,
-            URI origin, long authenticatedAt, long lastActiveAt) {
+            URI origin, long authenticatedAt, long lastActiveAt, String systemGeneration) {
         long expiresAt() {
             long idleDeadline = lastActiveAt + provider.idleTimeoutSeconds();
             return provider.reauthenticationTimeoutSeconds() == 0 ? idleDeadline

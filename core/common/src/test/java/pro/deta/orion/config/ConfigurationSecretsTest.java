@@ -168,7 +168,8 @@ class ConfigurationSecretsTest {
         OrionDocument corrupt = new OrionDocument(new OrionDocument.SystemConfiguration(
                 candidate.system().accessControl(), candidate.system().https(),
                 List.of(new ConfigurationSecret("renamed", candidate.system().secrets().getFirst().envelope())),
-                List.of(), candidate.system().connections()), candidate.organizations());
+                List.of(), candidate.system().connections(),
+                candidate.system().oidcProviders()), candidate.organizations());
         assertThatThrownBy(() -> secrets.validate(corrupt)).isInstanceOf(IllegalStateException.class);
         assertThat(current.get().system().secrets()).isEmpty();
     }
@@ -182,7 +183,8 @@ class ConfigurationSecretsTest {
         OrionDocument before = current.get();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(before.system().accessControl(),
                 before.system().https(), before.system().secrets(), List.of(proxy),
-                        before.system().connections()), before.organizations()));
+                        before.system().connections(),
+                before.system().oidcProviders()), before.organizations()));
 
         current.set(secrets.createSystem(current.get(), "other-token", "other".toCharArray()));
         current.set(secrets.replaceSystem(current.get(), "bootstrap-token", "rotated-token".toCharArray()));
@@ -259,7 +261,8 @@ class ConfigurationSecretsTest {
         String envelope = repository(current.get()).secrets().getFirst().envelope();
         OrionDocument.SystemConfiguration system = new OrionDocument.SystemConfiguration(
                 current.get().system().accessControl(), current.get().system().https(),
-                List.of(new ConfigurationSecret("github-token", envelope)), List.of(), current.get().system().connections());
+                List.of(new ConfigurationSecret("github-token", envelope)), List.of(), current.get().system().connections(),
+                current.get().system().oidcProviders());
         current.set(new OrionDocument(system, current.get().organizations()));
         assertThatThrownBy(() -> secrets.resolveSystem("github-token"))
                 .isInstanceOf(IllegalStateException.class)

@@ -42,7 +42,8 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public OrionDocument replaceAccessControl(AccessControl accessControl) {
         return new OrionDocument(
-                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies(), system.connections()),
+                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies(),
+                        system.connections(), system.oidcProviders()),
                 organizations);
     }
 
@@ -63,15 +64,17 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             Optional<OrionHttpsConfiguration> https,
             List<ConfigurationSecret> secrets,
             List<GitProxyBinding> proxies,
-            List<Connection> connections) {
+            List<Connection> connections,
+            List<OidcProvider> oidcProviders) {
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, Optional.empty(), List.of(), List.of(), List.of());
+            this(accessControl, Optional.empty(), List.of(), List.of(), List.of(), List.of());
         }
 
         public SystemConfiguration {
             Objects.requireNonNull(accessControl, "accessControl");
             https = Objects.requireNonNullElseGet(https, Optional::empty);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            oidcProviders = copyUnique(oidcProviders, OidcProvider::id, "OIDC provider");
             connections = copyConnections(connections, secrets);
             proxies = new ArrayList<>(copyUnique(proxies, GitProxyBinding::alias, "proxy"));
             proxies.sort(Comparator.comparing(proxy -> proxy.alias().value()));
@@ -80,6 +83,12 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             Set<String> secretIds = new HashSet<>();
             for (ConfigurationSecret secret : secrets) {
                 secretIds.add(secret.id());
+            }
+            for (OidcProvider provider : oidcProviders) {
+                if (!secretIds.contains(provider.secret())) {
+                    throw new IllegalArgumentException("OIDC secret is unavailable in system scope: "
+                            + provider.secret());
+                }
             }
             Optional<String> acmeSecret = https.flatMap(OrionHttpsConfiguration::acme)
                     .flatMap(OrionAcmeConfiguration::eabSecret);

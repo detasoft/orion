@@ -116,7 +116,8 @@ class BootstrapProxyAdoptionTest {
         try (OrionKeyMaterial material = material()) {
             OrionDocument current = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
                     Optional.empty(), List.of(new ConfigurationSecret("token", "invalid-envelope")),
-                    List.of(binding("configuration", "https://git.example/repo", "token")), List.of()), List.of());
+                    List.of(binding("configuration", "https://git.example/repo", "token")), List.of(),
+                    List.of()), List.of());
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, material.configurationCipher());
             var provider = provider("external-token");
             provider.prepareProvisional("configuration", source("https://git.example/repo"));
@@ -132,7 +133,8 @@ class BootstrapProxyAdoptionTest {
     private static OrionDocument withProxy(OrionDocument current, GitProxyBinding proxy) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(current.system().accessControl(),
                 current.system().https(), current.system().secrets(), List.of(proxy),
-                        current.system().connections()), current.organizations());
+                        current.system().connections(),
+                current.system().oidcProviders()), current.organizations());
     }
 
     private static GitProxyBinding binding(String alias, String upstream, String secret) {

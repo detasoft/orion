@@ -18,7 +18,8 @@ class JettyHTTPServerStateMachineTest {
     void stateMachineDefinitionComesFromGenericServiceAdapter() {
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
+                List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 new BootstrapConfiguration(), desiredState, TlsCapability.unavailable(), null, null, null);

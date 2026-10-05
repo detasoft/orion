@@ -224,7 +224,8 @@ class RuntimeHttpAdminAclUpdateIT {
             OrionDocument plaintext = new OrionDocument(new OrionDocument.SystemConfiguration(
                     system.accessControl(), system.https(),
                     List.of(new ConfigurationSecret("plain", "open-xml-secret")),
-                    system.proxies(), system.connections()), stored.organizations());
+                    system.proxies(), system.connections(),
+                    system.oidcProviders()), stored.organizations());
             assertThatThrownBy(() -> RuntimeHttpTestSupport.updateConfiguration(
                     orion, serializeDocument(plaintext), current.etag()))
                     .isInstanceOf(IllegalStateException.class);

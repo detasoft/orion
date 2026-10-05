@@ -255,7 +255,8 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                     : secrets.replaceSystem(document, id, request.credential());
         }
         OrionDocument candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
-                document.system().accessControl(), document.system().https(), document.system().secrets(), bindings, connections),
+                document.system().accessControl(), document.system().https(), document.system().secrets(), bindings, connections,
+                document.system().oidcProviders()),
                 document.organizations());
         secrets.validate(candidate);
         return candidate;

@@ -52,7 +52,8 @@ class OrionAdminProxiesRouteTest {
                 new ConnectionReference(ConnectionReference.Scope.SYSTEM, "upstream"), "/config.git"), "main");
         OrionDocument base = document(List.of());
         desired.publish(new OrionDocument(new OrionDocument.SystemConfiguration(base.system().accessControl(),
-                base.system().https(), base.system().secrets(), List.of(binding), List.of(connection)), List.of()),
+                base.system().https(), base.system().secrets(), List.of(binding), List.of(connection),
+                base.system().oidcProviders()), List.of()),
                 Optional.of("configuration-revision"));
 
         var response = get(context(grant(AccessControl.GrantKey.ADMIN)));
@@ -101,7 +102,8 @@ class OrionAdminProxiesRouteTest {
 
     private static OrionDocument document(List<GitProxyBinding> bindings) {
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(new ConfigurationSecret("private-key-id", "private-ciphertext")), bindings, List.of()), List.of());
+                List.of(new ConfigurationSecret("private-key-id", "private-ciphertext")), bindings, List.of(),
+                List.of()), List.of());
     }
 
     private Response get(SecurityContext context) throws Exception {

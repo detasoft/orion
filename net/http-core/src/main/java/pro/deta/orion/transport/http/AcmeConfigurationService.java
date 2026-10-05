@@ -165,7 +165,8 @@ public final class AcmeConfigurationService {
                 https.serverIssuerTrustAnchor(), https.clientAuthentication(), https.clientTrustAnchors(),
                 Optional.of(acme));
         return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
-                Optional.of(configured), document.system().secrets(), document.system().proxies(), document.system().connections()),
+                Optional.of(configured), document.system().secrets(), document.system().proxies(), document.system().connections(),
+                document.system().oidcProviders()),
                 document.organizations());
     }
 

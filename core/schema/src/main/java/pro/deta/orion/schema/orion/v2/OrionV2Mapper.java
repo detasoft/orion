@@ -38,7 +38,8 @@ public final class OrionV2Mapper {
                         accessControl,
                         Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent),
                         toCurrentSecrets(system.getSecrets()),
-                        toCurrentProxies(system.getProxies()), toCurrentConnections(system.getConnections())),
+                        toCurrentProxies(system.getProxies()), toCurrentConnections(system.getConnections()),
+                        toCurrentOidcProviders(system.getOidcProviders())),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -50,7 +51,8 @@ public final class OrionV2Mapper {
                         fromCurrent(source.system().accessControl()),
                         source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null),
                         fromCurrentSecrets(source.system().secrets()),
-                        fromCurrentProxies(source.system().proxies()), fromCurrentConnections(source.system().connections())),
+                        fromCurrentProxies(source.system().proxies()), fromCurrentConnections(source.system().connections()),
+                        fromCurrentOidcProviders(source.system().oidcProviders())),
                 fromCurrentOrganizations(source.organizations()));
     }
 

@@ -157,7 +157,8 @@ public class ACMECertificateChallengeTest {
     private static OrionDesiredState desiredStateWithoutHttps() {
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of(),
+                List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }
@@ -192,7 +193,8 @@ public class ACMECertificateChallengeTest {
                 Optional.of(acme));
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
+                List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }

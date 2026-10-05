@@ -7,15 +7,53 @@ import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.schema.acl.AccessControl;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OidcProviderTest {
+    @Test
+    void systemAndOrganizationProvidersRoundTripIndependentlyAndSurviveAclReplacement() throws Exception {
+        OidcProvider systemProvider = new OidcProvider("google", URI.create("https://accounts.google.com"),
+                "system-client", "client-secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+        OidcProvider organizationProvider = new OidcProvider("google", URI.create("https://sso.example.test"),
+                "organization-client", "client-secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+        OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
+                Optional.empty(), List.of(new ConfigurationSecret("client-secret", "system-envelope")),
+                List.of(), List.of(), List.of(systemProvider)),
+                List.of(organization("acme", List.of(organizationProvider))));
+        ByteArrayOutputStream xml = new ByteArrayOutputStream();
+        OrionXml.write(document, xml);
+        OrionDocument restored = OrionXml.read(new ByteArrayInputStream(xml.toByteArray()));
+        assertThat(restored.system().oidcProviders()).containsExactly(systemProvider);
+        assertThat(restored.organizations().getFirst().oidcProviders()).containsExactly(organizationProvider);
+        assertThat(restored.replaceAccessControl(new AccessControl()).system().oidcProviders())
+                .containsExactly(systemProvider);
+        assertThatThrownBy(() -> restored.system().oidcProviders().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void validatesSystemProviderUniquenessAndSystemOwnedSecrets() {
+        OidcProvider provider = new OidcProvider("google", URI.create("https://accounts.google.com"),
+                "system-client", "client-secret", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+        assertThatThrownBy(() -> new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
+                List.of(new ConfigurationSecret("client-secret", "encrypted")), List.of(), List.of(),
+                List.of(provider, provider)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("duplicate OIDC provider");
+        assertThatThrownBy(() -> new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
+                List.of(), List.of(), List.of(), List.of(provider)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("system scope");
+    }
+
     @Test
     void keepsProviderSettingsAndSecretsWithinTheirOrganization() {
         OidcProvider google = new OidcProvider(

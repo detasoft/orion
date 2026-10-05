@@ -91,7 +91,8 @@ class ProxyNativeGitRepositoryTest {
                 new GitProxyBinding.Direct(location.remoteUri(), location.credentialKind(), Optional.empty(),
                         Optional.empty()), location.refName());
         OrionDocument document = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.empty(), List.of(), List.of(binding), List.of()), List.of());
+                Optional.empty(), List.of(), List.of(binding), List.of(),
+                List.of()), List.of());
         ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document, ConfigurationCipherCapability.unavailable());
         IOException origin = new IOException("connection rejected");
         PrincipalAddress actor = PrincipalAddress.parse("system/operator");

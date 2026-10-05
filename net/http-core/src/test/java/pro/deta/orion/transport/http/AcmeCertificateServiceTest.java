@@ -316,7 +316,8 @@ class AcmeCertificateServiceTest {
             OrionHttpsConfiguration https = new OrionHttpsConfiguration(true, "127.0.0.1", availablePort, old.publicUrl(),
                     old.identity(), old.serverIssuerTrustAnchor(), old.clientAuthentication(), List.of(), old.acme());
             desired.publish(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                    Optional.of(https), List.of(), List.of(), List.of()), List.of()), Optional.of("https"));
+                    Optional.of(https), List.of(), List.of(), List.of(),
+                    List.of()), List.of()), Optional.of("https"));
             AcmeCertificateService service = new AcmeCertificateService(
                     bootstrap, desired, owner.acme(), new RecordingIssuer(false), null);
             X509Certificate initial = service.issue(AcmeCertificateService.IssueRequest.EMPTY)
@@ -521,7 +522,8 @@ class AcmeCertificateServiceTest {
                 Optional.of(acme));
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of(), List.of(), List.of(),
+                List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }

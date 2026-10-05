@@ -130,7 +130,8 @@ class PlaywrightExternalServicesIT {
         component.configurationEditor().edit(revision).update(document -> new OrionDocument(
                         new OrionDocument.SystemConfiguration(
                                 document.system().accessControl(), Optional.of(https),
-                                document.system().secrets(), document.system().proxies(), document.system().connections()),
+                                document.system().secrets(), document.system().proxies(), document.system().connections(),
+                                document.system().oidcProviders()),
                         document.organizations())).apply("configure test ACME", UserEmail.EMPTY);
     }
 

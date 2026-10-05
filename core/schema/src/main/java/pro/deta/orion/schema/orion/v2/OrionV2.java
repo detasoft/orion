@@ -38,7 +38,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies", "connections"})
+    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies", "connections", "oidcProviders"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
@@ -50,9 +50,12 @@ public class OrionV2 {
         @XmlElement(name = "proxy")
         private List<GitProxy> proxies;
         private Connections connections;
+        @XmlElementWrapper(name = "oidc")
+        @XmlElement(name = "provider")
+        private List<OidcProvider> oidcProviders;
 
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, null, null, null, null);
+            this(accessControl, null, null, null, null, null);
         }
     }
 

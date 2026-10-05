@@ -363,7 +363,8 @@ class OrionAdminProxyMutationTest {
                         new RemoteAlias("second"), first.source(), "third");
                 return new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                         document.system().https(), document.system().secrets(), List.of(first, second),
-                                document.system().connections()),
+                                document.system().connections(),
+                        document.system().oidcProviders()),
                         document.organizations());
             }).apply("share fixture credential", null);
 
@@ -483,7 +484,8 @@ class OrionAdminProxyMutationTest {
                         new GitProxyBinding.Ssh(source.connection(), "/second"), "main");
                 var system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
-                        system.secrets(), List.of(first, second), system.connections()), document.organizations());
+                        system.secrets(), List.of(first, second), system.connections(),
+                        system.oidcProviders()), document.organizations());
             }).apply("share SSH connection", UserEmail.EMPTY);
             OrionDocument original = f.desired.current().document();
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();

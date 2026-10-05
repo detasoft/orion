@@ -530,7 +530,8 @@ public final class NativeGitRepositoryFactory implements NativeGitRepositoryBack
             bindings.add(new GitProxyBinding(alias, transport, location.refName()));
             OrionDocument.SystemConfiguration system = candidate.system();
             candidate = new OrionDocument(new OrionDocument.SystemConfiguration(
-                    system.accessControl(), system.https(), system.secrets(), bindings, connections),
+                    system.accessControl(), system.https(), system.secrets(), bindings, connections,
+                    system.oidcProviders()),
                     candidate.organizations());
         }
         return candidate;

@@ -3,7 +3,7 @@ package pro.deta.orion.schema.orion.v2;
 import java.net.URI;
 import java.util.Objects;
 
-/** OIDC client configuration owned by an organization; secret names refer to that organization's secrets. */
+/** OIDC client configuration; secret names refer to the system or organization scope owning the provider. */
 public record OidcProvider(String id, URI issuer, String clientId, String secret,
         long idleTimeoutSeconds, long reauthenticationTimeoutSeconds) {
     public static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 48 * 60 * 60;

@@ -171,7 +171,8 @@ class AcmeConfigurationServiceTest {
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                 List.of(), Optional.of(acme));
         OrionDocument initial = new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(),
-                Optional.of(https), List.of(), List.of(), List.of()), List.of());
+                Optional.of(https), List.of(), List.of(), List.of(),
+                List.of()), List.of());
         desired.publish(initial, Optional.of("r1"));
         AcmeConfigurationService service = new AcmeConfigurationService(desired, null, null,
                 new AcmeCertificateService(new BootstrapConfiguration(), desired,
@@ -339,7 +340,8 @@ class AcmeConfigurationServiceTest {
             var connection = new Connection.S3("archive", Optional.empty(), "us-east-1",
                     false, Optional.of("id"), Optional.of(original), Optional.empty());
             saved = new OrionDocument(new OrionDocument.SystemConfiguration(saved.system().accessControl(),
-                    saved.system().https(), saved.system().secrets(), saved.system().proxies(), List.of(connection)),
+                    saved.system().https(), saved.system().secrets(), saved.system().proxies(), List.of(connection),
+                    saved.system().oidcProviders()),
                     saved.organizations());
             String changedKey = java.util.Base64.getUrlEncoder().encodeToString(new byte[32]);
             OrionDocument changed = service.updated(saved, settings("zerossl", "key-id", changedKey));

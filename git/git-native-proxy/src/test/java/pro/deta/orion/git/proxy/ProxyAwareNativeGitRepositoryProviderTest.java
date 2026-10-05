@@ -185,7 +185,8 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var added = proxyDocument("other", "file:///other.git").system().proxies().getFirst();
         current.set(new OrionDocument(new OrionDocument.SystemConfiguration(initial.system().accessControl(),
                 Optional.empty(), List.of(), List.of(initial.system().proxies().getFirst(), added),
-                        initial.system().connections()), List.of()));
+                        initial.system().connections(),
+                initial.system().oidcProviders()), List.of()));
 
         assertThat(provider.retry(added.alias(), current::get, secrets(current.get())))
                 .isInstanceOfSatisfying(Result.Failure.class, failure ->
@@ -941,7 +942,8 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         var binding = new GitProxyBinding(new RemoteAlias(alias),
                 new GitProxyBinding.Direct(URI.create(upstream), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "main");
         return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(),
-                List.of(), List.of(binding), List.of()), List.of());
+                List.of(), List.of(binding), List.of(),
+                List.of()), List.of());
     }
 
     private static ConfigurationSecrets secrets(OrionDocument document) {

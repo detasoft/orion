@@ -133,7 +133,8 @@ public class OrionRuntimeModule {
                 }
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
-                        system.https(), system.secrets(), bindings, connections), document.organizations());
+                        system.https(), system.secrets(), bindings, connections,
+                        system.oidcProviders()), document.organizations());
             }).apply("Reconcile bootstrap connection " + change.previous().alias().value()
                     + " approved by " + actor, UserEmail.EMPTY);
             return Result.of(null);
@@ -191,7 +192,8 @@ public class OrionRuntimeModule {
                 connections.set(connections.indexOf(connection), replacement);
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
-                        system.https(), system.secrets(), system.proxies(), connections), document.organizations());
+                        system.https(), system.secrets(), system.proxies(), connections,
+                        system.oidcProviders()), document.organizations());
             }).apply("Trust SSH host key for " + binding.alias().value()
                     + " approved by " + actor, UserEmail.EMPTY);
             recordTrustAudit(audit, binding, actor, "saved");
