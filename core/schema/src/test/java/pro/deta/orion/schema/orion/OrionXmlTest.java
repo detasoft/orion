@@ -8,7 +8,8 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.orion.v2.*;
 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -34,8 +35,15 @@ class OrionXmlTest {
 
     @Test
     void serializesVersionTwoWithSingularCollectionItemNames() throws Exception {
-        String xml = write(OrionDocument.withAccessControl(
-                ACLUtil.generateDefaultAccessControl("root-password-hash")));
+        Grant grant = new Grant("read", List.of(
+                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "example"),
+                new GrantExpression(AccessControl.GrantKey.READ, "true")));
+        Role role = new Role("reader", List.of(), List.of(grant.id()));
+        User user = new User("alice", null, null, "alice@example.test",
+                List.of(new Credential(AccessControl.CredentialType.ARGON2, "password-hash")),
+                List.of(role.id()), List.of());
+        AccessControl accessControl = new AccessControl(List.of(user), List.of(role), List.of(grant));
+        String xml = write(OrionDocument.withAccessControl(accessControl));
 
         assertThat(xml).contains("<orion schemaVersion=\"2\">");
         assertThat(xml).contains("<system>");
@@ -44,17 +52,17 @@ class OrionXmlTest {
         assertThat(xml).doesNotContain("<AccessControl");
 
         assertThat(xml).contains("<users>");
-        assertThat(xml).contains("<user id=\"root\">");
+        assertThat(xml).contains("<user id=\"alice\">");
         assertThat(xml).doesNotContain("<users>\n    <users>");
 
         assertThat(xml).contains("<roles>");
-        assertThat(xml).contains("<role>ROOT</role>");
+        assertThat(xml).contains("<role>reader</role>");
         assertThat(xml).contains("<grantReferences>");
-        assertThat(xml).contains("<grantReference>CONNECT</grantReference>");
+        assertThat(xml).contains("<grantReference>read</grantReference>");
         assertThat(xml).doesNotContain("<grantReferences>\n        <grantReferences>");
 
         assertThat(xml).contains("<grants>");
-        assertThat(xml).contains("<grant id=\"ALL_REPOSITORY\">");
+        assertThat(xml).contains("<grant id=\"read\">");
         assertThat(xml).doesNotContain("<grants>\n    <grants>");
 
         assertThat(xml).contains("<credentials>");

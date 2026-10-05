@@ -24,7 +24,7 @@ import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.Role;
@@ -433,7 +433,7 @@ class OrionStartupIT {
     }
 
     private static AccessControl accessControlWithUsers(String... userIds) {
-        AccessControl base = ACLUtil.generateDefaultAccessControl("remote-root-password-hash");
+        AccessControl base = DefaultAccessControl.create("remote-root-password-hash");
         List<User> users = new ArrayList<>(base.users());
         for (String userId : userIds) {
             if (!"root".equalsIgnoreCase(userId)) {

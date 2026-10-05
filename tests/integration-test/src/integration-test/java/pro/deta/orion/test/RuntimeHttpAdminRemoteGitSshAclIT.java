@@ -12,7 +12,7 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.User;
@@ -145,7 +145,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
     }
 
     private static AccessControl defaultAccessControlWithUsers(String... extraUserIds) {
-        AccessControl base = ACLUtil.generateDefaultAccessControl(
+        AccessControl base = DefaultAccessControl.create(
                 TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
         List<User> users = new ArrayList<>(base.users());
         for (String userId : extraUserIds) {

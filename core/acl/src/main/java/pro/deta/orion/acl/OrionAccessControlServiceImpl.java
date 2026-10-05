@@ -12,7 +12,7 @@ import pro.deta.orion.auth.check.MatcherUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -819,7 +819,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
             String authenticationGeneration = UUID.randomUUID().toString();
             AccessControl current = parseAccessControlConfiguration(snapshot.content());
-            AccessControl canonical = ACLUtil.generateDefaultAccessControl(
+            AccessControl canonical = DefaultAccessControl.create(
                     passwordHash,
                     AccessControl.CredentialType.ARGON2);
             User canonicalRoot = canonical.users().getFirst();

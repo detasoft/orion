@@ -33,7 +33,7 @@ import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
@@ -342,7 +342,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .filter(user -> "root".equalsIgnoreCase(user.id()))
                     .findFirst()
                     .orElseThrow();
-            AccessControl canonical = ACLUtil.generateDefaultAccessControl("unused-password-hash");
+            AccessControl canonical = DefaultAccessControl.create("unused-password-hash");
             assertThat(root.first()).isNull();
             assertThat(root.last()).isNull();
             assertThat(root.email()).isEqualTo("root@orion.pro");
@@ -469,7 +469,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                     .extracting(Credential::type)
                     .containsExactly(AccessControl.CredentialType.ARGON2);
 
-            AccessControl canonical = ACLUtil.generateDefaultAccessControl(
+            AccessControl canonical = DefaultAccessControl.create(
                     "unused-password-hash",
                     AccessControl.CredentialType.ARGON2);
             for (Role expected : canonical.roles()) {
@@ -1034,7 +1034,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String hash = hashingService.calculateHash(
                 PasswordHashingAlgorithm.SHA1,
                 password.toCharArray());
-        return accessControlBytes(ACLUtil.generateDefaultAccessControl(
+        return accessControlBytes(DefaultAccessControl.create(
                 hash,
                 AccessControl.CredentialType.SHA1));
     }

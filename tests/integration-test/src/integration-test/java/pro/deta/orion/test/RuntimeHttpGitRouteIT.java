@@ -16,7 +16,7 @@ import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
@@ -485,7 +485,7 @@ class RuntimeHttpGitRouteIT {
             boolean create,
             String branch,
             boolean force) {
-        AccessControl base = ACLUtil.generateDefaultAccessControl(
+        AccessControl base = DefaultAccessControl.create(
                 TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
         List<GrantExpression> expressions = new ArrayList<>();
         expressions.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));

@@ -48,7 +48,7 @@ import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
@@ -1222,7 +1222,7 @@ class OrionAccessControlServiceImplTest {
     private static ConfigurationFile defaultAclSnapshot() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         OrionXml.write(OrionDocument.withAccessControl(
-                ACLUtil.generateDefaultAccessControl("old-password-hash")), output);
+                DefaultAccessControl.create("old-password-hash")), output);
         return new ConfigurationFile(output.toByteArray(), Optional.of("initial"));
     }
 

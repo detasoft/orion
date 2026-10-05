@@ -1,7 +1,8 @@
 package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.*;
 
@@ -15,7 +16,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionDocumentTest {
     @Test
     void modelsRepositoriesInsideTheirTeamAndOrganization() {
-        AccessControl accessControl = ACLUtil.generateDefaultAccessControl("root-password-hash");
+        User user = new User("alice", null, null, "alice@example.test",
+                List.of(new Credential(AccessControl.CredentialType.ARGON2, "password-hash")),
+                List.of(), List.of());
+        AccessControl accessControl = new AccessControl(List.of(user), List.of(), List.of());
         OrionDocument.Repository repository = repository("api", "API");
         OrionDocument.Team team = new OrionDocument.Team(
                 new TeamId("platform"), "Platform", List.of(), List.of(), List.of(repository));

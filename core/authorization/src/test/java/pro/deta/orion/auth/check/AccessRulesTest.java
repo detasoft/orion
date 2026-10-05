@@ -11,7 +11,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -48,7 +48,7 @@ public class AccessRulesTest {
 
     @Test
     void confinesOrganizationUsersEvenWithWildcardAndSystemGrants() {
-        AccessControl acl = ACLUtil.generateDefaultAccessControl("unused");
+        AccessControl acl = DefaultAccessControl.create("unused");
         SecurityContext scoped = organizationContext("root", acl.grants());
         for (AccessRule<RepositoryResource> rule : List.of(RepositoryAccessRules.read(),
                 RepositoryAccessRules.write(), RepositoryAccessRules.create(), RepositoryAccessRules.force())) {
@@ -91,7 +91,7 @@ public class AccessRulesTest {
 
     @Test
     void defaultAclStillAllowsNestedRepositoriesAndBranches() {
-        AccessControl acl = ACLUtil.generateDefaultAccessControl("unused-test-hash");
+        AccessControl acl = DefaultAccessControl.create("unused-test-hash");
         SecurityContext root = securityContext(new InternalUserImpl("root", acl.grants()));
         assertThatCode(() -> requireRepositoryRead(root, "team/sub/api")).doesNotThrowAnyException();
         assertThatCode(() -> requireRepositoryWrite(root, "team/sub/api")).doesNotThrowAnyException();

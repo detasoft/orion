@@ -16,7 +16,7 @@ import pro.deta.orion.git.s3.S3NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -86,7 +86,7 @@ class S3BootstrapProxyColdStartIT {
                     signingKeyId = seeded.serverIdentity().activeKeyId();
                     signature = seeded.serverIdentity().sign(payload);
                     OrionDocument document = OrionDocument.withAccessControl(
-                            ACLUtil.generateDefaultAccessControl("proxy-cold-start-password-hash"));
+                            DefaultAccessControl.create("proxy-cold-start-password-hash"));
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                             seeded.configurationCipher());
                     ByteArrayOutputStream output = new ByteArrayOutputStream();

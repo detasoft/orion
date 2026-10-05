@@ -18,7 +18,7 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -73,7 +73,7 @@ class S3BootstrapRestartIT {
                 signingKeyId = material.serverIdentity().activeKeyId();
                 signature = material.serverIdentity().sign(payload);
                 OrionDocument document = OrionDocument.withAccessControl(
-                        ACLUtil.generateDefaultAccessControl("cold-start-test-password-hash"));
+                        DefaultAccessControl.create("cold-start-test-password-hash"));
                 ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                         material.configurationCipher());
                 ByteArrayOutputStream output = new ByteArrayOutputStream();

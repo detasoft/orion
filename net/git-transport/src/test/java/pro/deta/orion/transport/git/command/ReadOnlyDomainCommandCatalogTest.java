@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.git.command;
 
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.TeamId;
@@ -60,7 +60,7 @@ class ReadOnlyDomainCommandCatalogTest {
 
     private static OrionDocument organizationDocument() {
         User user = new User("operator", null, null, null, List.of(), List.of(),
-                ACLUtil.generateDefaultAccessControl("unused").grants());
+                DefaultAccessControl.create("unused").grants());
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());

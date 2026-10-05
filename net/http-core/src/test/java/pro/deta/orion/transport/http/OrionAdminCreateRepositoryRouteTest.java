@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.http;
 
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.SecurityContext;
@@ -38,7 +38,7 @@ class OrionAdminCreateRepositoryRouteTest {
 
     private static OrionDocument organizationDocument() {
         User user = new User("root", null, null, null, List.of(), List.of(),
-                ACLUtil.generateDefaultAccessControl("unused").grants());
+                DefaultAccessControl.create("unused").grants());
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("visible"), "",
                 OrionDocument.Repository.DEFAULT_BRANCH, RepositoryPolicy.safeDefaults(),
                 List.of(), List.of(), List.of(), List.of(), java.util.Optional.empty());
@@ -131,7 +131,7 @@ class OrionAdminCreateRepositoryRouteTest {
 
     private static HttpServletRequest request(String name) {
         return request(name, new InternalUserImpl("root",
-                ACLUtil.generateDefaultAccessControl("unused").grants()));
+                DefaultAccessControl.create("unused").grants()));
     }
 
     private static HttpServletRequest request(String name, UserIdentity identity) {

@@ -20,7 +20,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
@@ -293,7 +293,7 @@ class OrionHttpRouteServletRoutingTest {
 
     private static SecurityContext admin() {
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin",
-                ACLUtil.generateDefaultAccessControl("unused-test-hash").grants()));
+                DefaultAccessControl.create("unused-test-hash").grants()));
     }
 
     private static OrionHttpRoute failingRoute(RuntimeException failure) {

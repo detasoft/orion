@@ -32,7 +32,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
@@ -206,7 +206,7 @@ class OrionRuntimeModuleTest {
     void systemAdministrationUsesCurrentRolesAndPreservesPrincipalIsolation() {
         OrionDesiredState desired = new OrionDesiredState();
         OrionDocument base = decisionAccessDocument(false);
-        desired.publish(base.replaceAccessControl(ACLUtil.generateDefaultAccessControl("hash")), Optional.empty());
+        desired.publish(base.replaceAccessControl(DefaultAccessControl.create("hash")), Optional.empty());
         OrionAccessControlServiceImpl acl = decisionAcl(desired);
         PrincipalAddress root = PrincipalAddress.parse("system/root");
         assertThat(acl.canAdminister(root, Optional.empty())).isTrue();
@@ -214,7 +214,7 @@ class OrionRuntimeModuleTest {
         assertThat(acl.canAdminister(PrincipalAddress.parse("acme/root"),
                 Optional.of(ConfigurationScope.parse("acme")))).isFalse();
         assertThat(acl.canAdminister(PrincipalAddress.parse("system/reviewer"), Optional.empty())).isFalse();
-        AccessControl initial = ACLUtil.generateDefaultAccessControl("hash");
+        AccessControl initial = DefaultAccessControl.create("hash");
         User originalRoot = initial.users().getFirst();
         Credential password = originalRoot.credentials().getFirst();
         User lockedRoot = new User(originalRoot.id(), originalRoot.first(),

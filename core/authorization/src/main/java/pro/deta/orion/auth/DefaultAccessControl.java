@@ -1,13 +1,23 @@
-package pro.deta.orion.schema.acl;
+package pro.deta.orion.auth;
+
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.Role;
+import pro.deta.orion.schema.acl.User;
 
 import java.util.List;
 
-public class ACLUtil {
-    public static AccessControl generateDefaultAccessControl(String defaultRootPasswordHash) {
-        return generateDefaultAccessControl(defaultRootPasswordHash, AccessControl.CredentialType.ARGON2);
+public final class DefaultAccessControl {
+    private DefaultAccessControl() {
     }
 
-    public static AccessControl generateDefaultAccessControl(
+    public static AccessControl create(String defaultRootPasswordHash) {
+        return create(defaultRootPasswordHash, AccessControl.CredentialType.ARGON2);
+    }
+
+    public static AccessControl create(
             String defaultRootPasswordHash,
             AccessControl.CredentialType passwordCredentialType) {
         Grant connectFromLocalhost = new Grant("CONNECT", List.of(
