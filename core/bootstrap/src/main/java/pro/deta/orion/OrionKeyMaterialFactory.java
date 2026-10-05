@@ -1,5 +1,6 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialConstants;
@@ -35,13 +36,13 @@ public final class OrionKeyMaterialFactory {
     public static OrionKeyMaterial open(
             BootstrapConfiguration configuration,
             Map<String, String> environment) throws IOException, GeneralSecurityException {
-        return open(configuration, environment, false);
+        return open(configuration, environment, new KeyMaterialCreation(false));
     }
 
     public static OrionKeyMaterial open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            boolean createIfMissing) throws IOException, GeneralSecurityException {
+            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -51,21 +52,21 @@ public final class OrionKeyMaterialFactory {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         String location = resolveAgainstBaseDirectory(material.getLocation(), baseDirectory, "location");
         KeyMaterialContentStore store = resolver.resolveStore(location);
-        return open(configuration, environment, store, createIfMissing);
+        return open(configuration, environment, store, creation);
     }
 
     public static OrionKeyMaterial open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store) throws IOException, GeneralSecurityException {
-        return open(configuration, environment, store, false);
+        return open(configuration, environment, store, new KeyMaterialCreation(false));
     }
 
     public static OrionKeyMaterial open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store,
-            boolean createIfMissing) throws IOException, GeneralSecurityException {
+            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -81,7 +82,7 @@ public final class OrionKeyMaterialFactory {
                     options,
                     signingMaterial,
                     KeyMaterialConstants.RSA_KEY_SIZE_BITS,
-                    createIfMissing);
+                    creation);
         }
     }
 

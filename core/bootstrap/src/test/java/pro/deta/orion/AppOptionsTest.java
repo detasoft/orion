@@ -63,7 +63,7 @@ class AppOptionsTest {
             AppOptions options = AppOptions.parse(arguments);
 
             assertEquals(AppOptions.Command.RUN, options.command());
-            assertTrue(options.runtimeOptions().resetRootPassword());
+            assertTrue(options.rootPasswordReset().enabled());
             assertTrue(options.applicationArguments().isEmpty());
         }
     }
@@ -73,24 +73,24 @@ class AppOptionsTest {
         for (String command : java.util.List.of("start", "restart")) {
             AppOptions options = AppOptions.parse(new String[]{command, "--reset-root-pass"});
 
-            assertTrue(options.runtimeOptions().resetRootPassword());
+            assertTrue(options.rootPasswordReset().enabled());
             assertEquals(java.util.List.of("--reset-root-pass"), options.applicationArguments());
         }
     }
 
     @Test
     void createsMissingMaterialOnlyWhenRequestedAndForwardsServiceFlag() {
-        assertFalse(AppOptions.parse(new String[]{"run"}).createIfMissing());
+        assertFalse(AppOptions.parse(new String[]{"run"}).keyMaterialCreation().allowed());
         for (String[] arguments : java.util.List.of(
                 new String[]{"--create-if-missing"},
                 new String[]{"run", "--create-if-missing"})) {
             AppOptions options = AppOptions.parse(arguments);
-            assertTrue(options.createIfMissing());
+            assertTrue(options.keyMaterialCreation().allowed());
             assertTrue(options.applicationArguments().isEmpty());
         }
         for (String command : java.util.List.of("start", "restart")) {
             AppOptions options = AppOptions.parse(new String[]{command, "--create-if-missing"});
-            assertTrue(options.createIfMissing());
+            assertTrue(options.keyMaterialCreation().allowed());
             assertEquals(java.util.List.of("--create-if-missing"), options.applicationArguments());
         }
     }

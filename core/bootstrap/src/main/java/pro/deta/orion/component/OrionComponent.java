@@ -26,7 +26,7 @@ import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
@@ -70,7 +70,7 @@ public interface OrionComponent {
     interface Builder {
         OrionComponent build();
         @BindsInstance Builder bootstrapConfiguration(BootstrapConfiguration configuration);
-        @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
+        @BindsInstance Builder rootPasswordReset(RootPasswordReset rootPasswordReset);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
         @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
@@ -95,7 +95,7 @@ public interface OrionComponent {
                     configuration.getBootstrap().getAccessControl(),
                     true);
             return bootstrapConfiguration(configuration)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .rootPasswordReset(new RootPasswordReset(false))
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                     .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())

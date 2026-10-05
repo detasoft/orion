@@ -34,7 +34,7 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
@@ -604,7 +604,7 @@ class GitSshTransportEndToEndIT {
 
         startedOrion.stop();
         startedOrion = null;
-        startedOrion = startOrion(e2eConfiguration(orionRoot), new OrionRuntimeOptions(true));
+        startedOrion = startOrion(e2eConfiguration(orionRoot), new RootPasswordReset(true));
         char[] rootPassword = startedOrion.accessControlService()
                 .plainRootToken(PlainRootTokenAccessForTests.create());
         try {
@@ -962,7 +962,7 @@ class GitSshTransportEndToEndIT {
         String nonRootToken = nonRootTokenIssue.output().trim();
         startedOrion.stop();
         startedOrion = null;
-        startedOrion = startOrion(e2eConfiguration(orionRoot), new OrionRuntimeOptions(true));
+        startedOrion = startOrion(e2eConfiguration(orionRoot), new RootPasswordReset(true));
         char[] rootPassword = startedOrion.accessControlService()
                 .plainRootToken(PlainRootTokenAccessForTests.create());
         try {
@@ -1058,12 +1058,12 @@ class GitSshTransportEndToEndIT {
     }
 
     private StartedOrion startOrion(BootstrapConfiguration configuration) {
-        return startOrion(configuration, OrionRuntimeOptions.defaults());
+        return startOrion(configuration, new RootPasswordReset(false));
     }
 
     private StartedOrion startOrion(
             BootstrapConfiguration configuration,
-            OrionRuntimeOptions runtimeOptions) {
+            RootPasswordReset rootPasswordReset) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
             OrionComponent component = TestRuntimeBootstrap
@@ -1071,7 +1071,7 @@ class GitSshTransportEndToEndIT {
                             configuration,
                             identity.capability(),
                             identity.sshHostKeys(),
-                            runtimeOptions)
+                            rootPasswordReset)
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);

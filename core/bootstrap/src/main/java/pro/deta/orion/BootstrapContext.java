@@ -1,5 +1,6 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationStorage;
@@ -72,16 +73,16 @@ public final class BootstrapContext implements AutoCloseable {
     public static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment) {
-        return open(configuration, environment, false);
+        return open(configuration, environment, new KeyMaterialCreation(false));
     }
 
     public static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
-            boolean createIfMissing) {
+            KeyMaterialCreation creation) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(environment, "environment");
-        return open(configuration, environment, null, createIfMissing);
+        return open(configuration, environment, null, creation);
     }
 
     static NativeGitRepositoryBackend createRepositoryBackend(
@@ -100,14 +101,14 @@ public final class BootstrapContext implements AutoCloseable {
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryBackend backend) {
-        return open(configuration, environment, backend, false);
+        return open(configuration, environment, backend, new KeyMaterialCreation(false));
     }
 
     static BootstrapContext open(
             BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryBackend backend,
-            boolean createIfMissing) {
+            KeyMaterialCreation creation) {
         OrionKeyMaterial keyMaterial = null;
         S3Transport s3Transport = new S3Transport();
         NativeGitRepositoryFactory provider = null;
@@ -131,14 +132,14 @@ public final class BootstrapContext implements AutoCloseable {
             Optional<String> materialRepository = provider.resolveProvisional(
                     NativeGitRepositoryFactory.MATERIAL_SOURCE,
                     configuredMaterial,
-                    createIfMissing);
+                    creation.allowed());
             Optional<ConfigurationFile> initialConfiguration;
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
                     try {
                         return openKeyMaterial(configuration, environment, repositoryFactory.provider(),
                                 materialRepository, configuredMaterial,
-                                createIfMissing);
+                                creation);
                     } catch (IOException | GeneralSecurityException error) {
                         throw new CompletionException(error);
                     }
@@ -362,7 +363,7 @@ public final class BootstrapContext implements AutoCloseable {
             NativeGitRepositoryProvider provider,
             Optional<String> repositoryName,
             KeyMaterialConfig source,
-            boolean createIfMissing) throws IOException, GeneralSecurityException {
+            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
         if (repositoryName.isPresent()) {
             return OrionKeyMaterialFactory.open(
                     configuration,
@@ -372,9 +373,9 @@ public final class BootstrapContext implements AutoCloseable {
                             repositoryName.orElseThrow(),
                             NativeGitRepositoryFactory.sourceRefName(source),
                             NativeGitRepositoryFactory.repositoryPath(source.getPath())),
-                    createIfMissing);
+                    creation);
         }
-        return OrionKeyMaterialFactory.open(configuration, environment, createIfMissing);
+        return OrionKeyMaterialFactory.open(configuration, environment, creation);
     }
 
     private static List<SshHostKeyReference> sshHostKeyReferences(BootstrapConfiguration configuration) {

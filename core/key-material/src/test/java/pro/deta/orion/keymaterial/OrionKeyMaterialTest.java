@@ -30,7 +30,8 @@ class OrionKeyMaterialTest {
                 .hasMessageContaining("creation was not requested");
         assertThat(store.read()).isEmpty();
 
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             ServerIdentityCapability identity = material.serverIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("server-signing-v1");
@@ -85,7 +86,8 @@ class OrionKeyMaterialTest {
         byte[] nextSignature;
         SigningMaterialSet initial = new SigningMaterialSet(old, List.of());
 
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048,
+                new KeyMaterialCreation(true))) {
             oldSignature = material.serverIdentity().sign(payload);
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -164,7 +166,7 @@ class OrionKeyMaterialTest {
                 options(),
                 new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
                 2048,
-                true);
+                new KeyMaterialCreation(true));
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
         KeyMaterialDescriptor identity = descriptor(
@@ -203,7 +205,7 @@ class OrionKeyMaterialTest {
                     options(),
                     new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
                     2048,
-                    true)) {
+                    new KeyMaterialCreation(true))) {
             KeyMaterialDescriptor account = descriptor(
                     "acme-account-v1",
                     KeyMaterialPurpose.ACME_ACCOUNT,
@@ -236,7 +238,8 @@ class OrionKeyMaterialTest {
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
         String savedVersion;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             String initialVersion = store.read().orElseThrow().version();
             ConfigurationCipherCapability cipher = material.configurationCipher();
             assertThat(store.read().orElseThrow().version()).isEqualTo(initialVersion);
@@ -260,10 +263,12 @@ class OrionKeyMaterialTest {
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
         ConfigurationSecretEnvelope envelope;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(source, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(source, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             envelope = material.configurationCipher().seal(new byte[]{1}, context);
         }
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(destination, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(destination, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             String initialVersion = destination.read().orElseThrow().version();
             assertThatThrownBy(() -> material.configurationCipher().open(envelope, context))
                     .isInstanceOf(GeneralSecurityException.class);
@@ -287,7 +292,8 @@ class OrionKeyMaterialTest {
         FailingStore store = new FailingStore();
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/proxy-token", "credential");
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
             ConfigurationCipherCapability cipher = material.configurationCipher();
             store.fail = true;
@@ -311,7 +317,8 @@ class OrionKeyMaterialTest {
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         AcmeMaterialConfiguration configuration = acmeConfiguration();
         String afterFailure;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
             store.fail = true;
             assertThatThrownBy(() -> material.acme().acquire(configuration, 2048, 2048))
@@ -340,7 +347,8 @@ class OrionKeyMaterialTest {
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         AcmeMaterialConfiguration configuration = acmeConfiguration();
         X509Certificate expected;
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             AcmeKeyMaterial keys = material.acme().acquire(configuration, 2048, 2048);
             TestCertificateChain.Authority issuer = TestCertificateChain.root("ACME issuer");
             X509Certificate original = TestCertificateChain.leaf(
@@ -415,7 +423,8 @@ class OrionKeyMaterialTest {
     void doesNotReplaceAnAliasOwnedByAnotherMaterialPurpose() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         SigningMaterialSet signing = new SigningMaterialSet(rsa("configuration-v1", 1), List.of());
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             String before = store.read().orElseThrow().version();
             assertThatThrownBy(() -> material.configurationCipher().seal(new byte[]{1},
                     new ConfigurationSecretContext("system/token", "credential")))
@@ -430,7 +439,8 @@ class OrionKeyMaterialTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
-        try (OrionKeyMaterial first = OrionKeyMaterial.open(store, options(), signing, 2048, true);
+        try (OrionKeyMaterial first = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true));
              OrionKeyMaterial second = OrionKeyMaterial.open(store, options(), signing, 2048)) {
             ConfigurationSecretEnvelope envelope = first.configurationCipher().seal(new byte[]{1}, context);
             String winnerVersion = store.read().orElseThrow().version();
@@ -460,7 +470,8 @@ class OrionKeyMaterialTest {
         LostResponseStore store = new LostResponseStore();
         SigningMaterialSet signing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
         ConfigurationSecretContext context = new ConfigurationSecretContext("system/token", "credential");
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048,
+                new KeyMaterialCreation(true))) {
             store.loseResponse = true;
             assertThatThrownBy(() -> material.configurationCipher().seal(new byte[]{1}, context))
                     .isInstanceOf(GeneralSecurityException.class);

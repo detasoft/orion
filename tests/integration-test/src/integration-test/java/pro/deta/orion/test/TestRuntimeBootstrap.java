@@ -15,7 +15,7 @@ import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.util.List;
@@ -29,14 +29,14 @@ final class TestRuntimeBootstrap {
             BootstrapConfiguration configuration,
             ServerIdentityCapability identity,
             SshHostKeyCapability sshHostKeys) {
-        return componentBuilder(configuration, identity, sshHostKeys, OrionRuntimeOptions.defaults());
+        return componentBuilder(configuration, identity, sshHostKeys, new RootPasswordReset(false));
     }
 
     static OrionComponent.Builder componentBuilder(
             BootstrapConfiguration configuration,
             ServerIdentityCapability identity,
             SshHostKeyCapability sshHostKeys,
-            OrionRuntimeOptions runtimeOptions) {
+            RootPasswordReset rootPasswordReset) {
         NativeGitRepositoryBackend backend = NativeGitRepositoryBackend.file(
                 new ConfigurationContext(configuration).getFileGitStoragePath());
         S3Transport transport = new S3Transport();
@@ -50,7 +50,7 @@ final class TestRuntimeBootstrap {
                 true);
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
-                .runtimeOptions(runtimeOptions)
+                .rootPasswordReset(rootPasswordReset)
                 .serverIdentityCapability(identity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())

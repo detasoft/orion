@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -1092,7 +1093,7 @@ class JettyHTTPServerIT {
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(SIGNING, List.of()),
                 2048,
-                true);
+                new KeyMaterialCreation(true));
     }
 
     static OrionDesiredState desiredState(

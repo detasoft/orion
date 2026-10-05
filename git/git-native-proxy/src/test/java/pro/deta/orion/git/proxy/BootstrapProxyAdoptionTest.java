@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -160,7 +161,7 @@ class BootstrapProxyAdoptionTest {
                 KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(1), KeyMaterialScope.cluster("test"));
         try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                    new SigningMaterialSet(signing, List.of()), 2048, true);
+                    new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
         }
     }
 }

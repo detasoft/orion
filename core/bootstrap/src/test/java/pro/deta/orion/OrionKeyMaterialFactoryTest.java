@@ -1,5 +1,6 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -28,7 +29,7 @@ class OrionKeyMaterialFactoryTest {
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, "test-password"), true)) {
+                configuration, Map.of(PASSWORD_ENV, "test-password"), new KeyMaterialCreation(true))) {
             var identity = material.serverIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
@@ -55,7 +56,7 @@ class OrionKeyMaterialFactoryTest {
                 Map.of(
                         "ORION_TEST_ROOT", tempDir.toString(),
                         PASSWORD_ENV, "test-password"),
-                true)) {
+                new KeyMaterialCreation(true))) {
             // Opening the identity initializes the configured store.
         }
 
@@ -66,7 +67,7 @@ class OrionKeyMaterialFactoryTest {
     void resolvesConfiguredRetainedAliases() throws Exception {
         BootstrapConfiguration configuration = configuration();
         try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, "test-password"), true)) {
+                configuration, Map.of(PASSWORD_ENV, "test-password"), new KeyMaterialCreation(true))) {
             // Initialize the active alias in a new store.
         }
         configuration.getBootstrap()
@@ -100,7 +101,7 @@ class OrionKeyMaterialFactoryTest {
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store,
-                true)) {
+                new KeyMaterialCreation(true))) {
             assertThat(material.serverIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
         }
 

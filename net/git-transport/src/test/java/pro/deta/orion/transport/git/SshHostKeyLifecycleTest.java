@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -104,7 +105,7 @@ class SshHostKeyLifecycleTest {
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(serverSigning(), List.of()),
                 2_048,
-                true);
+                new KeyMaterialCreation(true));
     }
 
     private static KeyMaterialDescriptor serverSigning() {

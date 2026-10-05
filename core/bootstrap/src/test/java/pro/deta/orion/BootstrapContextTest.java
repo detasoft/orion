@@ -1,5 +1,6 @@
 package pro.deta.orion;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
 import org.eclipse.jgit.api.Git;
@@ -8,7 +9,7 @@ import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 
 import java.net.InetSocketAddress;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import org.junit.jupiter.api.Test;
@@ -139,7 +140,7 @@ class BootstrapContextTest {
 
     private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             boolean createIfMissing) {
-        return BootstrapContext.open(configuration, environment, createIfMissing);
+        return BootstrapContext.open(configuration, environment, new KeyMaterialCreation(createIfMissing));
     }
 
     private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
@@ -149,7 +150,8 @@ class BootstrapContextTest {
 
     private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
             NativeGitRepositoryProvider owner, boolean createIfMissing) {
-        return BootstrapContext.open(configuration, environment, backend(owner, true), createIfMissing);
+        return BootstrapContext.open(configuration, environment, backend(owner, true),
+                new KeyMaterialCreation(createIfMissing));
     }
 
     private static BootstrapContext openContext(BootstrapConfiguration configuration, Map<String, String> environment,
@@ -1469,7 +1471,7 @@ class BootstrapContextTest {
             BootstrapConfiguration configuration, BootstrapContext context) {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
+                .rootPasswordReset(new RootPasswordReset(false))
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
                 .configurationMaterialCapability(context.configurationMaterial())
@@ -1517,7 +1519,7 @@ class BootstrapContextTest {
                 configuration,
                 ENVIRONMENT,
                 store,
-                true)) {
+                new KeyMaterialCreation(true))) {
             // Generate the typed server identity in the test content store.
         }
         KeyMaterialSnapshot snapshot = store.read().orElseThrow();

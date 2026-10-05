@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import java.util.Set;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.X509TrustManager;
@@ -531,7 +532,7 @@ class AcmeCertificateServiceTest {
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(SIGNING, List.of()),
                 2048,
-                true);
+                new KeyMaterialCreation(true));
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {

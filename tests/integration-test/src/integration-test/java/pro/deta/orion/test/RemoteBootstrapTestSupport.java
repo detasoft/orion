@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.internal.UserEmail;
 
 import pro.deta.orion.config.OrionConfigurationEdit;
@@ -14,7 +15,7 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
 import java.nio.file.Files;
@@ -38,7 +39,7 @@ final class RemoteBootstrapTestSupport {
             BootstrapConfiguration configuration, BootstrapContext context) {
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
+                .rootPasswordReset(new RootPasswordReset(false))
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
                 .configurationMaterialCapability(context.configurationMaterial())
@@ -112,7 +113,8 @@ final class RemoteBootstrapTestSupport {
     static byte[] materialBytes(BootstrapConfiguration configuration, Map<String, String> environment)
             throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (var material = OrionKeyMaterialFactory.open(configuration, environment, store, true)) {
+        try (var material = OrionKeyMaterialFactory.open(configuration, environment, store,
+                new KeyMaterialCreation(true))) {
             SshHostKeyLifecycle.open(material.sshHostKeyMaterial(), List.of());
         }
         return store.read().orElseThrow().bytes();

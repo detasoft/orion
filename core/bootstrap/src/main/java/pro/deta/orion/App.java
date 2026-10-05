@@ -76,10 +76,10 @@ public class App {
             OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
                     new ConfigurationContext(configuration).getLogDir());
             try (BootstrapContext bootstrap = BootstrapContext.open(
-                    configuration, Map.copyOf(System.getenv()), options.createIfMissing())) {
+                    configuration, Map.copyOf(System.getenv()), options.keyMaterialCreation())) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .bootstrapConfiguration(configuration)
-                        .runtimeOptions(options.runtimeOptions())
+                        .rootPasswordReset(options.rootPasswordReset())
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
                         .configurationMaterialCapability(bootstrap.configurationMaterial())

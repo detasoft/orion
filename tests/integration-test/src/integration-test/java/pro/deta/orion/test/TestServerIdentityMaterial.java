@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialService;
@@ -40,7 +41,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, PASSWORD), true);
+                configuration, Map.of(PASSWORD_ENV, PASSWORD), new KeyMaterialCreation(true));
         try {
             return new TestServerIdentityMaterial(
                     material,

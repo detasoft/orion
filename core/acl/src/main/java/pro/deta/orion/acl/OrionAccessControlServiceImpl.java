@@ -42,7 +42,6 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.config.OrionConfigurationEditor;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.internal.UserEmail;
@@ -79,7 +78,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private final OrionConfigurationStorage configurationStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
-    private final OrionRuntimeOptions runtimeOptions;
+    private final RootPasswordReset rootPasswordReset;
     private final ServerIdentityCapability serverIdentity;
     private final OrionDesiredState desiredState;
     private final OrionConfigurationEditor editor;
@@ -93,14 +92,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public OrionAccessControlServiceImpl(
             OrionConfigurationStorage configurationStorage,
             OrionPasswordHashingService orionPasswordHashingService,
-            OrionRuntimeOptions runtimeOptions,
+            RootPasswordReset rootPasswordReset,
             ServerIdentityCapability serverIdentity,
             OrionDesiredState desiredState,
             OrionConfigurationEditor editor,
             Optional<ConfigurationFile> initialConfiguration) {
         this.configurationStorage = configurationStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
-        this.runtimeOptions = runtimeOptions;
+        this.rootPasswordReset = rootPasswordReset;
         this.serverIdentity = serverIdentity;
         this.desiredState = desiredState;
         this.editor = editor;
@@ -118,7 +117,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         .orElseGet(this::loadValidatedConfigurationFile);
                 switch (initial) {
                     case Result.Success<ConfigurationFile>(var file) -> {
-                        if (runtimeOptions.resetRootPassword()) {
+                        if (rootPasswordReset.enabled()) {
                             resetRootPassword(file);
                         } else {
                             editor.reload(file);

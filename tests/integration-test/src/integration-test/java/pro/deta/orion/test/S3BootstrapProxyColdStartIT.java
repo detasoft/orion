@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -81,7 +82,7 @@ class S3BootstrapProxyColdStartIT {
                 byte[] signature;
                 byte[] xml;
                 try (OrionKeyMaterial seeded = OrionKeyMaterialFactory.open(
-                        configuration, environment, materialStore, false)) {
+                        configuration, environment, materialStore, new KeyMaterialCreation(false))) {
                     signingKeyId = seeded.serverIdentity().activeKeyId();
                     signature = seeded.serverIdentity().sign(payload);
                     OrionDocument document = OrionDocument.withAccessControl(
@@ -107,7 +108,8 @@ class S3BootstrapProxyColdStartIT {
                     assertThat(empty.repositoryNames()).isEmpty();
                 }
                 assertThat(localRoot).isEmptyDirectory();
-                try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment, false)) {
+                try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
+                        new KeyMaterialCreation(false))) {
                     assertThat(bootstrap.initialConfiguration().orElseThrow().content()).isEqualTo(xml);
                     assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                     assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();

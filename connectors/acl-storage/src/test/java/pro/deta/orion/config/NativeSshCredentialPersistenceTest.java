@@ -19,7 +19,7 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 
@@ -98,7 +98,7 @@ class NativeSshCredentialPersistenceTest {
     ) {
         return new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 ServerIdentityCapability.unavailable(),
                 desired,
                 editor,

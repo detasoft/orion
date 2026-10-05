@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,7 +99,8 @@ class RemoteBootstrapConfigurationIT {
 
             var materialStore = new InMemoryKeyMaterialContentStore();
             materialStore.write(material, null);
-            try (var seededMaterial = OrionKeyMaterialFactory.open(configuration, environment, materialStore, false);
+            try (var seededMaterial = OrionKeyMaterialFactory.open(configuration, environment, materialStore,
+                    new KeyMaterialCreation(false));
                  var bootstrap = BootstrapContext.open(configuration, environment)) {
                 byte[] payload = "remote material identity".getBytes(StandardCharsets.UTF_8);
                 assertThat(bootstrap.serverIdentity().verify(seededMaterial.serverIdentity().activeKeyId(),

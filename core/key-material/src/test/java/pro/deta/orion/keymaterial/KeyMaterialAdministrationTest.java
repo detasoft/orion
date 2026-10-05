@@ -189,7 +189,8 @@ class KeyMaterialAdministrationTest {
     }
 
     private static OrionKeyMaterial open(InMemoryKeyMaterialContentStore store) throws Exception {
-        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()), SIGNING, 2048, true);
+        return OrionKeyMaterial.open(store, KeyMaterialOptions.pkcs12("password".toCharArray()), SIGNING, 2048,
+                new KeyMaterialCreation(true));
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {

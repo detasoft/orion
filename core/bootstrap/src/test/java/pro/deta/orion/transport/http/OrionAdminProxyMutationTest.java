@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -36,7 +37,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
@@ -562,7 +563,7 @@ class OrionAdminProxyMutationTest {
                     KeyMaterialScope.cluster("test"));
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new SigningMaterialSet(signing, List.of()), 2048, true);
+                        new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
             editor = new OrionConfigurationEditor(storage,
                 new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
@@ -571,7 +572,7 @@ class OrionAdminProxyMutationTest {
                 desired);
             acl = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 material.serverIdentity(),
                 desired,
                 editor,

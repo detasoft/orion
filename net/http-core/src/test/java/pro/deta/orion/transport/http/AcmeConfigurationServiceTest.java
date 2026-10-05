@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
@@ -39,7 +40,7 @@ import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.v2.Connection;
@@ -69,7 +70,7 @@ class AcmeConfigurationServiceTest {
                 desired);
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 owner.serverIdentity(),
                 desired,
                 editor,
@@ -202,7 +203,7 @@ class AcmeConfigurationServiceTest {
                 desired);
             OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 owner.serverIdentity(),
                 desired,
                 editor,
@@ -379,7 +380,8 @@ class AcmeConfigurationServiceTest {
                                 KeyMaterialPurpose.SERVER_SIGNING,
                                 KeyMaterialAlgorithm.RSA,
                                 new KeyMaterialVersion(1),
-                                KeyMaterialScope.cluster("test")), List.of()), 2048, true);
+                                KeyMaterialScope.cluster("test")), List.of()), 2048,
+                                        new KeyMaterialCreation(true));
     }
 
     private static AcmeConfigurationService.Settings settings(String provider, String kid, String key) {

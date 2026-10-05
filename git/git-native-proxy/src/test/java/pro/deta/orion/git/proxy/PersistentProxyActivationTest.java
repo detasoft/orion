@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -286,7 +287,7 @@ class PersistentProxyActivationTest {
                     KeyMaterialScope.cluster("test"));
             try (var options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
                 material = OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                        new SigningMaterialSet(signing, List.of()), 2048, true);
+                        new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
             }
             secrets = new ConfigurationSecrets(current::get, material.configurationCipher());
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.acl.RootPasswordReset;
+
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -56,7 +58,7 @@ final class StorageManagementFixture {
                 desired);
         OrionAccessControlServiceImpl acl = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 ServerIdentityCapability.unavailable(),
                 desired,
                 editor,

@@ -1,5 +1,7 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.acl.RootPasswordReset;
+
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
 
@@ -64,7 +66,7 @@ class ConfiguredStorageManagementTest {
                 desired);
         acl = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 ServerIdentityCapability.unavailable(),
                 desired,
                 editor,

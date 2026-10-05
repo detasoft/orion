@@ -55,7 +55,6 @@ import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
@@ -184,7 +183,7 @@ class OrionAccessControlServiceImplTest {
                 configurationState);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(List.of(KEY_THREE.getPublic())),
                 configurationState,
                 editor,
@@ -520,7 +519,7 @@ class OrionAccessControlServiceImplTest {
                 desiredState);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(),
                 desiredState,
                 editor,
@@ -559,7 +558,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desiredState = new OrionDesiredState();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(),
                 desiredState,
                 new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(),
@@ -601,7 +600,7 @@ class OrionAccessControlServiceImplTest {
                 desiredState);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(),
                 desiredState,
                 editor,
@@ -641,7 +640,7 @@ class OrionAccessControlServiceImplTest {
                 desiredState);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(),
                 desiredState,
                 editor,
@@ -1060,7 +1059,7 @@ class OrionAccessControlServiceImplTest {
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new BootstrapConfiguration(),
                 testCipher(), testMaterial(), desired);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
-                new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
+                new OrionPasswordHashingService(), new RootPasswordReset(false),
                 testServerIdentity(List.of(KEY_THREE.getPublic())), desired, editor, Optional.empty());
 
         try {
@@ -1094,7 +1093,7 @@ class OrionAccessControlServiceImplTest {
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new BootstrapConfiguration(),
                 testCipher(), testMaterial(), desired);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
-                new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
+                new OrionPasswordHashingService(), new RootPasswordReset(false),
                 testServerIdentity(List.of(KEY_THREE.getPublic())), desired, editor, Optional.empty());
 
         try {
@@ -1138,7 +1137,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                new OrionRuntimeOptions(resetRoot),
+                new RootPasswordReset(resetRoot),
                 testServerIdentity(),
                 desired,
                 new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
@@ -1156,7 +1155,7 @@ class OrionAccessControlServiceImplTest {
             byte[] beforeRestart = persisted.get().content();
             OrionAccessControlServiceImpl restarted = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 testServerIdentity(),
                 desired,
                 new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
@@ -1183,22 +1182,22 @@ class OrionAccessControlServiceImplTest {
 
     @Test
     void resetFailsWithoutPrintingWhenThePersistedAclCannotBeReloaded() throws Exception {
-        assertRecoveryFailsWithoutPrinting(defaultAclSnapshot(), new OrionRuntimeOptions(true));
+        assertRecoveryFailsWithoutPrinting(defaultAclSnapshot(), new RootPasswordReset(true));
     }
 
     @Test
     void defaultCreationFailsWithoutPrintingWhenThePersistedAclCannotBeReloaded() throws Exception {
-        assertRecoveryFailsWithoutPrinting(null, OrionRuntimeOptions.defaults());
+        assertRecoveryFailsWithoutPrinting(null, new RootPasswordReset(false));
     }
 
     private static void assertRecoveryFailsWithoutPrinting(
             ConfigurationFile initial,
-            OrionRuntimeOptions runtimeOptions) {
+            RootPasswordReset rootPasswordReset) {
         FailingReloadStorage storage = new FailingReloadStorage(initial);
         OrionDesiredState configurationState = new OrionDesiredState();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(),
-                runtimeOptions,
+                rootPasswordReset,
                 testServerIdentity(),
                 configurationState,
                 new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), configurationState),
@@ -1283,7 +1282,7 @@ class OrionAccessControlServiceImplTest {
                 configurationState);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 hashing,
-                OrionRuntimeOptions.defaults(),
+                new RootPasswordReset(false),
                 serverIdentity,
                 configurationState,
                 editor,

@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -155,7 +156,7 @@ class BootstrapSshTrustTest {
                 KeyMaterialScope.cluster("test"));
         try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("password".toCharArray())) {
             return OrionKeyMaterial.open(new InMemoryKeyMaterialContentStore(), options,
-                    new SigningMaterialSet(signing, List.of()), 2048, true);
+                    new SigningMaterialSet(signing, List.of()), 2048, new KeyMaterialCreation(true));
         }
     }
 

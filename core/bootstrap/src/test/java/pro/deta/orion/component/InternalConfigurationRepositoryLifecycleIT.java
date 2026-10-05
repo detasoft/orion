@@ -41,7 +41,7 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -210,7 +210,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         BootstrapConfiguration configuration = configuration();
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
-        OrionComponent component = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent component = component(configuration, new RootPasswordReset(true));
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(processOutput, true, StandardCharsets.UTF_8));
@@ -303,7 +303,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         String newPassword;
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
+        OrionComponent reset = component(configuration, new RootPasswordReset(true), serverIdentity);
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
@@ -443,7 +443,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         String newPassword;
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent reset = component(configuration, new RootPasswordReset(true));
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
@@ -520,7 +520,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         BootstrapConfiguration configuration = configuration();
         byte[] primaryAcl = aclBytes("alice", "alice-password");
         byte[] secondaryAcl = defaultAclBytes("old-root-password");
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent reset = component(configuration, new RootPasswordReset(true));
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
                 .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
@@ -566,7 +566,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         Files.write(aclFile, defaultAclBytes("old-root-password"));
         BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getAccessControl().setLocation(aclDirectory.toUri().toString());
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent reset = component(configuration, new RootPasswordReset(true));
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         String newPassword;
         try {
@@ -613,7 +613,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
         ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent reset = component(configuration, new RootPasswordReset(true));
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
@@ -797,7 +797,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         String rootToken;
         String aliceToken;
 
-        OrionComponent initial = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
+        OrionComponent initial = component(configuration, new RootPasswordReset(true), serverIdentity);
         OrionApplicationLifecycle initialLifecycle = initial.orionApplicationLifecycle();
         try {
             assertThat(initialLifecycle.runApplication()).isEqualTo(RUNNING);
@@ -848,7 +848,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
 
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
+        OrionComponent reset = component(configuration, new RootPasswordReset(true), serverIdentity);
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
@@ -904,19 +904,19 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
-            OrionRuntimeOptions runtimeOptions) {
-        return component(configuration, runtimeOptions, ServerIdentityCapability.unavailable());
+            RootPasswordReset rootPasswordReset) {
+        return component(configuration, rootPasswordReset, ServerIdentityCapability.unavailable());
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
             ServerIdentityCapability serverIdentity) {
-        return component(configuration, OrionRuntimeOptions.defaults(), serverIdentity);
+        return component(configuration, new RootPasswordReset(false), serverIdentity);
     }
 
     private static OrionComponent component(
             BootstrapConfiguration configuration,
-            OrionRuntimeOptions runtimeOptions,
+            RootPasswordReset rootPasswordReset,
             ServerIdentityCapability serverIdentity) {
         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.file(
@@ -931,7 +931,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return DaggerOrionComponent.builder()
                 .bootstrapConfiguration(configuration)
-                .runtimeOptions(runtimeOptions)
+                .rootPasswordReset(rootPasswordReset)
                 .serverIdentityCapability(serverIdentity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .configurationMaterialCapability(ConfigurationMaterialCapability.unavailable())

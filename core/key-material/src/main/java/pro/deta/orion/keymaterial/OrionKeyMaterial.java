@@ -58,7 +58,7 @@ public final class OrionKeyMaterial implements AutoCloseable {
             KeyMaterialOptions options,
             SigningMaterialSet signingMaterial,
             int activeKeySize) throws IOException, GeneralSecurityException {
-        return open(store, options, signingMaterial, activeKeySize, false);
+        return open(store, options, signingMaterial, activeKeySize, new KeyMaterialCreation(false));
     }
 
     public static OrionKeyMaterial open(
@@ -66,13 +66,13 @@ public final class OrionKeyMaterial implements AutoCloseable {
             KeyMaterialOptions options,
             SigningMaterialSet signingMaterial,
             int activeKeySize,
-            boolean createIfMissing) throws IOException, GeneralSecurityException {
+            KeyMaterialCreation creation) throws IOException, GeneralSecurityException {
         requireRsa(signingMaterial);
         KeyMaterialScope.Cluster clusterScope = requireClusterScope(signingMaterial.active().scope());
         KeyMaterialService service = KeyMaterialService.open(store, options);
         try {
             if (!service.hasDurableSnapshot()) {
-                if (!createIfMissing) {
+                if (!creation.allowed()) {
                     throw new GeneralSecurityException(
                             "Key material store is missing and creation was not requested");
                 }

@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
@@ -68,7 +69,7 @@ class S3BootstrapRestartIT {
             String signingKeyId;
             byte[] xml;
             try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                    configuration, environment, materialStore, false)) {
+                    configuration, environment, materialStore, new KeyMaterialCreation(false))) {
                 signingKeyId = material.serverIdentity().activeKeyId();
                 signature = material.serverIdentity().sign(payload);
                 OrionDocument document = OrionDocument.withAccessControl(
@@ -101,7 +102,8 @@ class S3BootstrapRestartIT {
             }
 
             assertThat(tempDir).isEmptyDirectory();
-            try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment, false)) {
+            try (BootstrapContext bootstrap = BootstrapContext.open(configuration, environment,
+                    new KeyMaterialCreation(false))) {
                 assertThat(bootstrap.initialConfiguration()).isPresent();
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();
@@ -143,7 +145,8 @@ class S3BootstrapRestartIT {
             Path firstRoot = Files.createDirectory(tempDir.resolve("first"));
             BootstrapConfiguration first = configuration(s3, firstRoot);
             first.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
-            try (BootstrapContext bootstrap = BootstrapContext.open(first, environment, true)) {
+            try (BootstrapContext bootstrap = BootstrapContext.open(first, environment,
+                    new KeyMaterialCreation(true))) {
                 OrionComponent component = runtimeComponent(first, bootstrap);
                 OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
                 try {
@@ -189,7 +192,8 @@ class S3BootstrapRestartIT {
             assertThat(freshRoot).isEmptyDirectory();
             BootstrapConfiguration restarted = configuration(s3, freshRoot);
             restarted.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
-            try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment, false)) {
+            try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment,
+                    new KeyMaterialCreation(false))) {
                 assertThat(bootstrap.initialConfiguration()).isPresent();
                 assertThat(bootstrap.serverIdentity().activeKeyId()).isEqualTo(signingKeyId);
                 assertThat(bootstrap.serverIdentity().verify(signingKeyId, payload, signature)).isTrue();

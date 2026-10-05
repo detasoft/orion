@@ -1,6 +1,7 @@
 package pro.deta.orion;
 
-import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
+import pro.deta.orion.keymaterial.KeyMaterialCreation;
+import pro.deta.orion.acl.RootPasswordReset;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -216,8 +217,12 @@ record AppOptions(
         );
     }
 
-    OrionRuntimeOptions runtimeOptions() {
-        return new OrionRuntimeOptions(resetRootPassword);
+    KeyMaterialCreation keyMaterialCreation() {
+        return new KeyMaterialCreation(createIfMissing);
+    }
+
+    RootPasswordReset rootPasswordReset() {
+        return new RootPasswordReset(resetRootPassword);
     }
 
     private static AppOptions commandOptions(
