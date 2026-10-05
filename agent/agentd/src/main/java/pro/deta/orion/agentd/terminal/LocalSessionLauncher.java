@@ -25,7 +25,8 @@ import java.util.UUID;
 final class LocalSessionLauncher {
     private static final String USAGE = """
             Usage: agentd terminal start [--session-host PATH] --state-dir PATH
-                   [--session-id ID] [--cwd PATH] -- COMMAND...
+                   [--session-id ID] [--cwd PATH] [--ack-journal] -- COMMAND...
+            --ack-journal permits retention to delete history needed by later attaches; no server durability.
             """;
 
     private final Map<String, String> environment;
@@ -90,7 +91,7 @@ final class LocalSessionLauncher {
         SessionLaunchResult result = runtime.launch(request.spec());
         if (result instanceof SessionLaunchResult.Started started) {
             output.println("session=" + started.sessionId().value() + " directory=" + started.directory());
-            return attacher.attach(started.directory(), errors);
+            return attacher.attach(started.directory(), request.acknowledgeJournal(), errors);
         }
         SessionLaunchResult.Failed failed = (SessionLaunchResult.Failed) result;
         errors.println(TerminalDiagnostics.bounded(failed.kind() + ": " + failed.detail()));
@@ -102,12 +103,17 @@ final class LocalSessionLauncher {
         Path stateDirectory = null;
         Path workingDirectory = Path.of("").toAbsolutePath().normalize();
         String sessionId = null;
+        boolean acknowledgeJournal = false;
         Set<String> present = new HashSet<>();
         int index = 0;
         while (index < arguments.length && !"--".equals(arguments[index])) {
             String option = arguments[index++];
             if (!present.add(option)) {
                 throw new IllegalArgumentException("Duplicate terminal start option: " + option);
+            }
+            if ("--ack-journal".equals(option)) {
+                acknowledgeJournal = true;
+                continue;
             }
             String value = value(arguments, index++, option);
             switch (option) {
@@ -147,7 +153,7 @@ final class LocalSessionLauncher {
                 terminalType,
                 colorTerminal,
                 SessionSpec.Sandbox.none());
-        return new LaunchRequest(executable, stateDirectory, spec);
+        return new LaunchRequest(executable, stateDirectory, spec, acknowledgeJournal);
     }
 
     private static String value(String[] arguments, int index, String option) {
@@ -173,7 +179,9 @@ final class LocalSessionLauncher {
                 && value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 128;
     }
 
-    private record LaunchRequest(Path sessionHost, Path stateDirectory, SessionSpec spec) {
+    private record LaunchRequest(
+            Path sessionHost, Path stateDirectory, SessionSpec spec, boolean acknowledgeJournal
+    ) {
     }
 
     @FunctionalInterface

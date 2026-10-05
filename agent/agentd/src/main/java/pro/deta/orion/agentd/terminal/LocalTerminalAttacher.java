@@ -1,6 +1,7 @@
 package pro.deta.orion.agentd.terminal;
 
 import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionCommandSource;
 import pro.deta.orion.agentd.session.ControlCommand;
 import pro.deta.orion.agentd.session.ControlEndpoint;
@@ -59,9 +60,13 @@ final class LocalTerminalAttacher {
                 client::open);
     }
 
-    int attach(Path sessionDirectory, PrintStream errors) {
+    int attach(Path sessionDirectory, boolean acknowledgeJournal, PrintStream errors) {
         Objects.requireNonNull(sessionDirectory, "sessionDirectory");
         Objects.requireNonNull(errors, "errors");
+        if (acknowledgeJournal) {
+            errors.println("Warning: --ack-journal permits native retention to delete history needed by later "
+                    + "attaches; it provides no server durability.");
+        }
         Path normalized = sessionDirectory.toAbsolutePath().normalize();
         SessionManifest manifest;
         try {
@@ -105,7 +110,7 @@ final class LocalTerminalAttacher {
                     "terminal attach failed: " + TerminalDiagnostics.detail(failure)));
             return 1;
         }
-        return runAttached(normalized, manifest, terminal, inspection, errors);
+        return runAttached(normalized, manifest, terminal, inspection, acknowledgeJournal, errors);
     }
 
     private int runAttached(
@@ -113,6 +118,7 @@ final class LocalTerminalAttacher {
             SessionManifest manifest,
             TerminalDevice terminal,
             TerminalJournalFollower.Inspection inspection,
+            boolean acknowledgeJournal,
             PrintStream errors
     ) {
         AtomicBoolean stopped = new AtomicBoolean();
@@ -134,7 +140,10 @@ final class LocalTerminalAttacher {
                 executor.submit(() -> watchResize(terminal, lane, stopped, controlFailure));
             }
             TerminalJournalFollower.Result journalResult = journal.follow(
-                    sessionDirectory, terminal.output(), stopped::get);
+                    sessionDirectory, terminal.output(), stopped::get,
+                    acknowledgeJournal
+                            ? new JournalAcknowledgement(manifest.control(), errors)
+                            : ignored -> {});
             stopped.set(true);
             if (controlTask != null) {
                 await(controlTask);
@@ -272,6 +281,56 @@ final class LocalTerminalAttacher {
             case ControlResult.Rejected rejected -> "rejected: " + rejected.detail();
             default -> "unexpected native response";
         };
+    }
+
+    private final class JournalAcknowledgement implements java.util.function.Consumer<EventId> {
+        private final ControlEndpoint endpoint;
+        private final PrintStream errors;
+        private EventId confirmed;
+        private boolean disabled;
+        private boolean uncertaintyReported;
+        private long retryAfter;
+
+        private JournalAcknowledgement(ControlEndpoint endpoint, PrintStream errors) {
+            this.endpoint = endpoint;
+            this.errors = errors;
+        }
+
+        @Override
+        public void accept(EventId eventId) {
+            if (disabled || (confirmed != null && eventId.compareTo(confirmed) <= 0)
+                    || (retryAfter != 0 && System.nanoTime() - retryAfter < 0)) {
+                return;
+            }
+            ControlResult result;
+            try (SessionControlClient.Connection connection = controls.apply(endpoint)) {
+                result = connection.send(new ControlCommand.AckJournal(eventId.value()));
+            } catch (IOException | RuntimeException failure) {
+                disable(TerminalDiagnostics.detail(failure));
+                return;
+            }
+            if (result instanceof ControlResult.JournalAcknowledged acknowledged
+                    && new EventId(acknowledged.acknowledgedEventId()).compareTo(eventId) >= 0) {
+                confirmed = new EventId(acknowledged.acknowledgedEventId());
+                retryAfter = 0;
+            } else if (result instanceof ControlResult.Failed failed
+                    && failed.kind() != ControlResult.FailureKind.VALIDATION
+                    && failed.kind() != ControlResult.FailureKind.UNSUPPORTED_TRANSPORT) {
+                retryAfter = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100);
+                if (!uncertaintyReported) {
+                    errors.println(TerminalDiagnostics.bounded(
+                            "journal acknowledgement unconfirmed; will retry: " + controlDetail(result)));
+                    uncertaintyReported = true;
+                }
+            } else {
+                disable(controlDetail(result));
+            }
+        }
+
+        private void disable(String detail) {
+            disabled = true;
+            errors.println(TerminalDiagnostics.bounded("journal acknowledgement disabled: " + detail));
+        }
     }
 
     private sealed interface ManualAction {

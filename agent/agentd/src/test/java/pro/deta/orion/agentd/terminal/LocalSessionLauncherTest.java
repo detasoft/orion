@@ -37,8 +37,9 @@ class LocalSessionLauncherTest {
         int exit = new LocalSessionLauncher(
                 Map.of("TERM", "screen", "COLORTERM", "truecolor"),
                 (host, sessions) -> runtime,
-                (directory, errors) -> {
+                (directory, acknowledgeJournal, errors) -> {
                     attached.set(directory);
+                    assertThat(acknowledgeJournal).isFalse();
                     return 9;
                 }).execute(new String[]{
                 "--session-host", executable.toString(),
@@ -67,6 +68,21 @@ class LocalSessionLauncherTest {
     }
 
     @Test
+    void passesExplicitAcknowledgementToTheSharedAttachPath() {
+        Path state = temporaryDirectory.resolve("state");
+        int result = new LocalSessionLauncher(Map.of(),
+                (host, sessions) -> spec -> new SessionLaunchResult.Started(spec.sessionId(), state),
+                (directory, acknowledgeJournal, errors) -> {
+                    assertThat(acknowledgeJournal).isTrue();
+                    return 7;
+                }).execute(new String[]{"--session-host", temporaryDirectory.resolve("host").toString(),
+                        "--state-dir", state.toString(), "--ack-journal", "--", "/bin/sh"},
+                        new PrintStream(new ByteArrayOutputStream()),
+                        new PrintStream(new ByteArrayOutputStream()));
+        assertThat(result).isEqualTo(7);
+    }
+
+    @Test
     void generatesIdentifiersAndUsesSafeTerminalDefaults() {
         AtomicReference<SessionSpec> launched = new AtomicReference<>();
         SessionRuntime runtime = spec -> {
@@ -77,7 +93,7 @@ class LocalSessionLauncherTest {
         int exit = new LocalSessionLauncher(
                 Map.of("TERM", "bad=value", "COLORTERM", "x".repeat(129)),
                 (host, sessions) -> runtime,
-                (directory, errors) -> 0).execute(new String[]{
+                (directory, acknowledgeJournal, errors) -> 0).execute(new String[]{
                 "--session-host", temporaryDirectory.resolve("session-host").toString(),
                 "--state-dir", temporaryDirectory.resolve("state").toString(),
                 "--", "/bin/cat"
@@ -104,7 +120,7 @@ class LocalSessionLauncherTest {
                     executable.set(host);
                     return runtime;
                 },
-                (directory, errors) -> 0).execute(new String[]{
+                (directory, acknowledgeJournal, errors) -> 0).execute(new String[]{
                 "--state-dir", state.toString(),
                 "--", "/bin/cat"
         }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
@@ -128,7 +144,7 @@ class LocalSessionLauncherTest {
                     executable.set(host);
                     return runtime;
                 },
-                (directory, errors) -> 0).execute(new String[]{
+                (directory, acknowledgeJournal, errors) -> 0).execute(new String[]{
                 "--session-host", override.toString(),
                 "--state-dir", state.toString(),
                 "--", "/bin/cat"
@@ -149,7 +165,7 @@ class LocalSessionLauncherTest {
                 (host, sessions) -> {
                     throw new AssertionError("failed installation must not create the runtime");
                 },
-                (directory, attachErrors) -> {
+                (directory, acknowledgeJournal, attachErrors) -> {
                     throw new AssertionError("failed installation must not attach");
                 }).execute(new String[]{
                 "--state-dir", state.toString(),
@@ -170,7 +186,7 @@ class LocalSessionLauncherTest {
                 (host, sessions) -> spec -> {
                     throw new AssertionError("invalid input must not launch");
                 },
-                (directory, errors) -> {
+                (directory, acknowledgeJournal, errors) -> {
                     throw new AssertionError("invalid input must not attach");
                 }).execute(
                 new String[]{"--state-dir", temporaryDirectory.toString()},
@@ -181,7 +197,7 @@ class LocalSessionLauncherTest {
                 Map.of(),
                 (host, sessions) -> spec -> SessionLaunchResult.failed(
                         SessionLaunchResult.FailureKind.INITIALIZATION_FAILED, "x".repeat(700)),
-                (directory, errors) -> {
+                (directory, acknowledgeJournal, errors) -> {
                     throw new AssertionError("failed launch must not attach");
                 }).execute(new String[]{
                 "--session-host", temporaryDirectory.resolve("session-host").toString(),

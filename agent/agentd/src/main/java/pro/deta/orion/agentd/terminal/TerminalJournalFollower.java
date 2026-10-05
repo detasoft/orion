@@ -15,9 +15,11 @@ import pro.deta.orion.agentd.journal.JournalReadPosition;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 final class TerminalJournalFollower {
     private final JournalReadLimits limits;
@@ -70,27 +72,45 @@ final class TerminalJournalFollower {
         }
     }
 
-    Result follow(Path sessionDirectory, OutputStream output, BooleanSupplier stopped) {
+    Result follow(
+            Path sessionDirectory, OutputStream output, BooleanSupplier stopped, Consumer<EventId> deliveredPage
+    ) {
         Optional<EventId> cursor = Optional.empty();
         Optional<JournalReadPosition> position = Optional.empty();
         try (JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(sessionDirectory)) {
             while (true) {
                 JournalReadPage page = reader.readPage(sessionDirectory, cursor, position, limits);
+                Result.Exited exit = null;
+                boolean delivered = true;
                 for (SessionEventRecord record : page.records()) {
                     Optional<SessionEventPayload> payload = codec.decodeKnownPayload(record);
                     cursor = Optional.of(record.eventId());
                     position = page.nextPosition();
                     if (payload.orElse(null) instanceof SessionEventPayload.PtyOutput terminalOutput) {
-                        output.write(terminalOutput.bytes().toByteArray());
-                        output.flush();
+                        if (exit == null) {
+                            output.write(terminalOutput.bytes().toByteArray());
+                            flush(output);
+                        } else {
+                            delivered = false;
+                        }
                     } else if (payload.orElse(null) instanceof SessionEventPayload.ProcessExited exited) {
-                        return new Result.Exited(exited.exitCode());
+                        if (exit == null) {
+                            exit = new Result.Exited(exited.exitCode());
+                        }
                     }
                 }
                 if (page.boundary() == JournalReadBoundary.ISSUE) {
                     return failedResult("journal failure: " + page.issue().orElseThrow().detail());
                 }
-                if (stopped.getAsBoolean()) {
+                flush(output);
+                boolean detached = stopped.getAsBoolean();
+                if (!detached && delivered && page.boundary() != JournalReadBoundary.INCOMPLETE_TAIL) {
+                    cursor.ifPresent(deliveredPage);
+                }
+                if (exit != null) {
+                    return exit;
+                }
+                if (detached) {
                     return new Result.Detached();
                 }
                 if (page.boundary() == JournalReadBoundary.PAGE_LIMIT) {
@@ -105,6 +125,13 @@ final class TerminalJournalFollower {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return new Result.Detached();
+        }
+    }
+
+    private static void flush(OutputStream output) throws IOException {
+        output.flush();
+        if (output instanceof PrintStream stream && stream.checkError()) {
+            throw new IOException("terminal output failed");
         }
     }
 

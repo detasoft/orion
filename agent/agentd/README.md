@@ -160,7 +160,7 @@ AgentD can start a local native session and attach the invoking terminal:
 ```text
 java -jar agentd.jar terminal start \
   --state-dir /path/to/state \
-  [--session-id ID] [--cwd PATH] -- COMMAND...
+  [--session-id ID] [--cwd PATH] [--ack-journal] -- COMMAND...
 ```
 
 AgentD installs its bundled native `session-host` at
@@ -172,12 +172,26 @@ After the native host publishes its durable session directory, `start` prints
 that directory and enters the same attach path as:
 
 ```text
-java -jar agentd.jar terminal attach --session-dir /path/to/session
+java -jar agentd.jar terminal attach --session-dir /path/to/session [--ack-journal]
 ```
 
 Attach replays retained terminal output from the beginning and then follows new
-journal records. It does not persist a cursor or acknowledge journal records,
-so every fresh attach replays the retained output again.
+journal records. By default it does not acknowledge journal records. It never
+persists a local cursor, so every fresh attach replays the retained output again.
+
+Pass `--ack-journal` to `start` or `attach` to test native journal retention.
+After a complete page has been decoded and its terminal output written and
+flushed, local mode sends its last EventId through `ACK_JOURNAL`. Incomplete
+tails, corrupt or missing pages, and failed output are never acknowledged.
+Unknown events count as read; numeric EventId gaps alone do not indicate loss.
+Acknowledgements are monotonic only within the invocation and may be repeated
+if delivery is uncertain. A definite rejection disables acknowledgement for
+that invocation while terminal output and manual controls continue.
+
+**Warning:** this option permits native retention to delete history needed by
+a later stateless attach. It provides no server durability or replication
+guarantee. The host's existing retention watermark is deletion permission,
+not a local replica cursor.
 
 Press `Ctrl-]` followed by `d` to detach. Press `Ctrl-]` twice to send one
 literal `Ctrl-]` byte. Detaching restores the local terminal and leaves

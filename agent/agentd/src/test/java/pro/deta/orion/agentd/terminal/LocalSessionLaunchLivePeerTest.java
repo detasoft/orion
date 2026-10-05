@@ -1,11 +1,15 @@
 package pro.deta.orion.agentd.terminal;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SessionCommandSource;
 import pro.deta.orion.agentd.session.ControlCommand;
 import pro.deta.orion.agentd.session.ControlHostProbe;
@@ -26,9 +30,17 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -77,7 +89,8 @@ class LocalSessionLaunchLivePeerTest {
                 "--session-id", "local-live",
                 "--cwd", temporaryDirectory.toString(),
                 "--", "/bin/cat"
-        }, new PrintStream(output), new PrintStream(errors), (directory, attachErrors) -> 0);
+        }, new PrintStream(output), new PrintStream(errors),
+                (directory, acknowledgeJournal, attachErrors) -> 0);
 
         String hostLog = Files.exists(sessionDirectory.resolve("session-host.log"))
                 ? Files.readString(sessionDirectory.resolve("session-host.log")) : "no host log";
@@ -122,7 +135,7 @@ class LocalSessionLaunchLivePeerTest {
                 "printf 'ready\\n'; IFS= read -r line; printf 'got:%s size:' \"$line\"; stty size; "
                         + "IFS= read -r line; exit 7"
         }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(launchErrors),
-                (directory, attachErrors) -> 0);
+                (directory, acknowledgeJournal, attachErrors) -> 0);
         assertThat(launch).as(launchErrors.toString(StandardCharsets.UTF_8)).isZero();
 
         SessionManifest manifest = new JsonSessionManifestReader().read(sessionDirectory);
@@ -134,7 +147,7 @@ class LocalSessionLaunchLivePeerTest {
                     new InputStep("", "hello\n"),
                     new InputStep("30 100", new byte[]{0x1d, 'd'}));
             int firstExit = attacher(client, firstTerminal).attach(
-                    sessionDirectory, new PrintStream(new ByteArrayOutputStream()));
+                    sessionDirectory, false, new PrintStream(new ByteArrayOutputStream()));
 
             assertThat(firstExit).isZero();
             assertThat(firstTerminal.text()).contains("ready", "got:hello", "30 100");
@@ -151,7 +164,7 @@ class LocalSessionLaunchLivePeerTest {
             ScriptedTerminal secondTerminal = new ScriptedTerminal(
                     new TerminalSize(100, 30), new InputStep("got:hello", "quit\n"));
             int secondExit = attacher(client, secondTerminal).attach(
-                    sessionDirectory, new PrintStream(new ByteArrayOutputStream()));
+                    sessionDirectory, false, new PrintStream(new ByteArrayOutputStream()));
 
             assertThat(secondExit).isEqualTo(7);
             assertThat(secondTerminal.text()).contains("ready", "got:hello", "30 100", "quit");
@@ -170,6 +183,156 @@ class LocalSessionLaunchLivePeerTest {
                 host.destroyForcibly();
             }
         }
+    }
+
+    @Test
+    void acknowledgesRealRotatedHistoryOnlyAfterDeliveryAndReattachesAfterRetention() throws Exception {
+        Path executable = extractSessionHost();
+        stateDirectory = Files.createTempDirectory(Path.of("/tmp"), "orion-local-ack-");
+        Path sessionDirectory = stateDirectory.resolve("ack-live");
+        Process host = new ProcessBuilder(executable.toString(),
+                "--session-id", "ack-live", "--start-command-id", "start-ack",
+                "--session-dir", sessionDirectory.toString(), "--cwd", temporaryDirectory.toString(),
+                "--cols", "80", "--rows", "24", "--journal-segment-bytes", "1", "--journal-max-bytes", "1",
+                "--", "/bin/sh", "-c",
+                "printf 'ready\\n'; while IFS= read -r line; do printf 'reply:%s\\n' \"$line\"; done")
+                .redirectErrorStream(true).redirectOutput(stateDirectory.resolve("host.log").toFile()).start();
+        SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
+        try {
+            awaitCondition(() -> Files.exists(sessionDirectory.resolve("metadata")));
+            SessionManifest manifest = new JsonSessionManifestReader().read(sessionDirectory);
+            awaitCondition(() -> client.send(manifest.control(), new ControlCommand.Status())
+                    instanceof ControlResult.Status);
+            awaitCondition(() -> {
+                ByteArrayOutputStream replay = new ByteArrayOutputStream();
+                new TerminalJournalFollower().follow(sessionDirectory, replay, () -> true, ignored -> {});
+                return replay.toString(StandardCharsets.UTF_8).contains("ready");
+            });
+            long outputSegment = Collections.max(journalSegments(sessionDirectory));
+            assertThat(client.send(manifest.control(), new ControlCommand.Resize(1,
+                    SessionCommandSource.MANUAL, Optional.empty(), 80, 24)))
+                    .isInstanceOf(ControlResult.Received.class);
+            awaitCondition(() -> Collections.max(journalSegments(sessionDirectory)) > outputSegment);
+            Path retentionState = sessionDirectory.resolve("control-retention-state");
+            Set<Long> originalSegments = journalSegments(sessionDirectory);
+            assertThat(originalSegments).hasSizeGreaterThan(1);
+            Set<Long> originalClosedSegments = new HashSet<>(originalSegments);
+            originalClosedSegments.remove(Collections.max(originalSegments));
+
+            ScriptedTerminal failedTerminal = new ScriptedTerminal(new TerminalSize(80, 24));
+            failedTerminal.outputOverride = new PrintStream(new OutputStream() {
+                @Override
+                public void write(int value) throws IOException {
+                    throw new IOException("terminal closed");
+                }
+            });
+            assertThat(attacher(client, failedTerminal).attach(sessionDirectory, true,
+                    new PrintStream(new ByteArrayOutputStream()))).isEqualTo(1);
+            assertThat(retentionState).doesNotExist();
+            assertThat(journalSegments(sessionDirectory)).containsAll(originalSegments);
+
+            ScriptedTerminal defaultTerminal = new ScriptedTerminal(new TerminalSize(80, 24),
+                    new InputStep("ready", new byte[]{0x1d, 'd'}));
+            assertThat(attacher(client, defaultTerminal).attach(sessionDirectory, false,
+                    new PrintStream(new ByteArrayOutputStream()))).isZero();
+            assertThat(retentionState).doesNotExist();
+            assertThat(journalSegments(sessionDirectory)).containsAll(originalSegments);
+
+            long firstWatermark;
+            ScriptedTerminal first = new ScriptedTerminal(new TerminalSize(80, 24));
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                Future<Integer> result = executor.submit(() -> attacher(client, first).attach(
+                        sessionDirectory, true,
+                        new PrintStream(new ByteArrayOutputStream())));
+                try {
+                    awaitCondition(() -> watermark(retentionState) > 0);
+                    assertThat(first.text()).contains("ready");
+                    firstWatermark = watermark(retentionState);
+                    awaitCondition(() -> Collections.disjoint(
+                            journalSegments(sessionDirectory), originalClosedSegments));
+                } finally {
+                    first.close();
+                }
+                assertThat(result.get(5, TimeUnit.SECONDS)).isZero();
+            }
+
+            ScriptedTerminal second = new ScriptedTerminal(new TerminalSize(80, 24));
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                Future<Integer> result = executor.submit(() -> attacher(client, second).attach(
+                        sessionDirectory, true,
+                        new PrintStream(new ByteArrayOutputStream())));
+                try {
+                    assertThat(client.send(manifest.control(), new ControlCommand.Input(2,
+                            SessionCommandSource.MANUAL, Optional.empty(), UUID.randomUUID(),
+                            ProtocolBytes.copyOf(
+                                    "again\n".getBytes(StandardCharsets.UTF_8)))))
+                            .isInstanceOf(ControlResult.Received.class);
+                    awaitCondition(() -> second.text().contains("reply:again"));
+                    awaitCondition(() -> watermark(retentionState) > firstWatermark);
+                    assertThat(second.text()).doesNotContain("ready");
+                } finally {
+                    second.close();
+                }
+                assertThat(result.get(5, TimeUnit.SECONDS)).isZero();
+            }
+            assertThat(host.isAlive()).isTrue();
+            assertThat(Files.readString(retentionState)).contains("acknowledgedEventId");
+        } finally {
+            try {
+                if (Files.exists(sessionDirectory.resolve("metadata"))) {
+                    SessionManifest manifest = new JsonSessionManifestReader().read(sessionDirectory);
+                    client.send(manifest.control(), new ControlCommand.Terminate(3,
+                            SessionCommandSource.MANUAL, Optional.empty(), AgentMessage.TerminationMode.FORCE));
+                }
+            } finally {
+                if (!host.waitFor(5, TimeUnit.SECONDS)) {
+                    host.destroyForcibly();
+                    assertThat(host.waitFor(5, TimeUnit.SECONDS)).isTrue();
+                }
+            }
+        }
+    }
+
+    private static Set<Long> journalSegments(Path directory) {
+        try (Stream<Path> files = Files.list(directory)) {
+            Set<Long> segments = new HashSet<>();
+            for (Path file : files.toList()) {
+                String name = file.getFileName().toString();
+                if (name.matches("[0-9]+\\.cbor(\\.zst)?")) {
+                    segments.add(Long.parseLong(name.substring(0, name.indexOf('.'))));
+                }
+            }
+            return segments;
+        } catch (IOException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static long watermark(Path state) {
+        if (!Files.exists(state)) {
+            return 0;
+        }
+        try (JsonParser parser = new JsonFactory()
+                .createParser(Files.readAllBytes(state))) {
+            while (parser.nextToken() != null) {
+                if (parser.currentToken() == JsonToken.FIELD_NAME
+                        && "acknowledgedEventId".equals(parser.currentName())) {
+                    parser.nextToken();
+                    return parser.getLongValue();
+                }
+            }
+            throw new AssertionError("missing host retention watermark");
+        } catch (IOException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
+    private static void awaitCondition(java.util.function.BooleanSupplier ready) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!ready.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(ready.getAsBoolean()).isTrue();
     }
 
     private static LocalTerminalAttacher attacher(
@@ -203,6 +366,7 @@ class LocalSessionLaunchLivePeerTest {
         private final InputStep[] steps;
         private final NotifyingOutput output = new NotifyingOutput();
         private final AtomicBoolean closed = new AtomicBoolean();
+        private OutputStream outputOverride;
         private int step;
 
         private ScriptedTerminal(TerminalSize size, InputStep... steps) {
@@ -256,7 +420,7 @@ class LocalSessionLaunchLivePeerTest {
 
         @Override
         public OutputStream output() {
-            return output;
+            return outputOverride == null ? output : outputOverride;
         }
 
         @Override

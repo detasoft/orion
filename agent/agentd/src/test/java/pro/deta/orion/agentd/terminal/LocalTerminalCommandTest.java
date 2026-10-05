@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,7 +21,8 @@ class LocalTerminalCommandTest {
         AtomicReference<Path> attached = new AtomicReference<>();
         Path requested = temporaryDirectory.resolve("sessions/../session-one");
 
-        int result = new LocalTerminalCommand((directory, errors) -> {
+        int result = new LocalTerminalCommand((directory, acknowledgeJournal, errors) -> {
+            assertThat(acknowledgeJournal).isFalse();
             attached.set(directory);
             return 7;
         }).execute(
@@ -30,6 +32,17 @@ class LocalTerminalCommandTest {
 
         assertThat(result).isEqualTo(7);
         assertThat(attached.get()).isEqualTo(requested.toAbsolutePath().normalize());
+    }
+
+    @Test
+    void acceptsExplicitJournalAcknowledgementForAttach() {
+        AtomicReference<Path> attached = new AtomicReference<>();
+
+        int result = runAttach(new String[]{"attach", "--ack-journal", "--session-dir",
+                temporaryDirectory.toString()}, new ByteArrayOutputStream(), attached);
+
+        assertThat(result).isZero();
+        assertThat(attached.get()).isEqualTo(temporaryDirectory.toAbsolutePath().normalize());
     }
 
     @Test
@@ -45,6 +58,10 @@ class LocalTerminalCommandTest {
         int unknown = runAttach(new String[]{"attach", "--state-dir", temporaryDirectory.toString()},
                 errors, attached);
 
+        int duplicateAck = runAttach(new String[]{"attach", "--session-dir", temporaryDirectory.toString(),
+                "--ack-journal", "--ack-journal"}, errors, attached);
+
+        assertThat(duplicateAck).isEqualTo(2);
         assertThat(missing).isEqualTo(2);
         assertThat(duplicate).isEqualTo(2);
         assertThat(unknown).isEqualTo(2);
@@ -57,7 +74,9 @@ class LocalTerminalCommandTest {
             ByteArrayOutputStream errors,
             AtomicReference<Path> attached
     ) {
-        return new LocalTerminalCommand((directory, attachErrors) -> {
+        return new LocalTerminalCommand((directory, acknowledgeJournal, attachErrors) -> {
+            assertThat(acknowledgeJournal)
+                    .isEqualTo(Arrays.asList(arguments).contains("--ack-journal"));
             attached.set(directory);
             return 0;
         }).execute(

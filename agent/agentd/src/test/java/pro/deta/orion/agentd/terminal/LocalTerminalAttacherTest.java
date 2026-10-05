@@ -13,10 +13,10 @@ import pro.deta.orion.agentd.session.ControlCommand;
 import pro.deta.orion.agentd.session.ControlEndpoint;
 import pro.deta.orion.agentd.session.ControlResult;
 import pro.deta.orion.agentd.session.HostObservation;
-import pro.deta.orion.agentd.session.SessionManifest;
-import pro.deta.orion.agentd.session.SessionManifestReader;
 import pro.deta.orion.agentd.session.HostProbe;
 import pro.deta.orion.agentd.session.SessionControlClient;
+import pro.deta.orion.agentd.session.SessionManifest;
+import pro.deta.orion.agentd.session.SessionManifestReader;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -29,13 +29,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiFunction;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -60,7 +61,7 @@ class LocalTerminalAttacherTest {
                     throw new AssertionError("exited replay must not send control");
                 });
 
-        int result = attacher.attach(sessionDirectory, new PrintStream(new ByteArrayOutputStream()));
+        int result = attacher.attach(sessionDirectory, false, new PrintStream(new ByteArrayOutputStream()));
 
         assertThat(result).isEqualTo(7);
         assertThat(terminal.output.toString()).isEqualTo("retained");
@@ -85,7 +86,7 @@ class LocalTerminalAttacherTest {
             return new ControlResult.Received(command.operationSequence().orElseThrow());
         });
 
-        int result = attacher.attach(sessionDirectory, new PrintStream(new ByteArrayOutputStream()));
+        int result = attacher.attach(sessionDirectory, false, new PrintStream(new ByteArrayOutputStream()));
 
         assertThat(result).isZero();
         assertThat(terminal.output.toString()).isEqualTo("ready");
@@ -125,7 +126,8 @@ class LocalTerminalAttacherTest {
             return new ControlResult.Received(command.operationSequence().orElseThrow());
         });
 
-        assertThat(attacher.attach(sessionDirectory, new PrintStream(new ByteArrayOutputStream()))).isZero();
+        assertThat(attacher.attach(sessionDirectory, false,
+                new PrintStream(new ByteArrayOutputStream()))).isZero();
 
         assertThat(chunks).hasSize(3);
         ByteArrayOutputStream delivered = new ByteArrayOutputStream();
@@ -148,7 +150,7 @@ class LocalTerminalAttacherTest {
                     command.operationSequence(), ControlResult.FailureKind.AMBIGUOUS_DELIVERY, "lost response");
         });
 
-        int result = attacher.attach(sessionDirectory, new PrintStream(errors));
+        int result = attacher.attach(sessionDirectory, false, new PrintStream(errors));
 
         assertThat(result).isEqualTo(1);
         assertThat(commands).hasSize(1);
@@ -171,7 +173,7 @@ class LocalTerminalAttacherTest {
                 },
                 (endpoint, command) -> new ControlResult.Received(command.operationSequence().orElseThrow()));
 
-        assertThat(manifestFailure.attach(sessionDirectory, new PrintStream(errors))).isEqualTo(1);
+        assertThat(manifestFailure.attach(sessionDirectory, false, new PrintStream(errors))).isEqualTo(1);
         assertBoundedUtf8(errors.toString());
         assertThat(errors.toString()).startsWith("terminal attach failed: failure-");
 
@@ -187,7 +189,7 @@ class LocalTerminalAttacherTest {
                         ControlResult.FailureKind.AMBIGUOUS_DELIVERY,
                         oversized));
 
-        assertThat(controlFailure.attach(sessionDirectory, new PrintStream(errors))).isEqualTo(1);
+        assertThat(controlFailure.attach(sessionDirectory, false, new PrintStream(errors))).isEqualTo(1);
         assertBoundedUtf8(errors.toString());
         assertThat(errors.toString()).startsWith("terminal control failed: ambiguous delivery: failure-");
         assertThat(errors.toString()).doesNotContain(secretInput);
@@ -214,7 +216,7 @@ class LocalTerminalAttacherTest {
                     throw new AssertionError("exited replay must not send control");
                 });
 
-        int result = attacher.attach(sessionDirectory, new PrintStream(new ByteArrayOutputStream()));
+        int result = attacher.attach(sessionDirectory, false, new PrintStream(new ByteArrayOutputStream()));
 
         assertThat(result).isEqualTo(7);
         assertThat(probed).isTrue();
@@ -236,7 +238,7 @@ class LocalTerminalAttacherTest {
                 },
                 (endpoint, command) -> new ControlResult.Received(command.operationSequence().orElseThrow()));
 
-        assertThat(corrupt.attach(sessionDirectory, new PrintStream(errors))).isEqualTo(1);
+        assertThat(corrupt.attach(sessionDirectory, false, new PrintStream(errors))).isEqualTo(1);
         assertThat(errors.toString()).contains("journal");
         assertThat(acquired).isFalse();
 
@@ -250,9 +252,129 @@ class LocalTerminalAttacherTest {
                 },
                 (endpoint, command) -> new ControlResult.Received(command.operationSequence().orElseThrow()));
         errors.reset();
-        assertThat(unreachable.attach(sessionDirectory, new PrintStream(errors))).isEqualTo(1);
+        assertThat(unreachable.attach(sessionDirectory, false, new PrintStream(errors))).isEqualTo(1);
         assertThat(errors.toString()).contains("unreachable");
         assertThat(acquired).isFalse();
+    }
+
+    @Test
+    void repeatsAnAmbiguousAcknowledgementAndKeepsInvocationWatermarksMonotonic() throws Exception {
+        writeJournal(output(Long.MAX_VALUE, "ready"));
+        RecordingTerminal terminal = new RecordingTerminal(new byte[0], new TerminalSize(80, 24));
+        terminal.keepInputOpen = true;
+        List<Long> acknowledged = new ArrayList<>();
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+        LocalTerminalAttacher attacher = attacher(terminal, (endpoint, command) -> {
+            long id = ((ControlCommand.AckJournal) command).acknowledgedEventId();
+            acknowledged.add(id);
+            if (acknowledged.size() == 1) {
+                return new ControlResult.Failed(OptionalLong.empty(),
+                        ControlResult.FailureKind.AMBIGUOUS_DELIVERY, "lost response");
+            }
+            if (acknowledged.size() == 2) {
+                try {
+                    Files.write(sessionDirectory.resolve("00000001.cbor"), exit(Long.MIN_VALUE, 0),
+                            java.nio.file.StandardOpenOption.APPEND);
+                } catch (Exception failure) {
+                    throw new AssertionError(failure);
+                }
+            }
+            return new ControlResult.JournalAcknowledged(id);
+        });
+
+        assertThat(attacher.attach(sessionDirectory, true, new PrintStream(errors))).isZero();
+
+        assertThat(acknowledged).containsExactly(Long.MAX_VALUE, Long.MAX_VALUE, Long.MIN_VALUE);
+        assertThat(closedConnections).hasValue(4);
+        assertThat(errors.toString()).contains("Warning:", "no server durability", "unconfirmed");
+        assertThat(errors.toString().lines().count()).isEqualTo(2);
+        assertThat(terminal.output.toString()).isEqualTo("ready");
+    }
+
+    @Test
+    void rejectionDisablesOnlyAcknowledgementWhileOutputAndManualInputContinue() throws Exception {
+        writeJournal(output(1, "ready"));
+        RecordingTerminal terminal = new RecordingTerminal(new byte[]{'x'}, new TerminalSize(80, 24));
+        terminal.keepInputOpen = true;
+        terminal.inputGate = new CountDownLatch(1);
+        List<Long> acknowledged = new ArrayList<>();
+        CountDownLatch inputSent = new CountDownLatch(1);
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+        LocalTerminalAttacher attacher = attacher(terminal, (endpoint, command) -> {
+            if (command instanceof ControlCommand.AckJournal ack) {
+                acknowledged.add(ack.acknowledgedEventId());
+                terminal.inputGate.countDown();
+                try {
+                    assertThat(inputSent.await(5, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException failure) {
+                    throw new AssertionError(failure);
+                }
+                return new ControlResult.Rejected(OptionalLong.empty(), 1, "denied-🚀".repeat(200));
+            }
+            assertThat(command).isInstanceOf(ControlCommand.Input.class);
+            try {
+                Files.write(sessionDirectory.resolve("00000001.cbor"), output(2, "after-rejection"),
+                        java.nio.file.StandardOpenOption.APPEND);
+                Files.write(sessionDirectory.resolve("00000001.cbor"), exit(3, 0),
+                        java.nio.file.StandardOpenOption.APPEND);
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
+            inputSent.countDown();
+            return new ControlResult.Received(command.operationSequence().orElseThrow());
+        });
+
+        assertThat(attacher.attach(sessionDirectory, true, new PrintStream(errors))).isZero();
+
+        assertThat(acknowledged).containsExactly(1L);
+        assertThat(closedConnections).hasValue(2);
+        assertThat(terminal.output.toString()).isEqualTo("readyafter-rejection");
+        assertThat(errors.toString().lines().toList()).hasSize(2);
+        assertBoundedUtf8(errors.toString().lines().toList().get(1));
+        assertThat(errors.toString()).contains("acknowledgement disabled: rejected");
+    }
+
+    @Test
+    void acceptsAnExistingHigherHostWatermarkAndRestartsWithoutALocalCursor() throws Exception {
+        ByteArrayOutputStream records = new ByteArrayOutputStream();
+        records.write(output(1, "retained"));
+        for (int id = 2; id <= 256; id++) {
+            records.write(codec().encodeOpaque(new EventId(id), 0x7fff,
+                    ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}), List.of()));
+        }
+        records.write(exit(257, 0));
+        writeJournal(records.toByteArray());
+        List<Long> acknowledged = new ArrayList<>();
+        for (int invocation = 0; invocation < 2; invocation++) {
+            RecordingTerminal terminal = new RecordingTerminal(new byte[0], new TerminalSize(80, 24));
+            terminal.keepInputOpen = true;
+            LocalTerminalAttacher attacher = attacher(terminal, (endpoint, command) -> {
+                acknowledged.add(((ControlCommand.AckJournal) command).acknowledgedEventId());
+                return new ControlResult.JournalAcknowledged(1000);
+            });
+            ByteArrayOutputStream errors = new ByteArrayOutputStream();
+            assertThat(attacher.attach(sessionDirectory, true, new PrintStream(errors))).isZero();
+            assertThat(terminal.output.toString()).isEqualTo("retained");
+            assertThat(errors.toString().lines().count()).isEqualTo(1);
+        }
+        assertThat(acknowledged).containsExactly(256L, 256L);
+        try (Stream<Path> files = Files.list(sessionDirectory)) {
+            assertThat(files.toList()).containsExactly(sessionDirectory.resolve("00000001.cbor"));
+        }
+    }
+
+    @Test
+    void invalidNativeAcknowledgementIdDoesNotFailTerminalReplay() throws Exception {
+        writeJournal(output(1, "retained"), exit(-1, 0));
+        RecordingTerminal terminal = new RecordingTerminal(new byte[0], new TerminalSize(80, 24));
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+        LocalTerminalAttacher attacher = attacher(terminal, (endpoint, command) -> {
+            throw new AssertionError("invalid ACK must not be sent");
+        });
+
+        assertThat(attacher.attach(sessionDirectory, true, new PrintStream(errors))).isZero();
+        assertThat(terminal.output.toString()).isEqualTo("retained");
+        assertThat(errors.toString()).contains("journal acknowledgement disabled");
     }
 
     private LocalTerminalAttacher attacher(
@@ -332,6 +454,8 @@ class LocalTerminalAttacherTest {
         private Optional<TerminalSize> resize = Optional.empty();
         private CountDownLatch inputGate;
         private boolean closed;
+        private boolean keepInputOpen;
+        private final CountDownLatch closedSignal = new CountDownLatch(1);
 
         private RecordingTerminal(byte[] input, TerminalSize size) {
             ByteArrayInputStream bytes = new ByteArrayInputStream(input);
@@ -339,13 +463,26 @@ class LocalTerminalAttacherTest {
                 @Override
                 public int read() throws IOException {
                     awaitResizeIfNeeded();
+                    awaitCloseAtEnd();
                     return bytes.read();
                 }
 
                 @Override
                 public int read(byte[] buffer, int offset, int length) throws IOException {
                     awaitResizeIfNeeded();
+                    awaitCloseAtEnd();
                     return bytes.read(buffer, offset, length);
+                }
+
+                private void awaitCloseAtEnd() throws IOException {
+                    if (keepInputOpen && bytes.available() == 0) {
+                        try {
+                            closedSignal.await();
+                        } catch (InterruptedException failure) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("input interrupted", failure);
+                        }
+                    }
                 }
 
                 private void awaitResizeIfNeeded() throws IOException {
@@ -391,6 +528,7 @@ class LocalTerminalAttacherTest {
         @Override
         public void close() {
             closed = true;
+            closedSignal.countDown();
         }
     }
 }
