@@ -1,7 +1,7 @@
 package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 import java.nio.file.Path;
@@ -17,8 +17,8 @@ public class ConfigurationRuntimeTest {
     }
 
     private static void assertShippedConfiguration(String resource) {
-        LocationConfigurationProvider fcp = new LocationConfigurationProvider();
-        BootstrapConfiguration oc = fcp.configurationLookup("classpath://" + resource);
+        BootstrapConfigurationReader reader = new BootstrapConfigurationReader("classpath://" + resource);
+        BootstrapConfiguration oc = reader.readConfiguration();
 
         assertEquals("orion_root", oc.getBootstrap().getBaseDir());
         assertEquals(Path.of("orion_root", "logs").toAbsolutePath().normalize(),

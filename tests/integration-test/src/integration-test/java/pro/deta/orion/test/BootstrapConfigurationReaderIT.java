@@ -2,7 +2,7 @@ package pro.deta.orion.test;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 
@@ -14,7 +14,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LocationConfigurationProviderIT {
+class BootstrapConfigurationReaderIT {
     private static final String CONFIG_FILE = "config/orion.yml";
 
     @TempDir
@@ -32,7 +32,7 @@ class LocationConfigurationProviderIT {
                     "s3-it.xml",
                     43080));
 
-            BootstrapConfiguration configuration = new LocationConfigurationProvider(
+            BootstrapConfiguration configuration = new BootstrapConfigurationReader(
                     "s3://" + s3.bucketName() + "/" + CONFIG_FILE
                             + "?endpoint=" + value(s3.endpoint())
                             + "&region=us-east-1"

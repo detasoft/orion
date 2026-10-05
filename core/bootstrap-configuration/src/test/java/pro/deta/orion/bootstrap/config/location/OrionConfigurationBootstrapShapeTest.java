@@ -33,8 +33,8 @@ class OrionConfigurationBootstrapShapeTest {
                     password: env:TEST_MATERIAL_PASSWORD
                 """);
 
-        BootstrapConfiguration configuration = new LocationConfigurationProvider()
-                .configurationLookup(configFile.toString());
+        BootstrapConfiguration configuration = new BootstrapConfigurationReader(configFile.toString())
+                .readConfiguration();
 
         assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
         assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
@@ -97,8 +97,8 @@ class OrionConfigurationBootstrapShapeTest {
                     port: 8000
                 """);
 
-        BootstrapConfiguration configuration = new LocationConfigurationProvider()
-                .configurationLookup(configFile.toString());
+        BootstrapConfiguration configuration = new BootstrapConfigurationReader(configFile.toString())
+                .readConfiguration();
 
         assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
         assertEquals("work", configuration.getBootstrap().getWorkDir());
@@ -175,8 +175,8 @@ class OrionConfigurationBootstrapShapeTest {
                       certificatePath: certs/nginx.pem
                 """);
 
-        assertThrows(RuntimeException.class, () -> new LocationConfigurationProvider()
-                .configurationLookup(configFile.toString()));
+        assertThrows(RuntimeException.class, () -> new BootstrapConfigurationReader(configFile.toString())
+                .readConfiguration());
     }
 
     @Test
@@ -192,8 +192,8 @@ class OrionConfigurationBootstrapShapeTest {
                   defaultAddress: localhost
                 """);
 
-        assertThrows(RuntimeException.class, () -> new LocationConfigurationProvider()
-                .configurationLookup(configFile.toString()));
+        assertThrows(RuntimeException.class, () -> new BootstrapConfigurationReader(configFile.toString())
+                .readConfiguration());
     }
 
     @Test
@@ -204,7 +204,7 @@ class OrionConfigurationBootstrapShapeTest {
                   baseDir: /tmp/explicit-orion
                 """);
 
-        BootstrapConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
+        BootstrapConfiguration configuration = new BootstrapConfigurationReader(configFile.toString())
                 .readConfiguration();
 
         assertEquals("/tmp/explicit-orion", configuration.getBootstrap().getBaseDir());
@@ -216,7 +216,7 @@ class OrionConfigurationBootstrapShapeTest {
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> new LocationConfigurationProvider(configFile.toString()).readConfiguration());
+                () -> new BootstrapConfigurationReader(configFile.toString()).readConfiguration());
 
         assertEquals("Configuration location not found or unsupported: " + configFile, error.getMessage());
     }

@@ -4,7 +4,7 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 
 import org.eclipse.jgit.api.Git;
 import com.sun.net.httpserver.HttpServer;
-import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 
 import java.net.InetSocketAddress;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -528,7 +528,7 @@ class BootstrapContextTest {
                     accessKeyId: test
                     secretAccessKey: env:S3_SECRET
                 """);
-        BootstrapConfiguration configuration = new LocationConfigurationProvider(yaml.toString()).readConfiguration();
+        BootstrapConfiguration configuration = new BootstrapConfigurationReader(yaml.toString()).readConfiguration();
         assertThat(configuration.getStorage().getEndpoint()).isEqualTo("file:/tmp/not-an-s3-endpoint");
         assertThatThrownBy(() -> {
             try (S3Transport transport = new S3Transport();
@@ -565,7 +565,7 @@ class BootstrapContextTest {
                         accessKeyId: test
                         secretAccessKey: env:S3_SECRET
                     """.formatted(url));
-            BootstrapConfiguration configuration = new LocationConfigurationProvider(yaml.toString())
+            BootstrapConfiguration configuration = new BootstrapConfigurationReader(yaml.toString())
                     .readConfiguration();
             assertThat(configuration.getStorage().getEndpoint()).isEqualTo(url);
             try (S3Transport transport = new S3Transport();
@@ -579,7 +579,7 @@ class BootstrapContextTest {
                 assertThat(requests.get()).isEqualTo(2);
             }
             Files.writeString(yaml, Files.readString(yaml).replace("  endpoint: " + url + "\n", ""));
-            configuration = new LocationConfigurationProvider(yaml.toString()).readConfiguration();
+            configuration = new BootstrapConfigurationReader(yaml.toString()).readConfiguration();
             try (S3Transport transport = new S3Transport();
                  pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend ignored =
                          BootstrapContext.createRepositoryBackend(

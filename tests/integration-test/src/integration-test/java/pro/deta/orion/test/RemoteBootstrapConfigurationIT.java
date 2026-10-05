@@ -7,7 +7,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.OrionKeyMaterialFactory;
-import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -77,7 +77,7 @@ class RemoteBootstrapConfigurationIT {
 
             Path processYaml = tempDir.resolve("process.yml");
             writeProcessYaml(processYaml, target);
-            BootstrapConfiguration configuration = new LocationConfigurationProvider(processYaml.toUri().toString())
+            BootstrapConfiguration configuration = new BootstrapConfigurationReader(processYaml.toUri().toString())
                     .readConfiguration();
             assertThat(configuration.getBootstrap().getBaseDir()).isEqualTo(target.getBootstrap().getBaseDir());
             assertThat(configuration.getTransport()).usingRecursiveComparison().isEqualTo(target.getTransport());

@@ -34,7 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-public class LocationConfigurationProvider {
+public class BootstrapConfigurationReader {
     private static final String[] DEFAULT_CONFIGURATION_LOCATIONS = new String[] { // order by priority
             "config.toml",
             "config.yml",
@@ -48,19 +48,19 @@ public class LocationConfigurationProvider {
     private final boolean explicitConfigurationLocation;
     private final List<ConfigurationLocationReader> readers;
 
-    public LocationConfigurationProvider() {
+    public BootstrapConfigurationReader() {
         this(DEFAULT_CONFIGURATION_LOCATIONS, false);
     }
 
-    public LocationConfigurationProvider(String configurationLocation) {
+    public BootstrapConfigurationReader(String configurationLocation) {
         this(new String[]{requiredLocation(configurationLocation)}, true);
     }
 
-    LocationConfigurationProvider(String[] configurationLocations, boolean explicitConfigurationLocation) {
+    BootstrapConfigurationReader(String[] configurationLocations, boolean explicitConfigurationLocation) {
         this(configurationLocations, explicitConfigurationLocation, defaultReaders());
     }
 
-    LocationConfigurationProvider(
+    BootstrapConfigurationReader(
             String[] configurationLocations,
             boolean explicitConfigurationLocation,
             List<ConfigurationLocationReader> readers) {
@@ -87,7 +87,7 @@ public class LocationConfigurationProvider {
         return parseYaml(localResourceConfig("config.yml"));
     }
 
-    public BootstrapConfiguration configurationLookup(String location) {
+    private BootstrapConfiguration configurationLookup(String location) {
         if (location == null) {
             return null;
         }
@@ -105,7 +105,7 @@ public class LocationConfigurationProvider {
         return null;
     }
 
-    public InputStream localResourceConfig(String name) {
+    private InputStream localResourceConfig(String name) {
         return Thread.currentThread().getContextClassLoader().getResourceAsStream(name);
     }
 

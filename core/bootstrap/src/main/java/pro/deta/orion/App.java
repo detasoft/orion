@@ -3,7 +3,7 @@ package pro.deta.orion;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
+import pro.deta.orion.bootstrap.config.location.BootstrapConfigurationReader;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -68,9 +68,9 @@ public class App {
     }
 
     private static int runApplication(AppOptions options) {
-        LocationConfigurationProvider reader = options.configurationLocation() == null
-                ? new LocationConfigurationProvider()
-                : new LocationConfigurationProvider(options.configurationLocation());
+        BootstrapConfigurationReader reader = options.configurationLocation() == null
+                ? new BootstrapConfigurationReader()
+                : new BootstrapConfigurationReader(options.configurationLocation());
         try {
             BootstrapConfiguration configuration = reader.readConfiguration();
             OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
