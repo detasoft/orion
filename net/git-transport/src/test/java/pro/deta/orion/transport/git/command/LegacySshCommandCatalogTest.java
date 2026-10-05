@@ -49,7 +49,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -75,7 +74,6 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 
 class LegacySshCommandCatalogTest {
     @TempDir
@@ -360,7 +358,7 @@ class LegacySshCommandCatalogTest {
     }
 
     private static Grant grant(GrantKey key) {
-        return grant(key, TRUE_STRING);
+        return grant(key, "true");
     }
 
     private static Grant grant(GrantKey key, String value) {

@@ -1583,12 +1583,12 @@ class GitSshTransportEndToEndIT {
     private static Grant repositoryGrant(String repositoryName, boolean write) {
         List<GrantExpression> info = new ArrayList<>();
         info.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
-        info.add(new GrantExpression(GrantKey.READ, AccessControl.TRUE_STRING));
+        info.add(new GrantExpression(GrantKey.READ, "true"));
         if (write) {
             info.add(new GrantExpression(
-                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, "true"));
             info.add(new GrantExpression(
-                    GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, "true"));
         }
         info.add(new GrantExpression(GrantKey.BRANCH, "*"));
         return new Grant("REPOSITORY_" + repositoryName, info);

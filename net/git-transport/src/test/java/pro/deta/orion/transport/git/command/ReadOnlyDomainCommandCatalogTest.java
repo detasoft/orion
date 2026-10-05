@@ -48,7 +48,6 @@ import java.util.Optional;
 import java.util.OptionalInt;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 
 class ReadOnlyDomainCommandCatalogTest {
     private final FixtureSource source = new FixtureSource();
@@ -447,7 +446,7 @@ class ReadOnlyDomainCommandCatalogTest {
     }
 
     private static UserIdentity admin() {
-        return user("admin", grant(GrantKey.ADMIN, TRUE_STRING));
+        return user("admin", grant(GrantKey.ADMIN, "true"));
     }
 
     private static Grant repositoryGrant(String repository) {

@@ -1,7 +1,6 @@
 package pro.deta.orion.transport.git.auth;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -143,7 +142,7 @@ class AuthenticatedRepositoryAccessHookTest {
     void updateCannotBorrowBranchFromReadOnlyGrant() {
         Grant readWrite = new Grant("writer", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, "project"),
-                new GrantExpression(GrantKey.READ_WRITE, AccessControl.TRUE_STRING),
+                new GrantExpression(GrantKey.READ_WRITE, "true"),
                 new GrantExpression(GrantKey.BRANCH, "dev")));
         Grant read = new Grant("reader", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, "project"),
@@ -234,11 +233,11 @@ class AuthenticatedRepositoryAccessHookTest {
         expressions.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
         if (write) {
             expressions.add(new GrantExpression(
-                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, "true"));
         }
         if (create) {
             expressions.add(new GrantExpression(
-                    GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, "true"));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
@@ -254,10 +253,10 @@ class AuthenticatedRepositoryAccessHookTest {
         expressions.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
         expressions.add(new GrantExpression(GrantKey.BRANCH, branchName));
         expressions.add(new GrantExpression(
-                GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                GrantKey.READ_WRITE, "true"));
         if (force) {
             expressions.add(new GrantExpression(
-                    GrantKey.FORCE, AccessControl.TRUE_STRING));
+                    GrantKey.FORCE, "true"));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(

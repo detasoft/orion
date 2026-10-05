@@ -13,7 +13,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -261,7 +260,7 @@ class OrionAuthorizationFilterTest {
             if (adminGrant) {
                 grants.add(new Grant("admin", List.of(
                         new GrantExpression(
-                                GrantKey.ADMIN, AccessControl.TRUE_STRING))));
+                                GrantKey.ADMIN, "true"))));
             }
             return TokenAuthenticationResult.success(
                     new InternalUserImpl("token-user", grants),

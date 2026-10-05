@@ -6,7 +6,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -278,7 +277,7 @@ class AgentSessionAcceptanceIT {
                     if ("Bearer acceptance-admin".equals(request.getHeader("Authorization"))) {
                         Grant grant = new Grant("admin", List.of(
                                 new GrantExpression(
-                                        GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                                        GrantKey.ADMIN, "true")));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()
                                         .withUserIdentity(new InternalUserImpl("admin", List.of(grant))));

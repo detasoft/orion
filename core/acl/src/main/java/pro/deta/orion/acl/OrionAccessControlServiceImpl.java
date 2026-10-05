@@ -1393,19 +1393,19 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     GrantKey.BRANCH, repositoryGrant.branch()));
             if (repositoryGrant.read()) {
                 expressions.add(new GrantExpression(
-                        GrantKey.READ, AccessControl.TRUE_STRING));
+                        GrantKey.READ, "true"));
             }
             if (repositoryGrant.readWrite()) {
                 expressions.add(new GrantExpression(
-                        GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                        GrantKey.READ_WRITE, "true"));
             }
             if (repositoryGrant.create()) {
                 expressions.add(new GrantExpression(
-                        GrantKey.CREATE, AccessControl.TRUE_STRING));
+                        GrantKey.CREATE, "true"));
             }
             if (repositoryGrant.force()) {
                 expressions.add(new GrantExpression(
-                        GrantKey.FORCE, AccessControl.TRUE_STRING));
+                        GrantKey.FORCE, "true"));
             }
             return new Grant(
                     repositoryGrantId(userId, repositoryGrant.repository()), expressions);

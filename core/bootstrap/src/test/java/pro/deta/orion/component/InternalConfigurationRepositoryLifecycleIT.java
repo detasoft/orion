@@ -283,7 +283,7 @@ class InternalConfigurationRepositoryLifecycleIT {
             List<Grant> grants = new ArrayList<>(root.grants());
             grants.add(new Grant("ROOT_DIRECT", List.of(
                     new GrantExpression(
-                            GrantKey.ADMIN, AccessControl.TRUE_STRING))));
+                            GrantKey.ADMIN, "true"))));
             User updatedRoot = new User(root.id(), "Recovery", "Administrator",
                     "recovery-root@example.test", credentials, root.roles(), grants);
             List<User> users = new ArrayList<>(acl.users());

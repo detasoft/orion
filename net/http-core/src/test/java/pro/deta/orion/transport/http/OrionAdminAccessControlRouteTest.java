@@ -57,7 +57,7 @@ class OrionAdminAccessControlRouteTest {
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });
         Grant grant = new Grant("admin", List.of(
-                new GrantExpression(GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                new GrantExpression(GrantKey.ADMIN, "true")));
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(

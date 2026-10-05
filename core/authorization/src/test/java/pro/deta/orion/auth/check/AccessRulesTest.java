@@ -33,7 +33,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 
@@ -190,7 +189,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("repository create");
 
         Grant createGrant = repositoryGrantDraft("project")
-                .addKey(GrantKey.CREATE, TRUE_STRING)
+                .addKey(GrantKey.CREATE, "true")
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
@@ -204,7 +203,7 @@ public class AccessRulesTest {
     @Test
     public void createAccessAllowsRepositoryPatternGrant() {
         Grant createGrant = repositoryGrantDraft("team/*")
-                .addKey(GrantKey.CREATE, TRUE_STRING)
+                .addKey(GrantKey.CREATE, "true")
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
@@ -223,7 +222,7 @@ public class AccessRulesTest {
 
         Grant writeGrant = grantDraft("write")
                 .addKey(GrantKey.REPOSITORY, "project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
 
@@ -237,7 +236,7 @@ public class AccessRulesTest {
     public void forceAccessRequiresRepositoryForceGrant() {
         Grant writeGrant = grantDraft("write")
                 .addKey(GrantKey.REPOSITORY, "project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
         assertThatThrownBy(() -> requireRepositoryForce(writer, "project"))
@@ -245,8 +244,8 @@ public class AccessRulesTest {
 
         Grant forceGrant = grantDraft("force")
                 .addKey(GrantKey.REPOSITORY, "project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(GrantKey.FORCE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
+                .addKey(GrantKey.FORCE, "true")
                 .toAccessControl();
         SecurityContext forceWriter = securityContext(new InternalUserImpl("force-writer", List.of(forceGrant)));
 
@@ -264,7 +263,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("application shutdown");
 
         Grant shutdownGrant = grantDraft("shutdown")
-                .addKey(GrantKey.SHUTDOWN, TRUE_STRING)
+                .addKey(GrantKey.SHUTDOWN, "true")
                 .toAccessControl();
         SecurityContext operator = securityContext(new InternalUserImpl("operator", List.of(shutdownGrant)));
 
@@ -280,7 +279,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("application admin");
 
         Grant adminGrant = grantDraft("admin")
-                .addKey(GrantKey.ADMIN, TRUE_STRING)
+                .addKey(GrantKey.ADMIN, "true")
                 .toAccessControl();
         SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
 
@@ -418,7 +417,7 @@ public class AccessRulesTest {
     @Test
     void branchPushAllowsGrantedBranchAndDeniesOtherBranches() {
         Grant grant = repositoryGrantDraft("project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .addKey(GrantKey.BRANCH, "master")
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(grant)));
@@ -432,7 +431,7 @@ public class AccessRulesTest {
     @Test
     void readOnlyBranchGrantDoesNotExpandPushBranches() {
         Grant write = repositoryGrantDraft("project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
@@ -447,7 +446,7 @@ public class AccessRulesTest {
     @Test
     void readOnlyWildcardDoesNotExpandPushBranches() {
         Grant write = repositoryGrantDraft("team/**")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
@@ -462,7 +461,7 @@ public class AccessRulesTest {
     @Test
     void readOnlyBranchRestrictionDoesNotNarrowUnrestrictedWriteGrant() {
         Grant write = repositoryGrantDraft("project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
                 "developer", List.of(write, repositoryGrant("project", "main"))));
@@ -473,10 +472,10 @@ public class AccessRulesTest {
     @Test
     void writeBranchRestrictionsRetainTheirExistingCombinationPolicy() {
         Grant unrestricted = repositoryGrantDraft("project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .toAccessControl();
         Grant restricted = repositoryGrantDraft("project")
-                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, "true")
                 .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(

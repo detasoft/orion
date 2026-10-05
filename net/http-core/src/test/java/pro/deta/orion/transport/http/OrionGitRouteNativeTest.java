@@ -20,7 +20,6 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -471,7 +470,7 @@ class OrionGitRouteNativeTest {
         assertThat(provider.exists(REPOSITORY_NAME)).isFalse();
         Grant grant = new Grant("create", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, REPOSITORY_NAME),
-                new GrantExpression(GrantKey.CREATE, AccessControl.TRUE_STRING)));
+                new GrantExpression(GrantKey.CREATE, "true")));
         SecurityContext creator = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("creator", List.of(grant)));
         ResponseRecorder allowed = new ResponseRecorder();
@@ -684,7 +683,7 @@ class OrionGitRouteNativeTest {
         Grant grant = new Grant("repository", List.of(
                 new GrantExpression(GrantKey.REPOSITORY, REPOSITORY_NAME),
                 new GrantExpression(
-                        GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
+                        GrantKey.READ_WRITE, "true")));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",

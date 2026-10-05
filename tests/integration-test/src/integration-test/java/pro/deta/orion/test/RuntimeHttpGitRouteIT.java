@@ -494,19 +494,19 @@ class RuntimeHttpGitRouteIT {
         expressions.add(new GrantExpression(GrantKey.BRANCH, branch));
         if (read) {
             expressions.add(new GrantExpression(
-                    GrantKey.READ, AccessControl.TRUE_STRING));
+                    GrantKey.READ, "true"));
         }
         if (write) {
             expressions.add(new GrantExpression(
-                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, "true"));
         }
         if (create) {
             expressions.add(new GrantExpression(
-                    GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, "true"));
         }
         if (force) {
             expressions.add(new GrantExpression(
-                    GrantKey.FORCE, AccessControl.TRUE_STRING));
+                    GrantKey.FORCE, "true"));
         }
         Grant grant = new Grant("REPOSITORY_" + repositoryName, expressions);
         User user = new User(USERNAME, null, null, USERNAME + "@example.test",

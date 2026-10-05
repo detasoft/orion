@@ -24,7 +24,6 @@ import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.AgentSessionServer;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
@@ -364,7 +363,7 @@ class OrionHttpUnifiedRouteTest {
 
     private static SecurityContext adminContext() {
         Grant grant = new Grant("admin", List.of(
-                new GrantExpression(GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                new GrantExpression(GrantKey.ADMIN, "true")));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
     }

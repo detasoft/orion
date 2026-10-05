@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public record AccessControl(List<User> users, List<Role> roles, List<Grant> grants) {
-    public static final String TRUE_STRING = "true";
-
     public AccessControl {
         users = immutableElements(users);
         roles = immutableElements(roles);
