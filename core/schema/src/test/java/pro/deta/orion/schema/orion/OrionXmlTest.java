@@ -5,7 +5,9 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.Credential;
@@ -36,11 +38,11 @@ class OrionXmlTest {
     @Test
     void serializesVersionTwoWithSingularCollectionItemNames() throws Exception {
         Grant grant = new Grant("read", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "example"),
-                new GrantExpression(AccessControl.GrantKey.READ, "true")));
+                new GrantExpression(GrantKey.REPOSITORY, "example"),
+                new GrantExpression(GrantKey.READ, "true")));
         Role role = new Role("reader", List.of(), List.of(grant.id()));
         User user = new User("alice", null, null, "alice@example.test",
-                List.of(new Credential(AccessControl.CredentialType.ARGON2, "password-hash")),
+                List.of(new Credential(CredentialType.ARGON2, "password-hash")),
                 List.of(role.id()), List.of());
         AccessControl accessControl = new AccessControl(List.of(user), List.of(role), List.of(grant));
         String xml = write(OrionDocument.withAccessControl(accessControl));

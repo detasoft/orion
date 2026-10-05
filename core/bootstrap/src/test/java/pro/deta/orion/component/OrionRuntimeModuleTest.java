@@ -35,8 +35,10 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
@@ -136,7 +138,7 @@ class OrionRuntimeModuleTest {
         ScopedGrant grant = new ScopedGrant(
                 new GrantId("admin"),
                 ScopedGrant.Effect.ALLOW,
-                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+                List.of(new GrantExpression(GrantKey.ADMIN, "true")));
         ScopedRole role = new ScopedRole(
                 new RoleId("reviewer"), List.of(),
                 List.of(GrantAddress.parse("acme/admin")));
@@ -235,8 +237,8 @@ class OrionRuntimeModuleTest {
         OrionDocument.Organization organization = base.organizations().getFirst();
         User restricted = new User("reviewer", null, null, null, List.of(), List.of(),
                 List.of(new Grant("admin", List.of(
-                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true"),
-                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
+                        new GrantExpression(GrantKey.ADMIN, "true"),
+                        new GrantExpression(GrantKey.REPOSITORY, "acme/platform/api")))));
         desired.publish(new OrionDocument(base.system(), List.of(new OrionDocument.Organization(
                 organization.id(), "", List.of(restricted), organization.grants(), organization.roles(),
                 organization.teams(), List.of(), List.of(), List.of(), organization.connections()))), Optional.empty());
@@ -250,7 +252,7 @@ class OrionRuntimeModuleTest {
 
     private static OrionDocument decisionAccessDocument(boolean allowed) {
         List<Grant> grants = allowed ? List.of(new Grant("admin",
-                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")))) : List.of();
+                List.of(new GrantExpression(GrantKey.ADMIN, "true")))) : List.of();
         User user = new User("reviewer", null, null, null,
                 List.of(), List.of(), grants);
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("api"), "API",
@@ -368,7 +370,7 @@ class OrionRuntimeModuleTest {
 
     private AccessControl accessControlWithUser(String userId) {
         User user = new User(userId, null, null, userId + "@example.test",
-                List.of(new Credential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH)),
+                List.of(new Credential(CredentialType.ARGON2, TEST_PASSWORD_HASH)),
                 List.of(), List.of());
         return new AccessControl(List.of(user), List.of(), List.of());
     }

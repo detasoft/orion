@@ -2,8 +2,10 @@ package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 
@@ -319,7 +321,7 @@ public final class OrionV2Mapper {
         for (OrionV2.ScopedGrantExpression expression : sortedExpressions) {
             Objects.requireNonNull(expression, "scoped grant expression");
             expressions.add(new GrantExpression(
-                    enumValue(AccessControl.GrantKey.class, expression.getKey()),
+                    enumValue(GrantKey.class, expression.getKey()),
                     expression.getValue()));
         }
         return expressions;
@@ -541,7 +543,7 @@ public final class OrionV2Mapper {
         for (OrionV2.Credential credential : sortedCredentials) {
             Objects.requireNonNull(credential, "ACL credential");
             credentials.add(new Credential(
-                    enumValue(AccessControl.CredentialType.class, credential.getType()),
+                    enumValue(CredentialType.class, credential.getType()),
                     credential.getKeyId(),
                     credential.getValue()));
         }
@@ -583,7 +585,7 @@ public final class OrionV2Mapper {
             for (OrionV2.GrantExpression expression : sortedInfo) {
                 Objects.requireNonNull(expression, "ACL grant expression");
                 expressions.add(new GrantExpression(
-                        enumValue(AccessControl.GrantKey.class, expression.getKey()),
+                        enumValue(GrantKey.class, expression.getKey()),
                         expression.getValue()));
             }
             grants.add(new Grant(grant.getId(), expressions));

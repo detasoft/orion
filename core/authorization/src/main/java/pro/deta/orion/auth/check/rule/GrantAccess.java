@@ -1,8 +1,8 @@
 package pro.deta.orion.auth.check.rule;
 
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.GrantMatcher;
 import pro.deta.orion.auth.check.AccessDecision;
@@ -30,7 +30,7 @@ final class GrantAccess {
     }
 
     static GrantMatcher repositoryGrant(String repositoryName) {
-        return GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, value -> matchExpressionValue(value, repositoryName));
+        return GrantMatcher.of(GrantKey.REPOSITORY, value -> matchExpressionValue(value, repositoryName));
     }
 
     static boolean hasGrant(UserIdentity userIdentity, GrantMatcher... matchers) {
@@ -43,13 +43,13 @@ final class GrantAccess {
         }
         java.util.ArrayList<Grant> grants = new java.util.ArrayList<>();
         for (Grant grant : userIdentity.getGrants()) {
-            if (!hasKey(grant.info(), AccessControl.GrantKey.CONNECTION)) grants.add(grant);
+            if (!hasKey(grant.info(), GrantKey.CONNECTION)) grants.add(grant);
         }
         return filterGrants(grants, matchers);
     }
 
     static AccessDecision scopedRepositoryAccess(UserIdentity identity, RepositoryResource repository,
-            AccessControl.GrantKey action, String branch) {
+            GrantKey action, String branch) {
         RepositoryAddress address;
         try {
             address = RepositoryAddress.parse(repository.repositoryName());
@@ -63,13 +63,13 @@ final class GrantAccess {
         if (organization.isEmpty()) return AccessDecision.deny("organization is unavailable");
         List<ScopedAccess.AssignedGrant> grants = ScopedAccess.assignedGrants(organization.orElseThrow(),
                 new UserId(identity.getUserId()), ConfigurationScope.repository(address),
-                action == AccessControl.GrantKey.CREATE);
+                action == GrantKey.CREATE);
         boolean restricted = false;
         if (branch != null) {
             for (ScopedAccess.AssignedGrant grant : grants) {
                 if (grant.effect() == ScopedGrant.Effect.ALLOW
                         && matchesRepositoryAction(grant.expressions(), repository.repositoryName(), action)
-                        && hasKey(grant.expressions(), AccessControl.GrantKey.BRANCH)) {
+                        && hasKey(grant.expressions(), GrantKey.BRANCH)) {
                     restricted = true;
                 }
             }
@@ -78,7 +78,7 @@ final class GrantAccess {
         for (ScopedAccess.AssignedGrant grant : grants) {
             List<GrantExpression> expressions = grant.expressions();
             if (!matchesRepositoryAction(expressions, repository.repositoryName(), action)) continue;
-            boolean branchRestricted = hasKey(expressions, AccessControl.GrantKey.BRANCH);
+            boolean branchRestricted = hasKey(expressions, GrantKey.BRANCH);
             if (grant.effect() == ScopedGrant.Effect.DENY) {
                 if (!branchRestricted || branch != null && matchesBranch(expressions, branch)) {
                     return AccessDecision.deny("scoped deny grant matched");
@@ -92,29 +92,29 @@ final class GrantAccess {
     }
 
     private static boolean matchesRepositoryAction(List<GrantExpression> expressions,
-            String repositoryName, AccessControl.GrantKey action) {
-        if (hasKey(expressions, AccessControl.GrantKey.CONNECTION)
-                || hasKey(expressions, AccessControl.GrantKey.NETWORK_SOURCE)
-                || hasKey(expressions, AccessControl.GrantKey.NETWORK_PORT)) return false;
-        boolean repositoryRestricted = hasKey(expressions, AccessControl.GrantKey.REPOSITORY);
+            String repositoryName, GrantKey action) {
+        if (hasKey(expressions, GrantKey.CONNECTION)
+                || hasKey(expressions, GrantKey.NETWORK_SOURCE)
+                || hasKey(expressions, GrantKey.NETWORK_PORT)) return false;
+        boolean repositoryRestricted = hasKey(expressions, GrantKey.REPOSITORY);
         if (repositoryRestricted && !repositoryGrant(repositoryName).matchesAny(expressions)) return false;
-        if (action == AccessControl.GrantKey.READ) {
-            if (hasKey(expressions, AccessControl.GrantKey.READ)
-                    || hasKey(expressions, AccessControl.GrantKey.READ_WRITE)) return true;
-            return repositoryRestricted && !hasKey(expressions, AccessControl.GrantKey.CREATE)
-                    && !hasKey(expressions, AccessControl.GrantKey.FORCE)
-                    && !hasKey(expressions, AccessControl.GrantKey.ADMIN)
-                    && !hasKey(expressions, AccessControl.GrantKey.SHUTDOWN);
+        if (action == GrantKey.READ) {
+            if (hasKey(expressions, GrantKey.READ)
+                    || hasKey(expressions, GrantKey.READ_WRITE)) return true;
+            return repositoryRestricted && !hasKey(expressions, GrantKey.CREATE)
+                    && !hasKey(expressions, GrantKey.FORCE)
+                    && !hasKey(expressions, GrantKey.ADMIN)
+                    && !hasKey(expressions, GrantKey.SHUTDOWN);
         }
         return hasKey(expressions, action);
     }
 
     private static boolean matchesBranch(List<GrantExpression> expressions, String branch) {
-        return GrantMatcher.of(AccessControl.GrantKey.BRANCH,
+        return GrantMatcher.of(GrantKey.BRANCH,
                 value -> "*".equals(value) || branch.equals(value)).matchesAny(expressions);
     }
 
-    private static boolean hasKey(List<GrantExpression> expressions, AccessControl.GrantKey key) {
+    private static boolean hasKey(List<GrantExpression> expressions, GrantKey key) {
         return GrantMatcher.of(key).matchesAny(expressions);
     }
 
@@ -122,6 +122,6 @@ final class GrantAccess {
         return matchingGrants(
                 userIdentity,
                 repositoryGrant(repositoryName),
-                GrantMatcher.of(AccessControl.GrantKey.BRANCH));
+                GrantMatcher.of(GrantKey.BRANCH));
     }
 }

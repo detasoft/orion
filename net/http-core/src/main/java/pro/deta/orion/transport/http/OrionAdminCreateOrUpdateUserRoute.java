@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.schema.acl.CredentialType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,7 +9,6 @@ import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AccessControlValidationException;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -55,7 +55,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
         private AccessControlUserUpdate toUserUpdate() {
             List<AccessControlCredentialUpdate> credentials = new ArrayList<>();
             if (publicKey != null && !publicKey.isBlank()) {
-                credentials.add(new AccessControlCredentialUpdate(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, publicKey));
+                credentials.add(new AccessControlCredentialUpdate(CredentialType.OPENSSH_PUBLIC_KEY, publicKey));
             }
 
             List<AccessControlRepositoryGrantUpdate> grants = new ArrayList<>();

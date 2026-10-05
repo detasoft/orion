@@ -20,8 +20,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
@@ -70,7 +70,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     Optional<OrganizationId> owner = binding.connection().scope() == ConnectionReference.Scope.SYSTEM
                             ? Optional.empty() : Optional.of(address.organizationId());
                     require(connectionAllowed(actor, document, owner, binding.connection().name(),
-                            AccessControl.GrantKey.CONNECTION_USE));
+                            GrantKey.CONNECTION_USE));
                     Connection connection = OrionDocument.findConnection(connections(document, owner),
                             binding.connection().name());
                     if (!(connection instanceof Connection.S3 s3)) throw new IllegalArgumentException();
@@ -117,7 +117,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                 requireOwner(actor, desired.current().document(), owner);
                 OrionDesiredState.Snapshot saved = editor.edit(revision).update(document -> {
                     require(connectionAllowed(actor, document, owner, input.name(), create
-                            ? AccessControl.GrantKey.CREATE : AccessControl.GrantKey.READ_WRITE));
+                            ? GrantKey.CREATE : GrantKey.READ_WRITE));
                     Connection existing = null;
                     for (Connection connection : connections(document, owner)) {
                         if (connection.name().equals(input.name())) existing = connection;
@@ -180,10 +180,10 @@ public final class ConfiguredStorageManagement implements StorageManagement {
         List<S3View> views = new ArrayList<>();
         for (Connection connection : connections(document, owner)) {
             if (!(connection instanceof Connection.S3 s3)) continue;
-            boolean use = connectionAllowed(actor, document, owner, s3.name(), AccessControl.GrantKey.CONNECTION_USE)
+            boolean use = connectionAllowed(actor, document, owner, s3.name(), GrantKey.CONNECTION_USE)
                     && (s3.secretKey().isPresent() || admin(actor, document));
-            boolean change = connectionAllowed(actor, document, owner, s3.name(), AccessControl.GrantKey.READ_WRITE);
-            if (!use && !change && !connectionAllowed(actor, document, owner, s3.name(), AccessControl.GrantKey.READ)) {
+            boolean change = connectionAllowed(actor, document, owner, s3.name(), GrantKey.READ_WRITE);
+            if (!use && !change && !connectionAllowed(actor, document, owner, s3.name(), GrantKey.READ)) {
                 continue;
             }
             views.add(new S3View(s3.name(), s3.endpoint().map(URI::toString).orElse(""), s3.region(),
@@ -194,7 +194,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     }
 
     private boolean connectionAllowed(SecurityContext actor, OrionDocument document, Optional<OrganizationId> owner,
-                                      String name, AccessControl.GrantKey action) {
+                                      String name, GrantKey action) {
         if (admin(actor, document)) return true;
         UserIdentity identity = actor.getUserIdentity();
         if (identity.isAnonymous() || owner.isEmpty() || !identity.getOrganizationId().equals(owner)) return false;
@@ -206,7 +206,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                             default -> { }
                         }
                     }
-                    return GrantMatcher.of(AccessControl.GrantKey.CONNECTION,
+                    return GrantMatcher.of(GrantKey.CONNECTION,
                             pattern -> MatcherUtils.matchExpressionValue(pattern, name)).matchesAny(expressions)
                             && GrantMatcher.of(action).matchesAny(expressions);
                 });

@@ -3,8 +3,10 @@ package pro.deta.orion.schema.orion;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -19,12 +21,12 @@ class OrionUsersTest {
     @Test
     void sharesUserValuesBetweenSystemAndOrganizationWithoutSharingMutableCollections() {
         List<Credential> credentials = new ArrayList<>(List.of(
-                new Credential(AccessControl.CredentialType.ARGON2, "password-verifier"),
+                new Credential(CredentialType.ARGON2, "password-verifier"),
                 new Credential(
-                        AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "laptop", "ssh-ed25519 AQID")));
+                        CredentialType.OPENSSH_PUBLIC_KEY, "laptop", "ssh-ed25519 AQID")));
         List<Grant> grants = new ArrayList<>(List.of(new Grant(
                 "read", List.of(new GrantExpression(
-                        AccessControl.GrantKey.REPOSITORY, "acme/platform/api")))));
+                        GrantKey.REPOSITORY, "acme/platform/api")))));
         User user = new User(
                 "alice", "Alice", "Example", "alice@example.test", credentials, List.of(), grants);
         List<User> users = new ArrayList<>(List.of(user));

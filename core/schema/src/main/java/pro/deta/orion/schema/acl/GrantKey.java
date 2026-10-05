@@ -1,0 +1,6 @@
+package pro.deta.orion.schema.acl;
+
+public enum GrantKey {
+    CONNECTION, CONNECTION_USE, REPOSITORY, BRANCH, FORCE, READ, READ_WRITE, CREATE,
+    NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN, ADMIN
+}

@@ -10,6 +10,7 @@ import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
@@ -30,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static pro.deta.orion.schema.acl.AccessControl.GrantKey.*;
+import static pro.deta.orion.schema.acl.GrantKey.*;
 
 class HierarchicalAccessRulesTest {
     private static final RepositoryResource REPOSITORY = RepositoryResource.of("acme/team/repo");
@@ -74,7 +75,7 @@ class HierarchicalAccessRulesTest {
     @Test
     void directAndRoleBranchRestrictionsRetainTheirCombinationPolicy() {
         Grant direct = new Grant("direct", List.of(
-                expression(AccessControl.GrantKey.REPOSITORY, "acme/**"), expression(READ_WRITE, "true")));
+                expression(GrantKey.REPOSITORY, "acme/**"), expression(READ_WRITE, "true")));
         ScopedGrant restricted = new ScopedGrant(new GrantId("write"), ScopedGrant.Effect.ALLOW,
                 List.of(expression(READ_WRITE, "true"), expression(BRANCH, "dev")));
         SecurityContext context = context(document(List.of("acme/developer"), List.of(direct),
@@ -112,7 +113,7 @@ class HierarchicalAccessRulesTest {
     @Test
     void directRepositoryGrantStillAllowsReadButAdministrationAloneDoesNot() {
         Grant direct = new Grant("direct",
-                List.of(expression(AccessControl.GrantKey.REPOSITORY, "acme/**")));
+                List.of(expression(GrantKey.REPOSITORY, "acme/**")));
         SecurityContext reader = context(document(List.of(), List.of(direct), List.of()));
         assertThat(fetch(reader, "main")).isTrue();
         assertThat(push(reader, "main")).isFalse();
@@ -183,9 +184,9 @@ class HierarchicalAccessRulesTest {
 
     @Test
     void repositoryQualifierDoesNotTurnOtherActionsIntoReadPermission() {
-        for (AccessControl.GrantKey action : List.of(CREATE, FORCE, ADMIN, SHUTDOWN)) {
+        for (GrantKey action : List.of(CREATE, FORCE, ADMIN, SHUTDOWN)) {
             ScopedGrant otherAction = new ScopedGrant(new GrantId("other"), ScopedGrant.Effect.ALLOW,
-                    List.of(expression(action, "true"), expression(AccessControl.GrantKey.REPOSITORY, "acme/**")));
+                    List.of(expression(action, "true"), expression(GrantKey.REPOSITORY, "acme/**")));
             SecurityContext context = context(document(List.of("acme/developer"), List.of(), List.of(otherAction)));
             assertThat(RepositoryAccessRules.read().evaluate(context, REPOSITORY).allowed()).as(action.name())
                     .isFalse();
@@ -196,7 +197,7 @@ class HierarchicalAccessRulesTest {
     @Test
     void createDenyDoesNotOverrideAnIndependentReadGrant() {
         ScopedGrant deny = new ScopedGrant(new GrantId("deny"), ScopedGrant.Effect.DENY,
-                List.of(expression(CREATE, "true"), expression(AccessControl.GrantKey.REPOSITORY, "acme/**")));
+                List.of(expression(CREATE, "true"), expression(GrantKey.REPOSITORY, "acme/**")));
         ScopedGrant read = grant("read", ScopedGrant.Effect.ALLOW, READ);
         SecurityContext context = context(document(List.of("acme/developer"), List.of(), List.of(deny, read)));
         assertThat(RepositoryAccessRules.read().evaluate(context, REPOSITORY).allowed()).isTrue();
@@ -217,13 +218,13 @@ class HierarchicalAccessRulesTest {
                 new InternalUserImpl("alice", new OrganizationId("acme"), () -> document));
     }
 
-    private static ScopedGrant grant(String id, ScopedGrant.Effect effect, AccessControl.GrantKey... keys) {
+    private static ScopedGrant grant(String id, ScopedGrant.Effect effect, GrantKey... keys) {
         List<GrantExpression> expressions = new ArrayList<>();
-        for (AccessControl.GrantKey key : keys) expressions.add(expression(key, "true"));
+        for (GrantKey key : keys) expressions.add(expression(key, "true"));
         return new ScopedGrant(new GrantId(id), effect, expressions);
     }
 
-    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+    private static GrantExpression expression(GrantKey key, String value) {
         return new GrantExpression(key, value);
     }
 

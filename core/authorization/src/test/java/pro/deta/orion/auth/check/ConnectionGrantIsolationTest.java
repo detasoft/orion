@@ -10,6 +10,7 @@ import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -23,12 +24,12 @@ class ConnectionGrantIsolationTest {
     @Test
     void connectionActionsNeverAuthorizeRepositoryOrSystemAdministrationEvenWithMixedSelectors() {
         Grant grant = new Grant("connection", List.of(
-                expression(AccessControl.GrantKey.CONNECTION, "*"),
-                expression(AccessControl.GrantKey.REPOSITORY, "**"),
-                expression(AccessControl.GrantKey.CREATE, "true"),
-                expression(AccessControl.GrantKey.READ_WRITE, "true"),
-                expression(AccessControl.GrantKey.ADMIN, "true"),
-                expression(AccessControl.GrantKey.SHUTDOWN, "true")));
+                expression(GrantKey.CONNECTION, "*"),
+                expression(GrantKey.REPOSITORY, "**"),
+                expression(GrantKey.CREATE, "true"),
+                expression(GrantKey.READ_WRITE, "true"),
+                expression(GrantKey.ADMIN, "true"),
+                expression(GrantKey.SHUTDOWN, "true")));
         SecurityContext system = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("alice", List.of(grant)));
         assertThat(ApplicationAccessRules.admin().evaluate(system,
@@ -52,7 +53,7 @@ class ConnectionGrantIsolationTest {
                 RepositoryResource.of("acme/team/new")).allowed()).isFalse();
     }
 
-    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+    private static GrantExpression expression(GrantKey key, String value) {
         return new GrantExpression(key, value);
     }
 }

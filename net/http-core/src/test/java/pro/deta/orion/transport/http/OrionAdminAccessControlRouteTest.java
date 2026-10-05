@@ -18,6 +18,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -56,7 +57,7 @@ class OrionAdminAccessControlRouteTest {
                     throw new AssertionError("Unexpected ACL call: " + method.getName());
                 });
         Grant grant = new Grant("admin", List.of(
-                new GrantExpression(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                new GrantExpression(GrantKey.ADMIN, AccessControl.TRUE_STRING)));
         SecurityContext admin = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("admin", List.of(grant)));
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(

@@ -17,8 +17,10 @@ import pro.deta.orion.config.OrionConfigurationStorage;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
@@ -65,7 +67,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static pro.deta.orion.schema.acl.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
+import static pro.deta.orion.schema.acl.CredentialType.OPENSSH_PUBLIC_KEY;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 import static pro.deta.orion.util.Result.Failure.generalFailure;
@@ -250,15 +252,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         Result<List<Grant>> grants = mergeGrants(snapshot, user);
         if (!(grants instanceof Result.Success<List<Grant>>(var assigned))) return false;
         for (Grant grant : assigned) {
-            if (!GrantMatcher.of(AccessControl.GrantKey.CONNECTION).matchesAny(grant.info())
-                    && GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(grant.info())) return true;
+            if (!GrantMatcher.of(GrantKey.CONNECTION).matchesAny(grant.info())
+                    && GrantMatcher.of(GrantKey.ADMIN).matchesAny(grant.info())) return true;
         }
         return false;
     }
 
     private static boolean matchesScopedAdministration(List<GrantExpression> expressions,
             ConfigurationScope scope) {
-        if (!GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(expressions)) return false;
+        if (!GrantMatcher.of(GrantKey.ADMIN).matchesAny(expressions)) return false;
         boolean repositoryRestricted = false;
         boolean repositoryMatches = false;
         for (GrantExpression expression : expressions) {
@@ -654,7 +656,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         User found = null;
         for (User user : currentAccessControl().users()) {
             for (Credential credential : user.credentials()) {
-                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                if (credential.type() == CredentialType.OIDC_SUBJECT
                         && Objects.equals(issuer, credential.keyId())
                         && Objects.equals(subject, credential.value())) {
                     if (found != null) {
@@ -710,7 +712,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             return TokenAuthenticationResult.failure("System OIDC account is unavailable");
         }
         for (Credential credential : user.credentials()) {
-            if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT) continue;
+            if (credential.type() != CredentialType.OIDC_SUBJECT) continue;
             for (OidcProvider provider : desiredState.current().document().system().oidcProviders()) {
                 if (!provider.issuer().toString().equals(credential.keyId())) continue;
                 if (systemOidcGeneration(userId, provider, credential.value()).filter(generation::equals).isEmpty()) {
@@ -756,7 +758,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     continue;
                 }
                 for (Credential credential : user.credentials()) {
-                    if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT
+                    if (credential.type() != CredentialType.OIDC_SUBJECT
                             || !oidcGeneration(credential.keyId(), credential.value()).equals(generation)) {
                         continue;
                     }
@@ -900,7 +902,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControl current = parseAccessControlConfiguration(snapshot.content());
             AccessControl canonical = DefaultAccessControl.create(
                     passwordHash,
-                    AccessControl.CredentialType.ARGON2);
+                    CredentialType.ARGON2);
             User canonicalRoot = canonical.users().getFirst();
             Credential password = canonicalRoot.credentials().getFirst();
             User root = withCredentials(canonicalRoot, List.of(new Credential(
@@ -1023,7 +1025,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             return null;
         }
         Credential credential = credentials.getFirst();
-        return credential.type() == AccessControl.CredentialType.ARGON2
+        return credential.type() == CredentialType.ARGON2
                 ? generationFromKeyId(credential.keyId())
                 : null;
     }
@@ -1033,9 +1035,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             return null;
         }
         List<Credential> authenticationCredentials = primaryCredentials(user);
-        AccessControl.CredentialType expectedType = authenticationCredentials.size() == 1
-                && authenticationCredentials.getFirst().type() == AccessControl.CredentialType.ARGON2
-                ? AccessControl.CredentialType.ARGON2
+        CredentialType expectedType = authenticationCredentials.size() == 1
+                && authenticationCredentials.getFirst().type() == CredentialType.ARGON2
+                ? CredentialType.ARGON2
                 : OPENSSH_PUBLIC_KEY;
         String generation = null;
         for (Credential credential : authenticationCredentials) {
@@ -1054,7 +1056,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private static List<Credential> primaryCredentials(User user) {
         List<Credential> credentials = new ArrayList<>();
         for (Credential credential : user.credentials()) {
-            if (credential.type() != AccessControl.CredentialType.OIDC_SUBJECT) credentials.add(credential);
+            if (credential.type() != CredentialType.OIDC_SUBJECT) credentials.add(credential);
         }
         return credentials;
     }
@@ -1176,7 +1178,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         try {
             String markerHash = orionPasswordHashingService.calculateHash(ARGON2, markerSecret);
             credentials.add(new Credential(
-                    AccessControl.CredentialType.ARGON2,
+                    CredentialType.ARGON2,
                     ROOT_LOCKED_GENERATION_PREFIX + UUID.randomUUID(),
                     markerHash));
         } finally {
@@ -1250,8 +1252,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private boolean performPasswordAuthentication(User user, byte[] credential) {
         for (Credential candidate : user.credentials()) {
             if (candidate != null
-                    && (candidate.type() == AccessControl.CredentialType.ARGON2
-                    || candidate.type() == AccessControl.CredentialType.SHA1)
+                    && (candidate.type() == CredentialType.ARGON2
+                    || candidate.type() == CredentialType.SHA1)
                     && credentialMatches(user, candidate, credential)) {
                 return true;
             }
@@ -1386,24 +1388,24 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 AccessControlRepositoryGrantUpdate repositoryGrant) {
             List<GrantExpression> expressions = new ArrayList<>();
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.REPOSITORY, repositoryGrant.repository()));
+                    GrantKey.REPOSITORY, repositoryGrant.repository()));
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.BRANCH, repositoryGrant.branch()));
+                    GrantKey.BRANCH, repositoryGrant.branch()));
             if (repositoryGrant.read()) {
                 expressions.add(new GrantExpression(
-                        AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
+                        GrantKey.READ, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.readWrite()) {
                 expressions.add(new GrantExpression(
-                        AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                        GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.create()) {
                 expressions.add(new GrantExpression(
-                        AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
+                        GrantKey.CREATE, AccessControl.TRUE_STRING));
             }
             if (repositoryGrant.force()) {
                 expressions.add(new GrantExpression(
-                        AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
+                        GrantKey.FORCE, AccessControl.TRUE_STRING));
             }
             return new Grant(
                     repositoryGrantId(userId, repositoryGrant.repository()), expressions);
@@ -1428,11 +1430,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 if (credential.type() == null) {
                     throw new AccessControlValidationException("Credential type is required");
                 }
-                if (credential.type() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY
+                if (credential.type() == CredentialType.JWT_SIGNING_PUBLIC_KEY
                         && (credential.keyId() == null || credential.keyId().isBlank())) {
                     throw new AccessControlValidationException("JWT signing key id is required");
                 }
-                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT) {
+                if (credential.type() == CredentialType.OIDC_SUBJECT) {
                     if (credential.keyId() == null || credential.keyId().isBlank()) {
                         throw new AccessControlValidationException("OIDC issuer is required");
                     }

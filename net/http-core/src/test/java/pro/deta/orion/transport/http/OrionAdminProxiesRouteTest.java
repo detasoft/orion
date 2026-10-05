@@ -13,6 +13,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.GitCredentialKind;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
@@ -56,7 +57,7 @@ class OrionAdminProxiesRouteTest {
                 base.system().oidcProviders()), List.of()),
                 Optional.of("configuration-revision"));
 
-        var response = get(context(grant(AccessControl.GrantKey.ADMIN)));
+        var response = get(context(grant(GrantKey.ADMIN)));
 
         assertThat(response.status).isEqualTo(200);
         JsonNode body = mapper.readTree(response.body.toString());
@@ -74,14 +75,14 @@ class OrionAdminProxiesRouteTest {
     void readsTheCurrentConfigurationAndKeepsAliasesSeparateFromOrdinaryRepositories() throws Exception {
         backend.create("team/repository").valueOrFailure("repository");
         desired.publish(document(List.of()), Optional.empty());
-        assertThat(mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString())
+        assertThat(mapper.readTree(get(context(grant(GrantKey.ADMIN))).body.toString())
                 .get("aliases").isEmpty()).isTrue();
         var binding = new GitProxyBinding(new RemoteAlias("archive"),
                 new GitProxyBinding.Direct(URI.create("file:///upstream.git"), GitCredentialKind.NONE,
                         Optional.empty(), Optional.empty()), "main");
         desired.publish(document(List.of(binding)), Optional.of("new-revision"));
 
-        JsonNode body = mapper.readTree(get(context(grant(AccessControl.GrantKey.ADMIN))).body.toString());
+        JsonNode body = mapper.readTree(get(context(grant(GrantKey.ADMIN))).body.toString());
         assertThat(body.get("aliases").get(0).get("alias").asText()).isEqualTo("archive");
         assertThat(backend.repositoryNames()).containsExactly("team/repository");
     }
@@ -89,11 +90,11 @@ class OrionAdminProxiesRouteTest {
     @Test
     void rejectsAnonymousReadOnlyAndRepositoryScopedUsersBeforeReadingConfiguration() throws Exception {
         for (SecurityContext context : List.of(SecurityContext.createContext(), context(),
-                context(grant(AccessControl.GrantKey.READ)),
+                context(grant(GrantKey.READ)),
                 context(new Grant("repository-access", List.of(
-                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "team/repository"),
-                        new GrantExpression(AccessControl.GrantKey.READ, "true"),
-                        new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true")))))) {
+                        new GrantExpression(GrantKey.REPOSITORY, "team/repository"),
+                        new GrantExpression(GrantKey.READ, "true"),
+                        new GrantExpression(GrantKey.READ_WRITE, "true")))))) {
             var response = get(context);
             assertThat(response.status).isEqualTo(403);
             assertThat(response.body.toString()).isEmpty();
@@ -119,7 +120,7 @@ class OrionAdminProxiesRouteTest {
         return response;
     }
 
-    private static Grant grant(AccessControl.GrantKey key) {
+    private static Grant grant(GrantKey key) {
         return new Grant("access", List.of(new GrantExpression(key, "true")));
     }
 

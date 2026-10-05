@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
@@ -141,12 +142,12 @@ class AuthenticatedRepositoryAccessHookTest {
     @Test
     void updateCannotBorrowBranchFromReadOnlyGrant() {
         Grant readWrite = new Grant("writer", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "project"),
-                new GrantExpression(AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING),
-                new GrantExpression(AccessControl.GrantKey.BRANCH, "dev")));
+                new GrantExpression(GrantKey.REPOSITORY, "project"),
+                new GrantExpression(GrantKey.READ_WRITE, AccessControl.TRUE_STRING),
+                new GrantExpression(GrantKey.BRANCH, "dev")));
         Grant read = new Grant("reader", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "project"),
-                new GrantExpression(AccessControl.GrantKey.BRANCH, "main")));
+                new GrantExpression(GrantKey.REPOSITORY, "project"),
+                new GrantExpression(GrantKey.BRANCH, "main")));
         AuthenticatedRepositoryAccessHook hook = new AuthenticatedRepositoryAccessHook(
                 SecurityContext.createContext().withUserIdentity(
                         new InternalUserImpl("developer", List.of(readWrite, read))));
@@ -230,14 +231,14 @@ class AuthenticatedRepositoryAccessHookTest {
             boolean write,
             boolean create) {
         List<GrantExpression> expressions = new ArrayList<>();
-        expressions.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
         if (write) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         }
         if (create) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
@@ -250,13 +251,13 @@ class AuthenticatedRepositoryAccessHookTest {
             String branchName,
             boolean force) {
         List<GrantExpression> expressions = new ArrayList<>();
-        expressions.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
-        expressions.add(new GrantExpression(AccessControl.GrantKey.BRANCH, branchName));
+        expressions.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new GrantExpression(GrantKey.BRANCH, branchName));
         expressions.add(new GrantExpression(
-                AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         if (force) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
+                    GrantKey.FORCE, AccessControl.TRUE_STRING));
         }
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(

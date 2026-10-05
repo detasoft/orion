@@ -12,13 +12,13 @@ public class SettingsTest {
     @Test
     public void accessControlListsAreImmutableSnapshots() {
         List<Credential> credentials = new ArrayList<>();
-        credentials.add(new Credential(AccessControl.CredentialType.ARGON2, "hash"));
+        credentials.add(new Credential(CredentialType.ARGON2, "hash"));
         List<User> users = new ArrayList<>();
         users.add(new User("root", null, null, "root@orion.pro",
                 credentials, List.of(), List.of()));
         AccessControl accessControl = new AccessControl(users, List.of(), List.of());
         credentials.add(new Credential(
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "public-key"));
+                CredentialType.OPENSSH_PUBLIC_KEY, "public-key"));
         users.add(new User("other", null, null, "other@example.test",
                 List.of(), List.of(), List.of()));
 
@@ -27,7 +27,7 @@ public class SettingsTest {
         assertThatThrownBy(() -> accessControl.users().add(users.getLast()))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> accessControl.users().getFirst().credentials()
-                .add(new Credential(AccessControl.CredentialType.PLAIN, "plain")))
+                .add(new Credential(CredentialType.PLAIN, "plain")))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 

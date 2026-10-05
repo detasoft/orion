@@ -15,6 +15,7 @@ import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
@@ -146,12 +147,12 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
 
     private static AccessControl defaultAccessControlWithUsers(String... extraUserIds) {
         AccessControl base = DefaultAccessControl.create(
-                TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
+                TEST_PASSWORD_HASH, CredentialType.SHA1);
         List<User> users = new ArrayList<>(base.users());
         for (String userId : extraUserIds) {
             users.add(new User(userId, null, null, userId + "@example.test",
                     List.of(new Credential(
-                            AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                            CredentialType.SHA1, TEST_PASSWORD_HASH)),
                     List.of(), List.of()));
         }
         return new AccessControl(users, base.roles(), base.grants());

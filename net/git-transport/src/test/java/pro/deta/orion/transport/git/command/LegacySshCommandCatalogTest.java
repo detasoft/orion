@@ -52,6 +52,7 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
@@ -175,7 +176,7 @@ class LegacySshCommandCatalogTest {
         agentServer = new AgentSessionServer(root);
         agentServer.onStart();
         try {
-            UserIdentity admin = user(List.of(grant(AccessControl.GrantKey.ADMIN)));
+            UserIdentity admin = user(List.of(grant(GrantKey.ADMIN)));
             assertFailure(dispatch("issue-launch-permit local http://localhost /tmp/agent dev", admin),
                     CommandFailureCode.INVALID_ARGUMENTS);
             assertFailure(dispatch("issue-launch-permit local", admin), CommandFailureCode.INVALID_ARGUMENTS);
@@ -215,7 +216,7 @@ class LegacySshCommandCatalogTest {
         agentServer = new AgentSessionServer(root);
         agentServer.onStart();
         try {
-            CommandResult result = dispatch(command, user(List.of(grant(AccessControl.GrantKey.ADMIN))));
+            CommandResult result = dispatch(command, user(List.of(grant(GrantKey.ADMIN))));
             assertThat(result).isInstanceOf(CommandResult.Message.class);
             String[] permit = ((CommandResult.Message) result).value().split("\\n");
             assertThat(permit).hasSize(3);
@@ -228,7 +229,7 @@ class LegacySshCommandCatalogTest {
 
     @Test
     void stateAliasesAndRepositoriesPreserveExistingOutput() {
-        UserIdentity admin = user(List.of(grant(AccessControl.GrantKey.ADMIN)));
+        UserIdentity admin = user(List.of(grant(GrantKey.ADMIN)));
 
         assertThat(dispatch("StAtE", admin)).isEqualTo(new CommandResult.Message("runtime: NEW"));
         assertThat(dispatch("STATUS", admin)).isEqualTo(new CommandResult.Message("runtime: NEW"));
@@ -241,7 +242,7 @@ class LegacySshCommandCatalogTest {
         assertFailure(dispatch("shutdown", user(List.of())), CommandFailureCode.ACCESS_DENIED);
         assertThat(shutdown).isFalse();
 
-        dispatch("ShUtDoWn", user(List.of(grant(AccessControl.GrantKey.SHUTDOWN))));
+        dispatch("ShUtDoWn", user(List.of(grant(GrantKey.SHUTDOWN))));
 
         assertThat(shutdown).isTrue();
     }
@@ -286,7 +287,7 @@ class LegacySshCommandCatalogTest {
                 .isEqualTo(new CommandResult.ObjectValue(Map.of(
                         "userId", CommandValue.text("operator"))));
         assertThat(dispatch("/repository ls", user(List.of(grant(
-                AccessControl.GrantKey.REPOSITORY,
+                GrantKey.REPOSITORY,
                 "project")))))
                 .isEqualTo(new CommandResult.Rows(
                         List.of(
@@ -306,7 +307,7 @@ class LegacySshCommandCatalogTest {
 
     @Test
     void enablesQueriesOnlyOnComposedReadOnlyListCommands() {
-        UserIdentity reader = user(List.of(grant(AccessControl.GrantKey.REPOSITORY, "project")));
+        UserIdentity reader = user(List.of(grant(GrantKey.REPOSITORY, "project")));
 
         CommandResult.Rows queried = (CommandResult.Rows) dispatch(
                 "/repository ls columns=id where refCount=1",
@@ -358,11 +359,11 @@ class LegacySshCommandCatalogTest {
         return new InternalUserImpl("operator", grants);
     }
 
-    private static Grant grant(AccessControl.GrantKey key) {
+    private static Grant grant(GrantKey key) {
         return grant(key, TRUE_STRING);
     }
 
-    private static Grant grant(AccessControl.GrantKey key, String value) {
+    private static Grant grant(GrantKey key, String value) {
         return new Grant("test", List.of(new GrantExpression(key, value)));
     }
 

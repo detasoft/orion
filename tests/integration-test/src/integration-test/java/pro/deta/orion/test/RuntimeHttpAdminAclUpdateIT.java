@@ -10,6 +10,7 @@ import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
@@ -139,7 +140,7 @@ class RuntimeHttpAdminAclUpdateIT {
             User root = acl.users().getFirst();
             User operator = new User("operator", root.first(), root.last(),
                     "operator@example.test", List.of(new Credential(
-                            AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                            CredentialType.SHA1, TEST_PASSWORD_HASH)),
                     root.roles(), root.grants());
             List<User> users = new ArrayList<>(acl.users());
             users.add(operator);
@@ -356,7 +357,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     private static User passwordUser(String userId) {
         return new User(userId, null, null, userId + "@example.test",
-                List.of(new Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                List.of(new Credential(CredentialType.SHA1, TEST_PASSWORD_HASH)),
                 List.of(), List.of());
     }
 

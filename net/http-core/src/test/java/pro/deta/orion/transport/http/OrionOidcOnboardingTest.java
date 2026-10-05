@@ -32,8 +32,10 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.*;
@@ -758,7 +760,7 @@ class OrionOidcOnboardingTest {
         final RSAKey signingKey = new RSAKeyGenerator(2048).keyID("provider-key").generate();
         final SecurityContext admin = SecurityContext.createContext().withUserIdentity(new InternalUserImpl("root",
                 List.of(new Grant("admin", List.of(
-                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))));
+                        new GrantExpression(GrantKey.ADMIN, "true"))))));
         OrionHttpRouteServlet servlet;
         OrionAuthorizationFilter filter;
         final Path sessions = Files.createTempDirectory("orion-oidc-sessions-");
@@ -927,12 +929,12 @@ class OrionOidcOnboardingTest {
 
         User systemUser(String id, String subject, boolean administrator) {
             return new User(id, "Alice", "System", "alice@example.test",
-                    List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer.toString(), subject)),
+                    List.of(new Credential(CredentialType.OIDC_SUBJECT, issuer.toString(), subject)),
                     List.of(), administrator ? List.of(new Grant("admin", List.of(
-                            new GrantExpression(AccessControl.GrantKey.ADMIN, "true"))))
+                            new GrantExpression(GrantKey.ADMIN, "true"))))
                             : List.of(new Grant("read", List.of(
-                                    new GrantExpression(AccessControl.GrantKey.REPOSITORY, "acme/team/repository"),
-                                    new GrantExpression(AccessControl.GrantKey.READ, "true")))));
+                                    new GrantExpression(GrantKey.REPOSITORY, "acme/team/repository"),
+                                    new GrantExpression(GrantKey.READ, "true")))));
         }
 
         void configureSystem(List<User> users) {

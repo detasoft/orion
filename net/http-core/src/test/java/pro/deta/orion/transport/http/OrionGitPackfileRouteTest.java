@@ -16,9 +16,9 @@ import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.pack.PackWriter;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.util.Result;
@@ -233,7 +233,7 @@ class OrionGitPackfileRouteTest {
     private static SecurityContext repositorySecurityContext(
             String repositoryName) {
         Grant grant = new Grant("repository", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName)));
+                new GrantExpression(GrantKey.REPOSITORY, repositoryName)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",

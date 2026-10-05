@@ -2,6 +2,7 @@ package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.*;
@@ -17,7 +18,7 @@ class OrionDocumentTest {
     @Test
     void modelsRepositoriesInsideTheirTeamAndOrganization() {
         User user = new User("alice", null, null, "alice@example.test",
-                List.of(new Credential(AccessControl.CredentialType.ARGON2, "password-hash")),
+                List.of(new Credential(CredentialType.ARGON2, "password-hash")),
                 List.of(), List.of());
         AccessControl accessControl = new AccessControl(List.of(user), List.of(), List.of());
         OrionDocument.Repository repository = repository("api", "API");

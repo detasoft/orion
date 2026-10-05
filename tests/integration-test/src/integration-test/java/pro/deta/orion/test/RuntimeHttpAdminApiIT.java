@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.internal.UserEmail;
 
 import pro.deta.orion.config.OrionConfigurationEdit;
@@ -13,7 +14,6 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.test.integration.git.GitHttpTestServer;
@@ -380,7 +380,7 @@ class RuntimeHttpAdminApiIT {
             try (OrionConfigurationEdit edit = orion.component().configurationEditor().edit()) {
                 AccessControlUserUpdate update = new AccessControlUserUpdate(
                     "token-user", "token-user@example.test",
-                    List.of(new AccessControlCredentialUpdate(AccessControl.CredentialType.SHA1, hash)), List.of());
+                    List.of(new AccessControlCredentialUpdate(CredentialType.SHA1, hash)), List.of());
                 orion.accessControlService().createOrUpdateUser(edit, update);
                 edit.apply("createOrUpdateUser() " + update.id(),
                         new UserEmail(update.id(), update.email()));

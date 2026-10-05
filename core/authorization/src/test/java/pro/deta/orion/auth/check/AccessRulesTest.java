@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -189,7 +190,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("repository create");
 
         Grant createGrant = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
+                .addKey(GrantKey.CREATE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
@@ -203,7 +204,7 @@ public class AccessRulesTest {
     @Test
     public void createAccessAllowsRepositoryPatternGrant() {
         Grant createGrant = repositoryGrantDraft("team/*")
-                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
+                .addKey(GrantKey.CREATE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
@@ -214,15 +215,15 @@ public class AccessRulesTest {
     @Test
     public void writeAccessRequiresRepositoryWriteGrant() {
         Grant repositoryGrant = grantDraft("repository-only")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(GrantKey.REPOSITORY, "project")
                 .toAccessControl();
         SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
         assertThatThrownBy(() -> requireRepositoryWrite(reader, "project"))
                 .isInstanceOf(OrionSecurityException.class);
 
         Grant writeGrant = grantDraft("write")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.REPOSITORY, "project")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
 
@@ -235,17 +236,17 @@ public class AccessRulesTest {
     @Test
     public void forceAccessRequiresRepositoryForceGrant() {
         Grant writeGrant = grantDraft("write")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.REPOSITORY, "project")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
         assertThatThrownBy(() -> requireRepositoryForce(writer, "project"))
                 .isInstanceOf(OrionSecurityException.class);
 
         Grant forceGrant = grantDraft("force")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(AccessControl.GrantKey.FORCE, TRUE_STRING)
+                .addKey(GrantKey.REPOSITORY, "project")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.FORCE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext forceWriter = securityContext(new InternalUserImpl("force-writer", List.of(forceGrant)));
 
@@ -263,7 +264,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("application shutdown");
 
         Grant shutdownGrant = grantDraft("shutdown")
-                .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING)
+                .addKey(GrantKey.SHUTDOWN, TRUE_STRING)
                 .toAccessControl();
         SecurityContext operator = securityContext(new InternalUserImpl("operator", List.of(shutdownGrant)));
 
@@ -279,7 +280,7 @@ public class AccessRulesTest {
                 .hasMessageContaining("application admin");
 
         Grant adminGrant = grantDraft("admin")
-                .addKey(AccessControl.GrantKey.ADMIN, TRUE_STRING)
+                .addKey(GrantKey.ADMIN, TRUE_STRING)
                 .toAccessControl();
         SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
 
@@ -417,8 +418,8 @@ public class AccessRulesTest {
     @Test
     void branchPushAllowsGrantedBranchAndDeniesOtherBranches() {
         Grant grant = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "master")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.BRANCH, "master")
                 .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(grant)));
 
@@ -431,8 +432,8 @@ public class AccessRulesTest {
     @Test
     void readOnlyBranchGrantDoesNotExpandPushBranches() {
         Grant write = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
                 "developer", List.of(write, repositoryGrant("project", "main"))));
@@ -446,8 +447,8 @@ public class AccessRulesTest {
     @Test
     void readOnlyWildcardDoesNotExpandPushBranches() {
         Grant write = repositoryGrantDraft("team/**")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
                 "developer", List.of(write, repositoryGrant("team/**", "*"))));
@@ -461,7 +462,7 @@ public class AccessRulesTest {
     @Test
     void readOnlyBranchRestrictionDoesNotNarrowUnrestrictedWriteGrant() {
         Grant write = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
                 "developer", List.of(write, repositoryGrant("project", "main"))));
@@ -472,11 +473,11 @@ public class AccessRulesTest {
     @Test
     void writeBranchRestrictionsRetainTheirExistingCombinationPolicy() {
         Grant unrestricted = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
                 .toAccessControl();
         Grant restricted = repositoryGrantDraft("project")
-                .addKey(AccessControl.GrantKey.READ_WRITE, TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "dev")
+                .addKey(GrantKey.READ_WRITE, TRUE_STRING)
+                .addKey(GrantKey.BRANCH, "dev")
                 .toAccessControl();
         SecurityContext user = securityContext(new InternalUserImpl(
                 "developer", List.of(unrestricted, restricted)));
@@ -534,13 +535,13 @@ public class AccessRulesTest {
 
     private static Grant repositoryGrant(String repositoryName, String branchName) {
         return repositoryGrantDraft(repositoryName)
-                .addKey(AccessControl.GrantKey.BRANCH, branchName)
+                .addKey(GrantKey.BRANCH, branchName)
                 .toAccessControl();
     }
 
     private static GrantFixture repositoryGrantDraft(String repositoryName) {
         return grantDraft("repository")
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
+                .addKey(GrantKey.REPOSITORY, repositoryName);
     }
 
     private static GrantFixture grantDraft(String id) {
@@ -555,7 +556,7 @@ public class AccessRulesTest {
             this.id = id;
         }
 
-        GrantFixture addKey(AccessControl.GrantKey key, String value) {
+        GrantFixture addKey(GrantKey key, String value) {
             info.add(new GrantExpression(key, value));
             return this;
         }

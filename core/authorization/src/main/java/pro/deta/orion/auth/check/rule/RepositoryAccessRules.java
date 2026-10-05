@@ -1,6 +1,6 @@
 package pro.deta.orion.auth.check.rule;
 
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.AccessDecision;
@@ -40,12 +40,12 @@ public final class RepositoryAccessRules {
     private static AccessDecision evaluateCreate(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
         if (userIdentity.getOrganizationId().isPresent()) {
-            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, AccessControl.GrantKey.CREATE, null);
+            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, GrantKey.CREATE, null);
         }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(AccessControl.GrantKey.CREATE));
+                GrantMatcher.of(GrantKey.CREATE));
         if (allowed) {
             return AccessDecision.allow("repository create grant matched");
         }
@@ -55,7 +55,7 @@ public final class RepositoryAccessRules {
     private static AccessDecision evaluateRead(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
         if (userIdentity.getOrganizationId().isPresent()) {
-            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, AccessControl.GrantKey.READ, null);
+            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, GrantKey.READ, null);
         }
         boolean allowed = GrantAccess.hasGrant(userIdentity, GrantAccess.repositoryGrant(resource.repositoryName()));
         if (allowed) {
@@ -67,12 +67,12 @@ public final class RepositoryAccessRules {
     private static AccessDecision evaluateWrite(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
         if (userIdentity.getOrganizationId().isPresent()) {
-            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, AccessControl.GrantKey.READ_WRITE, null);
+            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, GrantKey.READ_WRITE, null);
         }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(AccessControl.GrantKey.READ_WRITE));
+                GrantMatcher.of(GrantKey.READ_WRITE));
         if (allowed) {
             return AccessDecision.allow("repository write grant matched");
         }
@@ -82,12 +82,12 @@ public final class RepositoryAccessRules {
     private static AccessDecision evaluateForce(SecurityContext securityContext, RepositoryResource resource) {
         UserIdentity userIdentity = securityContext.getUserIdentity();
         if (userIdentity.getOrganizationId().isPresent()) {
-            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, AccessControl.GrantKey.FORCE, null);
+            return GrantAccess.scopedRepositoryAccess(userIdentity, resource, GrantKey.FORCE, null);
         }
         boolean allowed = GrantAccess.hasGrant(
                 userIdentity,
                 GrantAccess.repositoryGrant(resource.repositoryName()),
-                GrantMatcher.of(AccessControl.GrantKey.FORCE));
+                GrantMatcher.of(GrantKey.FORCE));
         if (allowed) {
             return AccessDecision.allow("repository force grant matched");
         }

@@ -10,6 +10,7 @@ import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import org.apache.sshd.common.AttributeRepository;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
@@ -550,9 +551,9 @@ class SshCommandFactoryTest {
         provider.create("demo").valueOrFailure("repository");
         TestChannelSession channel = channel(true);
         Grant grant = new Grant("repository", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "demo"),
+                new GrantExpression(GrantKey.REPOSITORY, "demo"),
                 new GrantExpression(
-                        AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
+                        GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
         channel.getSession().setAttribute(SSH_AUTHENTICATED_USER,
                 new InternalUserImpl("operator", List.of(grant)));
         SshCommandFactory factory = gitFactory(provider);

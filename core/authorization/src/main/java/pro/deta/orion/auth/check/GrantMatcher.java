@@ -3,8 +3,8 @@ package pro.deta.orion.auth.check;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 
 import java.util.List;
 
@@ -12,15 +12,15 @@ import java.util.List;
 @ToString
 @Getter
 public class GrantMatcher {
-    private final AccessControl.GrantKey key;
+    private final GrantKey key;
     private final GrantKeyValueMatcher keyValueMatcher;
 
 
-    public static GrantMatcher of(AccessControl.GrantKey key, GrantKeyValueMatcher matcher) {
+    public static GrantMatcher of(GrantKey key, GrantKeyValueMatcher matcher) {
         return new GrantMatcher(key, matcher);
     }
 
-    public static GrantMatcher of(AccessControl.GrantKey key) {
+    public static GrantMatcher of(GrantKey key) {
         return new GrantMatcher(key, GrantMatcher::alwaysTrue);
     }
 

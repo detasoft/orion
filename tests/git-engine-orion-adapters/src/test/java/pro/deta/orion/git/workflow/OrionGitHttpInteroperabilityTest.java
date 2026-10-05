@@ -28,9 +28,9 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.index.PackMetadata;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.http.OrionAuthorizationFilter;
@@ -83,7 +83,7 @@ class OrionGitHttpInteroperabilityTest {
                 }
                 versions.add(request.getHeader("Git-Protocol") == null ? "absent" : request.getHeader("Git-Protocol"));
                 Grant grant = new Grant("repository", List.of(
-                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, "project")));
+                        new GrantExpression(GrantKey.REPOSITORY, "project")));
                 request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                         SecurityContext.createContext().withUserIdentity(
                                 new InternalUserImpl("git-user", List.of(grant))));

@@ -3,6 +3,7 @@ package pro.deta.orion.auth.check;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
@@ -90,12 +91,12 @@ class ScopedAccessTest {
 
     private static boolean allows(OrionDocument.Organization organization, ConfigurationScope scope) {
         return ScopedAccess.allows(organization, USER, scope,
-                expressions -> GrantMatcher.of(AccessControl.GrantKey.ADMIN).matchesAny(expressions));
+                expressions -> GrantMatcher.of(GrantKey.ADMIN).matchesAny(expressions));
     }
 
     private static OrionDocument.Organization organization(List<String> assignments, ScopedGrant.Effect effect) {
         ScopedGrant grant = new ScopedGrant(new GrantId("admin"), effect,
-                List.of(new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+                List.of(new GrantExpression(GrantKey.ADMIN, "true")));
         ConfigurationScope org = ConfigurationScope.parse("acme");
         ScopedRole ancestor = new ScopedRole(new RoleId(effect == ScopedGrant.Effect.ALLOW ? "allow" : "deny"),
                 List.of(), List.of(new GrantAddress(org, grant.id())));

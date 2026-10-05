@@ -9,6 +9,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.agent.protocol.SessionCommandOutcome;
 import pro.deta.orion.agentd.session.JsonSessionManifestReader;
 import org.junit.jupiter.api.Test;
@@ -277,7 +278,7 @@ class AgentSessionAcceptanceIT {
                     if ("Bearer acceptance-admin".equals(request.getHeader("Authorization"))) {
                         Grant grant = new Grant("admin", List.of(
                                 new GrantExpression(
-                                        AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                                        GrantKey.ADMIN, AccessControl.TRUE_STRING)));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()
                                         .withUserIdentity(new InternalUserImpl("admin", List.of(grant))));

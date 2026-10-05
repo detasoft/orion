@@ -1,7 +1,7 @@
 package pro.deta.orion.auth.check.rule;
 
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.AccessRule;
@@ -62,7 +62,7 @@ public final class BranchAccessRules {
         RepositoryResource repository = resource.parentResource();
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return GrantAccess.scopedRepositoryAccess(securityContext.getUserIdentity(), repository,
-                    requireReadWrite ? AccessControl.GrantKey.READ_WRITE : AccessControl.GrantKey.READ,
+                    requireReadWrite ? GrantKey.READ_WRITE : GrantKey.READ,
                     resource.branchName());
         }
         AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
@@ -74,7 +74,7 @@ public final class BranchAccessRules {
                 securityContext.getUserIdentity(),
                 repository.repositoryName());
         if (requireReadWrite) {
-            branchGrants = filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.READ_WRITE));
+            branchGrants = filterGrants(branchGrants, GrantMatcher.of(GrantKey.READ_WRITE));
         }
         if (branchGrants.isEmpty()) {
             return AccessDecision.allow("parent repository grant has no branch restriction");
@@ -89,13 +89,13 @@ public final class BranchAccessRules {
     }
 
     private static boolean hasWildcardBranchGrant(List<Grant> branchGrants) {
-        return !filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty();
+        return !filterGrants(branchGrants, GrantMatcher.of(GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty();
     }
 
     private static boolean isBranchAllowed(List<Grant> branchGrants, String branchName) {
         return !filterGrants(
                 branchGrants,
-                GrantMatcher.of(AccessControl.GrantKey.BRANCH, grantBranchName -> Objects.equals(grantBranchName, branchName)))
+                GrantMatcher.of(GrantKey.BRANCH, grantBranchName -> Objects.equals(grantBranchName, branchName)))
                 .isEmpty();
     }
 }

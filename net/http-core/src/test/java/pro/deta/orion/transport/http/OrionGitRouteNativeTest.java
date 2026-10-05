@@ -23,6 +23,7 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 
@@ -469,8 +470,8 @@ class OrionGitRouteNativeTest {
         assertThat(denied.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
         assertThat(provider.exists(REPOSITORY_NAME)).isFalse();
         Grant grant = new Grant("create", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME),
-                new GrantExpression(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)));
+                new GrantExpression(GrantKey.REPOSITORY, REPOSITORY_NAME),
+                new GrantExpression(GrantKey.CREATE, AccessControl.TRUE_STRING)));
         SecurityContext creator = SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl("creator", List.of(grant)));
         ResponseRecorder allowed = new ResponseRecorder();
@@ -672,7 +673,7 @@ class OrionGitRouteNativeTest {
 
     private static SecurityContext repositorySecurityContext(String name) {
         Grant grant = new Grant("repository", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, name)));
+                new GrantExpression(GrantKey.REPOSITORY, name)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",
@@ -681,9 +682,9 @@ class OrionGitRouteNativeTest {
 
     private static SecurityContext repositoryWriteSecurityContext() {
         Grant grant = new Grant("repository", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME),
+                new GrantExpression(GrantKey.REPOSITORY, REPOSITORY_NAME),
                 new GrantExpression(
-                        AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
+                        GrantKey.READ_WRITE, AccessControl.TRUE_STRING)));
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",

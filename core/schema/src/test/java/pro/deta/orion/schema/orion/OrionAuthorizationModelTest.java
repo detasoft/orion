@@ -3,6 +3,7 @@ package pro.deta.orion.schema.orion;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.*;
 
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrionAuthorizationModelTest {
     @Test
     void scopedDefinitionsDefensivelyCopyTheirOrderedReferencesAndExpressions() {
-        GrantExpression readExpression = expression(AccessControl.GrantKey.READ, "true");
+        GrantExpression readExpression = expression(GrantKey.READ, "true");
         List<GrantExpression> expressions = new ArrayList<>(List.of(readExpression));
         ScopedGrant grant = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW, expressions);
         List<RoleAddress> roleReferences = new ArrayList<>(List.of(role("acme/base")));
@@ -347,7 +348,7 @@ class OrionAuthorizationModelTest {
         ScopedGrant deny = new ScopedGrant(
                 new GrantId("deny-read"),
                 ScopedGrant.Effect.DENY,
-                List.of(expression(AccessControl.GrantKey.READ, "true")));
+                List.of(expression(GrantKey.READ, "true")));
 
         OrionDocument document = document(organization(
                 "acme", List.of(), List.of(allow, deny), List.of(), List.of()));
@@ -407,7 +408,7 @@ class OrionAuthorizationModelTest {
         return new ScopedGrant(
                 new GrantId(id),
                 ScopedGrant.Effect.ALLOW,
-                List.of(expression(AccessControl.GrantKey.READ, "true")));
+                List.of(expression(GrantKey.READ, "true")));
     }
 
     private static ScopedRole roleDefinition(String id) {
@@ -422,7 +423,7 @@ class OrionAuthorizationModelTest {
         return GrantAddress.parse(address);
     }
 
-    private static GrantExpression expression(AccessControl.GrantKey key, String value) {
+    private static GrantExpression expression(GrantKey key, String value) {
         return new GrantExpression(key, value);
     }
 }

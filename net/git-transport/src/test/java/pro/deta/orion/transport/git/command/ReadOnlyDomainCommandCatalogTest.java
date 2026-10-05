@@ -31,6 +31,7 @@ import pro.deta.orion.command.terminal.TerminalCommandRenderer;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
@@ -446,14 +447,14 @@ class ReadOnlyDomainCommandCatalogTest {
     }
 
     private static UserIdentity admin() {
-        return user("admin", grant(AccessControl.GrantKey.ADMIN, TRUE_STRING));
+        return user("admin", grant(GrantKey.ADMIN, TRUE_STRING));
     }
 
     private static Grant repositoryGrant(String repository) {
-        return grant(AccessControl.GrantKey.REPOSITORY, repository);
+        return grant(GrantKey.REPOSITORY, repository);
     }
 
-    private static Grant grant(AccessControl.GrantKey key, String value) {
+    private static Grant grant(GrantKey key, String value) {
         return new Grant("test", List.of(new GrantExpression(key, value)));
     }
 

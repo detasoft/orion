@@ -28,9 +28,9 @@ import pro.deta.orion.git.workflow.RepositorySnapshot;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.schema.orion.v2.RepositoryName;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
@@ -296,10 +296,10 @@ final class OrionGitServer implements GitServer {
 
     private static InternalUserImpl matrixUser() {
         Grant grant = new Grant("matrix", List.of(
-                new GrantExpression(AccessControl.GrantKey.REPOSITORY, "*"),
-                new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
-                new GrantExpression(AccessControl.GrantKey.CREATE, "true"),
-                new GrantExpression(AccessControl.GrantKey.FORCE, "true")));
+                new GrantExpression(GrantKey.REPOSITORY, "*"),
+                new GrantExpression(GrantKey.READ_WRITE, "true"),
+                new GrantExpression(GrantKey.CREATE, "true"),
+                new GrantExpression(GrantKey.FORCE, "true")));
         return new InternalUserImpl("matrix", List.of(grant));
     }
 

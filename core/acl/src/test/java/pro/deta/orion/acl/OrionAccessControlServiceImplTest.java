@@ -51,8 +51,10 @@ import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -92,14 +94,14 @@ class OrionAccessControlServiceImplTest {
     void systemOidcPreservesRootKeyGenerationAndRejectsLockedOrRecoveryRoot() {
         String issuer = "https://sso.example.test";
         OidcProvider provider = new OidcProvider("sso", URI.create(issuer), "client", "secret", 172800, 0);
-        Credential binding = new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "external-root");
+        Credential binding = new Credential(CredentialType.OIDC_SUBJECT, issuer, "external-root");
         OrionDesiredState desired = new OrionDesiredState();
         Consumer<List<Credential>> publish = credentials -> desired.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl(List.of(new User("root", null, null, null,
                         credentials, List.of(), List.of())), List.of(), List.of()), Optional.empty(),
                         List.of(new ConfigurationSecret("secret", "encrypted")), List.of(), List.of(),
                         List.of(provider)), List.of()), Optional.empty());
-        publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+        publish.accept(List.of(binding, new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
                 "root-auth-generation:first", key(KEY_ONE.getPublic()))));
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null,
                 testServerIdentity(), desired,
@@ -111,11 +113,11 @@ class OrionAccessControlServiceImplTest {
         assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
         byte[] token = ((TokenIssueResult.Success) issued).token().getBytes(StandardCharsets.UTF_8);
         assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Success.class);
-        publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+        publish.accept(List.of(binding, new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
                 "root-auth-generation:second", key(KEY_ONE.getPublic()))));
         assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
         for (String generation : List.of("root-auth-locked:locked", "root-auth-generation:recovery")) {
-            publish.accept(List.of(binding, new Credential(AccessControl.CredentialType.ARGON2, generation, "hash")));
+            publish.accept(List.of(binding, new Credential(CredentialType.ARGON2, generation, "hash")));
             assertThat(service.findSystemOidcUser(issuer, "external-root")).isNull();
             assertThat(service.issueSystemOidcToken("root", provider, "external-root", 60))
                     .isInstanceOf(TokenIssueResult.Failure.class);
@@ -192,7 +194,7 @@ class OrionAccessControlServiceImplTest {
     void externalReloadPreparesRootServerKeysBeforePublication() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         try (ServiceFixture fixture = fixture(initial,
                 testServerIdentity(List.of(KEY_THREE.getPublic())))) {
             fixture.storage.snapshot = new ConfigurationFile(
@@ -237,7 +239,7 @@ class OrionAccessControlServiceImplTest {
         }
         AclFixture root = new AclFixture();
         root.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         storage.snapshot = new ConfigurationFile(serialize(root.toAccessControl()), storage.snapshot.revision());
         int saves = storage.saveCount;
         editor.reload("after stopped startup retry");
@@ -282,8 +284,8 @@ class OrionAccessControlServiceImplTest {
     @Test
     void connectionSelectorNeverGrantsAdministrationInSystemOrOrganizationScope() {
         Grant mixed = new Grant("mixed", List.of(
-                new GrantExpression(AccessControl.GrantKey.CONNECTION, "*"),
-                new GrantExpression(AccessControl.GrantKey.ADMIN, "true")));
+                new GrantExpression(GrantKey.CONNECTION, "*"),
+                new GrantExpression(GrantKey.ADMIN, "true")));
         User actor = new User("alice", "", "", "", List.of(), List.of(), List.of(mixed));
         OrionDocument.Organization org = new OrionDocument.Organization(new OrganizationId("acme"), "",
                 List.of(actor), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
@@ -367,7 +369,7 @@ class OrionAccessControlServiceImplTest {
         OrganizationId organization = new OrganizationId("acme");
         String issuer = "https://login.example.test";
         User assigned = new User("alice", null, null, null,
-                List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+                List.of(new Credential(CredentialType.OIDC_SUBJECT, issuer, "alice")),
                 List.of("acme/reader"), List.of());
         desired.publish(organizationTokenDocument(List.of(assigned)), Optional.empty());
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null,
@@ -399,7 +401,7 @@ class OrionAccessControlServiceImplTest {
 
     private static OrionDocument organizationTokenDocument(List<User> users) {
         ScopedGrant grant = new ScopedGrant(new GrantId("read"), ScopedGrant.Effect.ALLOW,
-                List.of(new GrantExpression(AccessControl.GrantKey.READ, "true")));
+                List.of(new GrantExpression(GrantKey.READ, "true")));
         ScopedRole role = new ScopedRole(new RoleId("reader"), List.of(),
                 List.of(GrantAddress.parse("acme/read")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
@@ -440,17 +442,17 @@ class OrionAccessControlServiceImplTest {
         AclFixture primary = new AclFixture();
         AclFixture.User alice = user("alice");
         String passwordHash = hashing.calculateHash(PasswordHashingAlgorithm.SHA1, "password".toCharArray());
-        alice.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
+        alice.addCredential(CredentialType.SHA1, passwordHash);
         alice.addRole("operators");
         primary.getUsers().add(alice);
         AclFixture.User bob = user("bob");
-        bob.addCredential(AccessControl.CredentialType.SHA1, passwordHash);
+        bob.addCredential(CredentialType.SHA1, passwordHash);
         primary.getUsers().add(bob);
         AclFixture.Role role = new AclFixture.Role();
         role.setId("operators");
         AclFixture.Grant grant = new AclFixture.Grant();
         grant.setId("operator-rights");
-        grant.addKey(AccessControl.GrantKey.READ, "team/*");
+        grant.addKey(GrantKey.READ, "team/*");
         Grant originalGrant = grant.toAccessControl();
         if (referenced) {
             role.addGrantReference(grant.getId());
@@ -467,7 +469,7 @@ class OrionAccessControlServiceImplTest {
             alice.getRoles().clear();
             bob.addRole("operators");
             grant.getInfo().clear();
-            grant.addKey(AccessControl.GrantKey.ADMIN, "true");
+            grant.addKey(GrantKey.ADMIN, "true");
             duringPasswordCheck.set(() -> {
                 fixture.storage.snapshot = new ConfigurationFile(
                         serialize(primary.toAccessControl()), Optional.of("version-two"));
@@ -707,13 +709,13 @@ class OrionAccessControlServiceImplTest {
     void listsCanonicalDeduplicatedSshCredentialsForOnlyTheSelectedUser() {
         AclFixture primary = new AclFixture();
         AclFixture.User alice = user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
-                .addCredential(AccessControl.CredentialType.ARGON2, "password-hash")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
+                .addCredential(CredentialType.ARGON2, "password-hash")
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()));
         primary.getUsers().add(alice);
         primary.getUsers().add(user("bob")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             SshCredentialListResult result = fixture.service.listSshCredentials("ALICE");
@@ -729,7 +731,7 @@ class OrionAccessControlServiceImplTest {
     void reportsMalformedStoredSshCredentialsWithoutHidingThem() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
 
         try (ServiceFixture fixture = fixture(primary)) {
             assertFailure(
@@ -742,9 +744,9 @@ class OrionAccessControlServiceImplTest {
     void atomicallyAddsCanonicalKeysToTheConfigurationFile() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.ARGON2, "password-hash"));
+                .addCredential(CredentialType.ARGON2, "password-hash"));
         primary.getUsers().add(user("bob")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_THREE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             String commented = key(KEY_ONE.getPublic()) + " alice@example";
@@ -801,7 +803,7 @@ class OrionAccessControlServiceImplTest {
     void addedRootKeysRetainTheExistingAuthenticationGeneration() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root").addCredential(
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                CredentialType.OPENSSH_PUBLIC_KEY,
                 "root-auth-generation:generation-one",
                 key(KEY_ONE.getPublic())));
 
@@ -810,7 +812,7 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(SshCredentialUpdateResult.Success.class);
 
             assertThat(credentials(fixture.storage.snapshot, "root"))
-                    .filteredOn(credential -> credential.type() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                    .filteredOn(credential -> credential.type() == CredentialType.OPENSSH_PUBLIC_KEY)
                     .extracting(Credential::keyId)
                     .containsOnly("root-auth-generation:generation-one");
         }
@@ -820,12 +822,12 @@ class OrionAccessControlServiceImplTest {
     void removesEveryDuplicateOfAUniqueKeyWithoutTouchingOtherCredentialsOrUsers() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
-                .addCredential(AccessControl.CredentialType.ARGON2, "password-hash"));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic()))
+                .addCredential(CredentialType.ARGON2, "password-hash"));
         primary.getUsers().add(user("bob")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             SshCredentialUpdateResult removed = fixture.removeSshCredential(
@@ -837,7 +839,7 @@ class OrionAccessControlServiceImplTest {
                     SshCredentialUpdateResult.Success.class,
                     success -> assertThat(success.credentials()).containsExactly(descriptor(KEY_TWO.getPublic())));
             assertThat(credentials(fixture.storage.snapshot, "alice"))
-                    .filteredOn(credential -> credential.type() == AccessControl.CredentialType.ARGON2)
+                    .filteredOn(credential -> credential.type() == CredentialType.ARGON2)
                     .singleElement()
                     .extracting(Credential::value)
                     .isEqualTo("password-hash");
@@ -850,8 +852,8 @@ class OrionAccessControlServiceImplTest {
     void removalRejectsMissingAmbiguousMalformedAndUnforcedLastKeyWithoutSaving() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic()))
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_TWO.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             String first = descriptor(KEY_ONE.getPublic()).fingerprint();
@@ -874,7 +876,7 @@ class OrionAccessControlServiceImplTest {
 
         AclFixture malformed = new AclFixture();
         malformed.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, "not-a-key"));
         try (ServiceFixture fixture = fixture(malformed)) {
             assertFailure(
                     fixture.removeSshCredential("alice", "SHA256:any", true),
@@ -887,7 +889,7 @@ class OrionAccessControlServiceImplTest {
     void forcedNonRootRemovalCanRemoveTheLastKeyAndRepeatingItIsMissing() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             String fingerprint = descriptor(KEY_ONE.getPublic()).fingerprint();
@@ -907,11 +909,11 @@ class OrionAccessControlServiceImplTest {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("RoOt")
                 .addCredential(
-                        AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                        CredentialType.OPENSSH_PUBLIC_KEY,
                         "root-auth-generation:" + generation,
                         key(KEY_ONE.getPublic()))
                 .addCredential(
-                        AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                        CredentialType.OPENSSH_PUBLIC_KEY,
                         "root-auth-generation:" + generation,
                         key(KEY_TWO.getPublic())));
 
@@ -964,7 +966,7 @@ class OrionAccessControlServiceImplTest {
     void tokenAuthenticationReturnsValidatedTokenIdentity() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             AuthenticationResult authentication = fixture.service.authenticateSshUser(
@@ -989,12 +991,12 @@ class OrionAccessControlServiceImplTest {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
                 .addCredential(
-                        AccessControl.CredentialType.ARGON2,
+                        CredentialType.ARGON2,
                         "root-auth-locked:generation",
                         "locked-hash")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(primary)) {
             assertThat(fixture.service.authenticateSshUser("root", KEY_ONE.getPublic().getEncoded()))
@@ -1010,9 +1012,9 @@ class OrionAccessControlServiceImplTest {
     void adminUserUpdateWritesOnlyTheConfigurationFile() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.ARGON2, "old-hash"));
+                .addCredential(CredentialType.ARGON2, "old-hash"));
 
         try (ServiceFixture fixture = fixture(primary)) {
             fixture.createOrUpdateUser(userUpdate("alice", "new-hash"));
@@ -1030,9 +1032,9 @@ class OrionAccessControlServiceImplTest {
     void adminUpdateWaitsForCredentialMutationAndCannotResurrectRootKey() throws Exception {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.ARGON2, "old-hash"));
+                .addCredential(CredentialType.ARGON2, "old-hash"));
 
         try (ServiceFixture fixture = fixture(primary);
              var executor = Executors.newFixedThreadPool(2)) {
@@ -1071,9 +1073,9 @@ class OrionAccessControlServiceImplTest {
     void internalServerKeySynchronizationKeepsOtherUsersInTheConfigurationFile() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.ARGON2, "alice-hash"));
+                .addCredential(CredentialType.ARGON2, "alice-hash"));
         primary.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
 
         try (ServiceFixture fixture = fixture(
                 primary,
@@ -1092,7 +1094,7 @@ class OrionAccessControlServiceImplTest {
     void internalServerKeySynchronizationDoesNotReloadInsideSaveNotification() {
         AclFixture primary = new AclFixture();
         primary.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         InMemoryStorage storage = new InMemoryStorage(
                 new ConfigurationFile(serialize(primary.toAccessControl()), Optional.of("version-one")));
         storage.notifyDuringSave = true;
@@ -1120,12 +1122,12 @@ class OrionAccessControlServiceImplTest {
     void internalServerKeySynchronizationRetriesAgainstConcurrentConfiguration() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         AclFixture winning = new AclFixture();
         winning.getUsers().add(user("root")
-                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+                .addCredential(CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
         winning.getUsers().add(user("alice")
-                .addCredential(AccessControl.CredentialType.ARGON2, "alice-hash"));
+                .addCredential(CredentialType.ARGON2, "alice-hash"));
         InMemoryStorage storage = new InMemoryStorage(
                 new ConfigurationFile(serialize(initial.toAccessControl()), Optional.of("version-one")));
         storage.concurrentReplacement = new ConfigurationFile(
@@ -1279,7 +1281,7 @@ class OrionAccessControlServiceImplTest {
                     .filter(user -> user.id().equals("alice")).findFirst().orElseThrow();
             assertThat(alice.grants().getFirst().info())
                     .extracting(GrantExpression::key)
-                    .contains(AccessControl.GrantKey.READ_WRITE);
+                    .contains(GrantKey.READ_WRITE);
         }
     }
 
@@ -1368,11 +1370,11 @@ class OrionAccessControlServiceImplTest {
             void setEmail(String email) { this.email = email; }
             List<String> getRoles() { return roles; }
 
-            User addCredential(AccessControl.CredentialType type, String value) {
+            User addCredential(CredentialType type, String value) {
                 return addCredential(type, null, value);
             }
 
-            User addCredential(AccessControl.CredentialType type, String keyId, String value) {
+            User addCredential(CredentialType type, String keyId, String value) {
                 credentials.add(new Credential(type, keyId, value));
                 return this;
             }
@@ -1411,7 +1413,7 @@ class OrionAccessControlServiceImplTest {
             String getId() { return id; }
             List<GrantExpression> getInfo() { return info; }
 
-            Grant addKey(AccessControl.GrantKey key, String value) {
+            Grant addKey(GrantKey key, String value) {
                 info.add(new GrantExpression(key, value));
                 return this;
             }
@@ -1426,7 +1428,7 @@ class OrionAccessControlServiceImplTest {
         return new AccessControlUserUpdate(
                 id,
                 id + "@updated.example.test",
-                List.of(new AccessControlCredentialUpdate(AccessControl.CredentialType.ARGON2, passwordHash)),
+                List.of(new AccessControlCredentialUpdate(CredentialType.ARGON2, passwordHash)),
                 List.of());
     }
 
@@ -1468,7 +1470,7 @@ class OrionAccessControlServiceImplTest {
         for (User user : parse(file.content()).users()) {
             if (userId.equalsIgnoreCase(user.id())) {
                 return user.credentials().stream()
-                        .filter(credential -> credential.type() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                        .filter(credential -> credential.type() == CredentialType.OPENSSH_PUBLIC_KEY)
                         .map(Credential::value)
                         .toList();
             }

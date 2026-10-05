@@ -29,8 +29,10 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
@@ -1564,7 +1566,7 @@ class GitSshTransportEndToEndIT {
          * behavior is covered by unit tests around access rules.
          */
         User user = new User(USERNAME, null, null, "e2e@example.test",
-                List.of(new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
                         KeyUtils.publicKeyToString(userPublicKey))), List.of(),
                 List.of(repositoryGrant("project", true), repositoryGrant("fetch-project", true)));
         return new AccessControl(List.of(user), List.of(), List.of());
@@ -1572,7 +1574,7 @@ class GitSshTransportEndToEndIT {
 
     private static AccessControl accessControlForReadOnlyRepository(PublicKey userPublicKey, String repositoryName) {
         User user = new User(USERNAME, null, null, "e2e@example.test",
-                List.of(new Credential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY,
                         KeyUtils.publicKeyToString(userPublicKey))), List.of(),
                 List.of(repositoryGrant(repositoryName, false)));
         return new AccessControl(List.of(user), List.of(), List.of());
@@ -1580,15 +1582,15 @@ class GitSshTransportEndToEndIT {
 
     private static Grant repositoryGrant(String repositoryName, boolean write) {
         List<GrantExpression> info = new ArrayList<>();
-        info.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
-        info.add(new GrantExpression(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
+        info.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
+        info.add(new GrantExpression(GrantKey.READ, AccessControl.TRUE_STRING));
         if (write) {
             info.add(new GrantExpression(
-                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
             info.add(new GrantExpression(
-                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
-        info.add(new GrantExpression(AccessControl.GrantKey.BRANCH, "*"));
+        info.add(new GrantExpression(GrantKey.BRANCH, "*"));
         return new Grant("REPOSITORY_" + repositoryName, info);
     }
 

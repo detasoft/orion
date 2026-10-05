@@ -28,13 +28,4 @@ public record AccessControl(List<User> users, List<Role> roles, List<Grant> gran
         }
         return List.copyOf(result);
     }
-
-    public enum CredentialType {
-        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, JWT_SIGNING_PUBLIC_KEY, OIDC_SUBJECT;
-    }
-
-    public enum GrantKey {
-        CONNECTION, CONNECTION_USE, REPOSITORY, BRANCH, FORCE, READ, READ_WRITE, CREATE,
-        NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN, ADMIN
-    }
 }

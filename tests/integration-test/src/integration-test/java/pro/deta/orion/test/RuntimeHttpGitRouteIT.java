@@ -19,8 +19,10 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
@@ -158,11 +160,11 @@ class RuntimeHttpGitRouteIT {
     private static OrionDocument.Organization gitOrganization(String id) {
         String issuer = "https://login.example.test";
         User user = new User("alice", null, null, null,
-                List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, "alice")),
+                List.of(new Credential(CredentialType.OIDC_SUBJECT, issuer, "alice")),
                 List.of(id + "/developer"), List.of());
         ScopedGrant grant = new ScopedGrant(new GrantId("write"), ScopedGrant.Effect.ALLOW, List.of(
-                new GrantExpression(AccessControl.GrantKey.READ_WRITE, "true"),
-                new GrantExpression(AccessControl.GrantKey.CREATE, "true")));
+                new GrantExpression(GrantKey.READ_WRITE, "true"),
+                new GrantExpression(GrantKey.CREATE, "true")));
         ScopedRole role = new ScopedRole(new RoleId("developer"), List.of(),
                 List.of(GrantAddress.parse(id + "/write")));
         OrionDocument.Repository repository = new OrionDocument.Repository(new RepositoryId("repo"), "",
@@ -486,29 +488,29 @@ class RuntimeHttpGitRouteIT {
             String branch,
             boolean force) {
         AccessControl base = DefaultAccessControl.create(
-                TEST_PASSWORD_HASH, AccessControl.CredentialType.SHA1);
+                TEST_PASSWORD_HASH, CredentialType.SHA1);
         List<GrantExpression> expressions = new ArrayList<>();
-        expressions.add(new GrantExpression(AccessControl.GrantKey.REPOSITORY, repositoryName));
-        expressions.add(new GrantExpression(AccessControl.GrantKey.BRANCH, branch));
+        expressions.add(new GrantExpression(GrantKey.REPOSITORY, repositoryName));
+        expressions.add(new GrantExpression(GrantKey.BRANCH, branch));
         if (read) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.READ, AccessControl.TRUE_STRING));
+                    GrantKey.READ, AccessControl.TRUE_STRING));
         }
         if (write) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
+                    GrantKey.READ_WRITE, AccessControl.TRUE_STRING));
         }
         if (create) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING));
+                    GrantKey.CREATE, AccessControl.TRUE_STRING));
         }
         if (force) {
             expressions.add(new GrantExpression(
-                    AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING));
+                    GrantKey.FORCE, AccessControl.TRUE_STRING));
         }
         Grant grant = new Grant("REPOSITORY_" + repositoryName, expressions);
         User user = new User(USERNAME, null, null, USERNAME + "@example.test",
-                List.of(new Credential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH)),
+                List.of(new Credential(CredentialType.SHA1, TEST_PASSWORD_HASH)),
                 List.of(), List.of(grant));
         List<User> users = new ArrayList<>(base.users());
         users.add(user);

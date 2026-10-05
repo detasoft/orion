@@ -1,6 +1,6 @@
 package pro.deta.orion.auth.check.rule;
 
-import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.AccessRule;
@@ -32,7 +32,7 @@ public final class ApplicationAccessRules {
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return AccessDecision.deny("system identity is required");
         }
-        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
+        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(GrantKey.SHUTDOWN));
         if (allowed) {
             return AccessDecision.allow("shutdown grant matched");
         }
@@ -43,7 +43,7 @@ public final class ApplicationAccessRules {
         if (securityContext.getUserIdentity().getOrganizationId().isPresent()) {
             return AccessDecision.deny("system identity is required");
         }
-        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(AccessControl.GrantKey.ADMIN));
+        boolean allowed = GrantAccess.hasGrant(securityContext.getUserIdentity(), GrantMatcher.of(GrantKey.ADMIN));
         if (allowed) {
             return AccessDecision.allow("admin grant matched");
         }

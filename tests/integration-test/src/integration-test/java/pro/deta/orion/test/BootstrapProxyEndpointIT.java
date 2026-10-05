@@ -30,8 +30,10 @@ import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -95,13 +97,13 @@ class BootstrapProxyEndpointIT {
             List<Grant> grants = new ArrayList<>(currentRoot.grants());
             for (String name : List.of("proxy/system/*", "bootstrap")) {
                 grants.add(new Grant("probe-" + grants.size(), List.of(
-                        new GrantExpression(AccessControl.GrantKey.REPOSITORY, name),
-                        new GrantExpression(AccessControl.GrantKey.READ, "true"),
-                        new GrantExpression(AccessControl.GrantKey.BRANCH, "*"))));
+                        new GrantExpression(GrantKey.REPOSITORY, name),
+                        new GrantExpression(GrantKey.READ, "true"),
+                        new GrantExpression(GrantKey.BRANCH, "*"))));
             }
             User updatedRoot = new User(currentRoot.id(), currentRoot.first(),
                     currentRoot.last(), currentRoot.email(), List.of(new Credential(
-                            AccessControl.CredentialType.SHA1,
+                            CredentialType.SHA1,
                             new OrionPasswordHashingService().calculateHash(
                                     PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray()))),
                     currentRoot.roles(), grants);
@@ -259,8 +261,8 @@ class BootstrapProxyEndpointIT {
         String hash = new OrionPasswordHashingService().calculateHash(
                 PasswordHashingAlgorithm.SHA1, PASSWORD.toCharArray());
         return new AccessControlUserUpdate(name, name + "@example.test", List.of(
-                new AccessControlCredentialUpdate(AccessControl.CredentialType.SHA1, hash),
-                new AccessControlCredentialUpdate(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                new AccessControlCredentialUpdate(CredentialType.SHA1, hash),
+                new AccessControlCredentialUpdate(CredentialType.OPENSSH_PUBLIC_KEY,
                         PublicKeyEntry.toString(key.getPublic()))),
                 List.of(new AccessControlRepositoryGrantUpdate(repository, true, write, false, false, "main")));
     }

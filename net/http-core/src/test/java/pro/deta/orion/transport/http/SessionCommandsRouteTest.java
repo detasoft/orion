@@ -38,6 +38,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 
 import java.io.IOException;
 import java.net.URI;
@@ -193,7 +194,7 @@ class SessionCommandsRouteTest {
                     if ("admin".equals(request.getHeader("Authorization"))) {
                         Grant grant = new Grant("admin", List.of(
                                 new GrantExpression(
-                                        AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)));
+                                        GrantKey.ADMIN, AccessControl.TRUE_STRING)));
                         request.setAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE,
                                 SecurityContext.createContext()
                                         .withUserIdentity(new InternalUserImpl("admin", List.of(grant))));

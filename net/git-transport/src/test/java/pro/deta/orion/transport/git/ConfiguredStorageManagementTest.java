@@ -18,6 +18,7 @@ import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.*;
 import pro.deta.orion.schema.orion.*;
@@ -51,10 +52,10 @@ class ConfiguredStorageManagementTest {
         material.generateSecretKeyIfMissing(descriptor, 256);
         cipher = KeyMaterialCapabilities.open(material, List.of(descriptor)).configurationCipher(descriptor);
         User user = new User("alice", "", "", "", List.of(), List.of(), List.of(
-                grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CREATE),
-                grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.READ_WRITE),
-                grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CONNECTION_USE),
-                grant(AccessControl.GrantKey.REPOSITORY, "acme/**", AccessControl.GrantKey.CREATE)));
+                grant(GrantKey.CONNECTION, "*", GrantKey.CREATE),
+                grant(GrantKey.CONNECTION, "*", GrantKey.READ_WRITE),
+                grant(GrantKey.CONNECTION, "*", GrantKey.CONNECTION_USE),
+                grant(GrantKey.REPOSITORY, "acme/**", GrantKey.CREATE)));
         OrionDocument.Organization org = new OrionDocument.Organization(organization, "Acme", List.of(user),
                 List.of(), List.of(), List.of(new OrionDocument.Team(new TeamId("team"), "Team", List.of(),
                 List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
@@ -180,7 +181,7 @@ class ConfiguredStorageManagementTest {
         assertThat(management.saveConnection(actor, Optional.of(organization), revision(), true,
                 input("secret".toCharArray()))).isInstanceOf(StorageManagement.Success.class);
         OrionDocument old = desired.current().document();
-        setGrants(List.of(grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CREATE)), false);
+        setGrants(List.of(grant(GrantKey.CONNECTION, "*", GrantKey.CREATE)), false);
         assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), false,
                 input("replacement".toCharArray())), StorageManagement.FailureCode.CONFLICT);
         // A matching revision from storage with a stale identity still cannot authorize the revoked change.
@@ -189,7 +190,7 @@ class ConfiguredStorageManagementTest {
         editor.reload("revoked");
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(
                 actor, Optional.of(organization))).value().connections()).isEmpty();
-        setGrants(List.of(grant(AccessControl.GrantKey.CONNECTION, "*", AccessControl.GrantKey.CONNECTION_USE)), true);
+        setGrants(List.of(grant(GrantKey.CONNECTION, "*", GrantKey.CONNECTION_USE)), true);
         StorageManagement.Connections view = ((StorageManagement.Success<StorageManagement.Connections>)
                 management.connections(actor, Optional.of(organization))).value();
         assertThat(view.connections()).hasSize(1);
@@ -287,7 +288,7 @@ class ConfiguredStorageManagementTest {
         OrionDocument.Organization org = document.organizations().getFirst();
         ConfigurationScope scope = ConfigurationScope.organization(organization);
         ScopedGrant deny = new ScopedGrant(new GrantId("deny-use"), ScopedGrant.Effect.DENY,
-                grant(AccessControl.GrantKey.CONNECTION, "archive", AccessControl.GrantKey.CONNECTION_USE).info());
+                grant(GrantKey.CONNECTION, "archive", GrantKey.CONNECTION_USE).info());
         ScopedRole role = new ScopedRole(new RoleId("denied"), List.of(),
                 List.of(new GrantAddress(scope, deny.id())));
         User user = new User("alice", "", "", "", List.of(),
@@ -310,11 +311,11 @@ class ConfiguredStorageManagementTest {
     @Test
     void matchingCreateAndChangeDeniesOverrideAllowsAndKeepSecretsUnchanged() throws Exception {
         management.saveConnection(actor, Optional.of(organization), revision(), true, input("original".toCharArray()));
-        for (AccessControl.GrantKey action : List.of(AccessControl.GrantKey.CREATE, AccessControl.GrantKey.READ_WRITE)) {
+        for (GrantKey action : List.of(GrantKey.CREATE, GrantKey.READ_WRITE)) {
             OrionDocument document = desired.current().document();
             OrionDocument.Organization org = document.organizations().getFirst();
             ScopedGrant deny = new ScopedGrant(new GrantId("deny-change"), ScopedGrant.Effect.DENY,
-                    grant(AccessControl.GrantKey.CONNECTION, "archive*", action).info());
+                    grant(GrantKey.CONNECTION, "archive*", action).info());
             ScopedRole role = new ScopedRole(new RoleId("denied"), List.of(), List.of(new GrantAddress(
                     ConfigurationScope.organization(organization), deny.id())));
             User user = new User("alice", "", "", "", List.of(), List.of("acme/denied"),
@@ -324,7 +325,7 @@ class ConfiguredStorageManagementTest {
                     org.invitations(), org.connections()))));
             editor.reload("deny connection mutation");
             int saves = storage.saves;
-            boolean create = action == AccessControl.GrantKey.CREATE;
+            boolean create = action == GrantKey.CREATE;
             char[] secret = "replacement".toCharArray();
             assertFailure(management.saveConnection(actor, Optional.of(organization), revision(), create,
                     new StorageManagement.S3Input(create ? "archive-new" : "archive", null, "us-east-1", true,
@@ -342,7 +343,7 @@ class ConfiguredStorageManagementTest {
         assertFailure(management.createRepository(actor, "acme/team/local", Optional.of(s3Binding())),
                 StorageManagement.FailureCode.CONFLICT);
         management.createRepository(actor, "acme/team/archive", Optional.of(s3Binding()));
-        setGrants(List.of(grant(AccessControl.GrantKey.REPOSITORY, "acme/team/archive", AccessControl.GrantKey.READ)), true);
+        setGrants(List.of(grant(GrantKey.REPOSITORY, "acme/team/archive", GrantKey.READ)), true);
         assertThat(pro.deta.orion.auth.check.rule.RepositoryAccessRules.read().evaluate(actor,
                 pro.deta.orion.auth.check.resource.RepositoryResource.of("acme/team/archive")).allowed()).isTrue();
         assertThat(((StorageManagement.Success<StorageManagement.Connections>) management.connections(actor,
@@ -354,7 +355,7 @@ class ConfiguredStorageManagementTest {
         OrionDocument document = desired.current().document();
         User adminUser = new User("operator", "", "", "", List.of(), List.of(),
                 List.of(new Grant("admin", List.of(
-                        new GrantExpression(AccessControl.GrantKey.ADMIN, "true")))));
+                        new GrantExpression(GrantKey.ADMIN, "true")))));
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(
                 new AccessControl(List.of(adminUser), List.of(), List.of())), document.organizations()));
         editor.reload("system administrator");
@@ -399,8 +400,8 @@ class ConfiguredStorageManagementTest {
                 "access-id", secret, null, false);
     }
 
-    private static Grant grant(AccessControl.GrantKey selector, String name,
-            AccessControl.GrantKey action) {
+    private static Grant grant(GrantKey selector, String name,
+            GrantKey action) {
         return new Grant(selector + "-" + action, List.of(
                 new GrantExpression(selector, name), new GrantExpression(action, "true")));
     }

@@ -5,10 +5,11 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
+import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
@@ -103,7 +104,7 @@ public final class OrganizationAccounts {
         User found = null;
         for (User user : organization(organization).users()) {
             for (Credential credential : user.credentials()) {
-                if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                if (credential.type() == CredentialType.OIDC_SUBJECT
                         && Objects.equals(issuer, credential.keyId())
                         && Objects.equals(subject, credential.value())) {
                     if (found != null && !found.id().equals(user.id())) {
@@ -136,7 +137,7 @@ public final class OrganizationAccounts {
                     throw new IllegalArgumentException("A user with this email already exists");
                 }
                 for (Credential credential : existing.credentials()) {
-                    if (credential.type() == AccessControl.CredentialType.OIDC_SUBJECT
+                    if (credential.type() == CredentialType.OIDC_SUBJECT
                             && Objects.equals(issuer, credential.keyId())
                             && Objects.equals(subject, credential.value())) {
                         throw new IllegalArgumentException("Account is already linked");
@@ -145,9 +146,9 @@ public final class OrganizationAccounts {
             }
             List<User> users = new ArrayList<>(organization.users());
             users.add(new User(userId, givenName, familyName, normalized,
-                    List.of(new Credential(AccessControl.CredentialType.OIDC_SUBJECT, issuer, subject)),
+                    List.of(new Credential(CredentialType.OIDC_SUBJECT, issuer, subject)),
                     List.of(), List.of(new Grant("organization-read", List.of(
-                            new GrantExpression(AccessControl.GrantKey.REPOSITORY, id + "/**"))))));
+                            new GrantExpression(GrantKey.REPOSITORY, id + "/**"))))));
             List<OrganizationInvitation> invitations = new ArrayList<>(organization.invitations());
             invitations.remove(invitation);
             return replaceAccounts(organization, users, invitations);

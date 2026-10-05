@@ -16,6 +16,7 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessTokenIdentity;
@@ -260,7 +261,7 @@ class OrionAuthorizationFilterTest {
             if (adminGrant) {
                 grants.add(new Grant("admin", List.of(
                         new GrantExpression(
-                                AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING))));
+                                GrantKey.ADMIN, AccessControl.TRUE_STRING))));
             }
             return TokenAuthenticationResult.success(
                     new InternalUserImpl("token-user", grants),
