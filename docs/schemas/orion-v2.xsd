@@ -36,6 +36,13 @@
         </xs:complexType>
       </xs:element>
       <xs:element name="connections" type="connections" minOccurs="0"/>
+      <xs:element name="oidc" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="provider" type="oidcProvider" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
   </xs:complexType>
 
@@ -261,6 +268,17 @@
       </xs:element>
     </xs:sequence>
     <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="oidcProvider" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="issuer" type="xs:string"/>
+      <xs:element name="clientId" type="xs:string"/>
+      <xs:element name="secret" type="xs:string"/>
+      <xs:element name="idleTimeoutSeconds" type="xs:long" minOccurs="0"/>
+      <xs:element name="reauthenticationTimeoutSeconds" type="xs:long" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
 
   <xs:complexType name="organization" final="extension restriction">
@@ -493,17 +511,6 @@
       <xs:element name="connection" type="connectionReference"/>
     </xs:sequence>
     <xs:attribute name="location" type="xs:string" use="required"/>
-  </xs:complexType>
-
-  <xs:complexType name="oidcProvider" final="extension restriction">
-    <xs:sequence>
-      <xs:element name="issuer" type="xs:string"/>
-      <xs:element name="clientId" type="xs:string"/>
-      <xs:element name="secret" type="xs:string"/>
-      <xs:element name="idleTimeoutSeconds" type="xs:long" minOccurs="0"/>
-      <xs:element name="reauthenticationTimeoutSeconds" type="xs:long" minOccurs="0"/>
-    </xs:sequence>
-    <xs:attribute name="id" type="xs:string" use="required"/>
   </xs:complexType>
 
   <xs:complexType name="invitation" final="extension restriction">

@@ -253,7 +253,8 @@ class OrionHttpRouteServletRoutingTest {
                 }
                 throw new IllegalArgumentException("private persistence details");
             });
-            OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(service, configurationEditor(), OBJECT_MAPPER);
+            OrionHttpRoute route = new OrionAdminCreateOrUpdateUserRoute(
+                    service, configurationEditor(), OBJECT_MAPPER, new OrionDesiredState());
             ResponseRecorder response = new ResponseRecorder();
             servlet(route).service(request("POST", route.definition().urlPattern(), admin(),
                     "{\"id\":\"alice\"}"), response.proxy());

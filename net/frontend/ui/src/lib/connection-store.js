@@ -6,7 +6,7 @@ export function loadConnectionSettings(local = localStorage, session = sessionSt
   let oidc
   try {
     const stored = JSON.parse(session.getItem(OIDC_KEY))
-    if (stored && Number.isFinite(stored.expiresAt) && stored.organization && stored.userId) oidc = stored
+    if (stored && Number.isFinite(stored.expiresAt) && typeof stored.organization === 'string' && stored.userId) oidc = stored
   } catch { /* Ignore invalid saved session metadata. */ }
   return {
     ...(oidc ? { oidc } : {}),

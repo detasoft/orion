@@ -1,15 +1,17 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { createOrionClient } from '../lib/orion-api.js'
 
 const props = defineProps({ invitation: { type: String, default: '' }, ticket: { type: String, default: '' },
-  organization: { type: String, default: 'default' } })
+  organization: { type: String, default: '' } })
 const emit = defineEmits(['signed-in', 'close'])
 const api = createOrionClient()
 const organization = ref(props.organization)
+const scope = ref(props.invitation || props.organization ? 'organization' : 'system')
 const providers = ref([])
 const provider = ref('')
 const loadedOrganization = ref('')
+const loadedScope = ref('')
 const profile = ref(null)
 const busy = ref(false)
 const error = ref('')
@@ -27,17 +29,22 @@ function loadProviders() {
     providers.value = []
     provider.value = ''
     const selectedOrganization = organization.value.trim()
-    const result = await api.providers(selectedOrganization)
+    const selectedScope = scope.value
+    const result = await api.providers(selectedScope === 'system'
+      ? { scope: 'system' } : { scope: 'organization', organization: selectedOrganization })
+    if (selectedScope !== scope.value || selectedOrganization !== organization.value.trim()) return
+    loadedScope.value = selectedScope
     loadedOrganization.value = selectedOrganization
     providers.value = result.providers
     provider.value = result.providers[0] ?? ''
-    if (!provider.value) error.value = 'No sign-in provider is configured for this organization.'
+    if (!provider.value) error.value = 'No sign-in provider is configured for this scope.'
   })
 }
 
 function start() {
   return perform(async () => {
-    const response = await api.beginOidc({ organization: loadedOrganization.value,
+    const response = await api.beginOidc({ scope: loadedScope.value,
+      ...(loadedScope.value === 'organization' ? { organization: loadedOrganization.value } : {}),
       provider: provider.value, invitation: props.invitation })
     window.location.assign(response.url)
   })
@@ -51,18 +58,26 @@ function complete() {
   })
 }
 
+watch(scope, () => {
+  providers.value = []
+  provider.value = ''
+  loadedScope.value = ''
+  error.value = ''
+  if (scope.value === 'system') loadProviders()
+})
+
 onMounted(() => {
   if (props.ticket) {
     perform(async () => { profile.value = await api.oidcProfile(props.ticket) })
-  } else if (props.invitation) loadProviders()
+  } else if (props.invitation || scope.value === 'system') loadProviders()
 })
 </script>
 
 <template>
   <div class="modal-backdrop">
-    <section class="modal sign-in" aria-label="Organization sign-in">
+    <section class="modal sign-in" aria-label="OIDC sign-in">
       <button class="close-button" aria-label="Close sign-in" @click="emit('close')">×</button>
-      <h2>{{ profile?.setup ? 'Set up your profile' : 'Sign in to your organization' }}</h2>
+      <h2>{{ profile?.setup ? 'Set up your profile' : 'Sign in with OIDC' }}</h2>
       <form v-if="profile" @submit.prevent="complete">
         <p>{{ profile.email }}</p>
         <template v-if="profile.setup">
@@ -72,11 +87,17 @@ onMounted(() => {
         <button class="primary-button" :disabled="busy">Continue</button>
       </form>
       <template v-else-if="!ticket">
-        <form @submit.prevent="loadProviders">
+        <label v-if="!invitation">Sign-in scope
+          <select v-model="scope" name="scope" :disabled="busy">
+            <option value="system">System user</option><option value="organization">Organization member</option>
+          </select>
+        </label>
+        <form v-if="scope === 'organization'" @submit.prevent="loadProviders">
           <label>Organization <input v-model="organization" required :readonly="!!invitation" /></label>
           <button class="secondary-button" :disabled="busy">Find sign-in providers</button>
         </form>
-        <form v-if="providers.length && organization.trim() === loadedOrganization" @submit.prevent="start">
+        <form v-if="providers.length && scope === loadedScope && organization.trim() === loadedOrganization"
+          @submit.prevent="start">
           <label>Sign-in provider
             <select v-model="provider"><option v-for="item in providers" :key="item">{{ item }}</option></select>
           </label>

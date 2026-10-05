@@ -63,6 +63,66 @@ import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
     @Test
+    void administratorEditsOnlyExistingUsersOidcBindingsWithRevisionProtection() throws Exception {
+        try (Fixture f = new Fixture()) {
+            User user = f.systemUser("operator", "external-alice", false);
+            User existing = new User(user.id(), "Existing", "Profile", user.email(),
+                    List.of(new Credential(CredentialType.OPENSSH_PUBLIC_KEY, "retained-key")),
+                    List.of(), user.grants());
+            f.configureSystem(List.of(existing));
+            User before = f.desired.current().document().system().accessControl().users().getFirst();
+            Reply listed = f.request("GET", "/api/admin/users", Map.of(), Map.of(), null, f.admin);
+            assertThat(listed.status).isEqualTo(200);
+            assertThat(listed.json.toString()).doesNotContain("retained-key");
+            Map<String, Object> input = Map.of("action", "oidc-bindings", "id", "operator",
+                    "revision", listed.json.path("revision").asText(), "bindings",
+                    List.of(Map.of("issuer", f.issuer.toString(), "subject", "external-alice")));
+            Reply saved = f.request("POST", "/api/admin/users", input, Map.of(), null, f.admin);
+            assertThat(saved.status).isEqualTo(200);
+            User after = f.desired.current().document().system().accessControl().users().getFirst();
+            assertThat(after.first()).isEqualTo(before.first());
+            assertThat(after.last()).isEqualTo(before.last());
+            assertThat(after.grants()).isEqualTo(before.grants());
+            assertThat(after.credentials()).contains(before.credentials().getFirst());
+            assertThat(f.signInSystem().status).isEqualTo(200);
+            assertThat(f.request("POST", "/api/admin/users", input, Map.of(), null, f.admin).status)
+                    .isEqualTo(409);
+            Map<String, Object> unknown = Map.of("action", "oidc-bindings", "id", "missing",
+                    "revision", f.desired.current().revision().orElseThrow(), "bindings", List.of());
+            assertThat(f.request("POST", "/api/admin/users", unknown, Map.of(), null, f.admin).status)
+                    .isEqualTo(400);
+            assertThat(f.desired.current().document().system().accessControl().users()).containsExactly(after);
+        }
+    }
+
+    @Test
+    void bindingEditorRejectsAmbiguityAndRevokesRemovedBindings() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.configureSystem(List.of(f.systemUser("operator", "external-alice", true),
+                    f.systemUser("other", "external-other", false)));
+            Reply signedIn = f.signInSystem();
+            byte[] token = signedIn.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
+            for (List<Map<String, String>> bindings : List.of(
+                    List.of(Map.of("issuer", f.issuer.toString(), "subject", "external-other")),
+                    List.of(Map.of("issuer", f.issuer.toString(), "subject", "external-alice"),
+                            Map.of("issuer", f.issuer.toString(), "subject", "external-alice")),
+                    List.of(Map.of("issuer", "http://insecure.example", "subject", "external-alice")))) {
+                Map<String, Object> input = Map.of("action", "oidc-bindings", "id", "operator",
+                        "revision", f.desired.current().revision().orElseThrow(), "bindings", bindings);
+                assertThat(f.request("POST", "/api/admin/users", input, Map.of(), null, f.admin).status)
+                        .isEqualTo(400);
+                assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Success.class);
+            }
+            Map<String, Object> remove = Map.of("action", "oidc-bindings", "id", "operator",
+                    "revision", f.desired.current().revision().orElseThrow(), "bindings", List.of());
+            assertThat(f.request("POST", "/api/admin/users", remove, Map.of(), null, f.admin).status).isEqualTo(200);
+            assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
+            assertThat(f.request("GET", "/api/admin/users", Map.of(), Map.of(), null, null).status).isEqualTo(403);
+        }
+    }
+
+    @Test
     void organizationWithNoProvidersDoesNotInheritSystemProviders() throws Exception {
         try (Fixture f = new Fixture()) {
             f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
@@ -892,7 +952,8 @@ class OrionOidcOnboardingTest {
             filter = new OrionAuthorizationFilter(acl, oidc);
             servlet = new OrionHttpRouteServlet(new OrionHttpRouteRegistry(Set.of(oidc,
                     new OrionAdminInvitationsRoute(accounts, desired, oidc, mapper),
-                    new OrionAdminOidcRoute(desired, editor, secrets, mapper))), new OrionHttpResponseWriter(mapper));
+                    new OrionAdminOidcRoute(desired, editor, secrets, mapper),
+                    new OrionAdminCreateOrUpdateUserRoute(acl, editor, mapper, desired))), new OrionHttpResponseWriter(mapper));
         }
 
         String invite(String organization) throws Exception {

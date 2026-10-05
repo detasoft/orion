@@ -373,3 +373,22 @@ describe('createOrionClient', () => {
     })
   })
 })
+
+it('renews system sessions with an explicit scope and rejects organization substitution', async () => {
+  const renewed = { scope: 'system', token: 'new-token', expiresAt: Date.now() / 1000 + 3600,
+    organization: '', userId: 'operator' }
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify(renewed), {
+    headers: { 'Content-Type': 'application/json' },
+  }))
+  const client = createOrionClient({ fetchImpl, token: 'old',
+    oidc: { expiresAt: 1, organization: '', userId: 'operator' } })
+  await client.refreshSession()
+  expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({ scope: 'system', userId: 'operator' })
+  client.dispose()
+  const replaced = createOrionClient({ token: 'old', oidc: { expiresAt: 1, organization: '', userId: 'operator' },
+    fetchImpl: async () => new Response(JSON.stringify({ ...renewed, scope: 'organization', organization: 'acme' }), {
+      headers: { 'Content-Type': 'application/json' },
+    }) })
+  await expect(replaced.refreshSession()).rejects.toMatchObject({ status: 401 })
+  replaced.dispose()
+})

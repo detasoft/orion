@@ -42,13 +42,15 @@ export function createOrionClient(options = {}) {
         const response = await fetchImpl(`${baseUrl}/api/auth/oidc/refresh`, {
           method: 'POST', credentials: 'same-origin', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ organization: oidc.organization, userId: oidc.userId }),
+          body: JSON.stringify({ scope: oidc.organization ? 'organization' : 'system',
+            ...(oidc.organization ? { organization: oidc.organization } : {}), userId: oidc.userId }),
         })
         if (!response.ok) throw Object.assign(new Error('Session renewal failed'), { status: response.status })
         const result = await response.json()
         if (disposed) throw new DOMException('Connection closed', 'AbortError')
         if (!result.token || !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now() / 1000
-          || result.organization !== oidc.organization || result.userId !== oidc.userId) {
+          || result.organization !== oidc.organization || result.userId !== oidc.userId
+          || (result.scope && result.scope !== (oidc.organization ? 'organization' : 'system'))) {
           throw Object.assign(new Error('Session changed. Sign in again.'), { status: 401 })
         }
         token = result.token
@@ -130,8 +132,8 @@ export function createOrionClient(options = {}) {
     invite(input) {
       return request('/api/admin/invitations', { method: 'POST', body: JSON.stringify(input) })
     },
-    providers(organization) {
-      return request(`/api/auth/providers?${new URLSearchParams({ organization })}`)
+    providers(scope) {
+      return request(`/api/auth/providers?${new URLSearchParams(scope)}`)
     },
     beginOidc(input) {
       return request('/api/auth/oidc/start', { method: 'POST', body: JSON.stringify(input) })
@@ -232,6 +234,11 @@ export function createOrionClient(options = {}) {
         body: JSON.stringify({ name, ...storage }),
         ...(storage ? { signal: AbortSignal.timeout(45000) } : {}),
       })
+    },
+    systemUsers() { return request('/api/admin/users') },
+    saveSystemOidcBindings(input) {
+      return request('/api/admin/users', { method: 'POST',
+        body: JSON.stringify({ ...input, action: 'oidc-bindings' }) })
     },
     createOrUpdateUser(user) {
       return request('/api/admin/users', {

@@ -34,6 +34,7 @@ const navItems = computed(() => identity.value?.organization
     : !['key-material', 'tasks', 'logs'].includes(item.id) || identity.value?.admin))
 const signIn = ref(null)
 const providerRevision = ref(0)
+const SystemOidcBindings = defineAsyncComponent(() => import('./components/SystemOidcBindings.vue'))
 const OrganizationOidc = defineAsyncComponent(() => import('./components/OrganizationOidc.vue'))
 const OrganizationInvitations = defineAsyncComponent(() => import('./components/OrganizationInvitations.vue'))
 const OrganizationSignIn = defineAsyncComponent(() => import('./components/OrganizationSignIn.vue'))
@@ -743,7 +744,9 @@ onUnmounted(() => {
         </template>
 
         <section v-else-if="activeView === 'people'" class="people-grid">
-          <OrganizationOidc v-if="isConnected && identity?.admin" :token="settings.token"
+          <SystemOidcBindings v-if="isConnected && identity?.admin" :key="settings.token" :token="settings.token"
+            @authorization-error="clearExpiredCredentials" />
+          <OrganizationOidc v-if="isConnected && identity?.admin" :key="settings.token" :token="settings.token"
             @saved="providerRevision++" @authorization-error="clearExpiredCredentials" />
           <OrganizationInvitations v-if="isConnected && identity?.admin" :key="providerRevision" :token="settings.token"
             @authorization-error="clearExpiredCredentials" />

@@ -7,6 +7,8 @@ const emit = defineEmits(['authorization-error', 'saved'])
 const api = createOrionClient({ token: props.token })
 const organizations = ref([])
 const organization = ref('')
+const scope = ref('organization')
+const systemProviders = ref([])
 const revision = ref('')
 const selected = ref('')
 const id = ref('')
@@ -18,7 +20,8 @@ const reauthenticationHours = ref(0)
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
-const providers = computed(() => organizations.value.find((item) => item.id === organization.value)?.providers ?? [])
+const providers = computed(() => scope.value === 'system' ? systemProviders.value
+  : organizations.value.find((item) => item.id === organization.value)?.providers ?? [])
 const original = computed(() => providers.value.find((item) => item.id === selected.value))
 const needsSecret = computed(() => !original.value || original.value.issuer !== issuer.value.trim()
   || original.value.clientId !== clientId.value.trim())
@@ -32,6 +35,7 @@ function reset() {
   reauthenticationHours.value = (original.value?.reauthenticationTimeoutSeconds ?? 0) / 3600
   saved.value = false
 }
+watch(scope, () => { selected.value = ''; reset() })
 watch(organization, () => { selected.value = ''; reset() })
 watch(selected, reset)
 
@@ -43,6 +47,7 @@ function failed(failure) {
 async function load() {
   const response = await api.oidcSettings()
   organizations.value = response.organizations
+  systemProviders.value = response.system?.providers ?? []
   revision.value = response.revision
   if (!organization.value) organization.value = response.organizations[0]?.id ?? ''
 }
@@ -60,7 +65,8 @@ async function save() {
   busy.value = true
   saved.value = false
   error.value = ''
-  const input = { organization: organization.value, revision: revision.value, id: id.value.trim(),
+  const input = { ...(scope.value === 'system' ? { scope: 'system' } : { organization: organization.value }),
+    revision: revision.value, id: id.value.trim(),
     issuer: issuer.value.trim(), clientId: clientId.value.trim(), clientSecret: clientSecret.value,
     idleTimeoutSeconds: Math.round(Number(idleHours.value) * 3600),
     reauthenticationTimeoutSeconds: Math.round(Number(reauthenticationHours.value) * 3600) }
@@ -82,16 +88,21 @@ onMounted(reload)
 
 <template>
   <section class="panel content-panel oidc-settings">
-    <h3>Organization sign-in</h3>
-    <p>Add a Google or corporate OIDC provider before inviting users.</p>
+    <h3>OIDC providers</h3>
+    <p>Configure providers independently for system users and organization members.</p>
     <form @submit.prevent="save">
-      <label>Organization
-        <select v-model="organization" :disabled="busy" required>
+      <label>Provider scope
+        <select v-model="scope" name="scope" :disabled="busy">
+          <option value="system">System users</option><option value="organization">Organization members</option>
+        </select>
+      </label>
+      <label v-if="scope === 'organization'">Organization
+        <select v-model="organization" name="organization" :disabled="busy" required>
           <option v-for="item in organizations" :key="item.id" :value="item.id">{{ item.id }}</option>
         </select>
       </label>
       <label>Provider
-        <select v-model="selected" :disabled="busy">
+        <select v-model="selected" name="provider" :disabled="busy">
           <option value="">Add provider</option>
           <option v-for="item in providers" :key="item.id" :value="item.id">{{ item.id }}</option>
         </select>
@@ -116,9 +127,10 @@ onMounted(reload)
           min="0" max="596523" step="any" required :disabled="busy" />
       </label>
       <p>Timeouts apply separately to each browser session using this provider.</p>
-      <button class="primary-button" :disabled="busy || !organization || !revision">Save provider</button>
+      <button class="primary-button"
+        :disabled="busy || (scope === 'organization' && !organization) || !revision">Save provider</button>
     </form>
-    <p v-if="saved" role="status">Provider saved. You can now invite users to this organization.</p>
+    <p v-if="saved" role="status">Provider saved in the selected scope.</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <button class="secondary-button" :disabled="busy" @click="reload">Reload providers</button>
   </section>

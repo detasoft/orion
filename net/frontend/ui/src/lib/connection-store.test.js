@@ -11,6 +11,14 @@ function memoryStorage() {
 }
 
 describe('connection storage', () => {
+  it('restores system session metadata without an organization', () => {
+    const local = memoryStorage()
+    const session = memoryStorage()
+    const oidc = { scope: 'system', expiresAt: 100, organization: '', userId: 'operator' }
+    saveConnectionSettings({ sshUsername: '', token: 'system-token', oidc }, local, session)
+    expect(loadConnectionSettings(local, session)).toEqual({ sshUsername: '', token: 'system-token', oidc })
+  })
+
   it('keeps the SSH username separately from the session-only token', () => {
     const local = memoryStorage()
     const session = memoryStorage()

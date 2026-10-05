@@ -1077,3 +1077,24 @@ describe('Orion connection', () => {
     expect(wrapper.text()).toContain('Clipboard is not available')
   })
 })
+
+it('persists system OIDC sign-in and restores renewal metadata after reload', async () => {
+  const wrapper = mount(App, { global: { stubs: { OrganizationSignIn: {
+    template: '<div class="system-sign-in" />', emits: ['signed-in'],
+  } } } })
+  await wrapper.findAll('button').find(item => item.text() === 'Sign in with OIDC').trigger('click')
+  const result = { scope: 'system', token: 'system-token', expiresAt: 100, organization: '', userId: 'operator' }
+  wrapper.getComponent('.system-sign-in').vm.$emit('signed-in', result)
+  await flushPromises()
+  expect(sessionStorage.getItem('orion.ui.token')).toBe('system-token')
+  expect(JSON.parse(sessionStorage.getItem('orion.ui.oidc'))).toEqual({
+    expiresAt: 100, organization: '', userId: 'operator',
+  })
+  wrapper.unmount()
+  createOrionClient.mockClear()
+  const restored = mountApp()
+  await flushPromises()
+  expect(createOrionClient.mock.calls.some(([options]) => options?.oidc?.userId === 'operator'
+    && options.oidc.organization === '')).toBe(true)
+  restored.unmount()
+})

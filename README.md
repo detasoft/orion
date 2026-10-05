@@ -533,11 +533,37 @@ administration, system SSH credentials and system token issuance require a
 system identity, even when an organization user has the same user ID. OIDC access
 tokens carry the organization identity and use these same checks.
 
+### Sign in as an existing system user
+
+1. Sign in as a system administrator. In **People → OIDC providers**, select
+   **System users** and save the issuer URL, client ID, and client secret.
+   Registration and the shared callback address are described below.
+2. In **People → System user sign-in**, select an existing system user, choose
+   **Add binding**, and enter the exact issuer URL and the external account's
+   `sub` (subject) from your identity provider. Select **Save bindings**.
+   Matching email addresses do not link accounts or create system users.
+3. On **Sign in with OIDC**, select **System user** and the provider. The user
+   receives their current system ACL permissions. Organization membership does
+   not grant system authority, and root locking/recovery still requires the
+   established key enrollment flow.
+
+Bindings use existing `OIDC_SUBJECT` credentials: `keyId` is the issuer URL and
+`value` is the subject. Editing bindings preserves profile details, other
+credentials, roles, and grants. Each issuer/subject pair belongs to at most one
+system user. Removing a binding, removing/changing a provider, rotating its
+secret, or changing root authentication generation revokes affected system
+sessions and tokens. The browser session supports reload, renewal, and logout.
+
+System providers are stored under `system/oidc`, after `system/connections`, with
+secrets in `system/secrets`. Organization configuration remains local. Register
+separate clients or repeat provider settings in each scope as appropriate.
+
 ### Configure an OIDC provider
 
-Providers belong to an organization, including the ordinary `default`
-organization created on first initialization. Organizations do not inherit
-providers from `default`. Configure each organization that needs browser login.
+Providers belong either to the system or to an organization, including the ordinary
+`default` organization created on first initialization. Every scope has its own
+providers and encrypted secrets; organizations do not inherit system or `default`
+providers. An empty list disables OIDC in that scope.
 Provider configuration is stored in the versioned `orion.xml`, not the startup
 YAML/TOML file.
 
@@ -560,7 +586,7 @@ YAML/TOML file.
    `email_verified: true`; `given_name` and `family_name` are optional. Orion does
    not fetch missing email claims from the UserInfo endpoint.
 3. **Save the provider in Orion.** Sign in as a system administrator and open
-   **People → Organization sign-in**. Select the organization, choose **Add
+   **People → OIDC providers**. Select **Organization members** and the organization, choose **Add
    provider**, and enter a provider ID (such as `google`), issuer URL, client ID,
    and client secret. Select **Save provider**. The server encrypts the secret
    into that organization's `<secrets>` and saves the provider reference in the
