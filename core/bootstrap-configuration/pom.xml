@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>schema</artifactId>
+            <artifactId>common-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
