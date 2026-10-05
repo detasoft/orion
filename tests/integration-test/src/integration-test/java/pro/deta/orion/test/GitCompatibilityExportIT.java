@@ -10,7 +10,7 @@ import org.eclipse.jgit.transport.TransportHttp;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -43,7 +43,7 @@ class GitCompatibilityExportIT {
         Path source = directory.resolve("source");
         unzipFixture(source, fixture);
         Path orionRoot = directory.resolve("orion");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (Git git = Git.open(source.toFile());
              RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {

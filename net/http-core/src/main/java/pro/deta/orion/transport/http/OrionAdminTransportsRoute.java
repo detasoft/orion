@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.TransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.transport.git.GitNativeTransportService;
@@ -15,7 +15,7 @@ import java.net.URISyntaxException;
 import java.util.Set;
 
 public class OrionAdminTransportsRoute extends BaseAdminRoute {
-    private final OrionConfiguration configuration;
+    private final BootstrapConfiguration configuration;
     private final OrionDesiredState desiredState;
     private final Provider<JettyHTTPServer> httpServer;
     private final Provider<GitSshTransportService> sshServer;
@@ -23,7 +23,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminTransportsRoute(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionDesiredState desiredState,
             Provider<JettyHTTPServer> httpServer,
             Provider<GitSshTransportService> sshServer,
@@ -38,7 +38,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        OrionConfiguration.AppTransport transport = configuration.getTransport();
+        BootstrapConfiguration.AppTransport transport = configuration.getTransport();
         return OrionHttpResponse.ok(new AdminTransportsResponse(
                 descriptor(transport == null ? null : transport.getHttp(), "http", httpPort()),
                 httpsDescriptor(),

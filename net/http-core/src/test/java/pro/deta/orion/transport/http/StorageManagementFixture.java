@@ -50,7 +50,7 @@ final class StorageManagementFixture {
             }
         };
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 cipher,
                 ConfigurationMaterialCapability.unavailable(),
                 desired);

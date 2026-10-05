@@ -27,7 +27,7 @@ import pro.deta.orion.keymaterial.TlsClientAuthentication;
 import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -64,7 +64,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
     @Inject
     public JettyHTTPServer(
-            OrionConfiguration orionConfiguration,
+            BootstrapConfiguration orionConfiguration,
             OrionDesiredState desiredState,
             TlsCapability tls,
             OrionHttpRouteServlet rootServlet,

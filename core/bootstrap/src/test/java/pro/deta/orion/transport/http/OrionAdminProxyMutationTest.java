@@ -565,7 +565,7 @@ class OrionAdminProxyMutationTest {
                         new SigningMaterialSet(signing, List.of()), 2048, true);
             }
             editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.bootstrap.config.OrionConfiguration(),
+                new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 material.configurationCipher(),
                 material.configurationMaterial(),
                 desired);

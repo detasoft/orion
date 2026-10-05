@@ -14,7 +14,7 @@ import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -48,7 +48,7 @@ public final class AcmeConfigurationService {
     @Inject
     public AcmeConfigurationService(OrionDesiredState desired, ConfigurationSecrets secrets,
             OrionConfigurationEditor editor, AcmeCertificateService certificates,
-            ConfigurationMaterialCapability material, OrionConfiguration bootstrap) {
+            ConfigurationMaterialCapability material, BootstrapConfiguration bootstrap) {
         this.desired = desired;
         this.secrets = secrets;
         this.editor = editor;

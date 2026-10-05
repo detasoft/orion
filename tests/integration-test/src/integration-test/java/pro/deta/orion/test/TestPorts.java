@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 final class TestPorts {
     private static final String HOST = "localhost";
@@ -8,7 +8,7 @@ final class TestPorts {
     private TestPorts() {
     }
 
-    static void configure(OrionConfiguration configuration) {
+    static void configure(BootstrapConfiguration configuration) {
         configuration.getTransport().getGit().setAddress(HOST);
         configuration.getTransport().getGit().setPort(0);
 

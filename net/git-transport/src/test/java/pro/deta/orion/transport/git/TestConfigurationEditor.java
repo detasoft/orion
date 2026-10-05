@@ -7,7 +7,7 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
@@ -43,7 +43,7 @@ public final class TestConfigurationEditor {
 
         };
         return new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 ConfigurationCipherCapability.unavailable(),
                 ConfigurationMaterialCapability.unavailable(),
                 new pro.deta.orion.config.OrionDesiredState());

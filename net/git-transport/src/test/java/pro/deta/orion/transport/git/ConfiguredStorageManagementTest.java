@@ -58,7 +58,7 @@ class ConfiguredStorageManagementTest {
                 List.of(), List.of())), List.of(), List.of(), List.of(), List.of());
         storage.set(new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(org)));
         editor = new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 cipher,
                 ConfigurationMaterialCapability.unavailable(),
                 desired);

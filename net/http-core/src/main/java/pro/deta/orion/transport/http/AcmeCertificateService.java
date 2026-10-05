@@ -19,7 +19,7 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -56,7 +56,7 @@ public class AcmeCertificateService {
 
     @Inject
     public AcmeCertificateService(
-            OrionConfiguration bootstrapConfiguration,
+            BootstrapConfiguration bootstrapConfiguration,
             OrionDesiredState desiredState,
             AcmeKeyMaterialCapability keyMaterial,
             AcmeCertificateIssuer certificateIssuer,

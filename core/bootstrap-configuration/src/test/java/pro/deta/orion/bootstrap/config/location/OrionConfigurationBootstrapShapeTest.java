@@ -2,7 +2,7 @@ package pro.deta.orion.bootstrap.config.location;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,7 +17,7 @@ class OrionConfigurationBootstrapShapeTest {
 
     @Test
     void keyMaterialSourceDefaultsToTheBootstrapRepository() {
-        OrionConfiguration configuration = new OrionConfiguration();
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
 
         assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
         assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
@@ -33,7 +33,7 @@ class OrionConfigurationBootstrapShapeTest {
                     password: env:TEST_MATERIAL_PASSWORD
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider()
+        BootstrapConfiguration configuration = new LocationConfigurationProvider()
                 .configurationLookup(configFile.toString());
 
         assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
@@ -97,7 +97,7 @@ class OrionConfigurationBootstrapShapeTest {
                     port: 8000
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider()
+        BootstrapConfiguration configuration = new LocationConfigurationProvider()
                 .configurationLookup(configFile.toString());
 
         assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
@@ -204,7 +204,7 @@ class OrionConfigurationBootstrapShapeTest {
                   baseDir: /tmp/explicit-orion
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
                 .readConfiguration();
 
         assertEquals("/tmp/explicit-orion", configuration.getBootstrap().getBaseDir());

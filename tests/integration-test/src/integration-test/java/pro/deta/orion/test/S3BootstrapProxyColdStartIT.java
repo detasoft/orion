@@ -16,7 +16,7 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
@@ -51,8 +51,8 @@ class S3BootstrapProxyColdStartIT {
     @Test
     void hydratesS3ProxyCacheFromRemoteBootstrapWithAnEmptyLocalDirectory() throws Exception {
         Path localRoot = Files.createDirectory(tempDir.resolve("target"));
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(localRoot);
-        OrionConfiguration upstreamConfiguration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(localRoot);
+        BootstrapConfiguration upstreamConfiguration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("upstream"));
         try (MinioS3TestServer s3 = MinioS3TestServer.start("orion-proxy-" + UUID.randomUUID())) {
             configuration.getStorage().setLocation("s3://" + s3.bucketName() + "/proxy-cache");

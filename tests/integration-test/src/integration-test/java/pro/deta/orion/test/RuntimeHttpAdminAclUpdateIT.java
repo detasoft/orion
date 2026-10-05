@@ -13,7 +13,7 @@ import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
@@ -46,7 +46,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @Test
     void configurationRollbackCreatesANewCommitAndRevokesRemovedUserAccess() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("configuration-rollback"));
         String originalXml;
         String rollbackEtag;
@@ -127,7 +127,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @Test
     void configurationCommitsIdentifyTheAuthenticatedAdministrator() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("configuration-authors"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String rootToken = TestBearerTokens.issueRootToken(orion.accessControlService(),
@@ -183,7 +183,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @Test
     void oidcSecretIsEncryptedInGitAndPlaintextConfigurationIsRejectedBeforeCommit() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("oidc-secret"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String token = TestBearerTokens.issueRootToken(orion.accessControlService(), orion.component().configurationEditor(), 600);
@@ -238,7 +238,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @Test
     void configurationStatusIsAdminOnlyAndReportsTheActiveGitRevision() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-status"));
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-status"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             RuntimeHttpTestSupport.HttpResponse withoutToken = RuntimeHttpTestSupport.request(
                     "GET", orion.httpUrl("/api/admin/configuration/status"), null);
@@ -261,7 +261,7 @@ class RuntimeHttpAdminAclUpdateIT {
     @Test
     void configurationUpdateReloadsRuntimeAclAndSurvivesRestart() throws Exception {
         Path orionRoot = tempDir.resolve("orion-update");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
         try {
@@ -292,7 +292,7 @@ class RuntimeHttpAdminAclUpdateIT {
     @Test
     void xmlUploadIsRejectedAndKeepsActiveAndStoredAclUnchanged() throws Exception {
         Path orionRoot = tempDir.resolve("orion-invalid-update");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String token = TestBearerTokens.issueRootToken(orion.accessControlService(), orion.component().configurationEditor(), 600);
@@ -323,7 +323,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
     @Test
     void staleConfigurationUpdateCannotReplaceANewerCommit() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-stale"));
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-stale"));
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String token = TestBearerTokens.issueRootToken(orion.accessControlService(), orion.component().configurationEditor(), 600);
             RuntimeHttpTestSupport.HttpResponse initial = RuntimeHttpTestSupport.request(

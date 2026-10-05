@@ -10,7 +10,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Data
 @Singleton
-public class OrionConfiguration {
+public class BootstrapConfiguration {
     private BootstrapConfig bootstrap = new BootstrapConfig();
     private StorageConfig storage = new StorageConfig();
     private AppTransport transport = new AppTransport();
@@ -21,11 +21,8 @@ public class OrionConfiguration {
         private String workDir = "work";
         private String logDir = "logs";
         private int threadPoolSize = 10;
-        private BootstrapAccessControlConfig accessControl = new BootstrapAccessControlConfig();
+        private BootstrapConfigurationSourceConfig accessControl = new BootstrapConfigurationSourceConfig();
         private KeyMaterialConfig keyMaterial = new KeyMaterialConfig();
-    }
-
-    public static class BootstrapAccessControlConfig extends BootstrapConfigurationSourceConfig {
     }
 
     @Data

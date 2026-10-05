@@ -13,7 +13,7 @@ import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
@@ -35,9 +35,9 @@ final class RemoteBootstrapTestSupport {
     }
 
     static OrionComponent runtimeComponent(
-            OrionConfiguration configuration, BootstrapContext context) {
+            BootstrapConfiguration configuration, BootstrapContext context) {
         return DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
+                .bootstrapConfiguration(configuration)
                 .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(context.serverIdentity())
                 .acmeKeyMaterialCapability(context.acmeKeyMaterial())
@@ -55,7 +55,7 @@ final class RemoteBootstrapTestSupport {
 
     static Map<String, String> configureSources(
             Path directory,
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             RuntimeHttpTestSupport.StartedOrion upstream,
             String transport) throws Exception {
         String location;
@@ -109,7 +109,7 @@ final class RemoteBootstrapTestSupport {
         return Map.of(PASSWORD_ENV, "bootstrap-test-password");
     }
 
-    static byte[] materialBytes(OrionConfiguration configuration, Map<String, String> environment)
+    static byte[] materialBytes(BootstrapConfiguration configuration, Map<String, String> environment)
             throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         try (var material = OrionKeyMaterialFactory.open(configuration, environment, store, true)) {

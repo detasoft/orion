@@ -38,7 +38,7 @@ import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
@@ -172,7 +172,7 @@ class OrionRuntimeModuleTest {
                 null,
                 ServerIdentityCapability.unavailable(),
                 desired,
-                new OrionConfigurationEditor(null, new OrionConfiguration(),
+                new OrionConfigurationEditor(null, new BootstrapConfiguration(),
                         pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
                         pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired),
                 java.util.Optional.empty());
@@ -267,7 +267,7 @@ class OrionRuntimeModuleTest {
     @Test
     void runtimeOwnsAgentServerBeforeExternallyVisibleTransports() {
         OrionComponent component = DaggerOrionComponent.builder()
-                .defaultConfigurationProvider()
+                .defaultBootstrapConfiguration()
                 .build();
 
         assertThat(component.runtimeStateMachine().childStatuses().keySet()).containsExactly(
@@ -293,7 +293,7 @@ class OrionRuntimeModuleTest {
                 assertThat(bare.getRepository().isBare()).isTrue();
             }
         }
-        OrionConfiguration configuration = configurationWithAcl(aclDirectory.toUri().toString());
+        BootstrapConfiguration configuration = configurationWithAcl(aclDirectory.toUri().toString());
 
         OrionConfigurationStorage storage = runtimeOrionConfigurationStorage(configuration);
 
@@ -303,7 +303,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void localAclSavesToExternalRepository() {
-        OrionConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
+        BootstrapConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
         OrionConfigurationStorage storage = runtimeOrionConfigurationStorage(configuration);
 
         storage.save(
@@ -317,7 +317,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void localLocatorUsesConfiguredNativeRepository() {
-        OrionConfiguration configuration = configurationWithAcl("local:internal/settings");
+        BootstrapConfiguration configuration = configurationWithAcl("local:internal/settings");
         NativeGitRepositoryFactory provider = new NativeGitRepositoryFactory(
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory());
 
@@ -336,7 +336,7 @@ class OrionRuntimeModuleTest {
 
     @Test
     void remoteGitAclIsUnsupported() {
-        OrionConfiguration configuration = configurationWithAcl("ssh://git@example.test/acl.git");
+        BootstrapConfiguration configuration = configurationWithAcl("ssh://git@example.test/acl.git");
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
@@ -345,13 +345,13 @@ class OrionRuntimeModuleTest {
         assertEquals("Orion configuration requires a resolved Git repository", error.getMessage());
     }
 
-    private OrionConfigurationStorage runtimeOrionConfigurationStorage(OrionConfiguration configuration) {
+    private OrionConfigurationStorage runtimeOrionConfigurationStorage(BootstrapConfiguration configuration) {
         return resolvedStorage(configuration, new NativeGitRepositoryFactory(
                 pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend.inMemory()));
     }
 
     private static OrionConfigurationStorage resolvedStorage(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             NativeGitRepositoryFactory provider) {
         provider.resolveProvisional(
                 NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
@@ -382,8 +382,8 @@ class OrionRuntimeModuleTest {
         assertEquals(userId, accessControl.users().getFirst().id());
     }
 
-    private OrionConfiguration configurationWithAcl(String location) {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private BootstrapConfiguration configurationWithAcl(String location) {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation(location);

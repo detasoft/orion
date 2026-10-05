@@ -9,7 +9,7 @@ import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -88,8 +88,8 @@ public class ACMECertificateChallengeTest {
     private static AcmeHttpTestServer startHttp(
             AcmeHttpChallengeService challengeService,
             OrionHttpRoute... additionalRoutes) throws IOException {
-        OrionConfiguration orionConfiguration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
+        BootstrapConfiguration orionConfiguration = new BootstrapConfiguration();
+        BootstrapConfiguration.AppTransport transports = new BootstrapConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", 0));
         orionConfiguration.setTransport(transports);
 
@@ -128,8 +128,8 @@ public class ACMECertificateChallengeTest {
 
     @Test
     public void startsHttpChallengeWithoutHttpsMaterial() throws Exception {
-        OrionConfiguration orionConfiguration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
+        BootstrapConfiguration orionConfiguration = new BootstrapConfiguration();
+        BootstrapConfiguration.AppTransport transports = new BootstrapConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", 0));
         orionConfiguration.setTransport(transports);
 
@@ -162,8 +162,8 @@ public class ACMECertificateChallengeTest {
         return desiredState;
     }
 
-    private static OrionConfiguration bootstrap() {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private static BootstrapConfiguration bootstrap() {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().getKeyMaterial().setClusterId("test-cluster");
         return configuration;
     }

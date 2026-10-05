@@ -15,7 +15,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.bootstrap.config.BootstrapSourceConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -48,9 +48,9 @@ class BootstrapProxyTransportIT {
     @ParameterizedTest
     @ValueSource(strings = {"http", "ssh"})
     void resolvesRefreshesAndPublishesThroughNativeUpstream(String transport) throws Exception {
-        OrionConfiguration upstreamConfiguration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration upstreamConfiguration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("upstream"), config -> config.getTransport().getSsh().setEnabled(true));
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("proxy"));
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
@@ -212,7 +212,7 @@ class BootstrapProxyTransportIT {
     }
 
     private static void assertCacheIsNotRoutable(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             String cache) {
         BootstrapSourceConfig source = new BootstrapSourceConfig();

@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -21,7 +21,7 @@ public final class OrionConfigurationJsonSchema {
     }
 
     public Map<String, Object> document() {
-        Map<String, Object> schema = objectSchema(OrionConfiguration.class, new OrionConfiguration());
+        Map<String, Object> schema = objectSchema(BootstrapConfiguration.class, new BootstrapConfiguration());
         schema.put("$schema", "https://json-schema.org/draft/2020-12/schema");
         schema.put("$id", "https://deta.pro/orion/schema/orion-configuration.schema.json");
         schema.put("title", "Orion server configuration");

@@ -25,8 +25,7 @@ import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
-import pro.deta.orion.bootstrap.config.ConfigurationProvider;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.transport.git.GitNativeTransportService;
@@ -70,7 +69,7 @@ public interface OrionComponent {
     @Component.Builder
     interface Builder {
         OrionComponent build();
-        @BindsInstance Builder configurationProvider(ConfigurationProvider configurationProvider);
+        @BindsInstance Builder bootstrapConfiguration(BootstrapConfiguration configuration);
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
@@ -84,8 +83,8 @@ public interface OrionComponent {
         @BindsInstance Builder s3Transport(S3Transport transport);
         @BindsInstance Builder configuredRepositoryFactory(ConfiguredNativeGitRepositoryFactory factory);
 
-        default Builder defaultConfigurationProvider() {
-            OrionConfiguration configuration = new OrionConfiguration();
+        default Builder defaultBootstrapConfiguration() {
+            BootstrapConfiguration configuration = new BootstrapConfiguration();
             S3Transport transport = new S3Transport();
             ConfiguredNativeGitRepositoryFactory configured =
                     new ConfiguredNativeGitRepositoryFactory(NativeGitRepositoryBackend.inMemory(), transport);
@@ -95,7 +94,7 @@ public interface OrionComponent {
                     NativeGitRepositoryFactory.CONFIGURATION_SOURCE,
                     configuration.getBootstrap().getAccessControl(),
                     true);
-            return configurationProvider(() -> configuration)
+            return bootstrapConfiguration(configuration)
                     .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())

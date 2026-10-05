@@ -36,7 +36,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
@@ -251,7 +251,7 @@ class GitSshTransportStateMachineTest {
             int port,
             OrionAccessControlService accessControlService,
             KeyPair hostKey) {
-        OrionConfiguration configuration = new OrionConfiguration();
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getTransport().getSsh().setEnabled(true);
         configuration.getTransport().getSsh().setAddress("127.0.0.1");

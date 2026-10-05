@@ -41,8 +41,7 @@ import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
-import pro.deta.orion.bootstrap.config.ConfigurationProvider;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.util.ArrayList;
@@ -231,12 +230,6 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static OrionConfiguration orionConfiguration(ConfigurationProvider configurationProvider) {
-        return configurationProvider.readConfiguration();
-    }
-
-    @Provides
-    @Singleton
     @Named("runtime")
     static AggregateStateMachine runtimeStateMachine(OrionRuntimeStateMachine stateMachine) {
         return stateMachine.aggregateStateMachine();
@@ -263,8 +256,8 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     static OrionConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
-            ConfigurationProvider configurationProvider) {
+            BootstrapConfiguration configuration) {
         return new NativeGitOrionConfigurationStorage(repositoryFactory,
-                configurationProvider.readConfiguration().getBootstrap().getAccessControl());
+                configuration.getBootstrap().getAccessControl());
     }
 }

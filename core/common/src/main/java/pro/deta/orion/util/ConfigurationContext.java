@@ -2,7 +2,7 @@ package pro.deta.orion.util;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -14,16 +14,16 @@ import java.util.Map;
 @Singleton
 @Getter
 public class ConfigurationContext {
-    private final OrionConfiguration configuration;
+    private final BootstrapConfiguration configuration;
     private final LazySupplier<Path> baseDir;
     private final Map<String, String> environment;
 
     @Inject
-    public ConfigurationContext(OrionConfiguration configuration) {
+    public ConfigurationContext(BootstrapConfiguration configuration) {
         this(configuration, System.getenv());
     }
 
-    public ConfigurationContext(OrionConfiguration configuration, Map<String, String> environment) {
+    public ConfigurationContext(BootstrapConfiguration configuration, Map<String, String> environment) {
         this.configuration = configuration;
         this.environment = Map.copyOf(environment);
         this.baseDir = new LazySupplier<>(() -> {
@@ -70,7 +70,7 @@ public class ConfigurationContext {
     }
 
     public static Path baseDirectory(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment) {
         String configuredBaseDir = configuration.getBootstrap().getBaseDir();
         if (OrionUtils.isNullOrEmpty(configuredBaseDir)) {

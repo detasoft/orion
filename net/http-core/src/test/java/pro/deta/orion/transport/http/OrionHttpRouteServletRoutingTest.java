@@ -14,14 +14,16 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlValidationException;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
+import pro.deta.orion.util.Result;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,7 +57,7 @@ class OrionHttpRouteServletRoutingTest {
                             default -> null;
                         });
         return new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
                 pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(),
                 new pro.deta.orion.config.OrionDesiredState());
@@ -220,9 +222,12 @@ class OrionHttpRouteServletRoutingTest {
 
     @Test
     void repositoryValidationIs400ButProviderArgumentFailureIs500() throws Exception {
-        NativeGitRepositoryProvider provider = stub(NativeGitRepositoryProvider.class, (proxy, method, args) -> {
-            throw new IllegalArgumentException("private provider details");
-        });
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+            @Override
+            public Result<NativeGitRepository> create(String repositoryName) {
+                throw new IllegalArgumentException("private provider details");
+            }
+        };
         OrionHttpRoute route = new OrionAdminCreateRepositoryRoute(provider,
                 StorageManagementFixture.create(provider, List.of()), OBJECT_MAPPER);
         for (String json : List.of("{\"name\":\"../repo\"}", "null", "{}")) {
@@ -282,7 +287,7 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     private static OrionHttpRoute acmeRoute(OrionDesiredState desired) {
-        return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new OrionConfiguration(), desired,
+        return new OrionAdminAcmeCertificateRoute(new AcmeCertificateService(new BootstrapConfiguration(), desired,
                 AcmeKeyMaterialCapability.unavailable(), new AcmeCertificateIssuer(null), null), OBJECT_MAPPER);
     }
 

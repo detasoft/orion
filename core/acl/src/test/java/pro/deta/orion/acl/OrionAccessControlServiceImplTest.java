@@ -56,7 +56,7 @@ import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
 
@@ -139,7 +139,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(new ConfigurationFile(serialize(new AccessControl()), Optional.empty()));
         OrionDesiredState desired = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(
-                storage, new OrionConfiguration(), testCipher(), testMaterial(), desired);
+                storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired);
         try (OrionConfigurationEdit edit = editor.edit()) {
             edit.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
@@ -178,7 +178,7 @@ class OrionAccessControlServiceImplTest {
         InMemoryStorage storage = new InMemoryStorage(new ConfigurationFile(serialize(new AccessControl()), Optional.empty()));
         OrionDesiredState configurationState = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 configurationState);
@@ -216,7 +216,7 @@ class OrionAccessControlServiceImplTest {
         FailingReloadStorage storage = new FailingReloadStorage(
                 new ConfigurationFile(serialize(new AccessControl()), Optional.empty()));
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 new pro.deta.orion.config.OrionDesiredState());
@@ -340,7 +340,7 @@ class OrionAccessControlServiceImplTest {
                 null,
                 testServerIdentity(),
                 desired,
-                new OrionConfigurationEditor(null, new OrionConfiguration(), testCipher(), testMaterial(), desired),
+                new OrionConfigurationEditor(null, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
                 Optional.empty());
         TokenIssueResult issued = service.issueOrganizationToken(organization, "alice", issuer, "alice", 60);
         assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
@@ -514,7 +514,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desiredState = new OrionDesiredState();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 desiredState);
@@ -562,7 +562,7 @@ class OrionAccessControlServiceImplTest {
                 OrionRuntimeOptions.defaults(),
                 testServerIdentity(),
                 desiredState,
-                new OrionConfigurationEditor(storage, new OrionConfiguration(), testCipher(),
+                new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(),
                         ConfigurationMaterialCapability.unavailable(), desiredState),
                 Optional.empty());
         service.onStart();
@@ -595,7 +595,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desiredState = new OrionDesiredState();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 desiredState);
@@ -635,7 +635,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desiredState = new OrionDesiredState();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 desiredState);
@@ -1057,7 +1057,7 @@ class OrionAccessControlServiceImplTest {
                 new ConfigurationFile(serialize(primary.toAccessControl()), Optional.of("version-one")));
         storage.notifyDuringSave = true;
         OrionDesiredState desired = new OrionDesiredState();
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new OrionConfiguration(),
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new BootstrapConfiguration(),
                 testCipher(), testMaterial(), desired);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
@@ -1091,7 +1091,7 @@ class OrionAccessControlServiceImplTest {
         storage.concurrentReplacement = new ConfigurationFile(
                 serialize(winning.toAccessControl()), Optional.of("version-two"));
         OrionDesiredState desired = new OrionDesiredState();
-        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new OrionConfiguration(),
+        OrionConfigurationEditor editor = new OrionConfigurationEditor(storage, new BootstrapConfiguration(),
                 testCipher(), testMaterial(), desired);
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(storage,
                 new OrionPasswordHashingService(), OrionRuntimeOptions.defaults(),
@@ -1141,7 +1141,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionRuntimeOptions(resetRoot),
                 testServerIdentity(),
                 desired,
-                new OrionConfigurationEditor(storage, new OrionConfiguration(), testCipher(), testMaterial(), desired),
+                new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
                 Optional.empty());
         PrintStream originalOut = System.out;
         try (PrintStream output = new PrintStream(new ByteArrayOutputStream())) {
@@ -1159,7 +1159,7 @@ class OrionAccessControlServiceImplTest {
                 OrionRuntimeOptions.defaults(),
                 testServerIdentity(),
                 desired,
-                new OrionConfigurationEditor(storage, new OrionConfiguration(), testCipher(), testMaterial(), desired),
+                new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
                 Optional.empty());
             try {
                 restarted.onStart();
@@ -1201,7 +1201,7 @@ class OrionAccessControlServiceImplTest {
                 runtimeOptions,
                 testServerIdentity(),
                 configurationState,
-                new OrionConfigurationEditor(storage, new OrionConfiguration(), testCipher(), testMaterial(), configurationState),
+                new OrionConfigurationEditor(storage, new BootstrapConfiguration(), testCipher(), testMaterial(), configurationState),
                 Optional.empty());
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
@@ -1277,7 +1277,7 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState configurationState = new OrionDesiredState();
         OrionConfigurationEditor editor =
                 new OrionConfigurationEditor(storage,
-                new OrionConfiguration(),
+                new BootstrapConfiguration(),
                 testCipher(),
                 testMaterial(),
                 configurationState);

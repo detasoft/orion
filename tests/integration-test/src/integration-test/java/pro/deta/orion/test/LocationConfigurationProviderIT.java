@@ -3,7 +3,7 @@ package pro.deta.orion.test;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 
 import java.net.URLEncoder;
@@ -32,7 +32,7 @@ class LocationConfigurationProviderIT {
                     "s3-it.xml",
                     43080));
 
-            OrionConfiguration configuration = new LocationConfigurationProvider(
+            BootstrapConfiguration configuration = new LocationConfigurationProvider(
                     "s3://" + s3.bucketName() + "/" + CONFIG_FILE
                             + "?endpoint=" + value(s3.endpoint())
                             + "&region=us-east-1"
@@ -57,7 +57,7 @@ class LocationConfigurationProviderIT {
     }
 
     private static void assertConfiguration(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             String baseDir,
             String accessControlPath,
             int httpPort) {

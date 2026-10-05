@@ -14,7 +14,7 @@ import pro.deta.orion.keymaterial.KeyMaterialAdministrationCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -26,14 +26,14 @@ final class TestRuntimeBootstrap {
     }
 
     static OrionComponent.Builder componentBuilder(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             ServerIdentityCapability identity,
             SshHostKeyCapability sshHostKeys) {
         return componentBuilder(configuration, identity, sshHostKeys, OrionRuntimeOptions.defaults());
     }
 
     static OrionComponent.Builder componentBuilder(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             ServerIdentityCapability identity,
             SshHostKeyCapability sshHostKeys,
             OrionRuntimeOptions runtimeOptions) {
@@ -49,7 +49,7 @@ final class TestRuntimeBootstrap {
                 configuration.getBootstrap().getAccessControl(),
                 true);
         return DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
+                .bootstrapConfiguration(configuration)
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(identity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())

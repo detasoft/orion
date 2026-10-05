@@ -3,7 +3,7 @@ package pro.deta.orion.test;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -25,13 +25,14 @@ final class RuntimeHttpTestSupport {
     private RuntimeHttpTestSupport() {
     }
 
-    static OrionConfiguration httpOnlyConfiguration(Path orionRoot) throws IOException {
+    static BootstrapConfiguration httpOnlyConfiguration(Path orionRoot) throws IOException {
         return httpOnlyConfiguration(orionRoot, ignored -> {
         });
     }
 
-    static OrionConfiguration httpOnlyConfiguration(Path orionRoot, Consumer<OrionConfiguration> customizer) throws IOException {
-        OrionConfiguration configuration = new OrionConfiguration();
+    static BootstrapConfiguration httpOnlyConfiguration(
+            Path orionRoot, Consumer<BootstrapConfiguration> customizer) throws IOException {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
@@ -43,7 +44,7 @@ final class RuntimeHttpTestSupport {
         return configuration;
     }
 
-    static StartedOrion start(OrionConfiguration orionConfiguration) {
+    static StartedOrion start(BootstrapConfiguration orionConfiguration) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
             OrionComponent orionComponent = TestRuntimeBootstrap
@@ -139,7 +140,7 @@ final class RuntimeHttpTestSupport {
 
     record StartedOrion(
             OrionComponent component,
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,
             NativeGitRepositoryProvider repositoryProvider,

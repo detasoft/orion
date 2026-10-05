@@ -3,7 +3,7 @@ package pro.deta.orion.test;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
 
@@ -19,7 +19,7 @@ class OrionTestRootEnrollmentIT {
 
     @Test
     void enrollsOnceWithoutSshAndReusesTheSavedKeyAfterRestart() throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(
                 tempDir.resolve("orion"));
         KeyPair key = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
 

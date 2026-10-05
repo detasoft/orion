@@ -18,7 +18,7 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
@@ -59,7 +59,7 @@ class S3BootstrapRestartIT {
         try (MinioS3TestServer s3 = MinioS3TestServer.start("orion-bootstrap-" + UUID.randomUUID())) {
             Map<String, String> environment = Map.of(
                     PASSWORD_ENV, "bootstrap-test-password", "S3_BOOTSTRAP_SECRET", s3.secretAccessKey());
-            OrionConfiguration configuration = configuration(s3, tempDir);
+            BootstrapConfiguration configuration = configuration(s3, tempDir);
             configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
             InMemoryKeyMaterialContentStore materialStore = new InMemoryKeyMaterialContentStore();
             materialStore.write(materialBytes(configuration, environment), null);
@@ -141,7 +141,7 @@ class S3BootstrapRestartIT {
             Map<String, String> savedRefs;
 
             Path firstRoot = Files.createDirectory(tempDir.resolve("first"));
-            OrionConfiguration first = configuration(s3, firstRoot);
+            BootstrapConfiguration first = configuration(s3, firstRoot);
             first.getBootstrap().getAccessControl().setCreateDefaultIfMissing(true);
             try (BootstrapContext bootstrap = BootstrapContext.open(first, environment, true)) {
                 OrionComponent component = runtimeComponent(first, bootstrap);
@@ -187,7 +187,7 @@ class S3BootstrapRestartIT {
             assertThat(firstRoot).doesNotExist();
             Path freshRoot = Files.createDirectory(tempDir.resolve("restarted"));
             assertThat(freshRoot).isEmptyDirectory();
-            OrionConfiguration restarted = configuration(s3, freshRoot);
+            BootstrapConfiguration restarted = configuration(s3, freshRoot);
             restarted.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
             try (BootstrapContext bootstrap = BootstrapContext.open(restarted, environment, false)) {
                 assertThat(bootstrap.initialConfiguration()).isPresent();
@@ -221,8 +221,8 @@ class S3BootstrapRestartIT {
         }
     }
 
-    private static OrionConfiguration configuration(MinioS3TestServer s3, Path localRoot) throws Exception {
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(localRoot,
+    private static BootstrapConfiguration configuration(MinioS3TestServer s3, Path localRoot) throws Exception {
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(localRoot,
                 config -> config.getTransport().getSsh().setEnabled(true));
         configuration.getStorage().setLocation("s3://" + s3.bucketName() + "/bootstrap");
         configuration.getStorage().setEndpoint(s3.endpoint());

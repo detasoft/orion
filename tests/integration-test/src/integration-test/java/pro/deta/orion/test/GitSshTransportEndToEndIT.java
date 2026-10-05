@@ -33,7 +33,7 @@ import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
@@ -1057,12 +1057,12 @@ class GitSshTransportEndToEndIT {
         return startOrion(e2eConfiguration(orionRoot));
     }
 
-    private StartedOrion startOrion(OrionConfiguration configuration) {
+    private StartedOrion startOrion(BootstrapConfiguration configuration) {
         return startOrion(configuration, OrionRuntimeOptions.defaults());
     }
 
     private StartedOrion startOrion(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionRuntimeOptions runtimeOptions) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
@@ -1380,8 +1380,8 @@ class GitSshTransportEndToEndIT {
         }
     }
 
-    private static OrionConfiguration e2eConfiguration(Path orionRoot) throws Exception {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private static BootstrapConfiguration e2eConfiguration(Path orionRoot) throws Exception {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getBootstrap().setThreadPoolSize(8);
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
@@ -1712,7 +1712,7 @@ class GitSshTransportEndToEndIT {
     private record SshCommandResult(int exitStatus, String output, String error) {
     }
 
-    private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
+    private record StartedOrion(BootstrapConfiguration configuration, OrionApplicationLifecycle lifecycle,
                                 NativeGitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService,
                                 TestServerIdentityMaterial identity, int httpPort, int sshPort) {

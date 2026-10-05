@@ -74,7 +74,7 @@ import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
@@ -411,7 +411,7 @@ class JettyHTTPServerIT {
     @Test
     void failsStartupWhenHttpPortIsAlreadyInUse() throws Exception {
         try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
-            OrionConfiguration bootstrap = httpConfiguration(false);
+            BootstrapConfiguration bootstrap = httpConfiguration(false);
             bootstrap.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", occupied.getLocalPort()));
             JettyHTTPServer server = server(
                     bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
@@ -425,7 +425,7 @@ class JettyHTTPServerIT {
 
     @Test
     void appliesConfiguredHttpBacklog() {
-        OrionConfiguration bootstrap = httpConfiguration(true);
+        BootstrapConfiguration bootstrap = httpConfiguration(true);
         bootstrap.getTransport().getHttp().setBacklog(37);
         JettyHTTPServer server = server(
                 bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
@@ -443,7 +443,7 @@ class JettyHTTPServerIT {
 
     @Test
     void stopClearsServerReferenceAfterGracefulShutdownTimeout() throws Exception {
-        OrionConfiguration bootstrap = httpConfiguration(true);
+        BootstrapConfiguration bootstrap = httpConfiguration(true);
         BlockingRoute route = new BlockingRoute();
         JettyHTTPServer server = server(
                 bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), route);
@@ -1139,8 +1139,8 @@ class JettyHTTPServerIT {
         return desiredState;
     }
 
-    static OrionConfiguration httpConfiguration(boolean enabled) {
-        OrionConfiguration configuration = new OrionConfiguration();
+    static BootstrapConfiguration httpConfiguration(boolean enabled) {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
         configuration.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", 0));
         configuration.getTransport().getHttp().setEnabled(enabled);
@@ -1148,7 +1148,7 @@ class JettyHTTPServerIT {
     }
 
     private static JettyHTTPServer server(
-            OrionConfiguration bootstrap,
+            BootstrapConfiguration bootstrap,
             OrionDesiredState desiredState,
             TlsCapability tls,
             OrionHttpRoute... routes) {

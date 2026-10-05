@@ -5,7 +5,7 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SshTransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
@@ -32,7 +32,7 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 class TransportLifecycleStateMachineTest {
     @Test
     void transportAggregateIsStartedDirectlyByParentMachine() {
-        OrionConfiguration configuration = configuration(true, true, true);
+        BootstrapConfiguration configuration = configuration(true, true, true);
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService(configuration);
         TransportLifecycleStateMachine machine = machine(configuration, service);
 
@@ -44,7 +44,7 @@ class TransportLifecycleStateMachineTest {
 
     @Test
     void allChildrenAppearInStateMachineChildMap() throws Exception {
-        OrionConfiguration configuration = configuration(true, true, true);
+        BootstrapConfiguration configuration = configuration(true, true, true);
         TransportLifecycleStateMachine machine = machine(configuration, new RecordingGitNativeTransportService(configuration));
 
         machine.start();
@@ -62,7 +62,7 @@ class TransportLifecycleStateMachineTest {
 
     @Test
     void disabledTransportsMoveAggregateToDisabled() throws Exception {
-        OrionConfiguration configuration = configuration(false, false, false);
+        BootstrapConfiguration configuration = configuration(false, false, false);
         AtomicBoolean serviceResolved = new AtomicBoolean(false);
         GitNativeTransportStateMachine child = new GitNativeTransportStateMachine(() -> {
                     serviceResolved.set(true);
@@ -91,7 +91,7 @@ class TransportLifecycleStateMachineTest {
     @Test
     void anyEnabledTransportMovesAggregateToRunning() {
         // only git-native enabled
-        OrionConfiguration configuration = configuration(true, false, false);
+        BootstrapConfiguration configuration = configuration(true, false, false);
         TransportLifecycleStateMachine machine = machine(configuration, new RecordingGitNativeTransportService(configuration));
 
         machine.start();
@@ -101,7 +101,7 @@ class TransportLifecycleStateMachineTest {
 
     @Test
     void startFailureMovesAggregateToError() {
-        OrionConfiguration configuration = configuration(true, false, false);
+        BootstrapConfiguration configuration = configuration(true, false, false);
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService(configuration);
         RuntimeException failure = new RuntimeException("start failed");
         service.failStartWith(failure);
@@ -117,8 +117,8 @@ class TransportLifecycleStateMachineTest {
         assertEquals(FIN, machine.currentState());
     }
 
-    private static OrionConfiguration configuration(boolean gitEnabled, boolean sshEnabled, boolean httpEnabled) {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private static BootstrapConfiguration configuration(boolean gitEnabled, boolean sshEnabled, boolean httpEnabled) {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getTransport().getGit().setEnabled(gitEnabled);
         configuration.getTransport().getSsh().setEnabled(sshEnabled);
         configuration.getTransport().getHttp().setEnabled(httpEnabled);
@@ -126,7 +126,7 @@ class TransportLifecycleStateMachineTest {
     }
 
     private static TransportLifecycleStateMachine machine(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             RecordingGitNativeTransportService service) {
         GitNativeTransportStateMachine gitNative = new GitNativeTransportStateMachine(() -> service);
         return machine(gitNative, disabledSshMachine(), disabledHttpMachine());
@@ -140,7 +140,7 @@ class TransportLifecycleStateMachineTest {
     }
 
     private static GitSshTransportStateMachine disabledSshMachine() {
-        OrionConfiguration configuration = new OrionConfiguration();
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         SshTransportConfig disabled = configuration.getTransport().getSsh();
         disabled.setEnabled(false);
         return new GitSshTransportStateMachine(() -> new GitSshTransportService(
@@ -152,7 +152,7 @@ class TransportLifecycleStateMachineTest {
     }
 
     private static JettyHTTPServerStateMachine disabledHttpMachine() {
-        OrionConfiguration disabled = new OrionConfiguration();
+        BootstrapConfiguration disabled = new BootstrapConfiguration();
         disabled.getTransport().getHttp().setEnabled(false);
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
@@ -179,7 +179,7 @@ class TransportLifecycleStateMachineTest {
         private int stopCalls;
         private RuntimeException startFailure;
 
-        private RecordingGitNativeTransportService(OrionConfiguration configuration) {
+        private RecordingGitNativeTransportService(BootstrapConfiguration configuration) {
             super(
                     configuration.getTransport().getGit(),
                     new DefaultGitNativeRepositoryService(

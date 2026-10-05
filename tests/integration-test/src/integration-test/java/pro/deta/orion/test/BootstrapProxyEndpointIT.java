@@ -33,7 +33,7 @@ import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
@@ -265,7 +265,7 @@ class BootstrapProxyEndpointIT {
                 List.of(new AccessControlRepositoryGrantUpdate(repository, true, write, false, false, "main")));
     }
 
-    private Client client(OrionConfiguration configuration, BootstrapContext bootstrap, String transport, int port,
+    private Client client(BootstrapConfiguration configuration, BootstrapContext bootstrap, String transport, int port,
             String username, KeyPair key, char[] password) throws Exception {
         if ("http".equals(transport)) {
             var http = configuration.getTransport().getHttp();

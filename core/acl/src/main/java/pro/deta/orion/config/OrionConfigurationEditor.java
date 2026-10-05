@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.*;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -35,7 +35,7 @@ public final class OrionConfigurationEditor {
 
     @Inject
     public OrionConfigurationEditor(OrionConfigurationStorage storage,
-            OrionConfiguration configuration, ConfigurationCipherCapability configurationCipher,
+            BootstrapConfiguration configuration, ConfigurationCipherCapability configurationCipher,
             ConfigurationMaterialCapability configurationMaterial, OrionDesiredState desiredState) {
         this.storage = storage;
         this.desiredState = desiredState;

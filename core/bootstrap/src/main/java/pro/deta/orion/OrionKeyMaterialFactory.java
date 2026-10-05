@@ -13,7 +13,7 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.ServerSigningConfig;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
 import pro.deta.orion.util.ConfigurationContext;
@@ -33,13 +33,13 @@ public final class OrionKeyMaterialFactory {
     }
 
     public static OrionKeyMaterial open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment) throws IOException, GeneralSecurityException {
         return open(configuration, environment, false);
     }
 
     public static OrionKeyMaterial open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             boolean createIfMissing) throws IOException, GeneralSecurityException {
         if (configuration == null) {
@@ -55,14 +55,14 @@ public final class OrionKeyMaterialFactory {
     }
 
     public static OrionKeyMaterial open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store) throws IOException, GeneralSecurityException {
         return open(configuration, environment, store, false);
     }
 
     public static OrionKeyMaterial open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store,
             boolean createIfMissing) throws IOException, GeneralSecurityException {

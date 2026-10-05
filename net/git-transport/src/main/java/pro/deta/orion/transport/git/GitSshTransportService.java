@@ -18,7 +18,7 @@ import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.forward.StaticDecisionForwardingFilter;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SshTransportConfig;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.auth.EnrollmentAwarePublicKeyAuthFactory;
@@ -44,7 +44,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
     public static final AttributeRepository.AttributeKey<UserIdentity> SSH_AUTHENTICATED_USER = new AttributeRepository.AttributeKey<>();
     private static final long STOP_WAIT_MILLIS = 500;
 
-    private final OrionConfiguration orionConfiguration;
+    private final BootstrapConfiguration orionConfiguration;
     private final SshServer sshd = SshServer.setUpDefaultServer();
 
     private final SshCommandFactory commandFactory;

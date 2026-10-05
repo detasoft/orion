@@ -2,7 +2,7 @@ package pro.deta.orion.bootstrap.config.location;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,14 +23,14 @@ class LocationConfigurationProviderTest {
                 new String[]{"classpath://location-provider-default.yml"},
                 false);
 
-        OrionConfiguration configuration = provider.readConfiguration();
+        BootstrapConfiguration configuration = provider.readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-default-location", "default-location.xml", 17080);
     }
 
     @Test
     void readsExplicitClasspathYamlLocation() {
-        OrionConfiguration configuration = new LocationConfigurationProvider(
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(
                 "classpath://file-provider-classpath.yml")
                 .readConfiguration();
 
@@ -39,7 +39,7 @@ class LocationConfigurationProviderTest {
 
     @Test
     void readsExplicitClasspathTomlLocation() {
-        OrionConfiguration configuration = new LocationConfigurationProvider(
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(
                 "classpath://file-provider-classpath.toml")
                 .readConfiguration();
 
@@ -60,7 +60,7 @@ class LocationConfigurationProviderTest {
                     port: 28080
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
                 .readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-file-yaml", "file-yaml.xml", 28080);
@@ -80,7 +80,7 @@ class LocationConfigurationProviderTest {
                     port: 28580
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider(configFile.toUri().toString())
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(configFile.toUri().toString())
                 .readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-file-uri", "file-uri.xml", 28580);
@@ -100,7 +100,7 @@ class LocationConfigurationProviderTest {
                 port = 29080
                 """);
 
-        OrionConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
+        BootstrapConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
                 .readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-file-toml", "file-toml.xml", 29080);
@@ -117,7 +117,7 @@ class LocationConfigurationProviderTest {
                         + "&accessKeyId=orion&secretAccessKey=file:/tmp/orion-secret",
                 new S3ConfigurationLocationReader(client));
 
-        OrionConfiguration configuration = provider.readConfiguration();
+        BootstrapConfiguration configuration = provider.readConfiguration();
 
         assertConfiguration(configuration, "/tmp/orion-s3", "s3.xml", 33080);
         assertEquals("orion-config", client.bucket);
@@ -158,7 +158,7 @@ class LocationConfigurationProviderTest {
     }
 
     private static void assertConfiguration(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             String baseDir,
             String accessControlPath,
             int httpPort) {

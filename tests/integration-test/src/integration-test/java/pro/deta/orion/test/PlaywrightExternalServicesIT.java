@@ -15,7 +15,7 @@ import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -57,7 +57,7 @@ class PlaywrightExternalServicesIT {
         Path caRoot = fixtureRoot.resolve(".state/step/certs/root_ca.crt");
         assertThat(caRoot).exists();
 
-        OrionConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
+        BootstrapConfiguration configuration = serverConfiguration(tempDir.resolve("orion"));
         KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
         AcmeMaterialConfiguration material = acmeMaterial(configuration);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
@@ -88,7 +88,7 @@ class PlaywrightExternalServicesIT {
         }
     }
 
-    static OrionConfiguration serverConfiguration(Path orionRoot) throws IOException {
+    static BootstrapConfiguration serverConfiguration(Path orionRoot) throws IOException {
         return RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot, options -> {
             options.getTransport().getHttp().setAddress("0.0.0.0");
             options.getTransport().getHttp().setPort(8000);
@@ -101,7 +101,7 @@ class PlaywrightExternalServicesIT {
         });
     }
 
-    private static AcmeMaterialConfiguration acmeMaterial(OrionConfiguration configuration) {
+    private static AcmeMaterialConfiguration acmeMaterial(BootstrapConfiguration configuration) {
         KeyMaterialScope scope = KeyMaterialScope.cluster(
                 configuration.getBootstrap().getKeyMaterial().getClusterId());
         return new AcmeMaterialConfiguration(
@@ -115,7 +115,7 @@ class PlaywrightExternalServicesIT {
     }
 
     private static void configureAcme(OrionComponent component,
-            OrionAccessControlServiceImpl accessControl, OrionConfiguration configuration) throws Exception {
+            OrionAccessControlServiceImpl accessControl, BootstrapConfiguration configuration) throws Exception {
         String revision = component.nativeGitRepositoryProvider().find("orion")
                 .valueOrFailure("test configuration repository")
                 .refs().get(configuration.getBootstrap().getAccessControl().selectedRef());

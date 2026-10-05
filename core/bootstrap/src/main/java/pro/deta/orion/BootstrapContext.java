@@ -26,7 +26,7 @@ import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
@@ -70,13 +70,13 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     public static BootstrapContext open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment) {
         return open(configuration, environment, false);
     }
 
     public static BootstrapContext open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             boolean createIfMissing) {
         Objects.requireNonNull(configuration, "configuration");
@@ -85,7 +85,7 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     static NativeGitRepositoryBackend createRepositoryBackend(
-            OrionConfiguration configuration, Map<String, String> environment, S3Transport transport) {
+            BootstrapConfiguration configuration, Map<String, String> environment, S3Transport transport) {
         String location = configuration.getStorage().getLocation();
         if (ResourceLocation.parse(location, "Storage location").scheme().value().equals("s3")) {
             return S3NativeGitRepositoryFactory.shared(location, configuration.getStorage().getEndpoint(),
@@ -97,14 +97,14 @@ public final class BootstrapContext implements AutoCloseable {
 
     @TestOnly
     static BootstrapContext open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryBackend backend) {
         return open(configuration, environment, backend, false);
     }
 
     static BootstrapContext open(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryBackend backend,
             boolean createIfMissing) {
@@ -334,7 +334,7 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     private static BootstrapConfigurationSourceConfig repositoryConfiguration(
-            OrionConfiguration configuration, Map<String, String> environment) throws IOException {
+            BootstrapConfiguration configuration, Map<String, String> environment) throws IOException {
         BootstrapConfigurationSourceConfig configured = configuration.getBootstrap().getAccessControl();
         ResourceLocation location = ResourceLocation.parse(configured.getLocation(), "ACL repository");
         if (!(location.scheme() instanceof ResourceScheme.File)
@@ -357,7 +357,7 @@ public final class BootstrapContext implements AutoCloseable {
     }
 
     private static OrionKeyMaterial openKeyMaterial(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryProvider provider,
             Optional<String> repositoryName,
@@ -377,7 +377,7 @@ public final class BootstrapContext implements AutoCloseable {
         return OrionKeyMaterialFactory.open(configuration, environment, createIfMissing);
     }
 
-    private static List<SshHostKeyReference> sshHostKeyReferences(OrionConfiguration configuration) {
+    private static List<SshHostKeyReference> sshHostKeyReferences(BootstrapConfiguration configuration) {
         if (configuration.getTransport().getSsh().getHostKeys() == null) {
             throw new IllegalArgumentException("SSH host key references must not be null");
         }

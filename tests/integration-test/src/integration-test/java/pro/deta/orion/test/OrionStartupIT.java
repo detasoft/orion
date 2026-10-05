@@ -29,7 +29,7 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 import pro.deta.orion.schema.orion.OrionXml;
@@ -80,8 +80,8 @@ class OrionStartupIT {
     void automaticallyAssignedPortsServeConcurrentRuntimesAndAllowRestart() throws Exception {
         Path firstRoot = tempDir.resolve("first-orion");
         Path secondRoot = tempDir.resolve("second-orion");
-        OrionConfiguration firstConfiguration = serverConfiguration(firstRoot);
-        OrionConfiguration secondConfiguration = serverConfiguration(secondRoot);
+        BootstrapConfiguration firstConfiguration = serverConfiguration(firstRoot);
+        BootstrapConfiguration secondConfiguration = serverConfiguration(secondRoot);
 
         try (StartedOrion second = startServerWithConfig(secondConfiguration)) {
             try (StartedOrion first = startServerWithConfig(firstConfiguration)) {
@@ -144,7 +144,7 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion");
         Path remoteAclRepository = tempDir.resolve("remote-acl.git");
         seedRemoteAclRepository(remoteAclRepository, accessControlWithUsers("root", "remote-user"));
-        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        BootstrapConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
         configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
 
@@ -189,7 +189,7 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion");
         Path configuredAclRepository = tempDir.resolve("configured-acl.git");
         seedRemoteAclRepository(configuredAclRepository, accessControlWithUsers("root", "configured-user"));
-        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        BootstrapConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl().setLocation(configuredAclRepository.toUri().toString());
         configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
 
@@ -255,7 +255,7 @@ class OrionStartupIT {
     @Test
     void occupiedHttpPortFailsRootStartupAndStillShutsDownCleanly() throws Exception {
         Path orionRoot = tempDir.resolve("orion-port-conflict");
-        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        BootstrapConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
 
@@ -289,7 +289,7 @@ class OrionStartupIT {
     void unavailableRemoteAclStorageFailsBeforeRuntimeConstruction() throws Exception {
         Path orionRoot = tempDir.resolve("orion-acl-failure");
         Path missingRemoteAclRepository = tempDir.resolve("missing-acl.git");
-        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        BootstrapConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getBootstrap().getAccessControl()
                 .setLocation("git+" + missingRemoteAclRepository.toUri());
         configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
@@ -305,7 +305,7 @@ class OrionStartupIT {
         assertCanBindHttpPort(configuration);
     }
 
-    private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
+    private static StartedOrion startServerWithConfig(BootstrapConfiguration orionConfiguration) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
             OrionComponent orionComponent = TestRuntimeBootstrap
@@ -481,7 +481,7 @@ class OrionStartupIT {
         return connection.getResponseCode();
     }
 
-    private static ServerSocket bindHttpPort(OrionConfiguration configuration) throws IOException {
+    private static ServerSocket bindHttpPort(BootstrapConfiguration configuration) throws IOException {
         ServerSocket socket = new ServerSocket();
         socket.setReuseAddress(false);
         socket.bind(new InetSocketAddress(
@@ -490,7 +490,7 @@ class OrionStartupIT {
         return socket;
     }
 
-    private static void assertCanBindHttpPort(OrionConfiguration configuration) throws IOException {
+    private static void assertCanBindHttpPort(BootstrapConfiguration configuration) throws IOException {
         try (ServerSocket ignored = bindHttpPort(configuration)) {
             assertThat(ignored.isBound()).isTrue();
         }
@@ -523,8 +523,8 @@ class OrionStartupIT {
         return false;
     }
 
-    private static OrionConfiguration serverConfiguration(Path orionRoot) throws IOException {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private static BootstrapConfiguration serverConfiguration(Path orionRoot) throws IOException {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
@@ -570,7 +570,7 @@ class OrionStartupIT {
 
     private record StartedOrion(
             OrionComponent component,
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,
             NativeGitRepositoryProvider repositoryProvider,

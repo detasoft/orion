@@ -3,8 +3,7 @@ package pro.deta.orion.bootstrap.config.location;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.moandjiezana.toml.Toml;
-import pro.deta.orion.bootstrap.config.ConfigurationProvider;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -35,7 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-public class LocationConfigurationProvider implements ConfigurationProvider {
+public class LocationConfigurationProvider {
     private static final String[] DEFAULT_CONFIGURATION_LOCATIONS = new String[] { // order by priority
             "config.toml",
             "config.yml",
@@ -70,14 +69,13 @@ public class LocationConfigurationProvider implements ConfigurationProvider {
         this.readers = List.copyOf(readers);
     }
 
-    @Override
-    public OrionConfiguration readConfiguration() {
+    public BootstrapConfiguration readConfiguration() {
         return findConfiguration();
     }
 
-    private OrionConfiguration findConfiguration() {
+    private BootstrapConfiguration findConfiguration() {
         for (String location : configurationLocations) {
-            OrionConfiguration orionConfiguration = configurationLookup(location);
+            BootstrapConfiguration orionConfiguration = configurationLookup(location);
             if (orionConfiguration != null) {
                 return orionConfiguration;
             }
@@ -89,7 +87,7 @@ public class LocationConfigurationProvider implements ConfigurationProvider {
         return parseYaml(localResourceConfig("config.yml"));
     }
 
-    public OrionConfiguration configurationLookup(String location) {
+    public BootstrapConfiguration configurationLookup(String location) {
         if (location == null) {
             return null;
         }
@@ -111,7 +109,7 @@ public class LocationConfigurationProvider implements ConfigurationProvider {
         return Thread.currentThread().getContextClassLoader().getResourceAsStream(name);
     }
 
-    private OrionConfiguration parse(ConfigurationContent content) {
+    private BootstrapConfiguration parse(ConfigurationContent content) {
         String sourceName = content.sourceName().toLowerCase(Locale.ROOT);
         try (InputStream input = new ByteArrayInputStream(content.content())) {
             if (sourceName.endsWith(".yaml") || sourceName.endsWith(".yml")) {
@@ -126,17 +124,17 @@ public class LocationConfigurationProvider implements ConfigurationProvider {
         throw new IllegalArgumentException("Unsupported configuration format: " + content.sourceName());
     }
 
-    private OrionConfiguration parseYaml(InputStream config) {
+    private BootstrapConfiguration parseYaml(InputStream config) {
         try {
-            return yom.readerFor(OrionConfiguration.class)
+            return yom.readerFor(BootstrapConfiguration.class)
                     .readValue(config);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private OrionConfiguration parseToml(InputStream config) {
-        return toml.read(config).to(OrionConfiguration.class);
+    private BootstrapConfiguration parseToml(InputStream config) {
+        return toml.read(config).to(BootstrapConfiguration.class);
     }
 
     private static List<ConfigurationLocationReader> defaultReaders() {

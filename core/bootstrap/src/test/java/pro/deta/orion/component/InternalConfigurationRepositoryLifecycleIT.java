@@ -40,7 +40,7 @@ import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.Role;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
@@ -133,7 +133,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void bootstrapsOnceAndReusesTheCommittedAclOnRestart() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         KeyPair enrolledKey = keyPair();
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
@@ -207,7 +207,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void resetFlagCreatesARecoveryRootWhenTheAclIsMissing() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         OrionComponent component = component(configuration, new OrionRuntimeOptions(true));
@@ -235,7 +235,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void recreatesExistingRootAsCanonicalRecoveryIdentity() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         KeyPair rootKey = keyPair();
         KeyPair recoveredRootKey = keyPair();
         KeyPair aliceKey = keyPair();
@@ -425,7 +425,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void recreatesMissingRootWithCanonicalFullPrivileges() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         OrionComponent first = component(configuration);
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
@@ -517,7 +517,7 @@ class InternalConfigurationRepositoryLifecycleIT {
     @Test
     void recoversRootInTheConfiguredFileAndPreservesOtherFiles() throws Exception {
         String secondaryPath = "config/root.xml";
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         byte[] primaryAcl = aclBytes("alice", "alice-password");
         byte[] secondaryAcl = defaultAclBytes("old-root-password");
         OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
@@ -564,7 +564,7 @@ class InternalConfigurationRepositoryLifecycleIT {
         Path aclFile = aclDirectory.resolve(ACL_PATH);
         Files.createDirectories(aclFile.getParent());
         Files.write(aclFile, defaultAclBytes("old-root-password"));
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getAccessControl().setLocation(aclDirectory.toUri().toString());
         OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
@@ -594,7 +594,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void replacesNoncanonicalRootWithOneCanonicalRecoveryRoot() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         OrionComponent first = component(configuration);
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         String versionBeforeReset;
@@ -638,7 +638,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void rotationRevokesRetainedServerIdentityFromRootSsh() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         KeyPair oldIdentity = keyPair();
         KeyPair activeIdentity = keyPair();
 
@@ -670,7 +670,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void reloadsReceivePackPublicationsAndRetainsLastValidAcl() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         OrionComponent component = component(configuration);
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
         try {
@@ -743,7 +743,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void enrollsSshKeysAtomicallyAndRetainsThemOnRestart() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         KeyPair firstKey = keyPair();
         KeyPair secondKey = keyPair();
         String firstOpenSshKey = PublicKeyEntry.toString(firstKey.getPublic());
@@ -790,7 +790,7 @@ class InternalConfigurationRepositoryLifecycleIT {
 
     @Test
     void forcedLastRootKeyRemovalRemainsLockedUntilExplicitReset() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         TestServerIdentity serverIdentity = new TestServerIdentity(keyPair(), List.of());
         KeyPair rootKey = keyPair();
         KeyPair aliceKey = keyPair();
@@ -885,8 +885,8 @@ class InternalConfigurationRepositoryLifecycleIT {
         }
     }
 
-    private OrionConfiguration configuration() {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private BootstrapConfiguration configuration() {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("runtime").toString());
         configuration.getStorage().setLocation(tempDir.resolve("repositories").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:" + REPOSITORY_NAME);
@@ -898,24 +898,24 @@ class InternalConfigurationRepositoryLifecycleIT {
         return configuration;
     }
 
-    private static OrionComponent component(OrionConfiguration configuration) {
+    private static OrionComponent component(BootstrapConfiguration configuration) {
         return component(configuration, ServerIdentityCapability.unavailable());
     }
 
     private static OrionComponent component(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionRuntimeOptions runtimeOptions) {
         return component(configuration, runtimeOptions, ServerIdentityCapability.unavailable());
     }
 
     private static OrionComponent component(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             ServerIdentityCapability serverIdentity) {
         return component(configuration, OrionRuntimeOptions.defaults(), serverIdentity);
     }
 
     private static OrionComponent component(
-            OrionConfiguration configuration,
+            BootstrapConfiguration configuration,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
         pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend backend =
@@ -930,7 +930,7 @@ class InternalConfigurationRepositoryLifecycleIT {
                 configuration.getBootstrap().getAccessControl(),
                 configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
+                .bootstrapConfiguration(configuration)
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())

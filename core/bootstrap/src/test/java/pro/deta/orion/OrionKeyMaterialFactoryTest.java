@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SigningKeyReferenceConfig;
 
 import java.nio.charset.StandardCharsets;
@@ -24,7 +24,7 @@ class OrionKeyMaterialFactoryTest {
 
     @Test
     void opensConfiguredRelativeStoreAndReloadsRetainedIdentity() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
@@ -47,7 +47,7 @@ class OrionKeyMaterialFactoryTest {
 
     @Test
     void resolvesRelativeStoreBelowEnvironmentBaseDirectory() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().setBaseDir("env:ORION_TEST_ROOT/material-home");
 
         try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
@@ -64,7 +64,7 @@ class OrionKeyMaterialFactoryTest {
 
     @Test
     void resolvesConfiguredRetainedAliases() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"), true)) {
             // Initialize the active alias in a new store.
@@ -82,7 +82,7 @@ class OrionKeyMaterialFactoryTest {
 
     @Test
     void missingProtectedPasswordFailsWithoutCreatingStore() {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
 
         assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration, Map.of()))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -92,7 +92,7 @@ class OrionKeyMaterialFactoryTest {
 
     @Test
     void opensIdentityFromAlreadyResolvedContentStore() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         configuration.getBootstrap().getKeyMaterial().setLocation("git+https://example.test/private.git");
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
@@ -107,8 +107,8 @@ class OrionKeyMaterialFactoryTest {
         assertThat(store.read()).isPresent();
     }
 
-    private OrionConfiguration configuration() {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private BootstrapConfiguration configuration() {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getBootstrap().getKeyMaterial().setLocation("security/orion.p12");
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);

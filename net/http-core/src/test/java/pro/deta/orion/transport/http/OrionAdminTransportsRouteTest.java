@@ -7,7 +7,7 @@ import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.bootstrap.config.GitTransportConfig;
 import pro.deta.orion.bootstrap.config.HttpTransportConfig;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.SshTransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OrionAdminTransportsRouteTest {
     @Test
     void reportsOnlyRunningTransportEndpoints() {
-        OrionConfiguration.AppTransport transport = new OrionConfiguration.AppTransport();
+        BootstrapConfiguration.AppTransport transport = new BootstrapConfiguration.AppTransport();
         transport.setHttp(new HttpTransportConfig("0.0.0.0", 9080));
         transport.setSsh(new SshTransportConfig("0.0.0.0", 2222));
         transport.setGit(new GitTransportConfig("0.0.0.0", 9418));
@@ -85,8 +85,8 @@ class OrionAdminTransportsRouteTest {
 
     @Test
     void reportsThePortBoundByTheRunningHttpServerThroughItsProvider() {
-        OrionConfiguration configuration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transport = new OrionConfiguration.AppTransport();
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
+        BootstrapConfiguration.AppTransport transport = new BootstrapConfiguration.AppTransport();
         transport.setHttp(new HttpTransportConfig("127.0.0.1", 0));
         configuration.setTransport(transport);
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
@@ -122,7 +122,7 @@ class OrionAdminTransportsRouteTest {
 
     @Test
     void reportsDesiredStateHttpsWhenBootstrapTransportsAreAbsent() {
-        OrionConfiguration configuration = new OrionConfiguration();
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
                 new OrionDocument.SystemConfiguration(

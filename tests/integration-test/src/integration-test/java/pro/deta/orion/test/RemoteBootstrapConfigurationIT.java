@@ -11,7 +11,7 @@ import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.ByteArrayInputStream;
@@ -77,7 +77,7 @@ class RemoteBootstrapConfigurationIT {
 
             Path processYaml = tempDir.resolve("process.yml");
             writeProcessYaml(processYaml, target);
-            OrionConfiguration configuration = new LocationConfigurationProvider(processYaml.toUri().toString())
+            BootstrapConfiguration configuration = new LocationConfigurationProvider(processYaml.toUri().toString())
                     .readConfiguration();
             assertThat(configuration.getBootstrap().getBaseDir()).isEqualTo(target.getBootstrap().getBaseDir());
             assertThat(configuration.getTransport()).usingRecursiveComparison().isEqualTo(target.getTransport());
@@ -185,7 +185,7 @@ class RemoteBootstrapConfigurationIT {
              var materialServer = RuntimeHttpTestSupport.start(materialUpstream)) {
             var environment = configureSources(Files.createDirectory(tempDir.resolve("configuration-auth")),
                     target, configurationServer, configurationTransport);
-            var materialSource = new OrionConfiguration();
+            var materialSource = new BootstrapConfiguration();
             configureSources(Files.createDirectory(tempDir.resolve("material-auth")), materialSource,
                     materialServer, "http".equals(configurationTransport) ? "ssh" : "http");
             var acl = target.getBootstrap().getAccessControl();
@@ -287,7 +287,7 @@ class RemoteBootstrapConfigurationIT {
     }
 
     private static void assertBootstrapRejected(
-            OrionConfiguration configuration, Map<String, String> environment, String scenario) throws Exception {
+            BootstrapConfiguration configuration, Map<String, String> environment, String scenario) throws Exception {
         int requestedPort = configuration.getTransport().getHttp().getPort();
         try (ServerSocket occupiedPort = new ServerSocket(0)) {
             configuration.getTransport().getHttp().setPort(occupiedPort.getLocalPort());
@@ -316,7 +316,7 @@ class RemoteBootstrapConfigurationIT {
                 + "\n-----END PRIVATE KEY-----\n";
     }
 
-    private static void writeProcessYaml(Path path, OrionConfiguration configuration) throws Exception {
+    private static void writeProcessYaml(Path path, BootstrapConfiguration configuration) throws Exception {
         var bootstrap = configuration.getBootstrap();
         var acl = bootstrap.getAccessControl();
         var material = bootstrap.getKeyMaterial();

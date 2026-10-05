@@ -3,11 +3,10 @@ package pro.deta.orion;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
-import pro.deta.orion.bootstrap.config.ConfigurationProvider;
 import pro.deta.orion.bootstrap.config.location.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.IOException;
@@ -69,15 +68,17 @@ public class App {
     }
 
     private static int runApplication(AppOptions options) {
-        ConfigurationProvider configurationProvider = configurationProvider(options);
+        LocationConfigurationProvider reader = options.configurationLocation() == null
+                ? new LocationConfigurationProvider()
+                : new LocationConfigurationProvider(options.configurationLocation());
         try {
-            OrionConfiguration configuration = configurationProvider.readConfiguration();
+            BootstrapConfiguration configuration = reader.readConfiguration();
             OrionApplicationLifecycle.BOOTSTRAP.getLogInitializer().configureScopedLogs(
                     new ConfigurationContext(configuration).getLogDir());
             try (BootstrapContext bootstrap = BootstrapContext.open(
                     configuration, Map.copyOf(System.getenv()), options.createIfMissing())) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
-                        .configurationProvider(() -> configuration)
+                        .bootstrapConfiguration(configuration)
                         .runtimeOptions(options.runtimeOptions())
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
@@ -104,13 +105,6 @@ public class App {
             return AppOptions.verifyUsage();
         }
         return AppOptions.usage();
-    }
-
-    static ConfigurationProvider configurationProvider(AppOptions options) {
-        if (options.configurationLocation() == null) {
-            return new LocationConfigurationProvider();
-        }
-        return new LocationConfigurationProvider(options.configurationLocation());
     }
 
     static int run(OrionApplicationLifecycle lifecycle, boolean installShutdownHook) {

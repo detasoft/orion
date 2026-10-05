@@ -22,7 +22,7 @@ import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.User;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.GrantAddress;
@@ -66,7 +66,7 @@ class RuntimeHttpGitRouteIT {
     void sameNameOrganizationUsersHaveIsolatedGitAccessAndObserveRoleRevocation() throws Exception {
         Path orionRoot = tempDir.resolve("organization-http-git");
         Path repositoryRoot = orionRoot.resolve("repos");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration);
              Git acmeSource = initRepository(tempDir.resolve("acme-source"));
              Git otherSource = initRepository(tempDir.resolve("other-source"))) {
@@ -204,7 +204,7 @@ class RuntimeHttpGitRouteIT {
         Path orionRoot = tempDir.resolve("orion-http-git");
         String repositoryName = "http-project";
         Path repositoryRoot = orionRoot.resolve("repos");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();
@@ -291,7 +291,7 @@ class RuntimeHttpGitRouteIT {
         String repositoryName = "http-read-only-project";
         String createdRepositoryName = "http-read-only-created";
         Path repositoryRoot = orionRoot.resolve("repos");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();
@@ -372,7 +372,7 @@ class RuntimeHttpGitRouteIT {
         String repositoryName = "http-branch-project";
         String featureBranch = "feature";
         Path repositoryRoot = orionRoot.resolve("repos");
-        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+        BootstrapConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();

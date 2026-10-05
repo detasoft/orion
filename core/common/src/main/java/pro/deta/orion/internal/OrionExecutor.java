@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.internal.async.StackTraceCapturingCallable;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
 import java.util.concurrent.*;
@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 @Slf4j
 public class OrionExecutor extends ScheduledThreadPoolExecutor implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     @Inject
-    public OrionExecutor(OrionConfiguration orionConfiguration, OrionThreadFactory orionThreadFactory) {
+    public OrionExecutor(BootstrapConfiguration orionConfiguration, OrionThreadFactory orionThreadFactory) {
         this(orionConfiguration.getBootstrap().getThreadPoolSize(), orionThreadFactory);
     }
 

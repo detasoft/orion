@@ -7,7 +7,7 @@ import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.SshHostKeyCapability;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 
 import java.nio.file.Files;
@@ -33,7 +33,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         this.sshHostKeys = sshHostKeys;
     }
 
-    static TestServerIdentityMaterial open(OrionConfiguration configuration) throws Exception {
+    static TestServerIdentityMaterial open(BootstrapConfiguration configuration) throws Exception {
         Path baseDirectory = Path.of(configuration.getBootstrap().getBaseDir());
         Files.createDirectories(baseDirectory);
         configuration.getBootstrap().getKeyMaterial().setLocation(
@@ -73,7 +73,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         material.close();
     }
 
-    private static KeyPair readActiveKey(OrionConfiguration configuration) throws Exception {
+    private static KeyPair readActiveKey(BootstrapConfiguration configuration) throws Exception {
         Path location = Path.of(configuration.getBootstrap().getBaseDir())
                 .resolve(configuration.getBootstrap().getKeyMaterial().getLocation())
                 .normalize();

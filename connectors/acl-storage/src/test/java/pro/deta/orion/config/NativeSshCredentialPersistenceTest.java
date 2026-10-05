@@ -60,7 +60,7 @@ class NativeSshCredentialPersistenceTest {
         KeyPair key = generator.generateKeyPair();
         OrionDesiredState desired = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(storage,
-                new pro.deta.orion.bootstrap.config.OrionConfiguration(),
+                new pro.deta.orion.bootstrap.config.BootstrapConfiguration(),
                 pro.deta.orion.keymaterial.ConfigurationCipherCapability.unavailable(),
                 pro.deta.orion.keymaterial.ConfigurationMaterialCapability.unavailable(), desired);
         OrionAccessControlServiceImpl service = service(storage, editor, desired);

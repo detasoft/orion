@@ -2,7 +2,7 @@ package pro.deta.orion.util;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -17,7 +17,7 @@ class ConfigurationContextTest {
 
     @Test
     void defaultsLogsToTheBaseDirectoryAndResolvesConfiguredPaths() {
-        OrionConfiguration configuration = configuration(Path.of("orion_root"));
+        BootstrapConfiguration configuration = configuration(Path.of("orion_root"));
         assertThat(new ConfigurationContext(configuration).getLogDir())
                 .isEqualTo(Path.of("orion_root", "logs").toAbsolutePath().normalize());
         configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
@@ -31,7 +31,7 @@ class ConfigurationContextTest {
 
     @Test
     void rejectsBlankLogDirectory() {
-        OrionConfiguration configuration = configuration(tempDir);
+        BootstrapConfiguration configuration = configuration(tempDir);
         for (String directory : new String[]{null, "", "  "}) {
             configuration.getBootstrap().setLogDir(directory);
             assertThatThrownBy(() -> new ConfigurationContext(configuration).getLogDir())
@@ -41,7 +41,7 @@ class ConfigurationContextTest {
 
     @Test
     void resolvesPlainStorageLocationRelativeToBaseDir() {
-        OrionConfiguration configuration = configuration(tempDir);
+        BootstrapConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("repos");
 
         Path storagePath = new ConfigurationContext(configuration).getFileGitStoragePath();
@@ -51,7 +51,7 @@ class ConfigurationContextTest {
 
     @Test
     void resolvesFileStorageLocation() {
-        OrionConfiguration configuration = configuration(tempDir);
+        BootstrapConfiguration configuration = configuration(tempDir);
         Path storageLocation = tempDir.resolve("storage").resolve("repos");
         configuration.getStorage().setLocation(storageLocation.toUri().toString());
 
@@ -62,7 +62,7 @@ class ConfigurationContextTest {
 
     @Test
     void resolvesRelativeFileStorageLocationFromWorkingDirectory() {
-        OrionConfiguration configuration = configuration(tempDir);
+        BootstrapConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("file:target/orion-test-repos");
 
         Path storagePath = new ConfigurationContext(configuration).getFileGitStoragePath();
@@ -75,7 +75,7 @@ class ConfigurationContextTest {
 
     @Test
     void rejectsNonFileStorageLocationSchemeForFileGitStoragePath() {
-        OrionConfiguration configuration = configuration(tempDir);
+        BootstrapConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("s3://orion/repositories");
 
         assertThatThrownBy(() -> new ConfigurationContext(configuration).getFileGitStoragePath())
@@ -85,7 +85,7 @@ class ConfigurationContextTest {
 
     @Test
     void resolvesEnvBaseDir() {
-        OrionConfiguration configuration = configuration(Path.of("unused"));
+        BootstrapConfiguration configuration = configuration(Path.of("unused"));
         configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
 
         Path baseDir = new ConfigurationContext(configuration, Map.of("ORION_ROOT", tempDir.toString()))
@@ -96,7 +96,7 @@ class ConfigurationContextTest {
 
     @Test
     void resolvesStorageLocationRelativeToEnvBaseDir() {
-        OrionConfiguration configuration = configuration(Path.of("unused"));
+        BootstrapConfiguration configuration = configuration(Path.of("unused"));
         configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
         configuration.getStorage().setLocation("repos");
 
@@ -108,7 +108,7 @@ class ConfigurationContextTest {
 
     @Test
     void rejectsMissingEnvBaseDir() {
-        OrionConfiguration configuration = configuration(Path.of("unused"));
+        BootstrapConfiguration configuration = configuration(Path.of("unused"));
         configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
 
         assertThatThrownBy(() -> new ConfigurationContext(configuration, Map.of()).getBaseDir())
@@ -116,8 +116,8 @@ class ConfigurationContextTest {
                 .hasMessageContaining("Environment variable ORION_ROOT is not set");
     }
 
-    private OrionConfiguration configuration(Path baseDir) {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private BootstrapConfiguration configuration(Path baseDir) {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(baseDir.toString());
         return configuration;
     }

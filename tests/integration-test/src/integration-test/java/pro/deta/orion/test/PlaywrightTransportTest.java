@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
 
@@ -32,7 +32,7 @@ class PlaywrightTransportTest {
 
     @Test
     void browserServerStartsAllTransportsAndServesNativeGit() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
             TestBearerTokens.enrollRootKey(orion.accessControlService(), orion.component().configurationEditor(), rootKey);
@@ -63,7 +63,7 @@ class PlaywrightTransportTest {
 
     @Test
     void browserServerRejectsUnknownSshKeysAndStillAcceptsItsAdminKey() throws Exception {
-        OrionConfiguration configuration = configuration();
+        BootstrapConfiguration configuration = configuration();
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
             KeyPair rootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("test root key");
             TestBearerTokens.enrollRootKey(orion.accessControlService(), orion.component().configurationEditor(), rootKey);
@@ -83,8 +83,8 @@ class PlaywrightTransportTest {
         }
     }
 
-    private OrionConfiguration configuration() throws Exception {
-        OrionConfiguration configuration = PlaywrightExternalServicesIT.serverConfiguration(
+    private BootstrapConfiguration configuration() throws Exception {
+        BootstrapConfiguration configuration = PlaywrightExternalServicesIT.serverConfiguration(
                 tempDir.resolve("orion"));
         TestPorts.configure(configuration);
         return configuration;

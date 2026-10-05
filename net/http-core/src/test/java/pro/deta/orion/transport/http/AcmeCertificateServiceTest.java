@@ -30,7 +30,7 @@ import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
@@ -72,7 +72,7 @@ class AcmeCertificateServiceTest {
     void issuesFromDesiredStatePersistsInMaterialStoreAndReloadsWithoutLegacyFiles() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         OrionDesiredState desiredState = desiredState(false);
-        OrionConfiguration bootstrap = bootstrap();
+        BootstrapConfiguration bootstrap = bootstrap();
 
         try (OrionKeyMaterial owner = owner(store)) {
             RecordingIssuer issuer = new RecordingIssuer(false);
@@ -306,7 +306,7 @@ class AcmeCertificateServiceTest {
     @Test
     void activatesRenewedCertificateOnTheRunningHttpsListener() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            OrionConfiguration bootstrap = bootstrap();
+            BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(false);
             OrionDesiredState desired = desiredState(false);
             OrionHttpsConfiguration old = desired.current().document().system().https().orElseThrow();
@@ -446,7 +446,7 @@ class AcmeCertificateServiceTest {
     @Test
     void startsAndStopsRenewalWithTheHttpTransport() throws Exception {
         try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
-            OrionConfiguration bootstrap = bootstrap();
+            BootstrapConfiguration bootstrap = bootstrap();
             bootstrap.getTransport().getHttp().setEnabled(true);
             bootstrap.getTransport().getHttp().setPort(0);
             OrionDesiredState desired = desiredState(false);
@@ -489,8 +489,8 @@ class AcmeCertificateServiceTest {
         }
     }
 
-    private OrionConfiguration bootstrap() {
-        OrionConfiguration configuration = new OrionConfiguration();
+    private BootstrapConfiguration bootstrap() {
+        BootstrapConfiguration configuration = new BootstrapConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
         return configuration;

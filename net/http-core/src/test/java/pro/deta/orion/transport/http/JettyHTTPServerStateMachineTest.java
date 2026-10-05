@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.bootstrap.config.OrionConfiguration;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 
 import java.util.List;
@@ -21,7 +21,7 @@ class JettyHTTPServerStateMachineTest {
                 new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
-                new OrionConfiguration(), desiredState, TlsCapability.unavailable(), null, null, null);
+                new BootstrapConfiguration(), desiredState, TlsCapability.unavailable(), null, null, null);
         JettyHTTPServerStateMachine machine = new JettyHTTPServerStateMachine(
                 () -> server, () -> { throw new AssertionError(); }, () -> { throw new AssertionError(); });
 
