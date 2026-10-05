@@ -1,14 +1,32 @@
-# Organization OIDC Login and Email Invitations
+# System OIDC Defaults and Organization Overrides
 
-- Owner: codex, session 01a0cd57-6e6e-7083-bffc-2f8231e97bc9, branch `codex/oidc-invitations-01a0cd57`,
-  worktree `.worktrees/oidc-invitations-01a0cd57`, started 2026-09-23 10:27 Europe/Amsterdam.
+## Integrated baseline and remaining work
+
+Organization-scoped OIDC provider configuration is integrated in `82c74b1c`,
+invited sign-in and onboarding in `af76d014`, provider setup documentation in
+`29f8379a`, administrator provider controls in `b69388c3`, and browser session
+renewal in `62ba1440`. Existing deterministic tests cover onboarding, persistence,
+protocol rejection, organization isolation, and browser session behavior.
+This inventory inspected source and test coverage; it did not rerun those tests.
+
+The remaining implementation is system-level OIDC defaults and organization
+inheritance/override controls, including explicitly disabling OIDC, resolving
+secrets in the provider's owning scope, and invalidating sign-in attempts and
+sessions when the effective configuration changes. `SystemConfiguration` has no
+OIDC provider list, and current sign-in reads only organization-local providers.
+Do not close this task based on the integrated organization-only baseline.
+
+Resume this implementation after the current worktree cleanup. Live Google or
+corporate-provider acceptance remains a separate task in
+`../02_hierarchical-orion-configuration/06_oidc-live-provider-acceptance.md`.
 
 ## Required result
 
-User-approved minimal scope: configure OIDC at organization level, invite an
-email into that organization, let the recipient sign in through Google or a
-corporate OIDC provider and fill in their profile. Organization users see and
-access only that organization's repositories and other scoped resources.
+Add system-wide OIDC provider defaults and let each organization inherit them,
+replace them with its own provider list, or explicitly disable OIDC. Preserve
+the integrated invitation, Google/corporate sign-in, and profile-completion flow.
+Organization users see and access only their organization's repositories and
+other scoped resources.
 System-wide settings remain restricted to existing system administrators.
 Use one shared OIDC implementation. Administrator receives a shareable invitation
 link; automatic email sending is not required.
@@ -29,11 +47,12 @@ boundary when handling an organization principal.
 
 ## Current model and smallest extension
 
-OrionDocument contains organizations and OrganizationUser. PrincipalAddress
-already distinguishes system and organization principals, and ConfigurationScope
-and RepositoryAddress identify resource ownership. Actual authentication is
-currently flat system ACL, so add the minimal organizational principal lookup
-and organization-ownership checks at existing authentication/access boundaries.
+OrionDocument already stores organization-local providers, users and invitations.
+OrganizationAccounts and OrionOidcRoute implement invited sign-in and account
+resolution. PrincipalAddress distinguishes system and organization principals,
+and ConfigurationScope and RepositoryAddress identify resource ownership.
+Extend the existing provider selection and secret-resolution paths to use the
+effective configuration and its owning scope.
 Do not duplicate organizational users into system ACL, introduce a parallel user
 store, or treat an organizational login as a same-name system user.
 
@@ -99,26 +118,21 @@ trip XML and survive every existing document-copy/update consumer.
 
 ## Implementation plan
 
-1. Inspect schema/XML mapper, configuration persistence/copy consumers, secret
-   resolution, UserIdentity, ACL/token lookup, access rules, resource names,
-   HTTP/SSH and decision consumers, frontend API/client and existing tests.
-2. Add minimal organization-level providers, invitations and external identities
-   to existing configuration/user model; update all real serialization and copy
-   paths. Add durable invitation operations and atomic profile completion.
-3. Add canonical organization identity resolution and shared organization
-   ownership checks. Preserve system identity wire/token compatibility and
-   existing ACL behavior. Provide member-safe resource listing/access routes
-   through existing mechanisms; do not expose global admin state.
-4. Implement generic OIDC browser flow, sessions/CSRF and registered routes.
-   Use a local controlled OIDC provider fixture for protocol behavior tests.
-5. Add browser login/provider selection, invitation onboarding, member view,
-   logout, administrator root/organization provider settings and invitation controls. Document
-   Google/corporate configuration and secret provisioning in appropriate docs.
-6. Verify normal onboarding/repeat login, wrong email, expired/revoked invite,
-   callback/state/nonce/signature/audience/issuer failures, replay/concurrency,
-   same-name accounts, cross-organization list and direct-access denial,
-   disabled user/policy reload, logout/CSRF and unchanged system Bearer/SSH.
-   Run focused make test plus full make test; frontend tests/build as needed.
+1. Inspect the existing schema/XML mapper, document-copy consumers, provider
+   selection, secret resolution, administrator APIs/UI, and session validation.
+2. Extend the existing model with system providers and distinguish absent,
+   explicitly empty, and non-empty organization overrides in persistence.
+3. Resolve effective providers through one production path. Use secrets from
+   the owning scope and retain invitation and organization-access boundaries.
+4. Revalidate pending sign-in and browser sessions against effective provider
+   configuration, including default changes, overrides, disable, and secret
+   rotation. Preserve the existing session renewal and timeout policies.
+5. Add administrator system-provider settings and visible organization controls
+   for inheritance, replacement, and disable; update setup documentation.
+6. Test inherited defaults, overrides, disable, persistence/reload, same provider
+   and secret ids across scopes, secret shadowing rejection, configuration-change
+   invalidation, and existing onboarding/isolation/session behavior. Run focused
+   make test plus full make test; frontend tests/build as needed.
 
 ## Acceptance
 
