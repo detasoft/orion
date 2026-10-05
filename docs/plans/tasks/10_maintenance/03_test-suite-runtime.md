@@ -1,11 +1,12 @@
 # Reduce the warm full-test runtime below twenty seconds
 
-Status: paused
+Status: todo
 
-- Owner: codex, session test-runtime-6b8f, branch `codex/test-suite-runtime-6b8f`,
-  worktree `.worktrees/test-suite-runtime-6b8f`, paused 2026-09-12 10:24 Europe/Amsterdam;
-  next: determine a verified redesign of full-suite execution that preserves all
-  tests and can close the measured 19-second gap from the fastest experiment.
+The previous execution was paused in `63823406` with a measured 19-second gap
+between its fastest experiment and the target. The target remains unverified.
+Next: determine a verified redesign of full-suite execution that preserves all
+tests and closes that gap. Re-establish the baseline on the current revision
+before relying on the historical timings and test counts below.
 
 ## Requirements
 
