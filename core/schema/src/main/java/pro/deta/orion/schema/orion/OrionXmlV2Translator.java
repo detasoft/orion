@@ -24,7 +24,6 @@ final class OrionXmlV2Translator {
         }
         try {
             Unmarshaller unmarshaller = JAXB_CONTEXT.createUnmarshaller();
-            unmarshaller.setSchema(XML_SCHEMA.compiledSchema());
             OrionV2 dto = (OrionV2) unmarshaller.unmarshal(new ByteArrayInputStream(content));
             return OrionV2Mapper.toCurrent(dto);
         } catch (JAXBException | IllegalArgumentException | NullPointerException e) {
