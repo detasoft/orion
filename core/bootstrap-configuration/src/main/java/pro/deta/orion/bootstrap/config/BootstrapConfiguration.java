@@ -1,15 +1,11 @@
 package pro.deta.orion.bootstrap.config;
 
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
 
-import jakarta.inject.Singleton;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@RequiredArgsConstructor
 @Data
-@Singleton
 public class BootstrapConfiguration {
     private BootstrapConfig bootstrap = new BootstrapConfig();
     private StorageConfig storage = new StorageConfig();

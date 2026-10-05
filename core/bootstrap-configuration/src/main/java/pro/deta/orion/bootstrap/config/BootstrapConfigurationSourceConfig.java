@@ -15,8 +15,4 @@ public class BootstrapConfigurationSourceConfig extends BootstrapSourceConfig {
     public String selectedRef() {
         return branch == null || branch.isBlank() ? super.selectedRef() : branch;
     }
-
-    public String configurationRef() {
-        return selectedRef();
-    }
 }
