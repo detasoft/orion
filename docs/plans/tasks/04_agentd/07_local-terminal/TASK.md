@@ -3,9 +3,9 @@
 Status: todo
 
 Provide a local AgentD path for starting and attaching to an independent
-`session-host` without an Orion server. The launch-only slice is complete in
-`e3822a4a`; the remaining children add interactive attachment and explicitly
-tracked follow-up capabilities.
+`session-host` without an Orion server. Local launch (`e3822a4a`), interactive
+attachment (`8667378a`), and opt-in journal acknowledgement (`82218cee`) are
+complete. Explicit daemon command routing remains a separate follow-up.
 
 ## Architecture
 
@@ -16,8 +16,9 @@ tracked follow-up capabilities.
 - Local mode does not construct `Agent`, read a server launch permit, initialize
   HTTP/2 transport, recover `SERVER` operation sequences, or persist a cursor.
 - Start-and-attach and attach-existing converge on one terminal-session path.
-- Journal retention acknowledgement and explicit daemon command routing remain
-  separate executable follow-ups rather than hidden optional scope.
+- Opt-in `--ack-journal` acknowledges fully decoded and flushed pages through
+  native retention control; it does not imply server durability.
+- Explicit daemon command routing remains a separate executable follow-up.
 
 ## Interaction Contract
 
