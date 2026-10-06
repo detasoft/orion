@@ -124,13 +124,29 @@ public final class OrionConfigurationEditor {
         }
     }
 
+    public OrionDocument read(ConfigurationFile snapshot) {
+        try (ByteArrayInputStream input = new ByteArrayInputStream(snapshot.content())) {
+            return OrionXml.read(input);
+        } catch (IOException failure) {
+            throw new IllegalArgumentException("Invalid ACL configuration file", failure);
+        }
+    }
+
+    public byte[] serialize(OrionDocument document) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            OrionXml.write(document, output);
+            return output.toByteArray();
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot serialize configuration", failure);
+        }
+    }
+
     public Result<OrionDocument> document(ConfigurationFile snapshot) {
-        byte[] content = snapshot.content();
-        try (ByteArrayInputStream input = new ByteArrayInputStream(content)) {
-            OrionDocument document = OrionXml.read(input);
+        try {
+            OrionDocument document = read(snapshot);
             validateConfiguration(document);
             return new Result.Success<>(document);
-        } catch (IOException | RuntimeException failure) {
+        } catch (RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
                     "Cannot validate configuration file", failure);
         }
@@ -207,13 +223,7 @@ public final class OrionConfigurationEditor {
         public OrionDesiredState.Snapshot apply(String message, UserEmail author) {
             synchronized (OrionConfigurationEditor.this) {
                 requireOpen();
-                byte[] content;
-                try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                    OrionXml.write(candidate, output);
-                    content = output.toByteArray();
-                } catch (IOException failure) {
-                    throw new IllegalStateException("Cannot serialize configuration", failure);
-                }
+                byte[] content = serialize(candidate);
                 ConfigurationFile updated = new ConfigurationFile(content, original.revision());
                 OrionConfigurationEditor.this.document(updated).valueOrFailure("Invalid updated configuration");
                 closed = true;

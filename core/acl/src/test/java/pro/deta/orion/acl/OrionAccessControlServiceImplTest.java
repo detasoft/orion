@@ -584,6 +584,8 @@ class OrionAccessControlServiceImplTest {
             storage.changeListener.accept("malformed desired state");
 
             assertThat(desiredState.current()).isSameAs(lastValid);
+            assertThatThrownBy(service::accessControlConfigurationFile)
+                    .isInstanceOf(IllegalArgumentException.class);
         } finally {
             service.onStop();
         }
@@ -621,6 +623,12 @@ class OrionAccessControlServiceImplTest {
 
             assertThat(desiredState.current()).isSameAs(lastValid);
             assertThat(service.isRunning()).isTrue();
+            ConfigurationFile stored = service.accessControlConfigurationFile();
+            assertThat(stored.revision()).contains("invalid-commit");
+            assertThat(parseDocument(stored.content())).isEqualTo(candidate);
+            assertThat(service.listSshCredentials("missing-user"))
+                    .isInstanceOfSatisfying(SshCredentialListResult.Failure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.USER_NOT_FOUND));
         } finally {
             service.onStop();
         }

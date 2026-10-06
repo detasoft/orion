@@ -54,11 +54,7 @@ import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.schema.orion.OrionXml;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -116,8 +112,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             changeSubscription = configurationStorage.onChange(initiator -> requestToUpdate());
             synchronized (editor) {
                 Result<ConfigurationFile> initial = initialConfiguration
-                        .<Result<ConfigurationFile>>map(this::validateConfigurationFile)
-                        .orElseGet(this::loadValidatedConfigurationFile);
+                        .<Result<ConfigurationFile>>map(Result.Success::new)
+                        .orElseGet(configurationStorage::load);
                 switch (initial) {
                     case Result.Success<ConfigurationFile>(var file) -> {
                         if (rootPasswordReset.enabled()) {
@@ -191,7 +187,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return switch (stored) {
             case Result.Success<ConfigurationFile>(var file) -> new ConfigurationStatus(
                     file.revision(), activeRevision,
-                    validateConfigurationFile(file) instanceof Result.Success<?> ? "valid" : "invalid");
+                    editor.document(file) instanceof Result.Success<?> ? "valid" : "invalid");
             case Result.Failure<ConfigurationFile> ignored ->
                     new ConfigurationStatus(Optional.empty(), activeRevision, "unavailable");
         };
@@ -300,7 +296,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private SshCredentialListResult listSshCredentials(ConfigurationFile snapshot, String userId) {
         try {
-            User user = findUser(parseAccessControlConfiguration(snapshot.content()), userId);
+            User user = findUser(editor.read(snapshot).system().accessControl(), userId);
             if (user == null) {
                 return SshCredentialListResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
@@ -851,39 +847,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public ConfigurationFile accessControlConfigurationFile() {
         return switch (configurationStorage.load()) {
             case Result.Success<ConfigurationFile>(var file) -> new ConfigurationFile(
-                    serializeOrionConfiguration(parseOrionConfiguration(file.content())), file.revision());
+                    editor.serialize(editor.read(file)), file.revision());
             case Result.Failure<ConfigurationFile> failure ->
                     throw new IllegalStateException("Cannot load ACL configuration file", failure.throwable());
         };
-    }
-
-    private AccessControl parseAccessControlConfiguration(byte[] content) {
-        return parseOrionConfiguration(content).system().accessControl();
-    }
-
-    private OrionDocument parseOrionConfiguration(byte[] content) {
-        try (ByteArrayInputStream input = new ByteArrayInputStream(content)) {
-            return OrionXml.read(input);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Invalid ACL configuration file", e);
-        }
     }
 
     private byte[] serializeInitialConfiguration(AccessControl accessControl) {
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("default"), "Default", List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of());
-        return serializeOrionConfiguration(new OrionDocument(
+        return editor.serialize(new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl), List.of(organization)));
-    }
-
-    private byte[] serializeOrionConfiguration(OrionDocument document) {
-        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            OrionXml.write(document, output);
-            return output.toByteArray();
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot serialize ACL configuration file", e);
-        }
     }
 
     private void requestToUpdate() {
@@ -899,7 +874,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         try {
             String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
             String authenticationGeneration = UUID.randomUUID().toString();
-            AccessControl current = parseAccessControlConfiguration(snapshot.content());
+            AccessControl current = editor.read(snapshot).system().accessControl();
             AccessControl canonical = DefaultAccessControl.create(
                     passwordHash,
                     CredentialType.ARGON2);
@@ -945,15 +920,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private ConfigurationFile prepareAccessControl(ConfigurationFile loadedSnapshot) {
-        AccessControl acl = parseAccessControlConfiguration(loadedSnapshot.content());
+        OrionDocument document = editor.read(loadedSnapshot);
+        AccessControl acl = document.system().accessControl();
         List<User> roots = rootUsers(acl);
         if (roots.size() == 1) {
             User root = roots.getFirst();
             List<Credential> credentials = synchronizedInternalServerKeys(root);
             if (credentials == null) return loadedSnapshot;
-            OrionDocument document = parseOrionConfiguration(loadedSnapshot.content());
             return new ConfigurationFile(
-                    serializeOrionConfiguration(document.replaceAccessControl(
+                    editor.serialize(document.replaceAccessControl(
                             replaceUser(acl, root, withCredentials(root, credentials)))),
                     loadedSnapshot.revision());
         }
@@ -1456,26 +1431,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
     }
-
-    private Result<ConfigurationFile> loadValidatedConfigurationFile() {
-        return switch (configurationStorage.load()) {
-            case Result.Success<ConfigurationFile>(var file) -> validateConfigurationFile(file);
-            case Result.Failure<ConfigurationFile> failure -> new Result.Failure<>(failure);
-        };
-    }
-
-    private Result<ConfigurationFile> validateConfigurationFile(ConfigurationFile file) {
-        return switch (documentFrom(file)) {
-            case Result.Success<OrionDocument> ignored -> new Result.Success<>(file);
-            case Result.Failure<OrionDocument> failure -> new Result.Failure<>(failure);
-        };
-    }
-
-    private Result<OrionDocument> documentFrom(ConfigurationFile snapshot) {
-        return editor.document(snapshot);
-    }
-
-
 
     private record ParsedSshCredential(PublicKey publicKey, SshCredential descriptor) {
     }
