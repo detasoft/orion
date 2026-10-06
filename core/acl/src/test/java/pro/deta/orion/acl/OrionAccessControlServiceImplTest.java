@@ -126,6 +126,54 @@ class OrionAccessControlServiceImplTest {
     }
 
     @Test
+    void systemOidcReloadUsesCurrentGrantsAndRejectsRotatedOrAmbiguousBindings() {
+        String issuer = "https://sso.example.test";
+        OidcProvider provider = new OidcProvider("sso", URI.create(issuer), "client", "secret", 172800, 0);
+        Credential binding = new Credential(CredentialType.OIDC_SUBJECT, issuer, "external-alice");
+        User alice = new User("alice", null, null, null, List.of(binding), List.of("reader"), List.of());
+        Grant read = new Grant("read", List.of(new GrantExpression(GrantKey.READ, "true")));
+        Grant admin = new Grant("admin", List.of(new GrantExpression(GrantKey.ADMIN, "true")));
+        OrionDesiredState desired = new OrionDesiredState();
+        java.util.function.BiConsumer<AccessControl, String> publish = (acl, envelope) -> desired.publish(
+                new OrionDocument(new OrionDocument.SystemConfiguration(acl, Optional.empty(),
+                        List.of(new ConfigurationSecret("secret", envelope)), List.of(), List.of(),
+                        List.of(provider)), List.of()), Optional.empty());
+        AccessControl original = new AccessControl(List.of(alice),
+                List.of(new Role("reader", List.of(read), List.of())), List.of());
+        publish.accept(original, "first-secret");
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(null, null, null,
+                testServerIdentity(), desired,
+                new OrionConfigurationEditor(null, new BootstrapConfiguration(), testCipher(), testMaterial(), desired),
+                Optional.empty());
+        TokenIssueResult.Success issued = (TokenIssueResult.Success) service.issueSystemOidcToken(
+                "alice", provider, "external-alice", 60);
+        byte[] token = issued.token().getBytes(StandardCharsets.UTF_8);
+        TokenAuthenticationResult.Success authenticated = (TokenAuthenticationResult.Success) service.verifyToken(token);
+        assertThat(authenticated.userIdentity().getGrants()).containsExactly(read);
+
+        AccessControl changedGrants = new AccessControl(List.of(alice),
+                List.of(new Role("reader", List.of(admin), List.of())), List.of());
+        publish.accept(changedGrants, "first-secret");
+        assertThat(service.verifyToken(token)).isInstanceOfSatisfying(TokenAuthenticationResult.Success.class,
+                result -> assertThat(result.userIdentity().getGrants()).containsExactly(admin));
+        assertThat(authenticated.userIdentity().getGrants()).containsExactly(read);
+
+        publish.accept(changedGrants, "second-secret");
+        assertThat(service.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+        TokenIssueResult.Success refreshed = (TokenIssueResult.Success) service.issueSystemOidcToken(
+                "alice", provider, "external-alice", 60);
+        byte[] refreshedToken = refreshed.token().getBytes(StandardCharsets.UTF_8);
+        assertThat(service.verifyToken(refreshedToken)).isInstanceOf(TokenAuthenticationResult.Success.class);
+
+        User duplicate = new User("bob", null, null, null, List.of(binding), List.of(), List.of());
+        publish.accept(new AccessControl(List.of(alice, duplicate), changedGrants.roles(), List.of()), "second-secret");
+        assertThat(service.systemOidcGeneration("alice", provider, "external-alice")).isEmpty();
+        assertThat(service.verifyToken(refreshedToken)).isInstanceOf(TokenAuthenticationResult.Failure.class);
+        assertThat(service.issueSystemOidcToken("alice", provider, "external-alice", 60))
+                .isInstanceOf(TokenIssueResult.Failure.class);
+    }
+
+    @Test
     void stagesTwoSshKeysAndPublishesOnlyOnce() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));

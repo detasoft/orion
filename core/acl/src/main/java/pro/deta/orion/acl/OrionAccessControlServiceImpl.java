@@ -649,8 +649,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     public User findSystemOidcUser(String issuer, String subject) {
+        return findSystemOidcUser(currentAccessControl(), issuer, subject);
+    }
+
+    private User findSystemOidcUser(AccessControl snapshot, String issuer, String subject) {
         User found = null;
-        for (User user : currentAccessControl().users()) {
+        for (User user : snapshot.users()) {
             for (Credential credential : user.credentials()) {
                 if (credential.type() == CredentialType.OIDC_SUBJECT
                         && Objects.equals(issuer, credential.keyId())
@@ -671,8 +675,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     public Optional<String> systemOidcGeneration(String userId, OidcProvider provider, String subject) {
-        User user = findSystemOidcUser(provider.issuer().toString(), subject);
-        OrionDocument.SystemConfiguration system = desiredState.current().document().system();
+        return systemOidcGeneration(desiredState.current().document().system(), userId, provider, subject);
+    }
+
+    private Optional<String> systemOidcGeneration(OrionDocument.SystemConfiguration system,
+            String userId, OidcProvider provider, String subject) {
+        User user = findSystemOidcUser(system.accessControl(), provider.issuer().toString(), subject);
         if (user == null || !user.id().equals(userId) || !system.oidcProviders().contains(provider)) {
             return Optional.empty();
         }
@@ -702,16 +710,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private TokenAuthenticationResult verifySystemOidcToken(String userId, String generation, String tokenId) {
-        AccessControl snapshot = currentAccessControl();
+        OrionDocument.SystemConfiguration system = desiredState.current().document().system();
+        AccessControl snapshot = system.accessControl();
         Result<User> found = findSingleUser(snapshot, userId);
         if (!(found instanceof Result.Success<User>(User user))) {
             return TokenAuthenticationResult.failure("System OIDC account is unavailable");
         }
         for (Credential credential : user.credentials()) {
             if (credential.type() != CredentialType.OIDC_SUBJECT) continue;
-            for (OidcProvider provider : desiredState.current().document().system().oidcProviders()) {
+            for (OidcProvider provider : system.oidcProviders()) {
                 if (!provider.issuer().toString().equals(credential.keyId())) continue;
-                if (systemOidcGeneration(userId, provider, credential.value()).filter(generation::equals).isEmpty()) {
+                if (systemOidcGeneration(system, userId, provider, credential.value())
+                        .filter(generation::equals).isEmpty()) {
                     continue;
                 }
                 AuthenticationResult authenticated = createUserIdentity(snapshot, user);
