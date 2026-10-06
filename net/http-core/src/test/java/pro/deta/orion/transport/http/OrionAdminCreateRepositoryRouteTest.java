@@ -3,6 +3,9 @@ package pro.deta.orion.transport.http;
 import pro.deta.orion.auth.DefaultAccessControl;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.User;
+import pro.deta.orion.schema.acl.Grant;
+import pro.deta.orion.schema.acl.GrantExpression;
+import pro.deta.orion.schema.acl.GrantKey;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -120,13 +123,34 @@ class OrionAdminCreateRepositoryRouteTest {
     }
 
     @Test
-    void rejectsSystemNonAdminAndAnonymousRequests() throws Exception {
-        for (UserIdentity identity : List.of(SecurityContext.ANONYMOUS,
-                new InternalUserImpl("reader", List.of()))) {
-            assertThat(route.doGet(request("", identity)).status()).isEqualTo(403);
+    void listsOnlyRepositoriesReadableByTheSystemUser() throws Exception {
+        provider.create("visible").valueOrFailure("repository");
+        provider.create("hidden").valueOrFailure("repository");
+        UserIdentity reader = new InternalUserImpl("reader", List.of(new Grant("read-visible", List.of(
+                new GrantExpression(GrantKey.REPOSITORY, "visible"),
+                new GrantExpression(GrantKey.READ, "true")))));
+
+        OrionHttpResponse response = route.doGet(request("", reader));
+
+        assertThat(response.status()).isEqualTo(SC_OK);
+        assertThat(response.body()).isEqualTo(Map.of("repositories", List.of(
+                new OrionAdminCreateRepositoryRoute.RepositoryResponse("visible"))));
+        assertThat(route.doPost(request("new", reader)).status()).isEqualTo(403);
+        assertThat(provider.repositoryNames()).containsExactly("hidden", "visible");
+    }
+
+    @Test
+    void emptySystemUserListingPreservesAnonymousAndCreationRestrictions() throws Exception {
+        provider.create("hidden").valueOrFailure("repository");
+        UserIdentity reader = new InternalUserImpl("reader", List.of());
+        OrionHttpResponse response = route.doGet(request("", reader));
+        assertThat(response.status()).isEqualTo(SC_OK);
+        assertThat(response.body()).isEqualTo(Map.of("repositories", List.of()));
+        assertThat(route.definition().authorization().allows(request("", SecurityContext.ANONYMOUS))).isFalse();
+        for (UserIdentity identity : List.of(SecurityContext.ANONYMOUS, reader)) {
             assertThat(route.doPost(request("acme/team/new", identity)).status()).isEqualTo(403);
         }
-        assertThat(provider.repositoryNames()).isEmpty();
+        assertThat(provider.repositoryNames()).containsExactly("hidden");
     }
 
     private static HttpServletRequest request(String name) {

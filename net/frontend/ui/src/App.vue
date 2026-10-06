@@ -430,7 +430,7 @@ async function connectSavedSettings() {
   try {
     const currentIdentity = await api.me()
     if (attempt !== connectionAttempt) return
-    const [routes, lifecycle, transports, repositoryResponse] = currentIdentity.organization
+    const [routes, lifecycle, transports, repositoryResponse] = !currentIdentity.admin
       ? [{ routes: [] }, '', {}, await api.repositories()]
       : await Promise.all([
         api.routes(),

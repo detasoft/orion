@@ -74,7 +74,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="modal-backdrop">
+  <div class="modal-layer">
     <section class="modal sign-in" aria-label="OIDC sign-in">
       <button class="close-button" aria-label="Close sign-in" @click="emit('close')">×</button>
       <h2>{{ profile?.setup ? 'Set up your profile' : 'Sign in with OIDC' }}</h2>

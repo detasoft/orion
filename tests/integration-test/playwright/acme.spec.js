@@ -28,8 +28,8 @@ test('administrator issues and inspects an HTTP-01 certificate in Orion', async 
   if (previous !== null) expect(await afterDenied.text()).toBe(previous)
 
   await step('Открыть Orion', null, () => page.goto(browserUrl))
-  await expect(page.getByRole('button', { name: 'Key material' })).toBeVisible()
-  await step('Открыть ключи и сертификаты', page.getByRole('button', { name: 'Key material' }),
+  await expect(page.getByRole('link', { name: 'Key material' })).toBeVisible()
+  await step('Открыть ключи и сертификаты', page.getByRole('link', { name: 'Key material' }),
     target => target.click())
   await expect(page.getByText('acme-identity')).toBeVisible()
   await expect(page.getByText('No issued certificate').first()).toBeVisible()

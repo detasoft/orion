@@ -618,6 +618,20 @@ describe('Orion connection', () => {
     wrapper.unmount()
   })
 
+  it('connects a system reader without requesting forbidden administration data', async () => {
+    client.me.mockResolvedValue({ userId: 'reader', organization: '', admin: false })
+    client.routes.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    client.repositories.mockResolvedValue({ repositories: [{ name: 'shared/project' }] })
+    const wrapper = mountApp()
+    await connect(wrapper)
+    expect(wrapper.text()).toContain('Sign out')
+    expect(sessionStorage.getItem('orion.ui.token')).toBe('token')
+    expect(client.routes).not.toHaveBeenCalled()
+    expect(client.transports).not.toHaveBeenCalled()
+    expect(client.lifecycleState).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('requires a connection before loading pending decisions', async () => {
     const wrapper = mountApp()
     const decisions = wrapper.findAll('.primary-nav .nav-item')

@@ -110,8 +110,10 @@ keys persist. The fixture remains running afterward; stop it with
 `tests/external-services/fixture down`.
 
 The integration round starts an isolated Orion instance, configures test access
-and CA trust, and runs Playwright in the container's visible Chromium. Orion
-listens on host port 8000 for HTTP-01 and stops when the round ends. Each test
+and CA trust, and runs Playwright in the container's visible Chromium. It issues
+an ACME certificate first, then restarts Orion with HTTPS on port 9443 for the
+Gitea OIDC scenario. Orion listens on host port 8000 for HTTP-01 and stops when
+the round ends. Each test
 uses a clean browser context; its pages close after success or failure. Existing
 manual browser pages stay open.
 The Playwright dependencies are installed from its lockfile in
@@ -163,6 +165,18 @@ scenario also needs Gitea, its fixture credentials and CA, and an Orion JVM that
 trusts that CA. Each run creates uniquely named Orion repositories and proxy
 aliases, which remain in the selected server's persistent configuration. The
 temporary upstream Gitea repository is removed after its scenario.
+
+The OIDC scenario registers a temporary confidential Gitea OAuth2 application,
+configures a system provider and binds an existing system user through Orion's
+UI. A separate browser context logs into Gitea, authorizes Orion, and verifies
+the user's identity, a repository list filtered by READ, denial of repository
+creation and administration, reload, session renewal, and denial of renewal
+after logout. The OAuth2 application is deleted afterward.
+Against a manually started server, this scenario requires HTTPS at
+`https://orion.test:9443` (or the HTTPS origin supplied in `URL`) and fixture CA
+trust in the JVM. Its test repositories, system user, provider, and binding remain
+in that server's configuration; the complete Maven round discards its isolated
+server data.
 
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.

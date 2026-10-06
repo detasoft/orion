@@ -45,9 +45,6 @@ public class OrionAdminCreateRepositoryRoute extends AbstractOrionHttpRoute {
     protected OrionHttpResponse doGet(HttpServletRequest req) {
         SecurityContext context = context(req);
         boolean admin = isAdmin(context);
-        if (!admin && context.getUserIdentity().getOrganizationId().isEmpty()) {
-            return OrionHttpResponse.empty(403);
-        }
         List<RepositoryResponse> repositories = new ArrayList<>();
         for (String name : gitRepositoryProvider.repositoryNames()) {
             if (admin || RepositoryAccessRules.read().evaluate(context, RepositoryResource.of(name)).allowed()) {

@@ -63,7 +63,7 @@ test('administrator creates a local repository in Orion', async ({ request, page
   await step('Создать репозиторий', dialog.getByRole('button', { name: 'Create repository' }),
     target => target.click())
   await expect(page.getByText('Repository created', { exact: true })).toBeVisible()
-  await step('Открыть список репозиториев', page.getByRole('button', { name: 'Repositories', exact: true }),
+  await step('Открыть список репозиториев', page.getByRole('link', { name: 'Repositories', exact: true }),
     target => target.click())
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 
@@ -75,7 +75,7 @@ test('administrator creates a local repository in Orion', async ({ request, page
   expect(await remoteRefs(`/r/${name}.git`, adminToken)).toBe('')
 
   await step('Обновить страницу и проверить сохранение репозитория', null, () => page.reload())
-  await step('Снова открыть список репозиториев', page.getByRole('button', { name: 'Repositories', exact: true }),
+  await step('Снова открыть список репозиториев', page.getByRole('link', { name: 'Repositories', exact: true }),
     target => target.click())
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 })
@@ -96,7 +96,7 @@ test('administrator connects an HTTPS Git proxy to private Gitea', async ({ requ
     expect(branch.status).toBe(200)
     const expectedCommit = JSON.parse(branch.body).commit.id
     await openOrion(page, step)
-    await step('Открыть удалённые репозитории', page.getByRole('button', { name: 'Remote aliases', exact: true }),
+    await step('Открыть удалённые репозитории', page.getByRole('link', { name: 'Remote aliases', exact: true }),
       target => target.click())
     await step('Добавить подключение к Gitea', page.getByRole('button', { name: 'Add alias', exact: true }),
       target => target.click())
@@ -124,9 +124,150 @@ test('administrator connects an HTTPS Git proxy to private Gitea', async ({ requ
     expect(await listing.text()).not.toContain(password)
     await step('Обновить страницу и проверить сохранение подключения', null, () => page.reload())
     await step('Снова открыть удалённые репозитории',
-      page.getByRole('button', { name: 'Remote aliases', exact: true }), target => target.click())
+      page.getByRole('link', { name: 'Remote aliases', exact: true }), target => target.click())
     await expect(page.getByRole('heading', { name: aliasName, exact: true })).toBeVisible()
   } finally {
     await giteaRequest('DELETE', `/api/v1/repos/fixture/${name}`, password)
   }
 })
+
+test('existing system user signs in through Gitea OIDC and keeps restricted permissions',
+  async ({ request, page, browser, adminToken }) => {
+    const credentialsPath = new URL('../../external-services/.state/credentials.env', import.meta.url)
+    const credentials = await readFile(credentialsPath, 'utf8')
+    const password = credentials.match(/^GITEA_PASSWORD=(.+)$/m)?.[1]
+    expect(password, 'The fixture supplies GITEA_PASSWORD').toBeTruthy()
+    const secureUrl = new URL(browserUrl)
+    if (secureUrl.protocol === 'http:') {
+      secureUrl.protocol = 'https:'
+      secureUrl.port = '9443'
+    }
+    const origin = secureUrl.origin
+    const issuer = `${giteaUrl}/`
+    const id = `oidc-${randomUUID().slice(0, 8)}`
+    const readable = `${id}-visible`
+    const hidden = `${id}-hidden`
+    const account = await giteaRequest('GET', '/api/v1/user', password)
+    expect(account.status).toBe(200)
+    const subject = String(JSON.parse(account.body).id)
+    const registered = await giteaRequest('POST', '/api/v1/user/applications/oauth2', password, {
+      name: id, confidential_client: true,
+      redirect_uris: [`${origin}/api/auth/oidc/callback`], skip_secondary_authorization: false,
+    })
+    expect(registered.status).toBe(201)
+    const application = JSON.parse(registered.body)
+    let userContext
+    let userPage
+    try {
+      for (const name of [readable, hidden]) {
+        const repository = await request.post(`${orionUrl}/api/admin/repositories`, {
+          headers: { Authorization: `Bearer ${adminToken}` }, data: { name },
+        })
+        expect(repository.status()).toBe(201)
+      }
+      // The account exists before the UI adds its OIDC credential; it has no admin grant.
+      const created = await request.post(`${orionUrl}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+        data: { id, email: `${id}@example.test`, repositories: [{ repository: readable, read: true }] },
+      })
+      expect(created.status()).toBe(201)
+      await page.addInitScript(({ origin, token }) => {
+        if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
+      }, { origin, token: adminToken })
+      await page.goto(origin)
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const provider = page.locator('.oidc-settings')
+      await provider.getByLabel('Provider scope').selectOption('system')
+      await provider.getByLabel('Provider ID', { exact: true }).fill(id)
+      await provider.getByLabel('Issuer URL', { exact: true }).fill(issuer)
+      await provider.getByLabel('Client ID', { exact: true }).fill(application.client_id)
+      await provider.getByLabel('Client secret', { exact: true }).fill(application.client_secret)
+      await provider.getByRole('button', { name: 'Save provider', exact: true }).click()
+      await expect(provider.getByRole('status')).toHaveText('Provider saved in the selected scope.')
+      const bindings = page.locator('.system-bindings')
+      // Reload after provider save so both forms use the current configuration revision.
+      await bindings.getByRole('button', { name: 'Reload users' }).click()
+      await bindings.getByLabel('Existing system user').selectOption(id)
+      await bindings.getByRole('button', { name: 'Add binding', exact: true }).click()
+      await bindings.getByLabel('Issuer URL', { exact: true }).fill(issuer)
+      await bindings.getByLabel('Subject', { exact: true }).fill(subject)
+      await bindings.getByRole('button', { name: 'Save bindings' }).click()
+      await expect(bindings.getByRole('status')).toHaveText('Bindings saved.')
+      await page.reload()
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      await bindings.getByLabel('Existing system user').selectOption(id)
+      await expect(bindings.getByLabel('Subject', { exact: true })).toHaveValue(subject)
+
+      // A separate context has neither the injected root token nor a Gitea login cookie.
+      userContext = await browser.newContext()
+      userPage = await userContext.newPage()
+      userPage.on('response', response => {
+        const url = new URL(response.url())
+        if (url.origin === origin && response.status() >= 400) {
+          console.log('OIDC request rejected:', response.status(), url.pathname)
+        }
+      })
+      await userPage.goto(origin)
+      await userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true }).click()
+      await userPage.getByLabel('Sign-in provider').selectOption(id)
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await userPage.locator('#user_name').fill('fixture')
+      await userPage.locator('#password').fill(password)
+      await userPage.getByRole('button', { name: 'Sign In', exact: true }).click()
+      await userPage.getByRole('button', { name: 'Authorize Application', exact: true }).click()
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      const token = await userPage.evaluate(() => sessionStorage.getItem('orion.ui.token'))
+      expect(token).toBeTruthy()
+      expect(token === adminToken).toBe(false)
+      const permissions = await userPage.evaluate(async userId => {
+        const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+        const identity = await fetch('/api/auth/me', { headers })
+        const repositories = await fetch('/api/admin/repositories', { headers })
+        const administration = await fetch('/api/admin/users', { headers })
+        const creation = await fetch('/api/admin/repositories', { method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: `${userId}-write` }) })
+        return { identity: await identity.json(), repositories: repositories.status,
+          names: (await repositories.json()).repositories.map(repository => repository.name),
+          administration: administration.status, creation: creation.status }
+      }, id)
+      expect(permissions.identity).toMatchObject({ userId: id, organization: '', admin: false })
+      expect(permissions.repositories).toBe(200)
+      expect(permissions.names).toEqual([readable])
+      expect(permissions.administration).toBe(403)
+      expect(permissions.creation).toBe(403)
+      await userPage.getByRole('link', { name: 'Repositories', exact: true }).click()
+      await expect(userPage.getByText(readable, { exact: true })).toBeVisible()
+      await expect(userPage.getByText(hidden, { exact: true })).toHaveCount(0)
+      await userPage.reload()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      const renewed = await userPage.evaluate(async userId => {
+        const response = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'system', userId }) })
+        const result = await response.json()
+        return { status: response.status, scope: result.scope, userId: result.userId }
+      }, id)
+      expect(renewed).toEqual({ status: 200, scope: 'system', userId: id })
+      await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true })).toBeVisible()
+      expect(await userPage.evaluate(() => sessionStorage.getItem('orion.ui.token'))).toBeNull()
+      const revoked = await userPage.evaluate(async userId => {
+        const response = await fetch('/api/auth/oidc/refresh', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'system', userId }) })
+        return response.status
+      }, id)
+      expect(revoked).toBe(401)
+    } catch (failure) {
+      if (userPage) {
+        await test.info().attach('OIDC user page', {
+          body: await userPage.screenshot(), contentType: 'image/png',
+        })
+      }
+      throw failure
+    } finally {
+      await userContext?.close()
+      const deleted = await giteaRequest('DELETE', `/api/v1/user/applications/oauth2/${application.id}`, password)
+      expect(deleted.status).toBe(204)
+    }
+  })

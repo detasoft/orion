@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
@@ -30,8 +31,10 @@ import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
@@ -52,7 +55,7 @@ class PlaywrightExternalServicesIT {
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
-    void browserExercisesCertificateIssuanceRepositoriesAndExternalGitProxy() throws Exception {
+    void browserExercisesCertificateIssuanceRepositoriesGitProxyAndOidc() throws Exception {
         Path fixtureRoot = Path.of(System.getProperty("external.services.fixture.root"));
         Path caRoot = fixtureRoot.resolve(".state/step/certs/root_ca.crt");
         assertThat(caRoot).exists();
@@ -62,26 +65,7 @@ class PlaywrightExternalServicesIT {
         AcmeMaterialConfiguration material = acmeMaterial(configuration);
         try (TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration)) {
             identity.material().acme().acquire(material, 2048, 2048);
-            OrionComponent component = TestRuntimeBootstrap.componentBuilder(
-                            configuration, identity.capability(), identity.sshHostKeys())
-                    .acmeKeyMaterialCapability(identity.material().acme())
-                    .configurationMaterialCapability(identity.material().configurationMaterial())
-                    .configurationCipherCapability(identity.material().configurationCipher())
-                    .tlsCapability(identity.material().tls())
-                    .build();
-            OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
-            try {
-                assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
-                lifecycle.waitForStarting();
-                OrionAccessControlServiceImpl accessControl = component.orionAccessControlService();
-                TestBearerTokens.enrollRootKey(accessControl, component.configurationEditor(), rootKey);
-                configureAcme(component, accessControl, configuration);
-                String token = OrionTestRootAccess.issueToken(accessControl, rootKey.getPublic(), 600);
-                runPlaywright(fixtureRoot, caRoot, token);
-            } finally {
-                lifecycle.shutdownApplication();
-                lifecycle.waitForShutdown();
-            }
+            runPlaywright(configuration, identity, rootKey, fixtureRoot, caRoot);
         }
         try (TestServerIdentityMaterial reopened = TestServerIdentityMaterial.open(configuration)) {
             assertThat(reopened.material().acme().certificateChain(material)).isPresent();
@@ -114,8 +98,8 @@ class PlaywrightExternalServicesIT {
                 Optional.empty());
     }
 
-    private static void configureAcme(OrionComponent component,
-            OrionAccessControlServiceImpl accessControl, BootstrapConfiguration configuration) throws Exception {
+    private static void configureAcme(OrionComponent component, BootstrapConfiguration configuration)
+            throws Exception {
         String revision = component.nativeGitRepositoryProvider().find("orion")
                 .valueOrFailure("test configuration repository")
                 .refs().get(configuration.getBootstrap().getAccessControl().selectedRef());
@@ -135,34 +119,84 @@ class PlaywrightExternalServicesIT {
                         document.organizations())).apply("configure test ACME", UserEmail.EMPTY);
     }
 
-    private void runPlaywright(Path fixtureRoot, Path caRoot, String token) throws Exception {
+    private void runPlaywright(BootstrapConfiguration configuration, TestServerIdentityMaterial identity,
+            KeyPair rootKey, Path fixtureRoot, Path caRoot) throws Exception {
         SSLContext previousContext = SSLContext.getDefault();
         SSLSocketFactory previousFactory = HttpsURLConnection.getDefaultSSLSocketFactory();
         try {
             SSLContext fixtureContext = trustFixtureCa(caRoot);
             SSLContext.setDefault(fixtureContext);
             HttpsURLConnection.setDefaultSSLSocketFactory(fixtureContext.getSocketFactory());
-            Path output = fixtureRoot.getParent().resolve("integration-test/target/playwright.log");
-            ProcessBuilder command = new ProcessBuilder(
-                    "make", "-s", "browser-test", "browser-acme-test", "URL=http://127.0.0.1:8000")
-                    .directory(fixtureRoot.normalize().getParent().getParent().toFile())
-                    .redirectErrorStream(true)
-                    .redirectOutput(output.toFile());
-            command.environment().put("ORION_TOKEN", token);
-            Process process = command.start();
-            try {
-                if (!process.waitFor(4, TimeUnit.MINUTES)) {
-                    throw new AssertionError("Playwright external-services tests timed out: " + output);
-                }
-                assertThat(process.exitValue()).as(Files.readString(output)).isZero();
-            } finally {
-                if (process.isAlive()) {
-                    process.destroyForcibly();
+            for (String goal : List.of("browser-acme-test", "browser-test")) {
+                boolean issueCertificate = goal.equals("browser-acme-test");
+                OrionComponent component = TestRuntimeBootstrap.componentBuilder(
+                                configuration, identity.capability(), identity.sshHostKeys())
+                        .acmeKeyMaterialCapability(identity.material().acme())
+                        .configurationMaterialCapability(identity.material().configurationMaterial())
+                        .configurationCipherCapability(identity.material().configurationCipher())
+                        .tlsCapability(identity.material().tls())
+                        .build();
+                OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
+                try {
+                    assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+                    lifecycle.waitForStarting();
+                    OrionAccessControlServiceImpl accessControl = component.orionAccessControlService();
+                    if (issueCertificate) {
+                        TestBearerTokens.enrollRootKey(accessControl, component.configurationEditor(), rootKey);
+                        configureAcme(component, configuration);
+                    }
+                    String token = OrionTestRootAccess.issueToken(accessControl, rootKey.getPublic(), 600);
+                    assertThat(accessControl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
+                            .isInstanceOf(TokenAuthenticationResult.Success.class);
+                    RuntimeHttpTestSupport.HttpResponse identityResponse = RuntimeHttpTestSupport.request(
+                            "GET", new URL("http://127.0.0.1:8000/api/auth/me"), TestBearerTokens.bearer(token));
+                    assertThat(identityResponse.status()).isEqualTo(200);
+                    assertThat(identityResponse.body()).contains("\"admin\":true");
+                    runPlaywrightGoal(fixtureRoot, token, goal);
+                    if (issueCertificate) enableHttps(component);
+                } finally {
+                    lifecycle.shutdownApplication();
+                    lifecycle.waitForShutdown();
                 }
             }
         } finally {
             HttpsURLConnection.setDefaultSSLSocketFactory(previousFactory);
             SSLContext.setDefault(previousContext);
+        }
+    }
+
+    private static void enableHttps(OrionComponent component) {
+        component.configurationEditor().edit().update(document -> {
+            OrionDocument.SystemConfiguration system = document.system();
+            OrionHttpsConfiguration https = system.https().orElseThrow();
+            OrionHttpsConfiguration enabled = new OrionHttpsConfiguration(
+                    true, https.address(), https.port(), https.publicUrl(), https.identity(),
+                    https.serverIssuerTrustAnchor(), https.clientAuthentication(),
+                    https.clientTrustAnchors(), https.acme());
+            return new OrionDocument(new OrionDocument.SystemConfiguration(
+                    system.accessControl(), Optional.of(enabled), system.secrets(), system.proxies(),
+                    system.connections(), system.oidcProviders()), document.organizations());
+        }).apply("enable test HTTPS", UserEmail.EMPTY);
+    }
+
+    private void runPlaywrightGoal(Path fixtureRoot, String token, String goal) throws Exception {
+        Path output = fixtureRoot.getParent().resolve("integration-test/target/" + goal + ".log");
+        ProcessBuilder command = new ProcessBuilder(
+                "make", "-s", goal, "URL=http://127.0.0.1:8000")
+                .directory(fixtureRoot.normalize().getParent().getParent().toFile())
+                .redirectErrorStream(true)
+                .redirectOutput(output.toFile());
+        command.environment().put("ORION_TOKEN", token);
+        Process process = command.start();
+        try {
+            if (!process.waitFor(4, TimeUnit.MINUTES)) {
+                throw new AssertionError("Playwright external-services tests timed out: " + output);
+            }
+            assertThat(process.exitValue()).as(Files.readString(output)).isZero();
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
         }
     }
 
