@@ -326,6 +326,10 @@ class OrionAccessControlServiceImplTest {
             fixture.createOrUpdateUser(userUpdate("bob", "new-password-hash"));
             assertThat(parse(fixture.storage.snapshot.content()).users())
                     .extracting(User::id).containsExactlyInAnyOrder("alice", "bob");
+            assertThat(fixture.service.userExists("BOB")).isTrue();
+            fixture.createOrUpdateUser(userUpdate("BOB", "replacement-password-hash"));
+            assertThat(parse(fixture.storage.snapshot.content()).users())
+                    .extracting(User::id).containsExactlyInAnyOrder("alice", "BOB");
         }
     }
 

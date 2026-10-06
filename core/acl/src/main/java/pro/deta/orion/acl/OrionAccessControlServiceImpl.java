@@ -61,7 +61,6 @@ import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import static pro.deta.orion.schema.acl.CredentialType.OPENSSH_PUBLIC_KEY;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
@@ -477,7 +476,16 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
-        new AccessControlWriter().createOrUpdateUser(edit, userUpdate);
+        validateUserUpdate(userUpdate);
+        AccessControl acl = edit.document().system().accessControl();
+        User existing = findUser(acl, userUpdate.id());
+        List<User> users = new ArrayList<>(acl.users());
+        if (existing != null) {
+            users.remove(existing);
+        }
+        users.add(userFrom(userUpdate));
+        AccessControl updated = new AccessControl(users, acl.roles(), acl.grants());
+        edit.update(document -> document.replaceAccessControl(updated));
     }
 
     @Override
@@ -1075,16 +1083,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private User findUser(AccessControl acl, String userId) {
-        User matched = null;
-        for (User user : acl.users()) {
-            if (user.id() != null && user.id().equalsIgnoreCase(userId)) {
-                if (matched != null) {
-                    throw new IllegalStateException("More than one user matches the requested id");
-                }
-                matched = user;
-            }
+        List<User> matches = findUsers(Objects.requireNonNull(acl), userId);
+        if (matches.size() > 1) {
+            throw new IllegalStateException("More than one user matches the requested id");
         }
-        return matched;
+        return matches.isEmpty() ? null : matches.getFirst();
     }
 
     private User withCredentials(
@@ -1323,8 +1326,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private Result<User> findSingleUser(AccessControl snapshot, String userName) {
-        ArrayList<User> result = new ArrayList<>();
-        consumeUsersInAccessControl(userName, result::add, snapshot);
+        List<User> result = findUsers(snapshot, userName);
         if (result.size() == 1) {
             return new Result.Success<>(result.getFirst());
         } else {
@@ -1332,112 +1334,101 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private static void consumeUsersInAccessControl(String userId, Consumer<User> userConsumer, AccessControl acl) {
-        if (acl == null) // could happen as we didn't load ACL yet
-            return;
-        for (User u : acl.users()) {
-            if (u.id() != null && u.id().equalsIgnoreCase(userId))
-                userConsumer.accept(u);
+    private static List<User> findUsers(AccessControl acl, String userId) {
+        if (acl == null) {
+            return List.of();
         }
+        List<User> matches = new ArrayList<>();
+        for (User user : acl.users()) {
+            if (user.id() != null && user.id().equalsIgnoreCase(userId)) {
+                matches.add(user);
+            }
+        }
+        return matches;
     }
 
-    private class AccessControlWriter {
-        private void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
-            validateUserUpdate(userUpdate);
-            AccessControl acl = edit.document().system().accessControl();
-            User existing = findUser(acl, userUpdate.id());
-            List<User> users = new ArrayList<>(acl.users());
-            if (existing != null) {
-                users.remove(existing);
-            }
-            users.add(userFrom(userUpdate));
-            AccessControl updated = new AccessControl(users, acl.roles(), acl.grants());
-            edit.update(document -> document.replaceAccessControl(updated));
+    private User userFrom(AccessControlUserUpdate userUpdate) {
+        List<Credential> credentials = new ArrayList<>();
+        List<Grant> grants = new ArrayList<>();
+        for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
+            credentials.add(new Credential(
+                    credential.type(), credential.keyId(), credential.value()));
         }
-
-        private User userFrom(AccessControlUserUpdate userUpdate) {
-            List<Credential> credentials = new ArrayList<>();
-            List<Grant> grants = new ArrayList<>();
-            for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
-                credentials.add(new Credential(
-                        credential.type(), credential.keyId(), credential.value()));
-            }
-            for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
-                grants.add(repositoryGrant(userUpdate.id(), repositoryGrant));
-            }
-            return new User(userUpdate.id(), null, null, userUpdate.email(),
-                    credentials, List.of(), grants);
+        for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
+            grants.add(repositoryGrant(userUpdate.id(), repositoryGrant));
         }
+        return new User(userUpdate.id(), null, null, userUpdate.email(),
+                credentials, List.of(), grants);
+    }
 
-        private Grant repositoryGrant(String userId,
-                AccessControlRepositoryGrantUpdate repositoryGrant) {
-            List<GrantExpression> expressions = new ArrayList<>();
+    private Grant repositoryGrant(String userId,
+            AccessControlRepositoryGrantUpdate repositoryGrant) {
+        List<GrantExpression> expressions = new ArrayList<>();
+        expressions.add(new GrantExpression(
+                GrantKey.REPOSITORY, repositoryGrant.repository()));
+        expressions.add(new GrantExpression(
+                GrantKey.BRANCH, repositoryGrant.branch()));
+        if (repositoryGrant.read()) {
             expressions.add(new GrantExpression(
-                    GrantKey.REPOSITORY, repositoryGrant.repository()));
+                    GrantKey.READ, "true"));
+        }
+        if (repositoryGrant.readWrite()) {
             expressions.add(new GrantExpression(
-                    GrantKey.BRANCH, repositoryGrant.branch()));
-            if (repositoryGrant.read()) {
-                expressions.add(new GrantExpression(
-                        GrantKey.READ, "true"));
-            }
-            if (repositoryGrant.readWrite()) {
-                expressions.add(new GrantExpression(
-                        GrantKey.READ_WRITE, "true"));
-            }
-            if (repositoryGrant.create()) {
-                expressions.add(new GrantExpression(
-                        GrantKey.CREATE, "true"));
-            }
-            if (repositoryGrant.force()) {
-                expressions.add(new GrantExpression(
-                        GrantKey.FORCE, "true"));
-            }
-            return new Grant(
-                    repositoryGrantId(userId, repositoryGrant.repository()), expressions);
+                    GrantKey.READ_WRITE, "true"));
         }
-
-        private String repositoryGrantId(String userId, String repository) {
-            return "REPOSITORY_" + safeGrantIdPart(userId) + "_" + safeGrantIdPart(repository);
+        if (repositoryGrant.create()) {
+            expressions.add(new GrantExpression(
+                    GrantKey.CREATE, "true"));
         }
-
-        private String safeGrantIdPart(String value) {
-            return value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        if (repositoryGrant.force()) {
+            expressions.add(new GrantExpression(
+                    GrantKey.FORCE, "true"));
         }
+        return new Grant(
+                repositoryGrantId(userId, repositoryGrant.repository()), expressions);
+    }
 
-        private void validateUserUpdate(AccessControlUserUpdate userUpdate) {
-            if (userUpdate == null) {
-                throw new AccessControlValidationException("User update is required");
+    private String repositoryGrantId(String userId, String repository) {
+        return "REPOSITORY_" + safeGrantIdPart(userId) + "_" + safeGrantIdPart(repository);
+    }
+
+    private String safeGrantIdPart(String value) {
+        return value.replaceAll("[^A-Za-z0-9_.-]", "_");
+    }
+
+    private void validateUserUpdate(AccessControlUserUpdate userUpdate) {
+        if (userUpdate == null) {
+            throw new AccessControlValidationException("User update is required");
+        }
+        if (userUpdate.id() == null || userUpdate.id().isBlank()) {
+            throw new AccessControlValidationException("User id is required");
+        }
+        for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
+            if (credential.type() == null) {
+                throw new AccessControlValidationException("Credential type is required");
             }
-            if (userUpdate.id() == null || userUpdate.id().isBlank()) {
-                throw new AccessControlValidationException("User id is required");
+            if (credential.type() == CredentialType.JWT_SIGNING_PUBLIC_KEY
+                    && (credential.keyId() == null || credential.keyId().isBlank())) {
+                throw new AccessControlValidationException("JWT signing key id is required");
             }
-            for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
-                if (credential.type() == null) {
-                    throw new AccessControlValidationException("Credential type is required");
+            if (credential.type() == CredentialType.OIDC_SUBJECT) {
+                if (credential.keyId() == null || credential.keyId().isBlank()) {
+                    throw new AccessControlValidationException("OIDC issuer is required");
                 }
-                if (credential.type() == CredentialType.JWT_SIGNING_PUBLIC_KEY
-                        && (credential.keyId() == null || credential.keyId().isBlank())) {
-                    throw new AccessControlValidationException("JWT signing key id is required");
-                }
-                if (credential.type() == CredentialType.OIDC_SUBJECT) {
-                    if (credential.keyId() == null || credential.keyId().isBlank()) {
-                        throw new AccessControlValidationException("OIDC issuer is required");
-                    }
-                    try {
-                        new OidcProvider("validation", java.net.URI.create(credential.keyId()), "validation",
-                                "validation", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
-                    } catch (IllegalArgumentException invalid) {
-                        throw new AccessControlValidationException("Invalid OIDC issuer");
-                    }
-                }
-                if (credential.value() == null || credential.value().isBlank()) {
-                    throw new AccessControlValidationException("Credential value is required");
+                try {
+                    new OidcProvider("validation", java.net.URI.create(credential.keyId()), "validation",
+                            "validation", OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0);
+                } catch (IllegalArgumentException invalid) {
+                    throw new AccessControlValidationException("Invalid OIDC issuer");
                 }
             }
-            for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
-                if (repositoryGrant.repository() == null || repositoryGrant.repository().isBlank()) {
-                    throw new AccessControlValidationException("Repository name is required");
-                }
+            if (credential.value() == null || credential.value().isBlank()) {
+                throw new AccessControlValidationException("Credential value is required");
+            }
+        }
+        for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
+            if (repositoryGrant.repository() == null || repositoryGrant.repository().isBlank()) {
+                throw new AccessControlValidationException("Repository name is required");
             }
         }
     }
