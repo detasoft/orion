@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.http;
-
+import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.config.ConfigurationFile;
-
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
@@ -16,7 +14,6 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.Grant;
 import pro.deta.orion.schema.acl.GrantExpression;
 import pro.deta.orion.schema.acl.GrantKey;
-import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessTokenIdentity;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -24,7 +21,6 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
-
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
@@ -35,7 +31,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAuthorizationFilterTest {
@@ -223,9 +218,8 @@ class OrionAuthorizationFilterTest {
         private String lastToken;
         private boolean adminGrant = true;
 
-
         @Override
-        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
+        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
             throw new UnsupportedOperationException();
         }
 
@@ -283,7 +277,6 @@ class OrionAuthorizationFilterTest {
         public ConfigurationFile accessControlConfigurationFile() {
             throw new UnsupportedOperationException();
         }
-
 
     }
 

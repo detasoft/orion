@@ -8,7 +8,6 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
-
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,7 +16,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.function.Consumer;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
@@ -75,8 +73,11 @@ final class RuntimeHttpTestSupport {
 
     static void updateConfiguration(StartedOrion orion, byte[] content, String etag) throws IOException {
         OrionDocument document = OrionXml.read(new ByteArrayInputStream(content));
-        orion.component().configurationEditor().edit(etag.replace("\"", "")).update(ignored -> document)
-                .apply("Update test configuration", UserEmail.EMPTY);
+        orion.component().configurationEditor().edit(
+                etag.replace("\"", ""), "Update test configuration",
+                UserEmail.EMPTY)
+            .update(ignored -> document)
+            .apply();
     }
 
     static String aclEtag(StartedOrion orion, String token) throws IOException {

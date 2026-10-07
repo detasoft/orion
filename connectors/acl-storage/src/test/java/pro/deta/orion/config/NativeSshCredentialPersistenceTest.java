@@ -1,9 +1,6 @@
 package pro.deta.orion.config;
 
 import pro.deta.orion.internal.UserEmail;
-
-
-
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import java.io.ByteArrayOutputStream;
 import java.util.Optional;
@@ -22,12 +19,10 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
-
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeSshCredentialPersistenceTest {
@@ -68,12 +63,15 @@ class NativeSshCredentialPersistenceTest {
             service.onStart();
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                assertThat(service.addSshCredentials(edit, "alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
+            service.withAccess(editor.edit(
+                    "add SSH credentials for alice",
+                    new UserEmail("alice", "alice@example.test")), edit -> {
+                assertThat(edit.addSshCredentials("alice", List.of(PublicKeyEntry.toString(key.getPublic()))))
                     .isInstanceOfSatisfying(SshCredentialUpdateResult.Success.class,
                             success -> assertThat(success.changed()).isTrue());
-                edit.apply("add SSH credentials for alice", new UserEmail("alice", "alice@example.test"));
-            }
+                edit.apply();
+                return null;
+            });
             assertThat(service.authenticateSshUser("alice", key.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Success.class);
         } finally {

@@ -1,10 +1,8 @@
 package pro.deta.orion.git.parser.v2.storage;
-
-import pro.deta.orion.git.api.Modification;
+import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.read.GitPackRead;
 import pro.deta.orion.git.parser.v2.storage.shared.PackHandle;
-
 import java.io.IOException;
 import java.util.Set;
 

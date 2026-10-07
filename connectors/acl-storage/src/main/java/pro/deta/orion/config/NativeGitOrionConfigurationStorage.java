@@ -12,8 +12,12 @@ import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.CheckedFunction;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
+import pro.deta.orion.internal.UserEmailMessage;
+import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
@@ -51,7 +55,7 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
     }
 
     @Override
-    public Result<ConfigurationFile> load() {
+    public Result<OrionDocumentRevision> load() {
         NativeGitRepository repository;
         try {
             repository = repositoryProvider.openForRead(repositoryName)
@@ -74,22 +78,30 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
         }
     }
 
+    private byte[] serialize(OrionDocument document) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            OrionXml.write(document, output);
+            return output.toByteArray();
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot serialize configuration", failure);
+        }
+    }
+
+
     @Override
-    public void save(ConfigurationFile file, String message, UserEmail author) {
+    synchronized public void save(Optional<String> revision, OrionDocument file, UserEmailMessage author) {
         Objects.requireNonNull(file, "configuration file");
-        byte[] content = file.content();
-        message = Objects.requireNonNullElse(message, "");
-        author = Objects.requireNonNullElse(author, UserEmail.EMPTY);
+        byte[] content = serialize(file);
         try {
-            GitCommitAuthor commitAuthor = new GitCommitAuthor(author.getUsername(), author.getEmail());
+            GitCommitAuthor commitAuthor = new GitCommitAuthor(author.username(), author.email(), author.message());
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
             CheckedFunction<GitFileAccess, Void> update = access -> {
                 byte[] previous = null;
-                if (file.revision().isPresent()) {
+                if (revision.isPresent()) {
                     try {
                         previous = repository.files().readFile(
-                                new ObjectId(file.revision().orElseThrow()), path,
+                                new ObjectId(revision.orElseThrow()), path,
                                 (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
                     } catch (GitRepositoryFileNotFoundException missing) {
                         // The configuration file has not been created at this revision yet.
@@ -101,22 +113,17 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
                 access.apply();
                 return null;
             };
-            if (file.revision().isPresent()) {
-                repository.files().withAccess(configurationRef, file.revision().orElseThrow(),
-                        message, commitAuthor, update);
+            if (revision.isPresent()) {
+                repository.files().withAccess(configurationRef, revision.orElseThrow(),
+                        commitAuthor, update);
             } else {
-                repository.files().withAccess(configurationRef, message, commitAuthor, update);
+                repository.files().withAccess(configurationRef, commitAuthor, update);
             }
         } catch (GitRefConflictException error) {
             throw new OrionConfigurationConcurrentUpdateException("Orion configuration changed concurrently", error);
         } catch (Exception error) {
             throw new IllegalStateException("Cannot save configuration to native repository " + repositoryName, error);
         }
-    }
-
-    @Override
-    public boolean createIfMissing() {
-        return createIfMissing;
     }
 
     @Override

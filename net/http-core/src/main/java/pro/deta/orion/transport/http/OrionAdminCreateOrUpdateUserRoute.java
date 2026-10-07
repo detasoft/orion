@@ -20,7 +20,6 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
-
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -73,9 +72,14 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
         if (request == null) {
             throw new HttpRequestValidationException("User request is required");
         }
-        try (OrionConfigurationEdit edit = editor.edit()) {
-            accessControlService.createOrUpdateUser(edit, request.toUserUpdate());
-            edit.apply("createOrUpdateUser() " + request.id(), new UserEmail(request.id(), request.email()));
+        try {
+            accessControlService.withAccess(editor.edit(
+                    "createOrUpdateUser() " + request.id(),
+                    new UserEmail(request.id(), request.email())), edit -> {
+                edit.createOrUpdateUser(request.toUserUpdate());
+                edit.apply();
+                return null;
+            });
         } catch (AccessControlValidationException failure) {
             throw new HttpRequestValidationException(failure.getMessage());
         }
@@ -85,10 +89,14 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     private OrionHttpResponse saveOidcBindings(JsonNode input) {
         String revision = input.path("revision").asText();
         if (revision.isBlank()) return OrionHttpResponse.text(400, "Configuration revision is required");
-        try (OrionConfigurationEdit edit = editor.edit(revision)) {
-            edit.update(document -> replaceOidcBindings(document, input));
-            edit.apply("Configure system OIDC bindings " + input.path("id").asText(), null);
-            return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
+        try {
+            return OrionConfigurationEdit.withAccess(editor.edit(
+                    revision, "Configure system OIDC bindings " + input.path("id").asText(),
+                    UserEmail.EMPTY), edit -> {
+                edit.update(document -> replaceOidcBindings(document, input));
+                edit.apply();
+                return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
+            });
         } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload users and try again.");
         } catch (IllegalArgumentException invalid) {

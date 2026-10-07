@@ -78,13 +78,14 @@ final class RemoteBootstrapTestSupport {
             if (((SshCredentialListResult.Success) listed).credentials().isEmpty()) {
                 TestBearerTokens.enrollRootKey(upstream.accessControlService(), upstream.component().configurationEditor(), key);
             } else {
-                try (OrionConfigurationEdit edit =
-                        upstream.component().configurationEditor().edit()) {
-                    assertThat(upstream.accessControlService().addSshCredentials(
-                            edit, "root", List.of(PublicKeyEntry.toString(key.getPublic()))))
+                upstream.accessControlService().withAccess(upstream.component().configurationEditor()
+                    .edit("add root test key", UserEmail.EMPTY), edit -> {
+                    assertThat(edit
+                        .addSshCredentials("root", List.of(PublicKeyEntry.toString(key.getPublic()))))
                             .isInstanceOf(SshCredentialUpdateResult.Success.class);
-                    edit.apply("add root test key", UserEmail.EMPTY);
-                }
+                    edit.apply();
+                    return null;
+                });
             }
             credential = "-----BEGIN PRIVATE KEY-----\n"
                     + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(key.getPrivate().getEncoded())

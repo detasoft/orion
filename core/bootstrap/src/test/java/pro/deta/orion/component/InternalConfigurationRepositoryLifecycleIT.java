@@ -18,7 +18,6 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
@@ -82,27 +81,34 @@ class InternalConfigurationRepositoryLifecycleIT {
     private Path tempDir;
 
     private static void updateUser(OrionComponent component, AccessControlUserUpdate user) {
-        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
-            component.orionAccessControlService().createOrUpdateUser(edit, user);
-            edit.apply("createOrUpdateUser() " + user.id(), new UserEmail(user.id(), user.email()));
-        }
+        component.orionAccessControlService().withAccess(component.configurationEditor().edit(
+                "createOrUpdateUser() " + user.id(),
+                new UserEmail(user.id(), user.email())), edit -> {
+            edit.createOrUpdateUser(user);
+            edit.apply();
+            return null;
+        });
     }
 
     private static SshKeyEnrollmentResult enroll(
             OrionComponent component, String generation, List<String> keys) {
-        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+        return component.orionAccessControlService().withAccess(component.configurationEditor().edit(
+                "complete root SSH key enrollment",
+                UserEmail.EMPTY), edit -> {
             SshKeyEnrollmentResult result =
-                    component.orionAccessControlService().completeRootSshKeyEnrollment(edit, generation, keys);
+            edit
+                .completeRootSshKeyEnrollment(generation, keys);
             if (result instanceof SshKeyEnrollmentResult.Success) {
-                edit.apply("complete root SSH key enrollment", UserEmail.EMPTY);
+                edit.apply();
             }
             return result;
-        }
+        });
     }
 
     private static SshCredentialUpdateResult addKeys(
             OrionComponent component, String user, List<String> keys) {
-        return mutateKeys(component, edit -> component.orionAccessControlService().addSshCredentials(edit, user, keys));
+        return mutateKeys(component,
+        edit -> component.orionAccessControlService().createAccess(edit).addSshCredentials(user, keys));
     }
 
     private static void addKey(OrionComponent component, String user, String key) {
@@ -118,19 +124,22 @@ class InternalConfigurationRepositoryLifecycleIT {
     private static SshCredentialUpdateResult removeKey(
             OrionComponent component, String user, String prefix, boolean force) {
         return mutateKeys(component,
-                edit -> component.orionAccessControlService().removeSshCredential(edit, user, prefix, force));
+        edit -> component.orionAccessControlService().createAccess(edit)
+            .removeSshCredential(user, prefix, force));
     }
 
     private static SshCredentialUpdateResult mutateKeys(OrionComponent component,
             java.util.function.Function<OrionConfigurationEdit,
                     SshCredentialUpdateResult> operation) {
-        try (OrionConfigurationEdit edit = component.configurationEditor().edit()) {
+        return OrionConfigurationEdit.withAccess(component.configurationEditor().edit(
+                "update test SSH credentials",
+                UserEmail.EMPTY), edit -> {
             SshCredentialUpdateResult result = operation.apply(edit);
             if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
-                edit.apply("update test SSH credentials", UserEmail.EMPTY);
+                edit.apply();
             }
             return result;
-        }
+        });
     }
 
     @Test
@@ -292,8 +301,9 @@ class InternalConfigurationRepositoryLifecycleIT {
                     new ByteArrayInputStream(accessControlBytes(
                             new AccessControl(users, acl.roles(), acl.grants()))));
             first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow())
-                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
+                    .accessControlConfigurationFile().revision().orElseThrow(),
+                    "Prepare configuration", UserEmail.EMPTY)
+                .update(ignored -> replacement).apply();
             beforeReset = OrionXml.read(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile().content()))
                             .system().accessControl();
@@ -434,8 +444,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(missingRootAclBytes()));
             first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow())
-                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
+                    .accessControlConfigurationFile().revision().orElseThrow(),
+                    "Prepare configuration", UserEmail.EMPTY)
+                .update(ignored -> replacement).apply();
             assertThat(first.orionAccessControlService().userExists("root")).isFalse();
             assertAuthenticated(first, "alice", "alice-password");
         } finally {
@@ -650,8 +661,9 @@ class InternalConfigurationRepositoryLifecycleIT {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
             OrionDocument replacement = OrionXml.read(new ByteArrayInputStream(defaultAclBytes("legacy-password")));
             first.configurationEditor().edit(first.orionAccessControlService()
-                    .accessControlConfigurationFile().revision().orElseThrow())
-                    .update(ignored -> replacement).apply("Prepare configuration", UserEmail.EMPTY);
+                    .accessControlConfigurationFile().revision().orElseThrow(),
+                    "Prepare configuration", UserEmail.EMPTY)
+                .update(ignored -> replacement).apply();
             assertSshAuthenticated(first, "root", oldIdentity);
         } finally {
             assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);

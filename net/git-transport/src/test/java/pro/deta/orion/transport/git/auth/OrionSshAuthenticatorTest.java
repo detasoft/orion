@@ -1,11 +1,9 @@
 package pro.deta.orion.transport.git.auth;
-
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationFile;
-
 import pro.deta.orion.auth.SshCredentialUpdateResult;
-
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
 import org.apache.sshd.client.auth.keyboard.UserInteraction;
@@ -26,7 +24,6 @@ import org.apache.sshd.server.session.ServerSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
@@ -34,7 +31,6 @@ import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -48,7 +44,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -522,25 +517,26 @@ class OrionSshAuthenticatorTest {
             return List.copyOf(keysByUser.getOrDefault(username, new LinkedHashMap<>()).values());
         }
 
-
         @Override
-        public SshCredentialUpdateResult addSshCredentials(
-                OrionConfigurationEdit edit, String username, List<String> publicKeys) {
-            LinkedHashMap<String, PublicKey> userKeys = keysByUser.get(username);
-            if (userKeys == null) {
-                throw new IllegalStateException("unknown user");
-            }
-            for (String publicKey : publicKeys) {
-                PublicKey parsed = pro.deta.orion.util.KeyUtils.readPublicKeyFromString(publicKey);
-                userKeys.putIfAbsent(fingerprint(parsed), parsed);
-            }
+        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+            return new AccessControlAccess(edit, new OrionPasswordHashingService()) {
 
-            return SshCredentialUpdateResult.success(List.of(), true);
-        }
+                @Override
+                public SshCredentialUpdateResult addSshCredentials(
+                        String username, List<String> publicKeys) {
+                    LinkedHashMap<String, PublicKey> userKeys = keysByUser.get(username);
+                    if (userKeys == null) {
+                        throw new IllegalStateException("unknown user");
+                    }
+                    for (String publicKey : publicKeys) {
+                        PublicKey parsed = pro.deta.orion.util.KeyUtils.readPublicKeyFromString(publicKey);
+                        userKeys.putIfAbsent(fingerprint(parsed), parsed);
+                    }
 
-        @Override
-        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
-            throw new UnsupportedOperationException();
+                    return SshCredentialUpdateResult.success(List.of(), true);
+                }
+
+            };
         }
 
         @Override

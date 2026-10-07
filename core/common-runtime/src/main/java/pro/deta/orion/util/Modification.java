@@ -1,4 +1,4 @@
-package pro.deta.orion.git.api;
+package pro.deta.orion.util;
 
 import java.io.IOException;
 
@@ -6,5 +6,5 @@ import java.io.IOException;
 public interface Modification {
     void apply() throws IOException;
 
-    void discard() throws IOException;
+    default void discard() throws IOException {};
 }

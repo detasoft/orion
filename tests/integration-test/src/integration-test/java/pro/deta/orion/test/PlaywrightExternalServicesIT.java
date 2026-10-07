@@ -21,9 +21,12 @@ import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
+import pro.deta.orion.schema.orion.v2.OrganizationId;
+import pro.deta.orion.schema.orion.v2.RepositoryId;
+import pro.deta.orion.schema.orion.v2.RepositoryPolicy;
+import pro.deta.orion.schema.orion.v2.TeamId;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
 import pro.deta.orion.util.KeyUtils;
-
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
@@ -40,9 +43,9 @@ import java.security.KeyStore;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
@@ -111,12 +114,15 @@ class PlaywrightExternalServicesIT {
                 false, "0.0.0.0", 9443, URI.create("https://orion.test:9443"),
                 Optional.of(new OrionMaterialReference("acme-identity", 1)), Optional.empty(),
                 OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), Optional.of(acme));
-        component.configurationEditor().edit(revision).update(document -> new OrionDocument(
+        component.configurationEditor().edit(
+                revision, "configure test ACME",
+                UserEmail.EMPTY)
+            .update(document -> new OrionDocument(
                         new OrionDocument.SystemConfiguration(
                                 document.system().accessControl(), Optional.of(https),
                                 document.system().secrets(), document.system().proxies(), document.system().connections(),
                                 document.system().oidcProviders()),
-                        document.organizations())).apply("configure test ACME", UserEmail.EMPTY);
+        document.organizations())).apply();
     }
 
     private void runPlaywright(BootstrapConfiguration configuration, TestServerIdentityMaterial identity,
@@ -144,6 +150,7 @@ class PlaywrightExternalServicesIT {
                     if (issueCertificate) {
                         TestBearerTokens.enrollRootKey(accessControl, component.configurationEditor(), rootKey);
                         configureAcme(component, configuration);
+                        configureOrganizations(component);
                     }
                     String token = OrionTestRootAccess.issueToken(accessControl, rootKey.getPublic(), 600);
                     assertThat(accessControl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
@@ -153,6 +160,23 @@ class PlaywrightExternalServicesIT {
                     assertThat(identityResponse.status()).isEqualTo(200);
                     assertThat(identityResponse.body()).contains("\"admin\":true");
                     runPlaywrightGoal(fixtureRoot, token, goal);
+                    if (!issueCertificate) {
+                        List<OrionDocument.Organization> organizations = component.configurationEditor()
+                                .reload("verify browser onboarding").document().organizations();
+                        assertThat(organizations).extracting(organization -> organization.id().value())
+                                .contains("oidc-acme", "oidc-other");
+                        for (OrionDocument.Organization organization : organizations) {
+                            if (organization.id().value().equals("oidc-acme")) {
+                                assertThat(organization.users()).singleElement().satisfies(user -> {
+                                    assertThat(user.first()).isEqualTo("Fixture");
+                                    assertThat(user.last()).isEqualTo("Member");
+                                });
+                                assertThat(organization.invitations()).isEmpty();
+                            } else if (organization.id().value().equals("oidc-other")) {
+                                assertThat(organization.users()).isEmpty();
+                            }
+                        }
+                    }
                     if (issueCertificate) enableHttps(component);
                 } finally {
                     lifecycle.shutdownApplication();
@@ -165,8 +189,26 @@ class PlaywrightExternalServicesIT {
         }
     }
 
+    private static void configureOrganizations(OrionComponent component) {
+        component.configurationEditor().edit("configure browser test organizations", UserEmail.EMPTY)
+                .update(document -> {
+                    List<OrionDocument.Organization> organizations = new ArrayList<>(document.organizations());
+                    for (String id : List.of("oidc-acme", "oidc-other")) {
+                        OrionDocument.Repository repository = new OrionDocument.Repository(
+                                new RepositoryId("repository"), "Browser test", OrionDocument.Repository.DEFAULT_BRANCH,
+                                RepositoryPolicy.safeDefaults(), List.of(), List.of(), List.of(), List.of(),
+                                Optional.empty());
+                        OrionDocument.Team team = new OrionDocument.Team(new TeamId("team"), "Browser test",
+                                List.of(), List.of(), List.of(repository));
+                        organizations.add(new OrionDocument.Organization(new OrganizationId(id), id,
+                                List.of(), List.of(), List.of(), List.of(team), List.of(), List.of(), List.of(), List.of()));
+                    }
+                    return new OrionDocument(document.system(), organizations);
+                }).apply();
+    }
+
     private static void enableHttps(OrionComponent component) {
-        component.configurationEditor().edit().update(document -> {
+        component.configurationEditor().edit("enable test HTTPS", UserEmail.EMPTY).update(document -> {
             OrionDocument.SystemConfiguration system = document.system();
             OrionHttpsConfiguration https = system.https().orElseThrow();
             OrionHttpsConfiguration enabled = new OrionHttpsConfiguration(
@@ -176,7 +218,7 @@ class PlaywrightExternalServicesIT {
             return new OrionDocument(new OrionDocument.SystemConfiguration(
                     system.accessControl(), Optional.of(enabled), system.secrets(), system.proxies(),
                     system.connections(), system.oidcProviders()), document.organizations());
-        }).apply("enable test HTTPS", UserEmail.EMPTY);
+        }).apply();
     }
 
     private void runPlaywrightGoal(Path fixtureRoot, String token, String goal) throws Exception {

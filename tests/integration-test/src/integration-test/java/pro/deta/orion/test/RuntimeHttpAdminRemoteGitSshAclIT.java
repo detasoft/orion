@@ -23,7 +23,6 @@ import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.test.integration.git.GitSshTestServer;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.schema.orion.OrionXml;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -40,7 +39,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.PASSWORD_ENV;
@@ -120,8 +118,10 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                             var updated = current.replaceAccessControl(
                                     defaultAccessControlWithUsers("remote-git-updated-user"));
                             byte[] materialBeforeUpdate = readFileFromRepository(remoteAclRepository, "material.p12");
-                            component.configurationEditor().edit(initialAcl.etag().replace("\"", ""))
-                                    .update(ignored -> updated).apply("Update remote configuration", UserEmail.EMPTY);
+                            component.configurationEditor().edit(
+                                    initialAcl.etag().replace("\"", ""), "Update remote configuration",
+                                    UserEmail.EMPTY)
+                                .update(ignored -> updated).apply();
                             assertUserAuthenticates(component.orionAccessControlService(), "remote-git-updated-user");
                             assertThat(readFileFromRepository(remoteAclRepository, "material.p12"))
                                     .isEqualTo(materialBeforeUpdate);

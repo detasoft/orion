@@ -24,7 +24,6 @@ import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.util.Result;
-
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -43,7 +42,6 @@ import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.util.ConfigurationContext;
-
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
@@ -118,7 +116,10 @@ public class OrionRuntimeModule {
     private static Result<Void> saveBootstrapConnection(OrionConfigurationEditor editor,
             OrionDesiredState.Snapshot snapshot, BootstrapChange change, PrincipalAddress actor) {
         try {
-            editor.edit(snapshot.revision().orElseThrow()).update(document -> {
+            editor.edit(
+                    snapshot.revision().orElseThrow(),
+                    "Reconcile bootstrap connection " + change.previous().alias().value()
+                    + " approved by " + actor, UserEmail.EMPTY).update(document -> {
                 if (!document.system().proxies().contains(change.previous())
                         || change.previousConnection().filter(value -> !document.system().connections().contains(value))
                             .isPresent()) {
@@ -135,8 +136,7 @@ public class OrionRuntimeModule {
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), bindings, connections,
                         system.oidcProviders()), document.organizations());
-            }).apply("Reconcile bootstrap connection " + change.previous().alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY);
+            }).apply();
             return Result.of(null);
         } catch (RuntimeException failure) {
             return new Result.Failure<>(Result.FailureCode.GENERAL,
@@ -183,7 +183,8 @@ public class OrionRuntimeModule {
             keys.add(key);
             Connection.Ssh replacement = new Connection.Ssh(connection.name(), connection.host(), connection.port(),
                     connection.username(), connection.credentialKind(), connection.secret(), keys);
-            editor.edit(snapshot.revision().orElseThrow()).update(document -> {
+            editor.edit(snapshot.revision().orElseThrow(), "Trust SSH host key for " + binding.alias().value()
+                    + " approved by " + actor, UserEmail.EMPTY).update(document -> {
                 if (!document.system().proxies().contains(binding)
                         || !document.system().connections().contains(connection)) {
                     throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", null);
@@ -194,8 +195,7 @@ public class OrionRuntimeModule {
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(),
                         system.https(), system.secrets(), system.proxies(), connections,
                         system.oidcProviders()), document.organizations());
-            }).apply("Trust SSH host key for " + binding.alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY);
+            }).apply();
             recordTrustAudit(audit, binding, actor, "saved");
             return Result.of(null);
         } catch (OrionConfigurationConcurrentUpdateException failure) {

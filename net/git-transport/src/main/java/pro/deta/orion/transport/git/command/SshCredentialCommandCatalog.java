@@ -1,5 +1,5 @@
 package pro.deta.orion.transport.git.command;
-
+import pro.deta.orion.acl.AccessControlAccess;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.apache.sshd.common.config.keys.KeyUtils;
@@ -26,7 +26,6 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandValue;
-
 import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -139,7 +138,7 @@ public final class SshCredentialCommandCatalog {
             return invalid("Candidate selection is invalid");
         }
         return switch (mutate(invocation, "add SSH credentials", edit ->
-                accessControlService.addSshCredentials(edit, userId(invocation), publicKeys))) {
+                edit.addSshCredentials(userId(invocation), publicKeys))) {
             case SshCredentialUpdateResult.Success(var credentials, var changed) -> new CommandResult.Message(
                     changed ? "SSH credentials added" : "SSH credential already exists");
             case SshCredentialUpdateResult.Failure(var code, var reason, var candidates, var throwable) ->
@@ -148,21 +147,26 @@ public final class SshCredentialCommandCatalog {
     }
 
     private SshCredentialUpdateResult mutate(CommandInvocation invocation, String operation,
-            java.util.function.Function<OrionConfigurationEdit, SshCredentialUpdateResult> mutation) {
+            java.util.function.Function<AccessControlAccess, SshCredentialUpdateResult> mutation) {
         String userId = userId(invocation);
-        try (OrionConfigurationEdit edit = editor.edit()) {
-            SshCredentialUpdateResult result = mutation.apply(edit);
-            if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+        try {
+            OrionConfigurationEdit edit = editor.edit(operation + " for " + userId, document -> {
                 String email = "";
-                for (User user : edit.document().system().accessControl().users()) {
+                for (User user : document.system().accessControl().users()) {
                     if (user.id().equalsIgnoreCase(userId)) {
                         email = Objects.requireNonNullElse(user.email(), "");
                         break;
                     }
                 }
-                edit.apply(operation + " for " + userId, new UserEmail(userId, email));
-            }
-            return result;
+                return new UserEmail(userId, email);
+            });
+            return accessControlService.withAccess(edit, access -> {
+                SshCredentialUpdateResult result = mutation.apply(access);
+                if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+                    access.apply();
+                }
+                return result;
+            });
         } catch (OrionConfigurationConcurrentUpdateException failure) {
             return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
                     "Access control changed concurrently", List.of(), failure);
@@ -233,7 +237,7 @@ public final class SshCredentialCommandCatalog {
         }
         boolean force = Boolean.parseBoolean(invocation.arguments().named().getOrDefault("force", "false"));
         return switch (mutate(invocation, "remove SSH credential", edit ->
-                accessControlService.removeSshCredential(edit, userId(invocation), prefix, force))) {
+                edit.removeSshCredential(userId(invocation), prefix, force))) {
             case SshCredentialUpdateResult.Success(var credentials, var changed) -> {
                 boolean current = connectionCredentials(invocation)
                         .authenticatedKeyFingerprint()

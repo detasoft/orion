@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.git;
-
+import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.config.ConfigurationFile;
-
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
@@ -18,7 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshCredential;
@@ -41,7 +38,6 @@ import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
@@ -57,7 +53,6 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -351,6 +346,10 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
+        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+            throw new UnsupportedOperationException();
+        }
+        @Override
         public SshCredentialListResult listSshCredentials(String userId) {
             if (!"alice".equals(userId) || acceptedKey == null) {
                 return SshCredentialListResult.success(List.of());
@@ -358,12 +357,6 @@ class GitSshTransportStateMachineTest {
             return SshCredentialListResult.success(List.of(new SshCredential(
                     org.apache.sshd.common.config.keys.KeyUtils.getKeyType(acceptedKey.getPublic()),
                     org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(acceptedKey.getPublic()))));
-        }
-
-
-        @Override
-        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
-            throw new UnsupportedOperationException();
         }
 
         @Override

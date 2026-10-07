@@ -1,9 +1,8 @@
 package pro.deta.orion.transport.git.command;
-
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.config.ConfigurationFile;
-
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
@@ -12,7 +11,6 @@ import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.InternalUserImpl;
-import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshConnectionCredentials;
@@ -34,13 +32,11 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
-
 import java.security.KeyPairGenerator;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SshCredentialCommandCatalogTest {
@@ -243,29 +239,31 @@ class SshCredentialCommandCatalogTest {
         private final List<String> removals = new ArrayList<>();
 
         @Override
+        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+            return new AccessControlAccess(edit, new OrionPasswordHashingService()) {
+
+                @Override
+                public SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+                    updateUsers.add(userId);
+                    addedKeys.add(List.copyOf(publicKeys));
+                    return updateResult;
+                }
+
+                @Override
+                public SshCredentialUpdateResult removeSshCredential(String userId,
+                        String prefix, boolean force) {
+                    updateUsers.add(userId);
+                    removals.add(userId + "|" + prefix + "|" + force);
+                    return updateResult;
+                }
+            };
+        }
+
+        @Override
         public SshCredentialListResult listSshCredentials(String userId) {
             listUsers.add(userId);
             return listResult;
         }
-
-        @Override
-        public SshCredentialUpdateResult addSshCredentials(OrionConfigurationEdit edit, String userId, List<String> publicKeys) {
-            updateUsers.add(userId);
-            addedKeys.add(List.copyOf(publicKeys));
-            return updateResult;
-        }
-
-        @Override
-        public SshCredentialUpdateResult removeSshCredential(OrionConfigurationEdit edit, String userId,
-                String prefix, boolean force) {
-            updateUsers.add(userId);
-            removals.add(userId + "|" + prefix + "|" + force);
-            return updateResult;
-        }
-
-
-        @Override
-        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {}
 
         @Override
         public boolean userExists(String userName) {

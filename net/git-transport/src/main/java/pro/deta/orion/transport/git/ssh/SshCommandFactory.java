@@ -41,7 +41,6 @@ import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.util.stream.*;
-
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -50,7 +49,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
@@ -129,20 +127,26 @@ public class SshCommandFactory implements CommandFactory {
                 return;
             }
             SshKeyEnrollmentResult result;
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                result = accessControlService.completeRootSshKeyEnrollment(
-                        edit, pending.expectedGeneration(), pending.publicKeys());
-                if (result instanceof SshKeyEnrollmentResult.Success) {
+            try {
+                OrionConfigurationEdit edit = editor.edit("complete root SSH key enrollment", document -> {
                     String email = "root@orion.pro";
                     for (pro.deta.orion.schema.acl.User user
-                            : edit.document().system().accessControl().users()) {
+                        : document.system().accessControl().users()) {
                         if (user.id().equalsIgnoreCase("root")) {
                             email = java.util.Objects.requireNonNullElse(user.email(), email);
                             break;
                         }
                     }
-                    edit.apply("complete root SSH key enrollment", new UserEmail("root", email));
-                }
+                    return new UserEmail("root", email);
+                });
+                result = accessControlService.withAccess(edit, access -> {
+                    SshKeyEnrollmentResult enrollment = access.completeRootSshKeyEnrollment(
+                            pending.expectedGeneration(), pending.publicKeys());
+                    if (enrollment instanceof SshKeyEnrollmentResult.Success) {
+                        access.apply();
+                    }
+                    return enrollment;
+                });
             } catch (RuntimeException failure) {
                 result = SshKeyEnrollmentResult.failure("key enrollment failed", failure);
             }

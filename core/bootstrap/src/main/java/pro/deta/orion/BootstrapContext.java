@@ -35,7 +35,6 @@ import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
-
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -271,8 +270,11 @@ public final class BootstrapContext implements AutoCloseable {
                 return Optional.empty();
             }
             try {
-                editor.edit(preparedFile).update(ignored -> candidate)
-                        .apply("Adopt bootstrap Git proxies", UserEmail.EMPTY);
+                editor.edit(
+                        preparedFile, "Adopt bootstrap Git proxies",
+                        UserEmail.EMPTY)
+                    .update(ignored -> candidate)
+                    .apply();
                 return Optional.of(candidate);
             } catch (OrionConfigurationEditor.ActivationFailedException failure) {
                 throw failure;

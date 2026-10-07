@@ -21,6 +21,9 @@ import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandCompletion;
@@ -403,11 +406,22 @@ class SshCommandFactoryTest {
                 OrionAccessControlService.class.getClassLoader(),
                 new Class<?>[]{OrionAccessControlService.class},
                 (proxy, method, args) -> {
-                    if ("completeRootSshKeyEnrollment".equals(method.getName())) {
-                        enrollments.incrementAndGet();
-                        assertEquals("generation-1", args[1]);
-                        assertEquals(List.of("ssh-rsa candidate"), args[2]);
-                        return SshKeyEnrollmentResult.success();
+                    if (method.isDefault()) {
+                        return java.lang.reflect.InvocationHandler.invokeDefault(proxy, method, args);
+                    }
+                    if ("createAccess".equals(method.getName())) {
+                        OrionConfigurationEdit edit =
+                                (OrionConfigurationEdit) args[0];
+                        return new AccessControlAccess(edit, new OrionPasswordHashingService()) {
+                            @Override
+                            public SshKeyEnrollmentResult completeRootSshKeyEnrollment(
+                                    String generation, List<String> publicKeys) {
+                                enrollments.incrementAndGet();
+                                assertEquals("generation-1", generation);
+                                assertEquals(List.of("ssh-rsa candidate"), publicKeys);
+                                return SshKeyEnrollmentResult.success();
+                            }
+                        };
                     }
                     return defaultValue(method.getReturnType());
                 });

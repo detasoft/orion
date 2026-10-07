@@ -22,7 +22,6 @@ import pro.deta.orion.schema.orion.v2.ConnectionReference;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
-
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
@@ -99,9 +98,10 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                 MutationRequest mutation = request;
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-                editor.edit(request.revision()).update(document -> update(document, selected, mutation))
-                        .apply("proxy " + action + " " + alias,
-                                new UserEmail(context.getUserIdentity().getUserId(), ""));
+                editor.edit(request.revision(), "proxy " + action + " " + alias,
+                        new UserEmail(context.getUserIdentity().getUserId(), ""))
+                        .update(document -> update(document, selected, mutation))
+                        .apply();
             }
             OrionDesiredState.Snapshot snapshot = desiredState.current();
             GitProxyBinding binding = find(snapshot.document(), selected);

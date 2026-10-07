@@ -20,7 +20,6 @@ import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
-
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -99,9 +98,10 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             char[] suppliedSecret = secret;
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-            editor.edit(revision).update(document -> save(document, id, provider, suppliedSecret))
-                    .apply("Configure " + scope + " OIDC provider",
-                            new UserEmail(context.getUserIdentity().getUserId(), ""));
+            editor.edit(revision, "Configure " + scope + " OIDC provider",
+                    new UserEmail(context.getUserIdentity().getUserId(), ""))
+                    .update(document -> save(document, id, provider, suppliedSecret))
+                    .apply();
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
         } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload providers and try again.");

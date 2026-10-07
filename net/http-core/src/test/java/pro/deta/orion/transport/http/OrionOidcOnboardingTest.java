@@ -3,7 +3,6 @@ package pro.deta.orion.transport.http;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.*;
@@ -41,7 +40,6 @@ import pro.deta.orion.acl.RootPasswordReset;
 import pro.deta.orion.schema.orion.*;
 import pro.deta.orion.schema.orion.v2.*;
 import pro.deta.orion.util.Result;
-
 import javax.net.ssl.*;
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
@@ -58,7 +56,6 @@ import java.time.Clock;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
-
 import static org.assertj.core.api.Assertions.*;
 
 class OrionOidcOnboardingTest {
@@ -126,7 +123,7 @@ class OrionOidcOnboardingTest {
     void organizationWithNoProvidersDoesNotInheritSystemProviders() throws Exception {
         try (Fixture f = new Fixture()) {
             f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
-            f.editor.edit().update(document -> {
+            f.editor.edit("disable fixture organization providers", UserEmail.EMPTY).update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization organization : document.organizations()) {
                     organizations.add(new OrionDocument.Organization(organization.id(), organization.displayName(),
@@ -134,7 +131,7 @@ class OrionOidcOnboardingTest {
                             organization.secrets(), List.of(), organization.invitations(), organization.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }).apply("disable fixture organization providers", null);
+            }).apply();
             Reply system = f.request("GET", "/api/auth/providers", Map.of(), Map.of("scope", "system"), null, null);
             assertThat(system.status).isEqualTo(200);
             assertThat(system.json.path("providers").get(0).asText()).isEqualTo("corporate");
@@ -204,8 +201,11 @@ class OrionOidcOnboardingTest {
             Reply result = f.signInSystem();
             byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Success.class);
-            f.editor.edit().update(document -> document.replaceAccessControl(new AccessControl()))
-                    .apply("remove fixture binding", null);
+            f.editor.edit(
+                    "remove fixture binding",
+                    UserEmail.EMPTY)
+                .update(document -> document.replaceAccessControl(new AccessControl()))
+                .apply();
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
         }
@@ -221,8 +221,11 @@ class OrionOidcOnboardingTest {
             Reply result = f.signInSystem();
             byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
             Login pending = f.startSystem();
-            f.editor.edit().update(document -> f.secrets.replaceSystem(document, "oidc", "rotated".toCharArray()))
-                    .apply("rotate fixture system secret", null);
+            f.editor.edit(
+                    "rotate fixture system secret",
+                    UserEmail.EMPTY)
+                .update(document -> f.secrets.replaceSystem(document, "oidc", "rotated".toCharArray()))
+                .apply();
             assertThat(f.callbackReply(pending).status).isEqualTo(400);
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
@@ -239,11 +242,11 @@ class OrionOidcOnboardingTest {
             f.configureSystem(List.of(f.systemUser("operator", "external-alice", true)));
             Reply result = f.signInSystem();
             byte[] token = result.json.path("token").asText().getBytes(StandardCharsets.UTF_8);
-            f.editor.edit().update(document -> {
+            f.editor.edit("remove fixture system providers", UserEmail.EMPTY).update(document -> {
                 OrionDocument.SystemConfiguration system = document.system();
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                         system.secrets(), system.proxies(), system.connections(), List.of()), document.organizations());
-            }).apply("remove fixture system providers", null);
+            }).apply();
             assertThat(f.acl.verifyToken(token)).isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
             assertThat(f.post("start", Map.of("scope", "system", "provider", "corporate"), null).status)
@@ -534,7 +537,10 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("refresh", Map.of("organization", "default", "userId", "alice"), null).status)
                     .isEqualTo(401);
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(200);
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "remove account",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<User> users = new ArrayList<>();
@@ -550,7 +556,7 @@ class OrionOidcOnboardingTest {
                             removed.equals("provider") ? List.of() : org.oidcProviders(), org.invitations(), org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }).apply("remove account", null);
+            }).apply();
             assertThat(f.post("refresh", Map.of(), null).status).isEqualTo(401);
         }
     }
@@ -608,9 +614,12 @@ class OrionOidcOnboardingTest {
             assertThat(f.post("profile", Map.of("ticket", returningTicket), returning.cookie)
                     .json.path("setup").asBoolean()).isFalse();
             assertThat(f.post("complete", Map.of("ticket", returningTicket), returning.cookie).status).isEqualTo(200);
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document ->
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "remove acme",
+                    UserEmail.EMPTY)
+                .update(document ->
                     new OrionDocument(document.system(),
-                            List.of(f.accounts.organization(new OrganizationId("default"))))).apply("remove acme", null);
+            List.of(f.accounts.organization(new OrganizationId("default"))))).apply();
             assertThat(f.acl.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Failure.class);
         }
@@ -662,7 +671,10 @@ class OrionOidcOnboardingTest {
             assertThat(f.accounts.organization(id).users()).isEmpty();
             assertThat(f.accounts.invitation(id, token)).isNotNull();
             f.storage.conflict = false;
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "expire fixture invitation",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OrganizationInvitation> expired = new ArrayList<>();
@@ -673,7 +685,7 @@ class OrionOidcOnboardingTest {
                             org.grants(), org.roles(), org.teams(), org.secrets(), org.oidcProviders(), expired, org.connections()));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }).apply("expire fixture invitation", null);
+            }).apply();
             assertThatThrownBy(() -> f.accounts.accept(id, token, "alice@example.test", provider, "subject", "A", ""))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(f.accounts.organization(id).users()).isEmpty();
@@ -748,7 +760,10 @@ class OrionOidcOnboardingTest {
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void rotatingSharedProviderSecretLeavesOtherConsumersAndOrganizationsUntouched(boolean connectionConsumer) throws Exception {
         try (Fixture f = new Fixture()) {
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "share fixture secret",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 List<OrionDocument.Organization> organizations = new ArrayList<>();
                 for (OrionDocument.Organization org : document.organizations()) {
                     List<OidcProvider> providers = new ArrayList<>(org.oidcProviders());
@@ -774,7 +789,7 @@ class OrionOidcOnboardingTest {
                             org.grants(), org.roles(), teams, org.secrets(), providers, org.invitations(), connections));
                 }
                 return new OrionDocument(document.system(), organizations);
-            }).apply("share fixture secret", null);
+            }).apply();
             Map<String, Object> input = Map.of("organization", "acme", "id", "corporate",
                     "issuer", f.issuer.toString(), "clientId", "client", "clientSecret", "new-secret",
                     "revision", f.desired.current().revision().orElseThrow());
@@ -999,7 +1014,7 @@ class OrionOidcOnboardingTest {
         }
 
         void configureSystem(List<User> users) {
-            editor.edit().update(document -> {
+            editor.edit("configure fixture system user", UserEmail.EMPTY).update(document -> {
                 OrionDocument.SystemConfiguration system = document.system();
                 OrionDocument changed = new OrionDocument(new OrionDocument.SystemConfiguration(
                         new AccessControl(users, List.of(), List.of()), system.https(),
@@ -1007,7 +1022,7 @@ class OrionOidcOnboardingTest {
                         List.of(new OidcProvider("corporate", issuer, "client", "oidc",
                                 OidcProvider.DEFAULT_IDLE_TIMEOUT_SECONDS, 0))), document.organizations());
                 return secrets.replaceSystem(changed, "oidc", "secret".toCharArray());
-            }).apply("configure fixture system user", null);
+            }).apply();
         }
 
         Reply signInSystem() throws Exception {

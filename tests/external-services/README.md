@@ -178,6 +178,20 @@ trust in the JVM. Its test repositories, system user, provider, and binding rema
 in that server's configuration; the complete Maven round discards its isolated
 server data.
 
+The organization OIDC scenario uses the isolated round's `oidc-acme` and
+`oidc-other` organizations, each with `team/repository`. It configures an
+organization provider and creates an email-bound invitation through the UI.
+A fresh browser context signs in with Gitea and completes the invited profile.
+The member sees only their organization's repository; direct Git requests to
+the other organization and invitation administration return 403. A second
+sign-in without an invitation reuses the same identity without profile setup.
+The JVM test reloads persisted configuration and checks that only one member
+exists and the invitation was consumed. Its temporary Gitea OAuth2 application
+is deleted afterward. To run this scenario against a manual server, provision
+those empty organizations and repositories first; the created member and
+provider remain there. This automated fixture scenario does not complete the
+public-provider, timeout, or active-session restart acceptance checks.
+
 `OBSERVE=1` opens noVNC in your computer's default browser before running tests.
 If automatic opening is unavailable, the command prints the URL and continues.
 Observed tests bring their page forward and show the scenario name and numbered

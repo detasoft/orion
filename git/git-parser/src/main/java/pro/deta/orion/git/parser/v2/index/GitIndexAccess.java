@@ -1,6 +1,5 @@
 package pro.deta.orion.git.parser.v2.index;
-
-import pro.deta.orion.git.api.Modification;
+import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -9,7 +8,6 @@ import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;
 import pro.deta.orion.git.parser.v2.id.RefId;
-
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;

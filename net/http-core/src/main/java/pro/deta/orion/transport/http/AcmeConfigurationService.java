@@ -21,7 +21,6 @@ import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
 import pro.deta.orion.schema.orion.v2.Connection;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
-
 import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
@@ -78,11 +77,14 @@ public final class AcmeConfigurationService {
             if (settings.revision() == null || settings.revision().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
             }
-            editor.edit(settings.revision()).update(document -> {
+            editor.edit(
+                    settings.revision(), "Configure ACME certificate issuance",
+                    new UserEmail(userId, ""))
+                .update(document -> {
                 OrionDocument candidate = updated(document, settings);
                 certificates.prepareMaterial(candidate.system().https().orElseThrow());
                 return candidate;
-            }).apply("Configure ACME certificate issuance", new UserEmail(userId, ""));
+            }).apply();
             return view();
         } finally {
             if (settings.eabHmacKey() != null) Arrays.fill(settings.eabHmacKey(), '\0');

@@ -1,16 +1,13 @@
 package pro.deta.orion.test;
-
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.test.integration.OrionTestRootAccess;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -43,8 +40,13 @@ final class TestBearerTokens {
             OrionConfigurationEditor editor, KeyPair key) {
         char[] password = accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
         byte[] credential = new String(password).getBytes(StandardCharsets.UTF_8);
-        try (OrionConfigurationEdit edit = editor.edit()) {
-            OrionTestRootAccess.enroll(accessControlService, edit, key.getPublic(), credential);
+        try {
+            OrionConfigurationEdit.withAccess(editor.edit(
+                    "complete root SSH key enrollment",
+                    new UserEmail("root", "root@orion.pro")), edit -> {
+                OrionTestRootAccess.enroll(accessControlService, edit, key.getPublic(), credential);
+                return null;
+            });
         } finally {
             Arrays.fill(password, '\0');
             Arrays.fill(credential, (byte) 0);

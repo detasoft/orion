@@ -16,7 +16,6 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.UserIdentity;
-
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.security.PublicKey;
@@ -27,7 +26,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Singleton
@@ -148,22 +146,26 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (authentication.rootRecoveryGeneration() == null) {
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                SshCredentialUpdateResult result = accessControlService.addSshCredentials(edit, username, selectedKeys);
+            OrionConfigurationEdit edit = editor.edit("add SSH credentials for " + username, document -> {
+                String email = "";
+                for (User user : document.system().accessControl().users()) {
+                    if (user.id().equalsIgnoreCase(username)) {
+                        email = java.util.Objects.requireNonNullElse(user.email(), "");
+                        break;
+                    }
+                }
+                return new UserEmail(username, email);
+            });
+            if (!accessControlService.withAccess(edit, access -> {
+                SshCredentialUpdateResult result = access.addSshCredentials(username, selectedKeys);
                 if (!(result instanceof SshCredentialUpdateResult.Success success)) {
                     return false;
                 }
                 if (success.changed()) {
-                    String email = "";
-                    for (User user : edit.document().system().accessControl().users()) {
-                        if (user.id().equalsIgnoreCase(username)) {
-                            email = java.util.Objects.requireNonNullElse(user.email(), "");
-                            break;
-                        }
-                    }
-                    edit.apply("add SSH credentials for " + username, new UserEmail(username, email));
+                    access.apply();
                 }
-            }
+                return true;
+            })) return false;
         } else {
             RootSshKeyEnrollmentSession.begin(
                     session,

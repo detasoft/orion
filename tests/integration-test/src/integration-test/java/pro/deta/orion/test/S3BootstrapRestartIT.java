@@ -23,7 +23,6 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -36,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 import static pro.deta.orion.test.RemoteBootstrapTestSupport.PASSWORD_ENV;
@@ -158,9 +156,11 @@ class S3BootstrapRestartIT {
                     ConfigurationSecrets secrets = new ConfigurationSecrets(() -> document,
                             bootstrap.configurationCipher());
                     OrionDocument updated = secrets.createSystem(document, SECRET_ID, SECRET_VALUE.toCharArray());
-                    component.configurationEditor().edit(current.revision().orElseThrow())
+                    component.configurationEditor().edit(
+                            current.revision().orElseThrow(), "Persist stateless bootstrap secret",
+                            UserEmail.EMPTY)
                             .update(ignored -> updated)
-                            .apply("Persist stateless bootstrap secret", UserEmail.EMPTY);
+                        .apply();
                     savedConfiguration = component.orionAccessControlService()
                             .accessControlConfigurationFile().content();
                     assertThat(new String(savedConfiguration, StandardCharsets.UTF_8))

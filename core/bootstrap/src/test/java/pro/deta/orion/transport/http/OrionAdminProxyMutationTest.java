@@ -1,9 +1,9 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.internal.UserEmailMessage;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -31,7 +31,6 @@ import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -45,7 +44,6 @@ import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.GitProxyBinding;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.util.Result;
-
 import java.io.*;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -56,7 +54,6 @@ import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -212,7 +209,10 @@ class OrionAdminProxyMutationTest {
         try (Fixture f = new Fixture()) {
             f.createSsh(Set.of());
             f.answer(f.decisions.list(OPERATOR).getFirst(), "0");
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> document).apply("concurrent update", null);
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "concurrent update",
+                    UserEmail.EMPTY)
+                .update(document -> document).apply();
             int saves = f.storage.saves;
             f.work.remove().run();
             assertThat(f.storage.saves).isEqualTo(saves);
@@ -358,7 +358,10 @@ class OrionAdminProxyMutationTest {
             assertThat(f.secrets.resolveSystem(original)).isEqualTo("shared-private-token".toCharArray());
             var implicit = f.command("update", "first", null, "unapproved-replacement");
             assertThat(f.post(implicit).status).isEqualTo(400);
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "share fixture credential",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 var first = document.system().proxies().getFirst();
                 var second = new GitProxyBinding(
                         new RemoteAlias("second"), first.source(), "third");
@@ -367,7 +370,7 @@ class OrionAdminProxyMutationTest {
                                 document.system().connections(),
                         document.system().oidcProviders()),
                         document.organizations());
-            }).apply("share fixture credential", null);
+            }).apply();
 
             assertThat(f.post(f.command("replace-credential", "first", null, "new-private-token")).status)
                     .isEqualTo(200);
@@ -477,7 +480,10 @@ class OrionAdminProxyMutationTest {
             create.put("credentialKind", "PASSWORD");
             create.put("knownHosts", Set.of(f.hostKey()));
             assertThat(f.post(create).status).isEqualTo(201);
-            f.editor.edit(f.desired.current().revision().orElseThrow()).update(document -> {
+            f.editor.edit(
+                    f.desired.current().revision().orElseThrow(), "share SSH connection",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 var first = document.system().proxies().getFirst();
                 var source = (GitProxyBinding.Ssh) first.source();
                 var second = new GitProxyBinding(
@@ -487,7 +493,7 @@ class OrionAdminProxyMutationTest {
                 return new OrionDocument(new OrionDocument.SystemConfiguration(system.accessControl(), system.https(),
                         system.secrets(), List.of(first, second), system.connections(),
                         system.oidcProviders()), document.organizations());
-            }).apply("share SSH connection", UserEmail.EMPTY);
+            }).apply();
             OrionDocument original = f.desired.current().document();
             String upstream = original.system().proxies().getFirst().upstream(original.system()).toString();
             Map<String, Object> path = f.command("update", "cluster", upstream.replace("/repo", "/changed"), null);
@@ -705,7 +711,7 @@ class OrionAdminProxyMutationTest {
             snapshot = new ConfigurationFile(output.toByteArray(), Optional.of("0"));
         }
         @Override public Result<ConfigurationFile> load() { return new Result.Success<>(snapshot); }
-        @Override public void save(ConfigurationFile next, String message, UserEmail author) {
+        @Override public void save(ConfigurationFile next, UserEmailMessage author) {
             if (failSave) throw new IllegalStateException("storage unavailable");
             if (conflict || !snapshot.revision().equals(next.revision())) {
                 throw new OrionConfigurationConcurrentUpdateException("configuration conflict", null);

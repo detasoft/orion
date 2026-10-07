@@ -377,14 +377,16 @@ class RuntimeHttpAdminApiIT {
 
             char[] password = "token-user-password".toCharArray();
             String hash = new OrionPasswordHashingService().calculateHash(PasswordHashingAlgorithm.SHA1, password);
-            try (OrionConfigurationEdit edit = orion.component().configurationEditor().edit()) {
-                AccessControlUserUpdate update = new AccessControlUserUpdate(
-                    "token-user", "token-user@example.test",
-                    List.of(new AccessControlCredentialUpdate(CredentialType.SHA1, hash)), List.of());
-                orion.accessControlService().createOrUpdateUser(edit, update);
-                edit.apply("createOrUpdateUser() " + update.id(),
-                        new UserEmail(update.id(), update.email()));
-            }
+            AccessControlUserUpdate update = new AccessControlUserUpdate(
+                "token-user", "token-user@example.test",
+                List.of(new AccessControlCredentialUpdate(CredentialType.SHA1, hash)), List.of());
+            orion.accessControlService().withAccess(orion.component().configurationEditor().edit(
+                    "createOrUpdateUser() " + update.id(),
+                    new UserEmail(update.id(), update.email())), edit -> {
+                edit.createOrUpdateUser(update);
+                edit.apply();
+                return null;
+            });
             RuntimeHttpTestSupport.HttpResponse invalidExpiration = RuntimeHttpTestSupport.request(
                     "POST",
                     orion.httpUrl("/api/admin/token"),

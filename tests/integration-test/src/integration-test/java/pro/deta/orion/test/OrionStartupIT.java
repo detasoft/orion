@@ -160,8 +160,10 @@ class OrionStartupIT {
 
             OrionDocument updatedDocument = loadedDocument.replaceAccessControl(
                     accessControlWithUsers("root", "saved-remote-user"));
-            orion.component().configurationEditor().edit(configurationFile.revision().orElseThrow())
-                    .update(ignored -> updatedDocument).apply("Update remote configuration", UserEmail.EMPTY);
+            orion.component().configurationEditor().edit(
+                    configurationFile.revision().orElseThrow(), "Update remote configuration",
+                    UserEmail.EMPTY)
+                .update(ignored -> updatedDocument).apply();
 
             assertThat(orion.accessControlService().userExists("remote-user")).isFalse();
             assertThat(orion.accessControlService().userExists("saved-remote-user")).isTrue();
@@ -198,14 +200,15 @@ class OrionStartupIT {
             assertThat(new String(readFileFromRepository(configuredAclRepository, ACL_FILE), StandardCharsets.UTF_8))
                     .contains("<orion schemaVersion=\"2\">")
                     .doesNotContain("<AccessControl");
-
-            try (OrionConfigurationEdit edit = orion.component().configurationEditor().edit()) {
-                AccessControlUserUpdate update = new AccessControlUserUpdate(
-                        "new-user", "new@example.test", List.of(), List.of());
-                orion.accessControlService().createOrUpdateUser(edit, update);
-                edit.apply("createOrUpdateUser() " + update.id(),
-                        new UserEmail(update.id(), update.email()));
-            }
+            AccessControlUserUpdate update = new AccessControlUserUpdate(
+                    "new-user", "new@example.test", List.of(), List.of());
+            orion.accessControlService().withAccess(orion.component().configurationEditor().edit(
+                    "createOrUpdateUser() " + update.id(),
+                    new UserEmail(update.id(), update.email())), edit -> {
+                edit.createOrUpdateUser(update);
+                edit.apply();
+                return null;
+            });
         }
 
         byte[] savedAcl = readFileFromRepository(configuredAclRepository, ACL_FILE);

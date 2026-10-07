@@ -1,9 +1,7 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
@@ -60,7 +58,6 @@ import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.Result;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -79,9 +76,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -177,21 +172,53 @@ class OrionAccessControlServiceImplTest {
     void stagesTwoSshKeysAndPublishesOnlyOnce() {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
-        try (ServiceFixture fixture = fixture(initial);
-                OrionConfigurationEdit edit = fixture.editor.edit()) {
-            assertThat(fixture.service.addSshCredentials(edit, "alice", List.of(key(KEY_ONE.getPublic()))))
-                    .isInstanceOf(SshCredentialUpdateResult.Success.class);
-            assertThat(fixture.service.addSshCredentials(edit, "alice", List.of(key(KEY_THREE.getPublic()))))
-                    .isInstanceOf(SshCredentialUpdateResult.Success.class);
+        try (ServiceFixture fixture = fixture(initial)) {
+            fixture.service.withAccess(fixture.editor.edit(
+                    "add two SSH credentials",
+                    new UserEmail("alice", "alice@example.test")), edit -> {
+                assertThat(edit.addSshCredentials("alice", List.of(key(KEY_ONE.getPublic()))))
+                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                assertThat(edit.addSshCredentials("alice", List.of(key(KEY_THREE.getPublic()))))
+                        .isInstanceOf(SshCredentialUpdateResult.Success.class);
+                edit.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
+                        document.system().accessControl(), document.system().https(),
+                        List.of(new ConfigurationSecret("combined", testEnvelope())),
+                        document.system().proxies(), document.system().connections(),
+                        document.system().oidcProviders()), document.organizations()));
+                assertThat(fixture.storage.saveCount).isZero();
+                assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
+                        .isInstanceOf(AuthenticationResult.Failure.class);
+                edit.apply();
+                assertThat(fixture.storage.saveCount).isEqualTo(1);
+                assertThat(edit.appliedSnapshot().document().system().secrets())
+                        .extracting(ConfigurationSecret::id).containsExactly("combined");
+                assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
+                        .isInstanceOf(AuthenticationResult.Success.class);
+                assertThat(fixture.service.authenticateSshUser("alice", KEY_THREE.getPublic().getEncoded()))
+                        .isInstanceOf(AuthenticationResult.Success.class);
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void withAccessDiscardsChangesAndKeepsTheOriginalException() {
+        try (ServiceFixture fixture = fixture(new AclFixture())) {
+            OrionConfigurationEdit edit = fixture.editor.edit("abandoned update", UserEmail.EMPTY);
+            java.io.IOException failure = new java.io.IOException("callback failed");
+            assertThatThrownBy(() -> fixture.service.withAccess(edit, access -> {
+                access.createOrUpdateUser(userUpdate("alice", "hash"));
+                access.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
+                        document.system().accessControl(), document.system().https(),
+                        List.of(new ConfigurationSecret("abandoned", testEnvelope())),
+                        document.system().proxies(), document.system().connections(),
+                        document.system().oidcProviders()), document.organizations()));
+                throw failure;
+            })).isSameAs(failure);
             assertThat(fixture.storage.saveCount).isZero();
-            assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
-            edit.apply("add two SSH credentials", new UserEmail("alice", "alice@example.test"));
-            assertThat(fixture.storage.saveCount).isEqualTo(1);
-            assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
-                    .isInstanceOf(AuthenticationResult.Success.class);
-            assertThat(fixture.service.authenticateSshUser("alice", KEY_THREE.getPublic().getEncoded()))
-                    .isInstanceOf(AuthenticationResult.Success.class);
+            assertThat(fixture.service.userExists("alice")).isFalse();
+            assertThatThrownBy(edit::document).isInstanceOf(IllegalStateException.class);
+            edit.discard();
         }
     }
 
@@ -200,16 +227,18 @@ class OrionAccessControlServiceImplTest {
         AclFixture initial = new AclFixture();
         initial.getUsers().add(user("alice"));
         try (ServiceFixture fixture = fixture(initial)) {
-            try (OrionConfigurationEdit edit = fixture.editor.edit()) {
-                fixture.service.addSshCredentials(edit, "alice", List.of(key(KEY_ONE.getPublic())));
-            }
+            fixture.service.withAccess(fixture.editor.edit("", UserEmail.EMPTY), edit -> {
+                edit.addSshCredentials("alice", List.of(key(KEY_ONE.getPublic())));
+                return null;
+            });
             assertThat(fixture.storage.saveCount).isZero();
-            try (OrionConfigurationEdit edit = fixture.editor.edit()) {
-                fixture.service.addSshCredentials(edit, "alice", List.of(key(KEY_TWO.getPublic())));
+            fixture.service.withAccess(fixture.editor.edit("conflicting edit", UserEmail.EMPTY), edit -> {
+                edit.addSshCredentials("alice", List.of(key(KEY_TWO.getPublic())));
                 fixture.storage.concurrentOnSave = true;
-                assertThatThrownBy(() -> edit.apply("conflicting edit", UserEmail.EMPTY))
+                assertThatThrownBy(() -> edit.apply())
                         .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
-            }
+                return null;
+            });
             assertThat(fixture.storage.saveCount).isZero();
             assertThat(fixture.service.authenticateSshUser("alice", KEY_ONE.getPublic().getEncoded()))
                     .isInstanceOf(AuthenticationResult.Failure.class);
@@ -224,18 +253,24 @@ class OrionAccessControlServiceImplTest {
         OrionDesiredState desired = new OrionDesiredState();
         OrionConfigurationEditor editor = new OrionConfigurationEditor(
                 storage, new BootstrapConfiguration(), testCipher(), testMaterial(), desired);
-        try (OrionConfigurationEdit edit = editor.edit()) {
+        OrionConfigurationEdit.withAccess(editor.edit("configure secret", UserEmail.EMPTY), edit -> {
             edit.update(document -> new OrionDocument(new OrionDocument.SystemConfiguration(
                     document.system().accessControl(), document.system().https(),
                     List.of(new ConfigurationSecret("credential", testEnvelope())),
                     document.system().proxies(), document.system().connections(),
                     document.system().oidcProviders()), document.organizations()));
             assertThat(desired.isPublished()).isFalse();
-            OrionDesiredState.Snapshot saved = edit.apply("configure secret", UserEmail.EMPTY);
+            edit.apply();
+            OrionDesiredState.Snapshot saved = edit.appliedSnapshot();
             assertThat(desired.current()).isSameAs(saved);
             assertThat(saved.document().system().secrets()).extracting(ConfigurationSecret::id)
                     .containsExactly("credential");
-        }
+            desired.publish(saved.document(), Optional.of("later-publication"));
+            edit.discard();
+            assertThat(edit.appliedSnapshot()).isSameAs(saved);
+            assertThat(edit.appliedSnapshot().revision()).isNotEqualTo(desired.current().revision());
+            return null;
+        });
     }
 
     @Test
@@ -278,10 +313,13 @@ class OrionAccessControlServiceImplTest {
         assertThatThrownBy(service::onStart).isInstanceOf(IllegalStateException.class);
         storage.loadUnavailable = false;
         service.onStart();
-        try (OrionConfigurationEdit edit = editor.edit()) {
-            service.createOrUpdateUser(edit, userUpdate("alice", "hash"));
-            edit.apply("create alice", UserEmail.EMPTY);
-            assertThat(service.userExists("alice")).isTrue();
+        try {
+            service.withAccess(editor.edit("create alice", UserEmail.EMPTY), edit -> {
+                edit.createOrUpdateUser(userUpdate("alice", "hash"));
+                edit.apply();
+                assertThat(service.userExists("alice")).isTrue();
+                return null;
+            });
         } finally {
             service.onStop();
         }
@@ -305,13 +343,14 @@ class OrionAccessControlServiceImplTest {
                 testCipher(),
                 testMaterial(),
                 new pro.deta.orion.config.OrionDesiredState());
-        try (OrionConfigurationEdit edit = editor.edit()) {
-            assertThatThrownBy(() -> edit.apply("saved before reload failure", UserEmail.EMPTY))
+        OrionConfigurationEdit.withAccess(editor.edit("saved before reload failure", UserEmail.EMPTY), edit -> {
+            assertThatThrownBy(() -> edit.apply())
                     .isInstanceOf(OrionConfigurationEditor.ActivationFailedException.class);
             assertThat(storage.saved).isTrue();
-            assertThatThrownBy(() -> edit.apply("retry", UserEmail.EMPTY))
+            assertThatThrownBy(() -> edit.apply())
                     .isInstanceOf(IllegalStateException.class).hasMessage("Configuration edit is closed");
-        }
+            return null;
+        });
     }
 
     @Test
@@ -543,12 +582,17 @@ class OrionAccessControlServiceImplTest {
     @Test
     void updatesConfigurationAtTheReadRevisionInOneFile() throws Exception {
         try (var fixture = fixture(new AclFixture())) {
-            var result = fixture.editor.edit("version-one").update(document ->
+            OrionConfigurationEdit appliedEdit = fixture.editor.edit(
+                    "version-one", "update proxy",
+                    UserEmail.EMPTY)
+                .update(document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), List.of(new ConfigurationSecret(
                             "credential", testEnvelope())), document.system().proxies(),
                                     document.system().connections(),
-                            document.system().oidcProviders()), document.organizations())).apply("update proxy", null);
+            document.system().oidcProviders()), document.organizations()));
+            appliedEdit.apply();
+            OrionDesiredState.Snapshot result = appliedEdit.appliedSnapshot();
 
             assertThat(result.document().system().secrets()).extracting("id").containsExactly("credential");
             assertThat(fixture.storage.snapshot.revision()).contains("version-one");
@@ -561,9 +605,12 @@ class OrionAccessControlServiceImplTest {
     void rejectsStalePrimaryConfigurationBeforeInvokingTheMutation() {
         try (var fixture = fixture(new AclFixture())) {
             int saves = fixture.storage.saveCount;
-            assertThatThrownBy(() -> fixture.editor.edit("stale").update(document -> {
+            assertThatThrownBy(() -> fixture.editor.edit(
+                    "stale", "update proxy",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 throw new AssertionError("A stale mutation must not consume credentials");
-            }).apply("update proxy", null))
+            }).apply())
                     .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             assertThat(fixture.storage.saveCount).isEqualTo(saves);
         }
@@ -573,9 +620,12 @@ class OrionAccessControlServiceImplTest {
     void reportsAStaleRevisionEvenWhenTheNewHeadIsInvalid() {
         try (ServiceFixture fixture = fixture(new AclFixture())) {
             fixture.storage.snapshot = new ConfigurationFile("<invalid".getBytes(StandardCharsets.UTF_8), Optional.of("version-two"));
-            assertThatThrownBy(() -> fixture.editor.edit("version-one").update(document -> {
+            assertThatThrownBy(() -> fixture.editor.edit(
+                    "version-one", "update ACL",
+                    UserEmail.EMPTY)
+                .update(document -> {
                 throw new AssertionError("A stale mutation must not parse or change the new head");
-            }).apply("update ACL", null))
+            }).apply())
                     .isInstanceOf(OrionConfigurationConcurrentUpdateException.class);
             assertThat(fixture.storage.saveCount).isZero();
         }
@@ -620,11 +670,11 @@ class OrionAccessControlServiceImplTest {
         try {
             assertThat(desiredState.current().revision()).contains("version-one");
             assertThat(desiredState.current().document().system().https()).contains(https);
-
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                service.createOrUpdateUser(edit, userUpdate("alice", "password-hash"));
-                edit.apply("update alice", UserEmail.EMPTY);
-            }
+            service.withAccess(editor.edit("update alice", UserEmail.EMPTY), edit -> {
+                edit.createOrUpdateUser(userUpdate("alice", "password-hash"));
+                edit.apply();
+                return null;
+            });
 
             OrionDocument persisted = parseDocument(storage.snapshot.content());
             assertThat(persisted.system().https()).contains(https);
@@ -1684,30 +1734,38 @@ class OrionAccessControlServiceImplTest {
             InMemoryStorage storage,
             OrionConfigurationEditor editor) implements AutoCloseable {
         private void createOrUpdateUser(AccessControlUserUpdate update) {
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                service.createOrUpdateUser(edit, update);
-                edit.apply("createOrUpdateUser() " + update.id(), new UserEmail(update.id(), update.email()));
-            }
+            service.withAccess(editor.edit(
+                    "createOrUpdateUser() " + update.id(),
+                    new UserEmail(update.id(), update.email())), edit -> {
+                edit.createOrUpdateUser(update);
+                edit.apply();
+                return null;
+            });
         }
 
         private SshCredentialUpdateResult addSshCredentials(String userId, List<String> keys) {
-            return mutate(userId, "add SSH credentials", edit -> service.addSshCredentials(edit, userId, keys));
+            return mutate(userId, "add SSH credentials",
+                    edit -> service.createAccess(edit).addSshCredentials(userId, keys));
         }
 
         private SshCredentialUpdateResult removeSshCredential(String userId, String prefix, boolean force) {
             return mutate(userId, "remove SSH credential",
-                    edit -> service.removeSshCredential(edit, userId, prefix, force));
+            edit -> service.createAccess(edit).removeSshCredential(userId, prefix, force));
         }
 
         private SshCredentialUpdateResult mutate(String userId, String message,
                 java.util.function.Function<OrionConfigurationEdit,
                         SshCredentialUpdateResult> mutation) {
-            try (OrionConfigurationEdit edit = editor.edit()) {
-                SshCredentialUpdateResult result = mutation.apply(edit);
-                if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
-                    edit.apply(message + " for " + userId, new UserEmail(userId, ""));
-                }
-                return result;
+            try {
+                return OrionConfigurationEdit.withAccess(editor.edit(
+                        message + " for " + userId,
+                        new UserEmail(userId, "")), edit -> {
+                    SshCredentialUpdateResult result = mutation.apply(edit);
+                    if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
+                        edit.apply();
+                    }
+                    return result;
+                });
             } catch (OrionConfigurationConcurrentUpdateException failure) {
                 return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
                         "Configuration changed", List.of(), failure);

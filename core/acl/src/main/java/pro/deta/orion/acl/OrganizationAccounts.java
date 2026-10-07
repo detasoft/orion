@@ -15,7 +15,6 @@ import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.OrganizationInvitation;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -168,7 +167,7 @@ public final class OrganizationAccounts {
     private void update(OrganizationId id, UnaryOperator<OrionDocument.Organization> operation,
             String message, UserEmail author) {
         String revision = desired.current().revision().orElseThrow();
-        editor.edit(revision).update(document -> {
+        editor.edit(revision, message, author).update(document -> {
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             boolean found = false;
             for (OrionDocument.Organization organization : document.organizations()) {
@@ -183,7 +182,7 @@ public final class OrganizationAccounts {
                 throw new IllegalArgumentException("Organization is unavailable");
             }
             return new OrionDocument(document.system(), organizations);
-        }).apply(message, author);
+        }).apply();
     }
 
     private static OrionDocument.Organization replaceAccounts(OrionDocument.Organization organization,

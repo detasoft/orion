@@ -2,7 +2,6 @@ package pro.deta.orion.component;
 
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,7 +13,6 @@ import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.decision.DecisionAnswer;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.DecisionRequest;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
@@ -37,14 +35,12 @@ import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.RemoteAlias;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
-
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class BootstrapConnectionDecisionTest {
@@ -93,12 +89,15 @@ class BootstrapConnectionDecisionTest {
             GitProxyBinding unrelated = new GitProxyBinding(new RemoteAlias("other"),
                 new GitProxyBinding.Direct(directory.resolve("other.git").toUri(), GitCredentialKind.NONE,
                         Optional.empty(), Optional.empty()), "main");
-            fixture.editor.edit(fixture.desired.current().revision().orElseThrow()).update(document ->
+            fixture.editor.edit(
+                    fixture.desired.current().revision().orElseThrow(), "unrelated edit",
+                    UserEmail.EMPTY)
+                .update(document ->
                     new OrionDocument(new OrionDocument.SystemConfiguration(document.system().accessControl(),
                             document.system().https(), document.system().secrets(),
                             List.of(fixture.previous, unrelated), document.system().connections(),
                             document.system().oidcProviders()),
-                                    document.organizations())).apply("unrelated edit", UserEmail.EMPTY);
+            document.organizations())).apply();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).contains(unrelated);
             assertThat(fixture.desired.current().document().system().proxies()).filteredOn(
@@ -116,8 +115,10 @@ class BootstrapConnectionDecisionTest {
             GitProxyBinding concurrent = new GitProxyBinding(fixture.previous.alias(),
                 new GitProxyBinding.Direct(fixture.previous.upstream(fixture.desired.current().document()
                         .system()), GitCredentialKind.NONE, Optional.empty(), Optional.empty()), "refs/heads/other");
-            fixture.editor.edit(fixture.desired.current().revision().orElseThrow())
-                    .update(document -> withBinding(concurrent)).apply("concurrent edit", UserEmail.EMPTY);
+            fixture.editor.edit(
+                    fixture.desired.current().revision().orElseThrow(), "concurrent edit",
+                    UserEmail.EMPTY)
+                .update(document -> withBinding(concurrent)).apply();
             fixture.decisions.decide(request.id(), new DecisionAnswer(0, ACTOR)).valueOrFailure("approve");
             assertThat(fixture.desired.current().document().system().proxies()).containsExactly(concurrent);
             assertThat(fixture.storage.load().isFailure()).isFalse();

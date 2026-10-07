@@ -15,6 +15,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>common-runtime</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2-mvstore</artifactId>
             <version>2.4.240</version>

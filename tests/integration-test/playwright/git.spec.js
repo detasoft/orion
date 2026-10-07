@@ -271,3 +271,127 @@ test('existing system user signs in through Gitea OIDC and keeps restricted perm
       expect(deleted.status).toBe(204)
     }
   })
+
+test('invited organization member signs in through Gitea without crossing organization boundaries',
+  async ({ request, page, browser, adminToken }) => {
+    const credentials = await readFile(
+      new URL('../../external-services/.state/credentials.env', import.meta.url), 'utf8')
+    const password = credentials.match(/^GITEA_PASSWORD=(.+)$/m)?.[1]
+    expect(password, 'The fixture supplies GITEA_PASSWORD').toBeTruthy()
+    const secureUrl = new URL(browserUrl)
+    if (secureUrl.protocol === 'http:') {
+      secureUrl.protocol = 'https:'
+      secureUrl.port = '9443'
+    }
+    const origin = secureUrl.origin
+    const organization = 'oidc-acme'
+    const ownRepository = `${organization}/team/repository`
+    const otherRepository = 'oidc-other/team/repository'
+    const id = `organization-${randomUUID().slice(0, 8)}`
+    const account = await giteaRequest('GET', '/api/v1/user', password)
+    expect(account.status).toBe(200)
+    const email = JSON.parse(account.body).email
+    expect(email).toBeTruthy()
+    const registered = await giteaRequest('POST', '/api/v1/user/applications/oauth2', password, {
+      name: id, confidential_client: true,
+      redirect_uris: [`${origin}/api/auth/oidc/callback`], skip_secondary_authorization: false,
+    })
+    expect(registered.status).toBe(201)
+    const application = JSON.parse(registered.body)
+    let userContext
+    let userPage
+    try {
+      for (const name of [ownRepository, otherRepository]) {
+        const created = await request.post(`${orionUrl}/api/admin/repositories`, {
+          headers: { Authorization: `Bearer ${adminToken}` }, data: { name },
+        })
+        expect(created.status()).toBe(201)
+      }
+      await page.addInitScript(({ origin, token }) => {
+        if (location.origin === origin) sessionStorage.setItem('orion.ui.token', token)
+      }, { origin, token: adminToken })
+      await page.goto(origin)
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const provider = page.locator('.oidc-settings')
+      await provider.getByLabel('Provider scope').selectOption('organization')
+      await provider.getByRole('combobox', { name: 'Organization', exact: true }).selectOption(organization)
+      await provider.getByLabel('Provider ID', { exact: true }).fill(id)
+      await provider.getByLabel('Issuer URL', { exact: true }).fill(`${giteaUrl}/`)
+      await provider.getByLabel('Client ID', { exact: true }).fill(application.client_id)
+      await provider.getByLabel('Client secret', { exact: true }).fill(application.client_secret)
+      await provider.getByRole('button', { name: 'Save provider', exact: true }).click()
+      await expect(provider.getByRole('status')).toHaveText('Provider saved in the selected scope.')
+      // Invitations load provider availability when mounted.
+      await page.reload()
+      await page.getByRole('link', { name: 'People', exact: true }).click()
+      const invitations = page.locator('.invitations')
+      await invitations.getByRole('combobox', { name: 'Organization', exact: true }).selectOption(organization)
+      await invitations.getByLabel('Email', { exact: true }).fill(email)
+      await invitations.getByRole('button', { name: 'Create invitation', exact: true }).click()
+      const invitationUrl = await invitations.getByLabel('Invitation link', { exact: true }).inputValue()
+
+      userContext = await browser.newContext()
+      userPage = await userContext.newPage()
+      await userPage.goto(invitationUrl)
+      await userPage.getByLabel('Sign-in provider').selectOption(id)
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await userPage.locator('#user_name').fill('fixture')
+      await userPage.locator('#password').fill(password)
+      await userPage.getByRole('button', { name: 'Sign In', exact: true }).click()
+      await userPage.getByRole('button', { name: 'Authorize Application', exact: true }).click()
+      await expect(userPage.getByRole('heading', { name: 'Set up your profile', exact: true })).toBeVisible()
+      await userPage.getByLabel('First name', { exact: true }).fill('Fixture')
+      await userPage.getByLabel('Last name', { exact: true }).fill('Member')
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      const firstIdentity = await userPage.evaluate(async () => {
+        const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+        return (await fetch('/api/auth/me', { headers })).json()
+      })
+      expect(firstIdentity).toMatchObject({ organization, admin: false })
+      expect(firstIdentity.userId).toBeTruthy()
+      await userPage.getByRole('link', { name: 'Repositories', exact: true }).click()
+      await expect(userPage.getByText(ownRepository, { exact: true })).toBeVisible()
+      await expect(userPage.getByText(otherRepository, { exact: true })).toHaveCount(0)
+      const permissions = await userPage.evaluate(async ({ ownRepository, otherRepository }) => {
+        const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+        const repositories = await fetch('/api/admin/repositories', { headers })
+        const own = await fetch(`/r/${ownRepository}.git/info/refs?service=git-upload-pack`, { headers })
+        const other = await fetch(`/r/${otherRepository}.git/info/refs?service=git-upload-pack`, { headers })
+        const administration = await fetch('/api/admin/invitations', { headers })
+        return { names: (await repositories.json()).repositories.map(item => item.name),
+          own: own.status, other: other.status, administration: administration.status }
+      }, { ownRepository, otherRepository })
+      expect(permissions).toEqual({ names: [ownRepository], own: 200, other: 403, administration: 403 })
+      await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await userPage.getByRole('button', { name: 'Sign in with OIDC', exact: true }).click()
+      await userPage.getByLabel('Sign-in scope').selectOption('organization')
+      await userPage.getByLabel('Organization', { exact: true }).fill(organization)
+      await userPage.getByRole('button', { name: 'Find sign-in providers', exact: true }).click()
+      await userPage.getByLabel('Sign-in provider').selectOption(id)
+      await userPage.getByRole('button', { name: 'Sign in', exact: true }).click()
+      // The Gitea session and consent remain valid; Orion still completes a new OIDC exchange.
+      await expect(userPage.getByRole('button', { name: 'Continue', exact: true })).toBeVisible()
+      await expect(userPage.getByRole('heading', { name: 'Set up your profile', exact: true })).toHaveCount(0)
+      await expect(userPage.getByLabel('First name', { exact: true })).toHaveCount(0)
+      await userPage.getByRole('button', { name: 'Continue', exact: true }).click()
+      await expect(userPage.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+      const returningIdentity = await userPage.evaluate(async () => {
+        const headers = { Authorization: `Bearer ${sessionStorage.getItem('orion.ui.token')}` }
+        return (await fetch('/api/auth/me', { headers })).json()
+      })
+      expect(returningIdentity).toMatchObject({ organization, userId: firstIdentity.userId, admin: false })
+      await userPage.getByRole('button', { name: 'Sign out', exact: true }).click()
+    } catch (failure) {
+      if (userPage) {
+        await test.info().attach('Organization OIDC user page', {
+          body: await userPage.screenshot(), contentType: 'image/png',
+        })
+      }
+      throw failure
+    } finally {
+      await userContext?.close()
+      const deleted = await giteaRequest('DELETE', `/api/v1/user/applications/oauth2/${application.id}`, password)
+      expect(deleted.status).toBe(204)
+    }
+  })

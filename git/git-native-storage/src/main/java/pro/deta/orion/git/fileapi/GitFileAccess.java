@@ -1,6 +1,5 @@
 package pro.deta.orion.git.fileapi;
-
-import pro.deta.orion.git.api.Modification;
+import pro.deta.orion.util.Modification;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -25,7 +24,6 @@ import pro.deta.orion.git.parser.v2.storage.GitStorageAccess;
 import pro.deta.orion.net.io.BufferedByteInputV2;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -46,7 +44,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.zip.Deflater;
-
 import static pro.deta.orion.git.fileapi.GitFileApi.*;
 
 /**
@@ -66,7 +63,6 @@ public final class GitFileAccess implements Modification {
     private final Optional<ObjectId> parent;
     private final Map<String, TreeEntry> rootEntries;
     private final Optional<RefId> headToInitialize;
-    private final String message;
     private final GitCommitAuthor author;
     private final Set<ObjectId> objects = new HashSet<>();
     private final Set<String> deleted = new HashSet<>();
@@ -76,14 +72,13 @@ public final class GitFileAccess implements Modification {
     private boolean finished;
 
     GitFileAccess(NativeGitRepository repository, GitIndexAccess index, String branch, Optional<ObjectId> parent,
-                  String message, GitCommitAuthor author, boolean initializeHead, Head head)
+                  GitCommitAuthor author, boolean initializeHead, Head head)
             throws IOException, GitOperationException {
         this.repository = repository;
         this.index = index;
         this.packId = index.packId().orElseThrow(() -> new IllegalArgumentException("Pack access required"));
         this.ref = new RefId(branchRefName(branch));
         this.parent = parent;
-        this.message = message;
         this.author = author;
         if (!index.snapshotRefs(new RefSelection.Head()).head().equals(head)) {
             throw new IOException("Repository HEAD changed while opening file access");
@@ -155,7 +150,7 @@ public final class GitFileAccess implements Modification {
             Set<String> changedPaths = new HashSet<>(entries.keySet());
             changedPaths.addAll(deleted);
             ObjectId tree = writeTree("", null, changedPaths).orElseThrow();
-            ObjectId commit = writeCommit(tree, parent.orElse(null), message, author);
+            ObjectId commit = writeCommit(tree, parent.orElse(null), author);
             List<RefUpdate> prepared = new ArrayList<>();
             prepared.add(new RefUpdate(ref, parent, Optional.of(commit)));
             headToInitialize.ifPresent(target ->
@@ -428,7 +423,6 @@ public final class GitFileAccess implements Modification {
     private ObjectId writeCommit(
             ObjectId treeId,
             ObjectId parent,
-            String message,
             GitCommitAuthor author) throws IOException {
         GitCommitAuthor commitAuthor = Objects.requireNonNullElse(author, GitCommitAuthor.EMPTY);
         String identity = commitAuthor.name() + " <" + commitAuthor.email() + "> 0 +0000";
@@ -442,7 +436,7 @@ public final class GitFileAccess implements Modification {
         data.append("author ").append(identity).append('\n')
                 .append("committer ").append(identity).append('\n')
                 .append('\n')
-                .append(commitMessage(message))
+                .append(commitMessage(commitAuthor.message()))
                 .append('\n');
         return writeObject(
                 GitObjectType.COMMIT,

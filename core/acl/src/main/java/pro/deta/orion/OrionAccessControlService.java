@@ -1,21 +1,13 @@
 package pro.deta.orion;
 
 import pro.deta.orion.config.ConfigurationFile;
-
-import pro.deta.orion.auth.AccessControlUserUpdate;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
-import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialListResult;
-import pro.deta.orion.auth.SshCredentialUpdateResult;
-
-import java.util.List;
-import java.util.Optional;
 
 public interface OrionAccessControlService {
     long MAX_TOKEN_EXPIRES_IN_SECONDS = 3_600;
@@ -26,24 +18,6 @@ public interface OrionAccessControlService {
                 "SSH credential listing is unavailable");
     }
 
-    default SshCredentialUpdateResult addSshCredentials(OrionConfigurationEdit edit, String userId, List<String> publicKeys) {
-        return SshCredentialUpdateResult.failure(
-                SshCredentialFailureCode.PERSISTENCE_FAILED,
-                "SSH credential addition is unavailable");
-    }
-
-    default SshCredentialUpdateResult removeSshCredential(
-            OrionConfigurationEdit edit,
-            String userId,
-            String fingerprintPrefix,
-            boolean force) {
-        return SshCredentialUpdateResult.failure(
-                SshCredentialFailureCode.PERSISTENCE_FAILED,
-                "SSH credential removal is unavailable");
-    }
-
-    void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate);
-
     boolean userExists(String userName);
 
     AuthenticationResult authenticateUser(String userName, byte[] credential);
@@ -52,13 +26,6 @@ public interface OrionAccessControlService {
             String userName,
             byte[] credential) {
         return SshKeyEnrollmentAuthentication.failure("authentication failed");
-    }
-
-    default SshKeyEnrollmentResult completeRootSshKeyEnrollment(
-            OrionConfigurationEdit edit,
-            String expectedGeneration,
-            List<String> publicKeys) {
-        return SshKeyEnrollmentResult.failure("key enrollment failed");
     }
 
     AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey);

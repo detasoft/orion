@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.git.command;
-
+import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.config.ConfigurationFile;
-
 import pro.deta.orion.config.OrionConfigurationEdit;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,7 +12,6 @@ import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.auth.AuthenticatedConnectionContext;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
-import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
@@ -58,10 +55,8 @@ import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
 import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
-
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.id.RefId;
-
 import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
@@ -72,7 +67,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LegacySshCommandCatalogTest {
@@ -405,6 +399,10 @@ class LegacySshCommandCatalogTest {
         private final java.util.ArrayList<String> listUsers = new java.util.ArrayList<>();
 
         @Override
+        public AccessControlAccess createAccess(OrionConfigurationEdit edit) {
+            throw new UnsupportedOperationException();
+        }
+        @Override
         public SshCredentialListResult listSshCredentials(String userId) {
             listUsers.add(userId);
             return SshCredentialListResult.success(List.of(new SshCredential("ssh-rsa", "SHA256:key")));
@@ -416,12 +414,6 @@ class LegacySshCommandCatalogTest {
                 long expiresInSeconds) {
             expiries.add(expiresInSeconds);
             return new TokenRefreshResult.Success("issued-secret", 1_000L);
-        }
-
-
-        @Override
-        public void createOrUpdateUser(OrionConfigurationEdit edit, AccessControlUserUpdate userUpdate) {
-            throw new UnsupportedOperationException();
         }
 
         @Override
