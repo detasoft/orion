@@ -11,6 +11,8 @@ import java.util.function.Consumer;
 public interface OrionVersionedConfigurationStorage {
     Result<OrionDocumentRevision> load();
 
+    Result<OrionDocumentRevision> load(OrionRevision.Stored revision);
+
     OrionRevision save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 
     Subscription onChange(Consumer<OrionRevision> listener);

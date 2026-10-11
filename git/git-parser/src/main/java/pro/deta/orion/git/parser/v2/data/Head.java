@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.v2.data;
 
-import pro.deta.orion.git.parser.v2.id.CommitId;
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.id.RefId;
 
 import java.util.Objects;

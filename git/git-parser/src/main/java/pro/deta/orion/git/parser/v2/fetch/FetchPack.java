@@ -188,7 +188,7 @@ public final class FetchPack {
         for (String ref : refs) {
             ObjectId id = "HEAD".equals(ref) ? switch (snapshot.head()) {
                 case Head.Symbolic head -> storedRefs.get(head.target());
-                case Head.Detached head -> new ObjectId(head.target().toBytes());
+                case Head.Detached head -> head.target();
             } : storedRefs.get(new RefId(ref));
             if (id == null && !"HEAD".equals(ref) && !ref.startsWith("refs/")) {
                 id = storedRefs.get(new RefId("refs/heads/" + ref));

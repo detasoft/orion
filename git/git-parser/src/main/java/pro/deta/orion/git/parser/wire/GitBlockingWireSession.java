@@ -241,7 +241,7 @@ public final class GitBlockingWireSession {
         List<GitAdvertisedRef> refs = new ArrayList<>();
         ObjectId head = snapshot.head() instanceof Head.Symbolic symbolic
                 ? snapshot.refs().get(symbolic.target())
-                : new ObjectId(((Head.Detached) snapshot.head()).target().toBytes());
+                : ((Head.Detached) snapshot.head()).target();
         if (head != null) {
             refs.add(GitAdvertisedRef.direct(head.toHex(), "HEAD"));
         }

@@ -77,7 +77,7 @@ public final class RefsCommand implements GitCommand {
             }
         } else {
             Head.Detached head = (Head.Detached) snapshot.head();
-            id = new ObjectId(head.target().toBytes());
+            id = head.target();
         }
         writer.writeRef(HEAD, Optional.ofNullable(id), symbolic,
                 request.peel() && id != null ? graph.peel(id) : Optional.empty());

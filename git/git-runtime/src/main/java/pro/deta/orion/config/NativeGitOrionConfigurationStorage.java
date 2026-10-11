@@ -22,6 +22,8 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+import static pro.deta.orion.config.OrionRevision.INITIAL;
+
 /** Persists versioned documents in Git, keeping XML bytes behind the storage boundary. */
 public final class NativeGitOrionConfigurationStorage
         implements OrionVersionedConfigurationStorage {
@@ -54,21 +56,45 @@ public final class NativeGitOrionConfigurationStorage
 
     @Override
     public Result<OrionDocumentRevision> load() {
-        NativeGitRepository repository;
         try {
-            repository = repositoryProvider.openForRead(repositoryName)
+            NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
+            return switch (findCurrentRevision(repository)) {
+                case Result.Failure<OrionRevision.Stored> failure ->
+                        new Result.Failure<>(failure.code(), failure.message(), failure.throwable());
+                case Result.Success<OrionRevision.Stored> success -> load(repository, success.value());
+            };
         } catch (RuntimeException error) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
+    }
+
+    private Result<OrionRevision.Stored> findCurrentRevision(NativeGitRepository repository) {
+        String currentRevision = repository.refs().get(configurationRef);
+        if (currentRevision == null) {
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+        } else {
+            return new Result.Success<>(new OrionRevision.Stored(currentRevision));
+        }
+    }
+
+    @Override
+    public Result<OrionDocumentRevision> load(OrionRevision.Stored revision) {
+        Objects.requireNonNull(revision, "revision");
         try {
-            String revision = repository.refs().get(configurationRef);
-            if (revision == null) {
-                return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
-            }
-            OrionDocument document = repository.files().readFile(new ObjectId(revision), path,
+            NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
+                    .valueOrFailure("Cannot open native repository " + repositoryName);
+            return load(repository, revision);
+        } catch (RuntimeException error) {
+            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
+        }
+    }
+
+    private Result<OrionDocumentRevision> load(NativeGitRepository repository, OrionRevision.Stored revision) {
+        try {
+            OrionDocument document = repository.files().readFile(new ObjectId(revision.value()), path,
                     (type, size, base, input) -> codec.read(input.newInputStream()));
-            return new Result.Success<>(new OrionDocumentRevision(document, new OrionRevision.Stored(revision)));
+            return new Result.Success<>(new OrionDocumentRevision(document, revision));
         } catch (GitRepositoryFileNotFoundException error) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | RuntimeException error) {

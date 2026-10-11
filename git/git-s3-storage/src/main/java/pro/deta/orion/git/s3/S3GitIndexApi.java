@@ -5,7 +5,7 @@ import pro.deta.orion.git.parser.v2.data.GitObjectType;
 import pro.deta.orion.git.parser.v2.data.Head;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
-import pro.deta.orion.git.parser.v2.id.CommitId;
+import pro.deta.orion.git.parser.v2.id.ObjectId.CommitId;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackChecksum;
 import pro.deta.orion.git.parser.v2.id.PackId;

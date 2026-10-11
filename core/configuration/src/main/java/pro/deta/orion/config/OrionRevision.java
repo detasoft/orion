@@ -3,6 +3,8 @@ package pro.deta.orion.config;
 import java.util.Objects;
 
 public sealed interface OrionRevision {
+    OrionRevision INITIAL = new Initial();
+
     record Initial() implements OrionRevision {}
 
     record Stored(String value) implements OrionRevision {

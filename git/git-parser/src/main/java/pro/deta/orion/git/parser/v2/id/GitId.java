@@ -7,9 +7,9 @@ import java.util.Objects;
 /**
  * Immutable Git hash stored as twenty or thirty-two bytes, with canonical hexadecimal formatting.
  * The repository selects the hash algorithm and validates the corresponding length.
- * Equality includes the concrete ID type so pack, commit, and general object IDs remain distinct.
+ * Object IDs share equality by hash, including commit IDs; pack checksums remain distinct.
  */
-public abstract sealed class GitId permits PackChecksum, CommitId, ObjectId {
+public abstract sealed class GitId permits PackChecksum, ObjectId {
     private final byte[] bytes;
 
     GitId(String hex) {
@@ -43,13 +43,15 @@ public abstract sealed class GitId permits PackChecksum, CommitId, ObjectId {
 
     @Override
     public final boolean equals(Object other) {
-        return this == other || other != null && getClass() == other.getClass()
-                && Arrays.equals(bytes, ((GitId) other).bytes);
+        return this == other || other instanceof GitId that
+                && (this instanceof ObjectId) == (that instanceof ObjectId)
+                && Arrays.equals(bytes, that.bytes);
     }
 
     @Override
     public final int hashCode() {
-        return 31 * getClass().hashCode() + Arrays.hashCode(bytes);
+        Class<?> type = this instanceof ObjectId ? ObjectId.class : PackChecksum.class;
+        return 31 * type.hashCode() + Arrays.hashCode(bytes);
     }
 
     private static byte[] parseHex(String hex) {

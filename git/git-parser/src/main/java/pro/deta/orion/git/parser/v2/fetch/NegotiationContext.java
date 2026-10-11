@@ -194,7 +194,7 @@ public class NegotiationContext {
             if (name.equals("HEAD")) {
                 target = switch (snapshot.head()) {
                     case Head.Symbolic head -> snapshot.refs().get(head.target());
-                    case Head.Detached head -> new ObjectId(head.target().toBytes());
+                    case Head.Detached head -> head.target();
                 };
             } else {
                 target = snapshot.refs().get(ref);
