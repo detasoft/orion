@@ -1,5 +1,6 @@
 package pro.deta.orion.config;
 
+import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFileAccess;
@@ -20,11 +21,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
-import static pro.deta.orion.config.OrionRevision.INITIAL;
-
 /** Persists versioned documents in Git, keeping XML bytes behind the storage boundary. */
+@Slf4j
 public final class NativeGitOrionConfigurationStorage
         implements OrionVersionedConfigurationStorage {
     private final OrionDocumentCodec codec = new OrionDocumentCodec();
@@ -141,8 +142,8 @@ public final class NativeGitOrionConfigurationStorage
                 if (!Arrays.equals(content, previous)) {
                     access.write(path, content);
                 }
-                OrionRevision savedRevision = new OrionRevision.Stored(
-                        access.refUpdates().getFirst().newId().orElseThrow().toHex());
+                OrionRevision savedRevision = storedRevision(
+                        access.refUpdates().getFirst().newId().orElseThrow());
                 access.apply();
                 return savedRevision;
             };
@@ -155,20 +156,37 @@ public final class NativeGitOrionConfigurationStorage
     }
 
     @Override
-    public Subscription onChange(Consumer<OrionRevision> listener) {
+    public Subscription onChange(Consumer<OrionDocumentRevision> listener) {
         Objects.requireNonNull(listener, "listener");
         NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName);
         return repository.onRefUpdate(update -> {
-            if (configurationRef.equals(update.update().ref().value())) {
-                OrionRevision revision;
-                if (update.update().newId().isPresent()) {
-                    revision = new OrionRevision.Stored(update.update().newId().orElseThrow().toHex());
-                } else {
-                    revision = new OrionRevision.Initial();
+            if (!configurationRef.equals(update.update().ref().value())) {
+                return;
+            }
+            Optional<ObjectId> newCommit = update.update().newId();
+            if (newCommit.isEmpty()) {
+                log.warn("Configuration ref {} was deleted from repository {}; skipping notification",
+                        configurationRef, repositoryName);
+                return;
+            }
+            OrionRevision.Stored revision = storedRevision(newCommit.orElseThrow());
+            switch (load(revision)) {
+                case Result.Success<OrionDocumentRevision> success -> listener.accept(success.value());
+                case Result.Failure<OrionDocumentRevision> failure -> {
+                    if (failure.code() == Result.FailureCode.NOT_FOUND) {
+                        log.warn("Configuration file {} is missing in repository {} at {}; skipping notification",
+                                path, repositoryName, revision.value());
+                    } else {
+                        log.warn("Cannot read configuration {} in repository {} at {}; skipping notification",
+                                path, repositoryName, revision.value(), failure.throwable());
+                    }
                 }
-                listener.accept(revision);
             }
         });
+    }
+
+    private static OrionRevision.Stored storedRevision(ObjectId commitId) {
+        return new OrionRevision.Stored(commitId.toHex());
     }
 }

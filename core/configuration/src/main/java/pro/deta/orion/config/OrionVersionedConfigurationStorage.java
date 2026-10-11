@@ -15,5 +15,5 @@ public interface OrionVersionedConfigurationStorage {
 
     OrionRevision save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 
-    Subscription onChange(Consumer<OrionRevision> listener);
+    Subscription onChange(Consumer<OrionDocumentRevision> listener);
 }

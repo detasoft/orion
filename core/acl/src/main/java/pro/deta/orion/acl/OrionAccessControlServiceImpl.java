@@ -93,7 +93,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void loadAccessControlOnStart() {
         try {
             preparationSubscription = editor.onPrepare("add internal server keys to root", this::prepareAccessControl);
-            changeSubscription = configurationStorage.onChange(revision -> requestToUpdate());
+            changeSubscription = configurationStorage.onChange(snapshot -> requestToUpdate());
             synchronized (editor) {
                 Result<ConfigurationFile> initial = initialConfiguration
                         .<Result<ConfigurationFile>>map(Result.Success::new)
