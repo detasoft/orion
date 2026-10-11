@@ -15,7 +15,7 @@ import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
 import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
@@ -31,7 +31,6 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
-
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.GeneralSecurityException;
@@ -53,7 +52,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
     private final HttpTransportConfig httpTransportConfig;
     private final KeyMaterialScope clusterScope;
-    private final OrionDesiredState desiredState;
+    private final OrionAccessControlService configurationService;
     private final TlsCapability tls;
     private final AgentSessionServer agentServer;
     private final OrionHttpRouteServlet rootServlet;
@@ -65,7 +64,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     @Inject
     public JettyHTTPServer(
             BootstrapConfiguration orionConfiguration,
-            OrionDesiredState desiredState,
+            OrionAccessControlService configurationService,
             TlsCapability tls,
             OrionHttpRouteServlet rootServlet,
             OrionAuthorizationFilter authorizationFilter,
@@ -73,7 +72,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
         this.clusterScope = KeyMaterialScope.cluster(
                 orionConfiguration.getBootstrap().getKeyMaterial().getClusterId());
-        this.desiredState = desiredState;
+        this.configurationService = configurationService;
         this.tls = tls;
         this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
@@ -299,14 +298,14 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
     public URL relativiseHttps(String path) throws MalformedURLException {
         OrionHttpsConfiguration https = httpsConfiguration()
-                .orElseThrow(() -> new IllegalStateException("HTTPS desired state is not configured"));
+                .orElseThrow(() -> new IllegalStateException("HTTPS configuration is not configured"));
         int boundPort = boundHttpsPort();
         int port = boundPort > 0 ? boundPort : https.port();
         return new URL("https://%s:%d%s".formatted(https.address(), port, path));
     }
 
     private Optional<OrionHttpsConfiguration> httpsConfiguration() {
-        return desiredState.current().document().system().https();
+        return configurationService.configuration().document().system().https();
     }
 
     private TlsMaterialConfiguration tlsMaterial(OrionHttpsConfiguration https) {

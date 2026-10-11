@@ -9,8 +9,9 @@ import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.config.OrionConfigurationEdit;
-import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
@@ -63,7 +64,6 @@ public class SshCommandFactory implements CommandFactory {
     private final DefaultGitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final OrionAccessControlService accessControlService;
-    private final OrionConfigurationEditor editor;
 
     @Inject
     public SshCommandFactory(
@@ -72,13 +72,12 @@ public class SshCommandFactory implements CommandFactory {
             PlainCommandRenderer commandRenderer,
             DefaultGitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig,
-            OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
+            OrionAccessControlService accessControlService) {
         this.orionExecutor = orionExecutor;
         this.commandDispatcher = commandDispatcher;
         this.commandRenderer = commandRenderer;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
-        this.editor = editor;
         this.accessControlService = accessControlService;
     }
 
@@ -128,25 +127,24 @@ public class SshCommandFactory implements CommandFactory {
             }
             SshKeyEnrollmentResult result;
             try {
-                OrionConfigurationEdit edit = editor.edit("complete root SSH key enrollment", document -> {
-                    String email = "root@orion.pro";
-                    for (pro.deta.orion.schema.acl.User user
-                        : document.system().accessControl().users()) {
-                        if (user.id().equalsIgnoreCase("root")) {
-                            email = java.util.Objects.requireNonNullElse(user.email(), email);
-                            break;
-                        }
+                OrionDocumentRevision snapshot = accessControlService.configuration();
+                String email = "root@orion.pro";
+                for (pro.deta.orion.schema.acl.User user : snapshot.document().system().accessControl().users()) {
+                    if (user.id().equalsIgnoreCase("root")) {
+                        email = java.util.Objects.requireNonNullElse(user.email(), email);
+                        break;
                     }
-                    return new UserEmail("root", email);
-                });
-                result = accessControlService.withAccess(edit, access -> {
-                    SshKeyEnrollmentResult enrollment = access.completeRootSshKeyEnrollment(
-                            pending.expectedGeneration(), pending.publicKeys());
-                    if (enrollment instanceof SshKeyEnrollmentResult.Success) {
+                }
+                AccessControlAccess access = accessControlService.createAccess(snapshot.revision(),
+                        new ChangeMetadata(new UserEmail("root", email), "complete root SSH key enrollment"));
+                try {
+                    result = access.completeRootSshKeyEnrollment(pending.expectedGeneration(), pending.publicKeys());
+                    if (result instanceof SshKeyEnrollmentResult.Success) {
                         access.apply();
                     }
-                    return enrollment;
-                });
+                } finally {
+                    access.discard();
+                }
             } catch (RuntimeException failure) {
                 result = SshKeyEnrollmentResult.failure("key enrollment failed", failure);
             }

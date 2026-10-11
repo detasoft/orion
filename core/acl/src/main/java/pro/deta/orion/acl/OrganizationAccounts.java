@@ -1,9 +1,11 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import jakarta.inject.Singleton;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
@@ -32,14 +34,14 @@ import java.util.function.UnaryOperator;
 @Singleton
 public final class OrganizationAccounts {
     private final OrionConfigurationEditor editor;
-    private final OrionDesiredState desired;
+    private final OrionAccessControlService configurationService;
     private final Clock clock = Clock.systemUTC();
     private final SecureRandom random = new SecureRandom();
 
     @Inject
-    public OrganizationAccounts(OrionConfigurationEditor editor, OrionDesiredState desired) {
+    public OrganizationAccounts(OrionConfigurationEditor editor, OrionAccessControlService configurationService) {
         this.editor = editor;
-        this.desired = desired;
+        this.configurationService = configurationService;
     }
 
     public InvitationLink invite(OrganizationId organizationId, String email, UserEmail author) {
@@ -91,7 +93,7 @@ public final class OrganizationAccounts {
     }
 
     public OrionDocument.Organization organization(OrganizationId id) {
-        for (OrionDocument.Organization organization : desired.current().document().organizations()) {
+        for (OrionDocument.Organization organization : configurationService.configuration().document().organizations()) {
             if (organization.id().equals(id)) {
                 return organization;
             }
@@ -166,8 +168,8 @@ public final class OrganizationAccounts {
 
     private void update(OrganizationId id, UnaryOperator<OrionDocument.Organization> operation,
             String message, UserEmail author) {
-        String revision = desired.current().revision().orElseThrow();
-        editor.edit(revision, message, author).update(document -> {
+        OrionRevision revision = configurationService.configuration().revision();
+        editor.edit(revision, new ChangeMetadata(author, message)).update(document -> {
             List<OrionDocument.Organization> organizations = new ArrayList<>();
             boolean found = false;
             for (OrionDocument.Organization organization : document.organizations()) {

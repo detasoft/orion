@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
@@ -11,7 +12,9 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.command.audit.CommandAuditSink;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory.SyncObservation;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.UserEmail;
@@ -36,7 +39,7 @@ import java.util.UUID;
 
 /** Administers system proxy bindings through revision-checked configuration updates and safe audit records. */
 public final class OrionAdminProxiesRoute extends BaseAdminRoute {
-    private final OrionDesiredState desiredState;
+    private final OrionAccessControlService configurationService;
     private final NativeGitRepositoryFactory provider;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
@@ -44,11 +47,11 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminProxiesRoute(OrionDesiredState desiredState, NativeGitRepositoryFactory provider,
+    public OrionAdminProxiesRoute(OrionAccessControlService configurationService, NativeGitRepositoryFactory provider,
             OrionConfigurationEditor editor, ConfigurationSecrets secrets,
             CommandAuditSink audit, ObjectMapper mapper) {
         super(OrionAdminPaths.PROXIES, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
-        this.desiredState = desiredState;
+        this.configurationService = configurationService;
         this.provider = provider;
         this.editor = editor;
         this.secrets = secrets;
@@ -58,14 +61,14 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        var snapshot = desiredState.current();
-        var aliases = new ArrayList<AliasResponse>();
+        OrionDocumentRevision snapshot = configurationService.configuration();
+        List<AliasResponse> aliases = new ArrayList<>();
         for (GitProxyBinding binding : snapshot.document().system().proxies()) {
             aliases.add(project(binding, snapshot.document().system(), provider.syncObservation(binding,
                     snapshot.document().system())));
         }
         aliases.sort(Comparator.comparing(AliasResponse::alias));
-        return OrionHttpResponse.ok(new AliasListResponse(aliases, snapshot.revision().orElse(null)));
+        return OrionHttpResponse.ok(new AliasListResponse(aliases, ((OrionRevision.Stored) snapshot.revision()).value()));
     }
 
     @Override
@@ -91,26 +94,28 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
                         || request.credentialKind() != null || request.username() != null || request.knownHosts() != null) {
                     throw new IllegalArgumentException("Retry accepts no configuration changes");
                 }
-                if (!desiredState.current().revision().equals(Optional.of(request.revision()))) {
+                OrionRevision expected = new OrionRevision.Stored(request.revision());
+                if (!configurationService.configuration().revision().equals(expected)) {
                     throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
                 }
             } else {
                 MutationRequest mutation = request;
                 SecurityContext context = (SecurityContext) req.getAttribute(
                         OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-                editor.edit(request.revision(), "proxy " + action + " " + alias,
-                        new UserEmail(context.getUserIdentity().getUserId(), ""))
+                editor.edit(new OrionRevision.Stored(request.revision()),
+                        new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""),
+                                "proxy " + action + " " + alias))
                         .update(document -> update(document, selected, mutation))
                         .apply();
             }
-            OrionDesiredState.Snapshot snapshot = desiredState.current();
+            OrionDocumentRevision snapshot = configurationService.configuration();
             GitProxyBinding binding = find(snapshot.document(), selected);
             SyncObservation observation = retry(snapshot, binding);
             String status = action.equals("retry") ? "retried" : "saved";
             resultCode = status + ":" + wireStatus(observation);
             response = OrionHttpResponse.json(action.equals("create") ? 201 : 200,
                     new MutationResponse(status, project(binding, snapshot.document().system(), observation),
-                            snapshot.revision().orElse(null)));
+                            ((OrionRevision.Stored) snapshot.revision()).value()));
         } catch (OrionConfigurationConcurrentUpdateException failure) {
             try {
                 editor.reload("proxy configuration conflict");
@@ -137,13 +142,13 @@ public final class OrionAdminProxiesRoute extends BaseAdminRoute {
         return response;
     }
 
-    private SyncObservation retry(OrionDesiredState.Snapshot snapshot, GitProxyBinding binding) {
-        if (!desiredState.current().revision().equals(snapshot.revision())) {
+    private SyncObservation retry(OrionDocumentRevision snapshot, GitProxyBinding binding) {
+        if (!configurationService.configuration().revision().equals(snapshot.revision())) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed before retry", null);
         }
         Result<SyncObservation> result = provider.retry(binding.alias(),
-                () -> desiredState.current().document(), secrets);
-        if (!desiredState.current().revision().equals(snapshot.revision())) {
+                () -> configurationService.configuration().document(), secrets);
+        if (!configurationService.configuration().revision().equals(snapshot.revision())) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration changed during retry", null);
         }
         if (result instanceof Result.Success<SyncObservation> success) return success.value();

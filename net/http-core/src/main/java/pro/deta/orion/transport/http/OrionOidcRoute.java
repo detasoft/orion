@@ -14,17 +14,14 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.acl.User;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
-
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.keymaterial.ConfigurationSecretContext;
 import pro.deta.orion.keymaterial.ConfigurationSecretEnvelopeCodec;
 import pro.deta.orion.util.ConfigurationContext;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -64,21 +61,20 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     private final SecureRandom random = new SecureRandom();
     private final OrganizationAccounts accounts;
     private final OrionAccessControlServiceImpl acl;
-    private final OrionDesiredState desired;
     private final ConfigurationSecrets secrets;
     private final ObjectMapper mapper;
     private final OidcClient client;
 
     @Inject
     public OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
-            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper,
+            ConfigurationSecrets secrets, ObjectMapper mapper,
             ConfigurationContext configuration, ConfigurationCipherCapability cipher) {
-        this(accounts, acl, desired, secrets, mapper, Clock.systemUTC(),
+        this(accounts, acl, secrets, mapper, Clock.systemUTC(),
                 configuration.getBaseDir().resolve("oidc-sessions"), cipher);
     }
 
     OrionOidcRoute(OrganizationAccounts accounts, OrionAccessControlServiceImpl acl,
-            OrionDesiredState desired, ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
+            ConfigurationSecrets secrets, ObjectMapper mapper, Clock clock,
             Path sessionDirectory, ConfigurationCipherCapability sessionCipher) {
         super("/api/auth/**", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.clock = clock;
@@ -86,7 +82,6 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
         this.sessionCipher = sessionCipher;
         this.accounts = accounts;
         this.acl = acl;
-        this.desired = desired;
         this.secrets = secrets;
         this.mapper = mapper;
         this.client = new OidcClient(mapper);
@@ -208,8 +203,8 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
             throw new IllegalArgumentException("Authorization issuer mismatch");
         }
         char[] secret = attempt.organization() == null
-                ? secrets.resolveSystem(desired.current().document(), attempt.provider().secret())
-                : secrets.resolveOrganization(desired.current().document(), attempt.organization(),
+                ? secrets.resolveSystem(acl.configuration().document(), attempt.provider().secret())
+                : secrets.resolveOrganization(acl.configuration().document(), attempt.organization(),
                         attempt.provider().secret());
         OidcClient.Identity identity;
         try {
@@ -413,7 +408,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private List<OidcProvider> configuredProviders(OrganizationId organization) {
-        return organization == null ? desired.current().document().system().oidcProviders()
+        return organization == null ? acl.configuration().document().system().oidcProviders()
                 : accounts.organization(organization).oidcProviders();
     }
 
@@ -434,7 +429,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     private String systemProviderVersion(OidcProvider provider) {
-        for (ConfigurationSecret secret : desired.current().document().system().secrets()) {
+        for (ConfigurationSecret secret : acl.configuration().document().system().secrets()) {
             if (secret.id().equals(provider.secret())) return sessionKey(secret.envelope());
         }
         throw new IllegalArgumentException("System OIDC secret is unavailable");
@@ -449,7 +444,7 @@ public final class OrionOidcRoute extends AbstractOrionHttpRoute {
     }
 
     URI publicOrigin() {
-        URI uri = desired.current().document().system().https().orElseThrow().publicUrl();
+        URI uri = acl.configuration().document().system().https().orElseThrow().publicUrl();
         if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null
                 || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
                 || !(uri.getPath().isEmpty() || uri.getPath().equals("/"))) {

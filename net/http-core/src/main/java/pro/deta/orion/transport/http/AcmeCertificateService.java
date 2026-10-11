@@ -5,7 +5,7 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.util.LogScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
@@ -23,7 +23,6 @@ import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionMaterialReference;
-
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
@@ -44,7 +43,7 @@ public class AcmeCertificateService {
     private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
     private final String clusterId;
-    private final OrionDesiredState desiredState;
+    private final OrionAccessControlService configurationService;
     private final AcmeKeyMaterialCapability keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
     private final ConfigurationSecrets secrets;
@@ -57,14 +56,14 @@ public class AcmeCertificateService {
     @Inject
     public AcmeCertificateService(
             BootstrapConfiguration bootstrapConfiguration,
-            OrionDesiredState desiredState,
+            OrionAccessControlService configurationService,
             AcmeKeyMaterialCapability keyMaterial,
             AcmeCertificateIssuer certificateIssuer,
             ConfigurationSecrets secrets) {
         this.clusterId = required(
                 bootstrapConfiguration.getBootstrap().getKeyMaterial().getClusterId(),
                 "Key material cluster id is required");
-        this.desiredState = desiredState;
+        this.configurationService = configurationService;
         this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
         this.secrets = secrets;
@@ -125,7 +124,7 @@ public class AcmeCertificateService {
             if (eabKey != null) Arrays.fill(eabKey, '\0');
         }
         if (Thread.currentThread().isInterrupted() || (automatic && maintenanceStopped)
-                || !settings.snapshot().system().https().equals(desiredState.current().document().system().https())) {
+                || !settings.snapshot().system().https().equals(configurationService.configuration().document().system().https())) {
             throw new AcmeCertificateIssueException("Certificate issuance cancelled or ACME settings changed");
         }
         try {
@@ -266,14 +265,14 @@ public class AcmeCertificateService {
 
     private IssueSettings settingsFrom(IssueRequest request) {
         IssueRequest effectiveRequest = request == null ? IssueRequest.EMPTY : request;
-        OrionDocument snapshot = desiredState.current().document();
+        OrionDocument snapshot = configurationService.configuration().document();
         OrionHttpsConfiguration https = snapshot
                 .system()
                 .https()
-                .orElseThrow(() -> new ConfigurationUnavailableException("HTTPS desired state is not configured"));
+                .orElseThrow(() -> new ConfigurationUnavailableException("HTTPS configuration is not configured"));
         OrionAcmeConfiguration acme = https.acme()
                 .filter(OrionAcmeConfiguration::enabled)
-                .orElseThrow(() -> new ConfigurationUnavailableException("ACME desired state is not enabled"));
+                .orElseThrow(() -> new ConfigurationUnavailableException("ACME configuration is not enabled"));
 
         if (acme.eabSecret().isPresent() && effectiveRequest.directoryUrl() != null
                 && !effectiveRequest.directoryUrl().equals(acme.directoryUrl().toString())) {

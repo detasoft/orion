@@ -7,8 +7,9 @@ import org.apache.sshd.server.auth.keyboard.InteractiveChallenge;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.config.OrionConfigurationEdit;
-import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.acl.AccessControlAccess;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
@@ -41,11 +42,9 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             new AttributeRepository.AttributeKey<>();
 
     private final OrionAccessControlService accessControlService;
-    private final OrionConfigurationEditor editor;
 
     @Inject
-    public OrionSshAuthenticator(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
-        this.editor = editor;
+    public OrionSshAuthenticator(OrionAccessControlService accessControlService) {
         this.accessControlService = accessControlService;
     }
 
@@ -146,17 +145,17 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (authentication.rootRecoveryGeneration() == null) {
-            OrionConfigurationEdit edit = editor.edit("add SSH credentials for " + username, document -> {
-                String email = "";
-                for (User user : document.system().accessControl().users()) {
-                    if (user.id().equalsIgnoreCase(username)) {
-                        email = java.util.Objects.requireNonNullElse(user.email(), "");
-                        break;
-                    }
+            OrionDocumentRevision snapshot = accessControlService.configuration();
+            String email = "";
+            for (User user : snapshot.document().system().accessControl().users()) {
+                if (user.id().equalsIgnoreCase(username)) {
+                    email = java.util.Objects.requireNonNullElse(user.email(), "");
+                    break;
                 }
-                return new UserEmail(username, email);
-            });
-            if (!accessControlService.withAccess(edit, access -> {
+            }
+            AccessControlAccess access = accessControlService.createAccess(snapshot.revision(),
+                    new ChangeMetadata(new UserEmail(username, email), "add SSH credentials for " + username));
+            try {
                 SshCredentialUpdateResult result = access.addSshCredentials(username, selectedKeys);
                 if (!(result instanceof SshCredentialUpdateResult.Success success)) {
                     return false;
@@ -164,8 +163,9 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
                 if (success.changed()) {
                     access.apply();
                 }
-                return true;
-            })) return false;
+            } finally {
+                access.discard();
+            }
         } else {
             RootSshKeyEnrollmentSession.begin(
                     session,

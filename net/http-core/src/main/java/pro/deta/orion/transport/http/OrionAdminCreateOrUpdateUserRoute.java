@@ -1,14 +1,16 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.acl.AccessControlAccess;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
 import pro.deta.orion.schema.acl.User;
@@ -28,15 +30,13 @@ import java.util.Map;
 
 public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
     private final ObjectMapper objectMapper;
-    private final OrionDesiredState desiredState;
     private final OrionAccessControlService accessControlService;
     private final OrionConfigurationEditor editor;
 
     @Inject
     public OrionAdminCreateOrUpdateUserRoute(OrionAccessControlService accessControlService,
-            OrionConfigurationEditor editor, ObjectMapper objectMapper, OrionDesiredState desiredState) {
+            OrionConfigurationEditor editor, ObjectMapper objectMapper) {
         super(OrionAdminPaths.USERS, OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
-        this.desiredState = desiredState;
         this.editor = editor;
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
@@ -44,7 +44,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
-        OrionDesiredState.Snapshot snapshot = desiredState.current();
+        OrionDocumentRevision snapshot = accessControlService.configuration();
         List<Map<String, Object>> users = new ArrayList<>();
         for (User user : snapshot.document().system().accessControl().users()) {
             List<Map<String, String>> bindings = new ArrayList<>();
@@ -55,7 +55,8 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
             }
             users.add(Map.of("id", user.id(), "bindings", bindings));
         }
-        return OrionHttpResponse.ok(Map.of("revision", snapshot.revision().orElse(""), "users", users))
+        String revision = ((OrionRevision.Stored) snapshot.revision()).value();
+        return OrionHttpResponse.ok(Map.of("revision", revision, "users", users))
                 .withHeader("Cache-Control", "no-store");
     }
 
@@ -73,13 +74,16 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
             throw new HttpRequestValidationException("User request is required");
         }
         try {
-            accessControlService.withAccess(editor.edit(
-                    "createOrUpdateUser() " + request.id(),
-                    new UserEmail(request.id(), request.email())), edit -> {
-                edit.createOrUpdateUser(request.toUserUpdate());
-                edit.apply();
-                return null;
-            });
+            AccessControlAccess access = accessControlService.createAccess(
+                    accessControlService.configuration().revision(),
+                    new ChangeMetadata(new UserEmail(request.id(), request.email()),
+                            "createOrUpdateUser() " + request.id()));
+            try {
+                access.createOrUpdateUser(request.toUserUpdate());
+                access.apply();
+            } finally {
+                access.discard();
+            }
         } catch (AccessControlValidationException failure) {
             throw new HttpRequestValidationException(failure.getMessage());
         }
@@ -90,13 +94,14 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
         String revision = input.path("revision").asText();
         if (revision.isBlank()) return OrionHttpResponse.text(400, "Configuration revision is required");
         try {
-            return OrionConfigurationEdit.withAccess(editor.edit(
-                    revision, "Configure system OIDC bindings " + input.path("id").asText(),
-                    UserEmail.EMPTY), edit -> {
-                edit.update(document -> replaceOidcBindings(document, input));
-                edit.apply();
-                return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
-            });
+            editor.withAccess(
+                    new ChangeMetadata(UserEmail.EMPTY,
+                            "Configure system OIDC bindings " + input.path("id").asText()),
+                    new OrionRevision.Stored(revision), edit -> {
+                        edit.update(document -> replaceOidcBindings(document, input));
+                        edit.apply();
+                    });
+            return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");
         } catch (OrionConfigurationConcurrentUpdateException conflict) {
             return OrionHttpResponse.text(409, "Configuration changed. Reload users and try again.");
         } catch (IllegalArgumentException invalid) {

@@ -1,14 +1,12 @@
 package pro.deta.orion.component;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import dagger.BindsInstance;
 import dagger.Component;
-
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.config.ConfigurationFile;
+import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.keymaterial.ConfigurationCipherCapability;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -31,8 +29,6 @@ import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
-
-import java.util.List;
 import java.util.Optional;
 
 @Singleton
@@ -75,7 +71,7 @@ public interface OrionComponent {
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
         @BindsInstance Builder keyMaterialAdministrationCapability(KeyMaterialAdministrationCapability capability);
         @BindsInstance Builder configurationMaterialCapability(ConfigurationMaterialCapability capability);
-        @BindsInstance Builder initialConfiguration(Optional<ConfigurationFile> snapshot);
+        @BindsInstance Builder initialConfiguration(Optional<OrionDocumentRevision> snapshot);
         @BindsInstance Builder configurationCipherCapability(ConfigurationCipherCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);

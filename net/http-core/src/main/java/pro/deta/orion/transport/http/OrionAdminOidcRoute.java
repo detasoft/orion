@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
@@ -8,7 +9,9 @@ import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecretReference;
@@ -29,16 +32,16 @@ import java.util.UUID;
 
 /** Admin-only provider editing; secrets stay encrypted and are omitted from all responses. */
 public final class OrionAdminOidcRoute extends BaseAdminRoute {
-    private final OrionDesiredState desired;
+    private final OrionAccessControlService configurationService;
     private final OrionConfigurationEditor editor;
     private final ConfigurationSecrets secrets;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminOidcRoute(OrionDesiredState desired, OrionConfigurationEditor editor,
+    public OrionAdminOidcRoute(OrionAccessControlService configurationService, OrionConfigurationEditor editor,
             ConfigurationSecrets secrets, ObjectMapper mapper) {
         super("/api/admin/oidc", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
-        this.desired = desired;
+        this.configurationService = configurationService;
         this.editor = editor;
         this.secrets = secrets;
         this.mapper = mapper;
@@ -46,7 +49,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
 
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
-        OrionDesiredState.Snapshot snapshot = desired.current();
+        OrionDocumentRevision snapshot = configurationService.configuration();
         List<Map<String, Object>> organizations = new ArrayList<>();
         for (OrionDocument.Organization organization : snapshot.document().organizations()) {
             List<Map<String, Object>> providers = new ArrayList<>();
@@ -63,7 +66,7 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
                     "clientId", provider.clientId(), "idleTimeoutSeconds", provider.idleTimeoutSeconds(),
                     "reauthenticationTimeoutSeconds", provider.reauthenticationTimeoutSeconds()));
         }
-        return OrionHttpResponse.ok(Map.of("revision", snapshot.revision().orElse(""),
+        return OrionHttpResponse.ok(Map.of("revision", ((OrionRevision.Stored) snapshot.revision()).value(),
                 "system", Map.of("providers", systemProviders), "organizations", organizations))
                 .withHeader("Cache-Control", "no-store");
     }
@@ -98,8 +101,8 @@ public final class OrionAdminOidcRoute extends BaseAdminRoute {
             char[] suppliedSecret = secret;
             SecurityContext context = (SecurityContext) request.getAttribute(
                     OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-            editor.edit(revision, "Configure " + scope + " OIDC provider",
-                    new UserEmail(context.getUserIdentity().getUserId(), ""))
+            editor.edit(new OrionRevision.Stored(revision),
+                    new ChangeMetadata(new UserEmail(context.getUserIdentity().getUserId(), ""), "Configure " + scope + " OIDC provider"))
                     .update(document -> save(document, id, provider, suppliedSecret))
                     .apply();
             return OrionHttpResponse.ok(Map.of("saved", true)).withHeader("Cache-Control", "no-store");

@@ -4,8 +4,8 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.config.OrionConfigurationEdit;
-import pro.deta.orion.config.OrionConfigurationEditor;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
@@ -43,11 +43,9 @@ public final class SshCredentialCommandCatalog {
     private static final Set<String> REMOVE_PARAMETERS = Set.of("force");
 
     private final OrionAccessControlService accessControlService;
-    private final OrionConfigurationEditor editor;
 
     @Inject
-    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService, OrionConfigurationEditor editor) {
-        this.editor = editor;
+    public SshCredentialCommandCatalog(OrionAccessControlService accessControlService) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
     }
 
@@ -150,23 +148,25 @@ public final class SshCredentialCommandCatalog {
             java.util.function.Function<AccessControlAccess, SshCredentialUpdateResult> mutation) {
         String userId = userId(invocation);
         try {
-            OrionConfigurationEdit edit = editor.edit(operation + " for " + userId, document -> {
-                String email = "";
-                for (User user : document.system().accessControl().users()) {
-                    if (user.id().equalsIgnoreCase(userId)) {
-                        email = Objects.requireNonNullElse(user.email(), "");
-                        break;
-                    }
+            OrionDocumentRevision snapshot = accessControlService.configuration();
+            String email = "";
+            for (User user : snapshot.document().system().accessControl().users()) {
+                if (user.id().equalsIgnoreCase(userId)) {
+                    email = Objects.requireNonNullElse(user.email(), "");
+                    break;
                 }
-                return new UserEmail(userId, email);
-            });
-            return accessControlService.withAccess(edit, access -> {
+            }
+            AccessControlAccess access = accessControlService.createAccess(snapshot.revision(),
+                    new ChangeMetadata(new UserEmail(userId, email), operation + " for " + userId));
+            try {
                 SshCredentialUpdateResult result = mutation.apply(access);
                 if (result instanceof SshCredentialUpdateResult.Success success && success.changed()) {
                     access.apply();
                 }
                 return result;
-            });
+            } finally {
+                access.discard();
+            }
         } catch (OrionConfigurationConcurrentUpdateException failure) {
             return SshCredentialUpdateResult.failure(SshCredentialFailureCode.CONCURRENT_UPDATE,
                     "Access control changed concurrently", List.of(), failure);

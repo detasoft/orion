@@ -1,13 +1,13 @@
 package pro.deta.orion;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
-import pro.deta.orion.config.ConfigurationFile;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
-import pro.deta.orion.config.OrionDocumentCodec;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryBackend;
@@ -30,18 +30,15 @@ import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.bootstrap.config.KeyMaterialConfig;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,13 +54,13 @@ public final class BootstrapContext implements AutoCloseable {
     private final NativeGitRepositoryFactory repositoryFactory;
     private final OrionKeyMaterial keyMaterial;
     private final SshHostKeyCapability sshHostKeys;
-    private final Optional<ConfigurationFile> initialConfiguration;
+    private final Optional<OrionDocumentRevision> initialConfiguration;
 
     private BootstrapContext(
             NativeGitRepositoryFactory repositoryFactory,
             OrionKeyMaterial keyMaterial,
             SshHostKeyCapability sshHostKeys,
-            Optional<ConfigurationFile> initialConfiguration) {
+            Optional<OrionDocumentRevision> initialConfiguration) {
         this.repositoryFactory = repositoryFactory;
         this.keyMaterial = keyMaterial;
         this.sshHostKeys = sshHostKeys;
@@ -133,7 +130,7 @@ public final class BootstrapContext implements AutoCloseable {
                     NativeGitRepositoryFactory.MATERIAL_SOURCE,
                     configuredMaterial,
                     creation.allowed());
-            Optional<ConfigurationFile> initialConfiguration;
+            Optional<OrionDocumentRevision> initialConfiguration;
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 CompletableFuture<OrionKeyMaterial> materialInput = CompletableFuture.supplyAsync(() -> {
                     try {
@@ -190,7 +187,7 @@ public final class BootstrapContext implements AutoCloseable {
         return repositoryFactory;
     }
 
-    public Optional<ConfigurationFile> initialConfiguration() {
+    public Optional<OrionDocumentRevision> initialConfiguration() {
         return initialConfiguration;
     }
 
@@ -216,15 +213,15 @@ public final class BootstrapContext implements AutoCloseable {
         }
     }
 
-    private static Optional<ConfigurationFile> loadInitialConfiguration(
+    private static Optional<OrionDocumentRevision> loadInitialConfiguration(
             NativeGitRepositoryFactory provider,
             BootstrapConfigurationSourceConfig source) {
         OrionVersionedConfigurationStorage storage =
                 new NativeGitOrionConfigurationStorage(provider, source);
         return switch (storage.load()) {
-            case Result.Success<ConfigurationFile>(var file) -> Optional.of(file);
-            case Result.Failure<ConfigurationFile> failure -> {
-                if (failure.code() == Result.FailureCode.NOT_FOUND && storage.createIfMissing()) {
+            case Result.Success<OrionDocumentRevision>(var file) -> Optional.of(file);
+            case Result.Failure<OrionDocumentRevision> failure -> {
+                if (failure.code() == Result.FailureCode.NOT_FOUND && source.isCreateDefaultIfMissing()) {
                     yield Optional.empty();
                 }
                 throw new IllegalStateException("Configuration file is unavailable", failure.throwable());
@@ -235,21 +232,21 @@ public final class BootstrapContext implements AutoCloseable {
     public static Optional<OrionDocument> adoptProxies(OrionVersionedConfigurationStorage storage,
             OrionConfigurationEditor editor,
             NativeGitRepositoryFactory repositoryProvider, ConfigurationCipherCapability cipher,
-            OrionDesiredState.Snapshot approved) {
+            OrionDocumentRevision approved) {
         Objects.requireNonNull(storage, "configuration storage");
         Objects.requireNonNull(approved, "approved configuration");
         RuntimeException lastSaveFailure = null;
         for (int attempt = 0; attempt <= 3; attempt++) {
-            Result<ConfigurationFile> loaded = storage.load();
-            if (!(loaded instanceof Result.Success<ConfigurationFile> success)) {
+            Result<OrionDocumentRevision> loaded = storage.load();
+            if (!(loaded instanceof Result.Success<OrionDocumentRevision> success)) {
                 return Optional.empty();
             }
-            ConfigurationFile file = success.value();
+            OrionDocumentRevision file = success.value();
             if (!file.revision().equals(approved.revision())) {
                 return Optional.empty();
             }
-            OrionDocument current = proxyConfiguration(file);
-            if (file.revision().isEmpty()) {
+            OrionDocument current = file.document();
+            if (file.revision() instanceof OrionRevision.Initial) {
                 throw new IllegalStateException("Proxy adoption requires a configuration revision");
             }
             ConfigurationSecrets secrets = new ConfigurationSecrets(() -> current, cipher);
@@ -263,37 +260,26 @@ public final class BootstrapContext implements AutoCloseable {
             if (attempt == 3) {
                 throw new IllegalStateException("Proxy configuration kept changing during adoption", lastSaveFailure);
             }
-            Result<ConfigurationFile> prepared = storage.load();
-            if (!(prepared instanceof Result.Success<ConfigurationFile> preparedSuccess)) {
+            Result<OrionDocumentRevision> prepared = storage.load();
+            if (!(prepared instanceof Result.Success<OrionDocumentRevision> preparedSuccess)) {
                 return Optional.empty();
             }
-            ConfigurationFile preparedFile = preparedSuccess.value();
-            if (preparedFile.revision().isEmpty()
-                    || !Arrays.equals(file.content(), preparedFile.content())) {
+            OrionDocumentRevision preparedFile = preparedSuccess.value();
+            if (preparedFile.revision() instanceof OrionRevision.Initial
+                    || !file.document().equals(preparedFile.document())) {
                 return Optional.empty();
             }
             try {
-                editor.edit(
-                        preparedFile, "Adopt bootstrap Git proxies",
-                        UserEmail.EMPTY)
+                editor.edit(preparedFile,
+                    new ChangeMetadata(UserEmail.EMPTY, "Adopt bootstrap Git proxies"))
                     .update(ignored -> candidate)
                     .apply();
                 return Optional.of(candidate);
-            } catch (OrionConfigurationEditor.ActivationFailedException failure) {
-                throw failure;
             } catch (RuntimeException failure) {
                 lastSaveFailure = failure;
             }
         }
         throw new IllegalStateException("Proxy adoption did not converge");
-    }
-
-    private static OrionDocument proxyConfiguration(ConfigurationFile file) {
-        try (ByteArrayInputStream input = new ByteArrayInputStream(file.content())) {
-            return OrionXml.read(input);
-        } catch (IOException failure) {
-            throw new IllegalStateException("Cannot validate proxy configuration", failure);
-        }
     }
 
     public ConfigurationCipherCapability configurationCipher() {

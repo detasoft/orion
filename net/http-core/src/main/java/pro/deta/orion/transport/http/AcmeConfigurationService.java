@@ -1,11 +1,14 @@
 package pro.deta.orion.transport.http;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.Session;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.keymaterial.ConfigurationMaterialCapability;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -37,7 +40,7 @@ public final class AcmeConfigurationService {
             new Preset("zerossl", "ZeroSSL", "https://acme.zerossl.com/v2/DV90", true),
             new Preset("google", "Google Trust Services", "https://dv.acme-v02.api.pki.goog/directory", true),
             new Preset("custom", "Other ACME server", "", false));
-    private final OrionDesiredState desired;
+    private final OrionAccessControlService configurationService;
     private final ConfigurationSecrets secrets;
     private final OrionConfigurationEditor editor;
     private final AcmeCertificateService certificates;
@@ -45,10 +48,10 @@ public final class AcmeConfigurationService {
     private final KeyMaterialScope scope;
 
     @Inject
-    public AcmeConfigurationService(OrionDesiredState desired, ConfigurationSecrets secrets,
+    public AcmeConfigurationService(OrionAccessControlService configurationService, ConfigurationSecrets secrets,
             OrionConfigurationEditor editor, AcmeCertificateService certificates,
             ConfigurationMaterialCapability material, BootstrapConfiguration bootstrap) {
-        this.desired = desired;
+        this.configurationService = configurationService;
         this.secrets = secrets;
         this.editor = editor;
         this.certificates = certificates;
@@ -57,7 +60,7 @@ public final class AcmeConfigurationService {
     }
 
     public View view() {
-        OrionDesiredState.Snapshot snapshot = desired.current();
+        OrionDocumentRevision snapshot = configurationService.configuration();
         OrionAcmeConfiguration acme = snapshot.document().system().https()
                 .flatMap(OrionHttpsConfiguration::acme).orElse(null);
         String directory = acme == null ? PRESETS.getFirst().directoryUrl() : directoryUrl(acme.directoryUrl());
@@ -65,7 +68,8 @@ public final class AcmeConfigurationService {
         for (Preset preset : PRESETS) {
             if (preset.directoryUrl().equals(directory)) provider = preset.id();
         }
-        return new View(snapshot.revision().orElse(""), acme != null && acme.enabled(), provider, directory,
+        String revision = ((OrionRevision.Stored) snapshot.revision()).value();
+        return new View(revision, acme != null && acme.enabled(), provider, directory,
                 acme == null || acme.accountEmail() == null ? "" : acme.accountEmail(), acme == null ? List.of() : acme.domains(),
                 acme == null ? "" : acme.eabKeyId().orElse(""), acme != null && acme.eabSecret().isPresent(), PRESETS,
                 certificates.renewalStatus(), acme == null ? null : acme.accountMaterial().orElse(null));
@@ -77,9 +81,8 @@ public final class AcmeConfigurationService {
             if (settings.revision() == null || settings.revision().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
             }
-            editor.edit(
-                    settings.revision(), "Configure ACME certificate issuance",
-                    new UserEmail(userId, ""))
+            editor.edit(new OrionRevision.Stored(settings.revision()),
+                    new ChangeMetadata(new UserEmail(userId, ""), "Configure ACME certificate issuance"))
                 .update(document -> {
                 OrionDocument candidate = updated(document, settings);
                 certificates.prepareMaterial(candidate.system().https().orElseThrow());

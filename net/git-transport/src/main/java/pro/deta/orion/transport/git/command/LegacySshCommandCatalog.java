@@ -1,7 +1,6 @@
 package pro.deta.orion.transport.git.command;
 
 import pro.deta.orion.config.OrionConfigurationEditor;
-
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Provider;
@@ -29,7 +28,6 @@ import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.util.OrionProvider;
-
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -84,7 +82,7 @@ public final class LegacySshCommandCatalog {
                 runtimeStateMachine,
                 repositoryProvider,
                 shutdownAction,
-                new SshCredentialCommandCatalog(accessControlService, editor),
+                new SshCredentialCommandCatalog(accessControlService),
                 readOnlyDomainCommandCatalog,
                 decisionCommandCatalog,
                 agentServer);

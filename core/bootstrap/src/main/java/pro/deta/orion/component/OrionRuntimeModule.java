@@ -1,5 +1,6 @@
 package pro.deta.orion.component;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import dagger.Module;
 import pro.deta.orion.config.OrionConfigurationEditor;
 import dagger.Provides;
@@ -14,7 +15,7 @@ import pro.deta.orion.ssh.SshHostKeyDecision;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.OrionDocumentRevision;
 import pro.deta.orion.decision.DecisionRegistry;
 import pro.deta.orion.decision.Decision;
 import pro.deta.orion.decision.DecisionAction;
@@ -37,7 +38,6 @@ import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
-import pro.deta.orion.config.OrionDocumentCodec;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -70,21 +70,21 @@ public class OrionRuntimeModule {
     static Runnable bootstrapProxies(OrionVersionedConfigurationStorage storage,
             ConfiguredNativeGitRepositoryFactory configured,
             NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
-            ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionConfigurationEditor editor,
+            ConfigurationSecrets secrets, OrionAccessControlService configurationService, OrionConfigurationEditor editor,
             DecisionRegistry decisions,
             ConnectionFailureHandler connectionFailures,
             BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> hostKeyDecisions) {
         return () -> {
             provider.connectionFailures(connectionFailures, hostKeyDecisions);
             Optional<OrionDocument> adopted = BootstrapContext.adoptProxies(
-                    storage, editor, provider, cipher, desiredState.current());
-            configured.activate(() -> desiredState.current().document(), secrets,
+                    storage, editor, provider, cipher, configurationService.configuration());
+            configured.activate(() -> configurationService.configuration().document(), secrets,
                     provider::referencesBootstrapRepository);
-            provider.activate(() -> desiredState.current().document(), secrets, adopted.isEmpty());
-            OrionDesiredState.Snapshot snapshot = desiredState.current();
+            provider.activate(() -> configurationService.configuration().document(), secrets, adopted.isEmpty());
+            OrionDocumentRevision snapshot = configurationService.configuration();
             for (BootstrapChange change : provider.bootstrapChanges(snapshot.document())) {
                 Decision decision = bootstrapDecision(change,
-                        actor -> saveBootstrapConnection(editor, desiredState.current(), change, actor));
+                        actor -> saveBootstrapConnection(editor, configurationService.configuration(), change, actor));
                 decisions.register(decision).valueOrFailure("Cannot register bootstrap connection decision");
             }
         };
@@ -115,12 +115,11 @@ public class OrionRuntimeModule {
     }
 
     private static Result<Void> saveBootstrapConnection(OrionConfigurationEditor editor,
-            OrionDesiredState.Snapshot snapshot, BootstrapChange change, PrincipalAddress actor) {
+            OrionDocumentRevision snapshot, BootstrapChange change, PrincipalAddress actor) {
         try {
-            editor.edit(
-                    snapshot.revision().orElseThrow(),
-                    "Reconcile bootstrap connection " + change.previous().alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY).update(document -> {
+            editor.edit(snapshot,
+                    new ChangeMetadata(UserEmail.EMPTY, "Reconcile bootstrap connection " + change.previous().alias().value()
+                    + " approved by " + actor)).update(document -> {
                 if (!document.system().proxies().contains(change.previous())
                         || change.previousConnection().filter(value -> !document.system().connections().contains(value))
                             .isPresent()) {
@@ -154,14 +153,14 @@ public class OrionRuntimeModule {
     @Provides
     @Singleton
     public static BiFunction<ProxySshConnection, HostKeyRejectedException, Decision> proxyHostKeyDecisions(
-            OrionDesiredState desiredState, OrionConfigurationEditor editor, CommandAuditSink audit) {
+            OrionAccessControlService configurationService, OrionConfigurationEditor editor, CommandAuditSink audit) {
         return (selected, rejected) -> {
             Connection.Ssh connection = selected.connection();
             GitProxyBinding binding = selected.binding();
             if (!connection.host().equalsIgnoreCase(rejected.host()) || connection.port() != rejected.port()) {
                 throw new IllegalStateException("Rejected host key belongs to another server", rejected);
             }
-            OrionDesiredState.Snapshot snapshot = desiredState.current();
+            OrionDocumentRevision snapshot = configurationService.configuration();
             if (!snapshot.document().system().proxies().contains(binding)
                     || !snapshot.document().system().connections().contains(connection)) {
                 throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", rejected);
@@ -175,7 +174,7 @@ public class OrionRuntimeModule {
     }
 
     private static Result<Void> trust(OrionConfigurationEditor editor, CommandAuditSink audit,
-            OrionDesiredState.Snapshot snapshot,
+            OrionDocumentRevision snapshot,
             ProxySshConnection selected, String key, PrincipalAddress actor) {
         GitProxyBinding binding = selected.binding();
         Connection.Ssh connection = selected.connection();
@@ -184,8 +183,9 @@ public class OrionRuntimeModule {
             keys.add(key);
             Connection.Ssh replacement = new Connection.Ssh(connection.name(), connection.host(), connection.port(),
                     connection.username(), connection.credentialKind(), connection.secret(), keys);
-            editor.edit(snapshot.revision().orElseThrow(), "Trust SSH host key for " + binding.alias().value()
-                    + " approved by " + actor, UserEmail.EMPTY).update(document -> {
+            editor.edit(snapshot,
+                    new ChangeMetadata(UserEmail.EMPTY, "Trust SSH host key for " + binding.alias().value()
+                    + " approved by " + actor)).update(document -> {
                 if (!document.system().proxies().contains(binding)
                         || !document.system().connections().contains(connection)) {
                     throw new OrionConfigurationConcurrentUpdateException("Connection configuration changed", null);
@@ -221,9 +221,9 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static ConfigurationSecrets configurationSecrets(OrionDesiredState desiredState,
+    static ConfigurationSecrets configurationSecrets(OrionAccessControlService configurationService,
             ConfigurationCipherCapability cipher) {
-        return new ConfigurationSecrets(() -> desiredState.current().document(), cipher);
+        return new ConfigurationSecrets(() -> configurationService.configuration().document(), cipher);
     }
 
     @Provides
@@ -261,6 +261,6 @@ public class OrionRuntimeModule {
     static OrionVersionedConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
             BootstrapConfiguration configuration) {
         return new NativeGitOrionConfigurationStorage(repositoryFactory,
-                configuration.getBootstrap().getAccessControl(), new OrionDocumentCodec());
+                configuration.getBootstrap().getAccessControl());
     }
 }

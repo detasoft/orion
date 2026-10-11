@@ -1,8 +1,9 @@
 package pro.deta.orion.transport.git;
 
+import pro.deta.orion.internal.ChangeMetadata;
 import jakarta.inject.Inject;
 import pro.deta.orion.config.OrionConfigurationEditor;
-import pro.deta.orion.config.OrionConfigurationEdit;
+import pro.deta.orion.config.OrionConfigurationModification;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
@@ -16,7 +17,8 @@ import pro.deta.orion.auth.check.ScopedAccess;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.config.ConfigurationSecrets;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.config.OrionDocumentRevision;
+import pro.deta.orion.config.OrionRevision;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
@@ -39,18 +41,15 @@ import java.util.function.Supplier;
 public final class ConfiguredStorageManagement implements StorageManagement {
     private final OrionAccessControlServiceImpl acl;
     private final OrionConfigurationEditor editor;
-    private final OrionDesiredState desired;
     private final ConfigurationSecrets secrets;
     private final NativeGitRepositoryProvider repositories;
 
     @Inject
     public ConfiguredStorageManagement(OrionAccessControlServiceImpl acl, OrionConfigurationEditor editor,
-            OrionDesiredState desired,
             ConfigurationCipherCapability cipher, NativeGitRepositoryProvider repositories) {
         this.acl = acl;
         this.editor = editor;
-        this.desired = desired;
-        this.secrets = new ConfigurationSecrets(() -> desired.current().document(), cipher);
+        this.secrets = new ConfigurationSecrets(() -> acl.configuration().document(), cipher);
         this.repositories = repositories;
     }
 
@@ -58,16 +57,15 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     public Outcome<Created> createRepository(SecurityContext actor, String requested, Optional<S3StorageBinding> storage) {
         return safely(() -> {
             String name = RepositoryName.parse(requested).value();
-            OrionDesiredState.Snapshot snapshot = desired.current();
+            OrionDocumentRevision snapshot = acl.configuration();
             requireRepositoryCreate(actor, snapshot.document(), name);
             if (storage.isPresent()) {
                 RepositoryAddress address = RepositoryAddress.parse(name);
                 if (name.startsWith("bootstrap/") || name.startsWith("proxy/")) throw new IllegalArgumentException();
                 S3StorageBinding binding = storage.orElseThrow();
                 pro.deta.orion.git.s3.S3NativeGitRepositoryFactory.validateLocation(binding.location().toString());
-                editor.edit(
-                        snapshot.revision().orElseThrow(), "Create S3 repository",
-                        new UserEmail(actor.getUserIdentity().getUserId(), ""))
+                editor.edit(snapshot,
+                    new ChangeMetadata(new UserEmail(actor.getUserIdentity().getUserId(), ""), "Create S3 repository"))
                     .update(document -> {
                     requireRepositoryCreate(actor, document, name);
                     Optional<OrganizationId> owner = binding.connection().scope() == ConnectionReference.Scope.SYSTEM
@@ -105,7 +103,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     @Override
     public Outcome<Connections> connections(SecurityContext actor, Optional<OrganizationId> owner) {
         return safely(() -> {
-            OrionDesiredState.Snapshot snapshot = desired.current();
+            OrionDocumentRevision snapshot = acl.configuration();
             return new Success<>(view(actor, owner, snapshot));
         });
     }
@@ -117,11 +115,10 @@ public final class ConfiguredStorageManagement implements StorageManagement {
             return safely(() -> {
                 if (input == null) throw new IllegalArgumentException();
                 // Check scope before revision validation to avoid exposing another organization's configuration.
-                requireOwner(actor, desired.current().document(), owner);
-                OrionConfigurationEdit edit = editor.edit(
-                        revision, create ? "Create S3 connection" : "Update S3 connection",
-                        new UserEmail(actor.getUserIdentity().getUserId(),
-                        "")).update(document -> {
+                requireOwner(actor, acl.configuration().document(), owner);
+                OrionConfigurationModification edit = editor.edit(new OrionRevision.Stored(revision),
+                    new ChangeMetadata(new UserEmail(actor.getUserIdentity().getUserId(),
+                        ""), create ? "Create S3 connection" : "Update S3 connection")).update(document -> {
                     require(connectionAllowed(actor, document, owner, input.name(), create
                             ? GrantKey.CREATE : GrantKey.READ_WRITE));
                     Connection existing = null;
@@ -168,8 +165,9 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     updatedConnections.add(replacement);
                     return withConnections(updated, owner, updatedConnections);
                 });
+                OrionDocument updated = edit.document();
                 edit.apply();
-                return new Success<>(view(actor, owner, edit.appliedSnapshot()));
+                return new Success<>(view(actor, owner, new OrionDocumentRevision(updated, edit.revision())));
             });
         } finally {
             if (input != null) {
@@ -180,7 +178,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
     }
 
     private Connections view(SecurityContext actor, Optional<OrganizationId> owner,
-            OrionDesiredState.Snapshot snapshot) {
+            OrionDocumentRevision snapshot) {
         OrionDocument document = snapshot.document();
         requireOwner(actor, document, owner);
         List<S3View> views = new ArrayList<>();
@@ -196,7 +194,7 @@ public final class ConfiguredStorageManagement implements StorageManagement {
                     s3.pathStyleAccess(), s3.accessKeyId().orElse(""), s3.secretKey().isPresent(),
                     s3.sessionToken().isPresent(), change, use));
         }
-        return new Connections(snapshot.revision().orElseThrow(), List.copyOf(views));
+        return new Connections(((OrionRevision.Stored) snapshot.revision()).value(), List.copyOf(views));
     }
 
     private boolean connectionAllowed(SecurityContext actor, OrionDocument document, Optional<OrganizationId> owner,

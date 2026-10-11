@@ -19,18 +19,14 @@ import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
-import pro.deta.orion.config.OrionDesiredState;
-import pro.deta.orion.config.OrionConfigurationEdit;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Modification;
-
 import java.security.PublicKey;
 import java.util.*;
 import java.util.function.UnaryOperator;
-
 import static pro.deta.orion.schema.acl.CredentialType.OPENSSH_PUBLIC_KEY;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
 
@@ -65,11 +61,6 @@ public class AccessControlAccess implements Modification {
     @Override
     public void discard() {
         edit.discard();
-    }
-
-    @Override
-    public OrionDesiredState.Snapshot appliedSnapshot() {
-        return edit.appliedSnapshot();
     }
 
     public SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {

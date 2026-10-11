@@ -7,11 +7,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.acl.OrganizationAccounts;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,16 +18,16 @@ import java.util.Map;
 /** Lets a system administrator create an email-bound invitation in any configured organization. */
 public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
     private final OrganizationAccounts accounts;
-    private final OrionDesiredState desired;
+    private final OrionAccessControlService configurationService;
     private final OrionOidcRoute oidc;
     private final ObjectMapper mapper;
 
     @Inject
-    public OrionAdminInvitationsRoute(OrganizationAccounts accounts, OrionDesiredState desired,
+    public OrionAdminInvitationsRoute(OrganizationAccounts accounts, OrionAccessControlService configurationService,
             OrionOidcRoute oidc, ObjectMapper mapper) {
         super("/api/admin/invitations", OrionHttpRouteDefinition.Method.GET, OrionHttpRouteDefinition.Method.POST);
         this.accounts = accounts;
-        this.desired = desired;
+        this.configurationService = configurationService;
         this.oidc = oidc;
         this.mapper = mapper;
     }
@@ -36,7 +35,7 @@ public final class OrionAdminInvitationsRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest request) {
         List<Map<String, Object>> organizations = new ArrayList<>();
-        for (OrionDocument.Organization organization : desired.current().document().organizations()) {
+        for (OrionDocument.Organization organization : configurationService.configuration().document().organizations()) {
             organizations.add(Map.of("id", organization.id().value(), "name",
                     organization.displayName() == null ? organization.id().value() : organization.displayName(),
                     "oidcConfigured", !organization.oidcProviders().isEmpty()));

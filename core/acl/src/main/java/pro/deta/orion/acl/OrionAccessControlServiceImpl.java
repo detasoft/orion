@@ -1,6 +1,7 @@
 package pro.deta.orion.acl;
 
 import pro.deta.orion.util.Subscription;
+import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -15,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.DefaultAccessControl;
 import static pro.deta.orion.acl.AccessControlAccess.*;
-
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.Credential;
 import pro.deta.orion.schema.acl.CredentialType;
@@ -42,12 +42,10 @@ import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.schema.orion.v2.OrganizationId;
 import pro.deta.orion.schema.orion.v2.OidcProvider;
 import pro.deta.orion.schema.orion.v2.ConfigurationSecret;
-import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.PublicKey;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import static pro.deta.orion.schema.acl.CredentialType.OPENSSH_PUBLIC_KEY;
@@ -61,9 +59,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final RootPasswordReset rootPasswordReset;
-    private final ServerIdentityCapability serverIdentity;
     private final OrionConfigurationEditor editor;
-    private Subscription preparationSubscription;
+    private final OrionVersionedConfigurationStorage configurationStorage;
+    private final boolean createDefaultIfMissing;
+    private volatile OrionDocumentRevision activeConfiguration;
     private final Optional<OrionDocumentRevision> initialConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
@@ -74,65 +73,63 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionPasswordHashingService orionPasswordHashingService,
             RootPasswordReset rootPasswordReset,
             ServerIdentityCapability serverIdentity,
-            OrionDesiredState desiredState,
+            OrionVersionedConfigurationStorage configurationStorage,
+            BootstrapConfiguration bootstrapConfiguration,
             OrionConfigurationEditor editor,
             Optional<OrionDocumentRevision> initialConfiguration) {
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.rootPasswordReset = rootPasswordReset;
-        this.serverIdentity = serverIdentity;
-        this.desiredState = desiredState;
+        this.configurationStorage = configurationStorage;
+        this.createDefaultIfMissing = bootstrapConfiguration.getBootstrap().getAccessControl()
+                .isCreateDefaultIfMissing();
         this.editor = editor;
         this.initialConfiguration = Objects.requireNonNull(initialConfiguration, "initial configuration");
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
-    public AccessControlAccess createAccess(Optional<String> revision, ChangeMetadata metadata) {
+
+    @Override
+    public AccessControlAccess createAccess(OrionRevision revision, ChangeMetadata metadata) {
         OrionConfigurationModification modification = editor.edit(revision, metadata);
         return new AccessControlAccess(modification, orionPasswordHashingService);
     }
 
     private void loadAccessControlOnStart() {
-        try {
-            preparationSubscription = editor.onPrepare("add internal server keys to root", this::prepareAccessControl);
-            changeSubscription = configurationStorage.onChange(snapshot -> requestToUpdate());
-            synchronized (editor) {
-                Result<ConfigurationFile> initial = initialConfiguration
-                        .<Result<ConfigurationFile>>map(Result.Success::new)
+        synchronized (configurationStorage) {
+            try {
+                changeSubscription = configurationStorage.onChange(this::onConfigurationChange);
+                Result<OrionDocumentRevision> initial = initialConfiguration
+                        .<Result<OrionDocumentRevision>>map(Result.Success::new)
                         .orElseGet(configurationStorage::load);
                 switch (initial) {
-                    case Result.Success<ConfigurationFile>(var file) -> {
+                    case Result.Success<OrionDocumentRevision> success -> {
                         if (rootPasswordReset.enabled()) {
-                            resetRootPassword(file);
+                            resetRootPassword(success.value());
                         } else {
-                            editor.reload(file);
+                            activateConfiguration(success.value());
                         }
                     }
-                    case Result.Failure<ConfigurationFile> f -> {
-                        if (f.code() == Result.FailureCode.NOT_FOUND) {
-                            if (!configurationStorage.createIfMissing()) {
-                                throw new IllegalStateException(
-                                        "ACL not found and default ACL creation is disabled.");
-                            }
-                            resetRootPassword(new ConfigurationFile(
-                                    serializeInitialConfiguration(new AccessControl()), Optional.empty()));
-                        } else {
-                            log.error("Error while preparing configuration repository.", f.throwable());
-                            throw new IllegalStateException(
-                                    "Configuration repository not initialized.", f.throwable());
+                    case Result.Failure<OrionDocumentRevision> failure -> {
+                        if (failure.code() != Result.FailureCode.NOT_FOUND) {
+                            throw new IllegalStateException("Cannot load configuration", failure.throwable());
                         }
+                        if (!createDefaultIfMissing) {
+                            throw new IllegalStateException(
+                                    "ACL not found and default ACL creation is disabled.");
+                        }
+                        resetRootPassword(new OrionDocumentRevision(initialDocument(), OrionRevision.INITIAL));
                     }
                 }
                 if (initialConfiguration.isPresent()) {
-                    Result<ConfigurationFile> latest = configurationStorage.load();
-                    if (latest instanceof Result.Success<ConfigurationFile> success
-                            && !success.value().revision().equals(desiredState.current().revision())) {
-                        requestToUpdate();
+                    Result<OrionDocumentRevision> latest = configurationStorage.load();
+                    if (latest instanceof Result.Success<OrionDocumentRevision> success
+                            && !success.value().revision().equals(configuration().revision())) {
+                        onConfigurationChange(success.value());
                     }
                 }
+            } catch (RuntimeException failure) {
+                onStop();
+                throw new IllegalStateException("Configuration repository not initialized.", failure);
             }
-        } catch (Exception e) {
-            onStop();
-            log.error("Error while preparing configuration repository.", e);
-            throw new IllegalStateException("Configuration repository not initialized.", e);
         }
     }
 
@@ -143,16 +140,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void onStop() {
-        Subscription subscription = changeSubscription;
-        if (subscription != null) {
-            subscription.close();
-            changeSubscription = null;
+        synchronized (configurationStorage) {
+            if (changeSubscription != null) {
+                changeSubscription.close();
+                changeSubscription = null;
+            }
+            // ACL state remains available until process shutdown.
         }
-        if (preparationSubscription != null) {
-            preparationSubscription.close();
-            preparationSubscription = null;
-        }
-        // ACL state remains available until process shutdown.
     }
 
     @Override
@@ -162,18 +156,34 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public boolean isRunning() {
-        return desiredState.isPublished();
+        return activeConfiguration != null;
+    }
+
+    @Override
+    public OrionDocumentRevision configuration() {
+        OrionDocumentRevision snapshot = activeConfiguration;
+        if (snapshot == null) {
+            throw new IllegalStateException("ACL configuration is not initialized");
+        }
+        return snapshot;
     }
 
     public ConfigurationStatus configurationStatus() {
-        Result<OrionDocument> stored = editor.document(desiredState);
-        Optional<String> activeRevision = desiredState.current().revision();
-        return switch (stored) {
-            case Result.Success<ConfigurationFile>(var file) -> new ConfigurationStatus(
-                    file.revision(), activeRevision,
-                    editor.document(file) instanceof Result.Success<?> ? "valid" : "invalid");
-            case Result.Failure<ConfigurationFile> ignored ->
+        OrionDocumentRevision active = activeConfiguration;
+        Optional<String> activeRevision = active == null ? Optional.empty() : revisionValue(active.revision());
+        return switch (configurationStorage.load()) {
+            case Result.Success<OrionDocumentRevision> success -> new ConfigurationStatus(
+                    revisionValue(success.value().revision()), activeRevision,
+                    editor.document(success.value()) instanceof Result.Success<?> ? "valid" : "invalid");
+            case Result.Failure<OrionDocumentRevision> ignored ->
                     new ConfigurationStatus(Optional.empty(), activeRevision, "unavailable");
+        };
+    }
+
+    private static Optional<String> revisionValue(OrionRevision revision) {
+        return switch (revision) {
+            case OrionRevision.Initial initial -> Optional.empty();
+            case OrionRevision.Stored stored -> Optional.of(stored.value());
         };
     }
 
@@ -205,12 +215,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private AccessControl currentAccessControl() {
-        return desiredState.current().document().system().accessControl();
+        return configuration().document().system().accessControl();
     }
 
     public boolean canAdminister(PrincipalAddress actor,
             Optional<ConfigurationScope> scope) {
-        return canAdminister(actor, scope, desiredState.current().document());
+        return canAdminister(actor, scope, configuration().document());
     }
 
     public boolean canAdminister(PrincipalAddress actor, Optional<ConfigurationScope> scope,
@@ -266,20 +276,20 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     SshCredentialFailureCode.USER_NOT_FOUND,
                     "User is not available");
         }
-        synchronized (editor) {
+        synchronized (configurationStorage) {
             return switch (configurationStorage.load()) {
-                case Result.Failure<ConfigurationFile> failure -> SshCredentialListResult.failure(
+                case Result.Failure<OrionDocumentRevision> failure -> SshCredentialListResult.failure(
                         SshCredentialFailureCode.PERSISTENCE_FAILED,
                         "Cannot load SSH credentials",
                         failure.throwable());
-                case Result.Success<ConfigurationFile>(var snapshot) -> listSshCredentials(snapshot, userId);
+                case Result.Success<OrionDocumentRevision>(var snapshot) -> listSshCredentials(snapshot, userId);
             };
         }
     }
 
-    private SshCredentialListResult listSshCredentials(ConfigurationFile snapshot, String userId) {
+    private SshCredentialListResult listSshCredentials(OrionDocumentRevision snapshot, String userId) {
         try {
-            User user = findUser(editor.read(snapshot).system().accessControl(), userId);
+            User user = findUser(snapshot.document().system().accessControl(), userId);
             if (user == null) {
                 return SshCredentialListResult.failure(
                         SshCredentialFailureCode.USER_NOT_FOUND,
@@ -446,7 +456,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     public Optional<String> systemOidcGeneration(String userId, OidcProvider provider, String subject) {
-        return systemOidcGeneration(desiredState.current().document().system(), userId, provider, subject);
+        return systemOidcGeneration(configuration().document().system(), userId, provider, subject);
     }
 
     private Optional<String> systemOidcGeneration(OrionDocument.SystemConfiguration system,
@@ -481,7 +491,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private TokenAuthenticationResult verifySystemOidcToken(String userId, String generation, String tokenId) {
-        OrionDocument.SystemConfiguration system = desiredState.current().document().system();
+        OrionDocument.SystemConfiguration system = configuration().document().system();
         AccessControl snapshot = system.accessControl();
         Result<User> found = findSingleUser(snapshot, userId);
         if (!(found instanceof Result.Success<User>(User user))) {
@@ -526,7 +536,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private TokenAuthenticationResult verifyOrganizationToken(String organizationId, String userId,
             String generation, String tokenId) {
-        for (OrionDocument.Organization organization : desiredState.current().document().organizations()) {
+        for (OrionDocument.Organization organization : configuration().document().organizations()) {
             if (!organization.id().value().equals(organizationId)) {
                 continue;
             }
@@ -542,7 +552,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     for (OidcProvider provider : organization.oidcProviders()) {
                         if (provider.issuer().toString().equals(credential.keyId())) {
                             return TokenAuthenticationResult.success(new InternalUserImpl(userId,
-                                    organization.id(), () -> desiredState.current().document()),
+                                    organization.id(), () -> configuration().document()),
                                     new AccessTokenIdentity(tokenId, organizationId + "/" + userId));
                         }
                     }
@@ -624,30 +634,27 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    @Override
-    public ConfigurationFile accessControlConfigurationFile() {
-        return switch (configurationStorage.load()) {
-            case Result.Success<ConfigurationFile>(var file) -> new ConfigurationFile(
-                    editor.serialize(editor.read(file)), file.revision());
-            case Result.Failure<ConfigurationFile> failure ->
-                    throw new IllegalStateException("Cannot load ACL configuration file", failure.throwable());
-        };
-    }
-
-    private byte[] serializeInitialConfiguration(AccessControl accessControl) {
+    private OrionDocument initialDocument() {
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("default"), "Default", List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of());
-        return editor.serialize(new OrionDocument(
-                new OrionDocument.SystemConfiguration(accessControl), List.of(organization)));
+        return new OrionDocument(new OrionDocument.SystemConfiguration(new AccessControl()), List.of(organization));
     }
 
-    private void requestToUpdate() {
-        try {
-            editor.onStorageChange();
-        } catch (RuntimeException failure) {
-            log.error("Retaining the last valid configuration after reload failure", failure);
+    private void onConfigurationChange(OrionDocumentRevision snapshot) {
+        synchronized (configurationStorage) {
+            if (changeSubscription == null) return;
+            try {
+                activateConfiguration(snapshot);
+            } catch (RuntimeException failure) {
+                log.warn("Retaining the last valid ACL configuration after reload failure", failure);
+            }
         }
+    }
+
+    private void activateConfiguration(OrionDocumentRevision snapshot) {
+        OrionDocument document = editor.document(snapshot).valueOrFailure("Invalid ACL configuration");
+        activeConfiguration = new OrionDocumentRevision(document, snapshot.revision());
     }
 
     private void resetRootPassword(OrionDocumentRevision snapshot) {
@@ -655,7 +662,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         try {
             String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
             String authenticationGeneration = UUID.randomUUID().toString();
-            AccessControl current = editor.read(snapshot).system().accessControl();
+            AccessControl current = snapshot.document().system().accessControl();
             AccessControl canonical = DefaultAccessControl.create(
                     passwordHash,
                     CredentialType.ARGON2);
@@ -677,11 +684,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 grants.add(canonicalGrant);
             }
             AccessControl updated = new AccessControl(users, roles, grants);
-            editor.edit(snapshot,
+            OrionConfigurationModification modification = editor.edit(snapshot,
                     new ChangeMetadata(
                             new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.email(), "root@orion.pro")),
-                            "root password reset"))
-                .update(document -> document.replaceAccessControl(updated)).apply();
+                            "root password reset"));
+            try {
+                OrionDocument prepared = snapshot.document().replaceAccessControl(updated);
+                modification.modify(prepared);
+                modification.apply();
+                activateConfiguration(new OrionDocumentRevision(prepared, modification.revision()));
+            } finally {
+                modification.discard();
+            }
             printAndClearPlainTextPasswordMessage(System.out, rootPassword);
         } finally {
             Arrays.fill(rootPassword, '\0');
@@ -690,77 +704,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private boolean idsAreEqual(String first, String second) {
         return first != null && second != null && first.equalsIgnoreCase(second);
-    }
-
-    private OrionDocumentRevision prepareAccessControl(OrionDocumentRevision loadedSnapshot) {
-        editor.withAccess(())
-        OrionDocument document = loadedSnapshot.document();
-        AccessControl acl = document.system().accessControl();
-        List<User> roots = rootUsers(acl);
-        if (roots.size() == 1) {
-            User root = roots.getFirst();
-            List<Credential> credentials = synchronizedInternalServerKeys(root);
-            if (credentials == null) return loadedSnapshot;
-            return document.replaceAccessControl(
-                            replaceUser(acl, root, withCredentials(root, credentials)));
-        }
-        return loadedSnapshot;
-    }
-
-    private List<Credential> synchronizedInternalServerKeys(User rootUser) {
-        if (isGenerationAwareRoot(rootUser)) {
-            return null;
-        }
-
-        List<Credential> credentials = new ArrayList<>(rootUser.credentials());
-        boolean changed = removeRetainedServerKeys(credentials);
-        for (PublicKey publicKey : serverPublicKeys()) {
-            if (!hasPublicKeyCredential(credentials, publicKey)) {
-                credentials.add(new Credential(OPENSSH_PUBLIC_KEY,
-                        KeyUtils.publicKeyToString(publicKey)));
-                changed = true;
-            }
-        }
-        return changed ? credentials : null;
-    }
-
-    private boolean removeRetainedServerKeys(List<Credential> credentials) {
-        Set<String> retained = new HashSet<>();
-        for (PublicKey publicKey : retainedServerPublicKeys()) {
-            retained.add(KeyUtils.publicKeyToString(publicKey));
-        }
-        if (retained.isEmpty()) {
-            return false;
-        }
-        return credentials.removeIf(credential ->
-                credential.type() == OPENSSH_PUBLIC_KEY
-                        && retained.contains(credential.value()));
-    }
-
-    private List<PublicKey> serverPublicKeys() {
-        try {
-            return serverIdentity.publicKeys();
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("Cannot load server identity public keys", e);
-        }
-    }
-
-    private List<PublicKey> retainedServerPublicKeys() {
-        try {
-            return serverIdentity.retainedPublicKeys();
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("Cannot load retained server identity public keys", e);
-        }
-    }
-
-    private boolean hasPublicKeyCredential(List<Credential> credentials, PublicKey publicKey) {
-        for (Credential credential : credentials) {
-            if (credential.type() == OPENSSH_PUBLIC_KEY
-                    && publicKeysAreEqual(credential.value(), publicKey.getEncoded())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private AuthenticationResult createUserIdentity(AccessControl snapshot, User u) {

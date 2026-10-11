@@ -3,20 +3,19 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.bootstrap.config.TransportConfig;
 import pro.deta.orion.schema.orion.v2.OrionHttpsConfiguration;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
-
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Set;
 
 public class OrionAdminTransportsRoute extends BaseAdminRoute {
     private final BootstrapConfiguration configuration;
-    private final OrionDesiredState desiredState;
+    private final OrionAccessControlService configurationService;
     private final Provider<JettyHTTPServer> httpServer;
     private final Provider<GitSshTransportService> sshServer;
     private final Provider<GitNativeTransportService> nativeGitServer;
@@ -24,13 +23,13 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
     @Inject
     public OrionAdminTransportsRoute(
             BootstrapConfiguration configuration,
-            OrionDesiredState desiredState,
+            OrionAccessControlService configurationService,
             Provider<JettyHTTPServer> httpServer,
             Provider<GitSshTransportService> sshServer,
             Provider<GitNativeTransportService> nativeGitServer) {
         super(OrionAdminPaths.TRANSPORTS, OrionHttpRouteDefinition.Method.GET);
         this.configuration = configuration;
-        this.desiredState = desiredState;
+        this.configurationService = configurationService;
         this.httpServer = httpServer;
         this.sshServer = sshServer;
         this.nativeGitServer = nativeGitServer;
@@ -121,7 +120,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
     }
 
     private TransportDescriptor httpsDescriptor() {
-        OrionHttpsConfiguration https = desiredState.current()
+        OrionHttpsConfiguration https = configurationService.configuration()
                 .document()
                 .system()
                 .https()
