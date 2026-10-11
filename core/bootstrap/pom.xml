@@ -44,8 +44,8 @@
             <artifactId>key-material</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.connectors</groupId>
-            <artifactId>acl-storage</artifactId>
+            <groupId>pro.deta.orion.git</groupId>
+            <artifactId>git-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jgit</groupId>

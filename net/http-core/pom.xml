@@ -29,7 +29,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-native-proxy</artifactId>
+            <artifactId>git-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.net</groupId>

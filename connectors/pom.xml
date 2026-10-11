@@ -16,7 +16,6 @@
 
     <modules>
         <module>bc</module>
-        <module>acl-storage</module>
     </modules>
 
     <dependencies>

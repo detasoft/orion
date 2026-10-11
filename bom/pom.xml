@@ -77,11 +77,6 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.connectors</groupId>
-                <artifactId>acl-storage</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>bootstrap-configuration</artifactId>
                 <version>${project.version}</version>
@@ -128,7 +123,7 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.git</groupId>
-                <artifactId>git-native-proxy</artifactId>
+                <artifactId>git-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
