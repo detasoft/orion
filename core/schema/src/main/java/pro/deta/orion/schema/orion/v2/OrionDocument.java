@@ -180,7 +180,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
         private static List<Repository> copyRepositories(List<Repository> source) {
             Objects.requireNonNull(source, "repositories");
-            Set<RepositoryId> ids = new HashSet<>();
+            Set<String> ids = new HashSet<>();
             for (Repository repository : source) {
                 Objects.requireNonNull(repository, "repository");
                 if (!ids.add(repository.id())) {
@@ -192,7 +192,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
     }
 
     public record Repository(
-            RepositoryId id,
+            String id,
             String displayName,
             String defaultBranch,
             RepositoryPolicy policy,
@@ -204,7 +204,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
         public static final String DEFAULT_BRANCH = "refs/heads/main";
 
         public Repository {
-            Objects.requireNonNull(id, "id");
+            id = IdentifierRules.requireCanonical(id, "repository id");
             defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
             Objects.requireNonNull(policy, "repository policy");
             storage = Objects.requireNonNull(storage, "repository storage");

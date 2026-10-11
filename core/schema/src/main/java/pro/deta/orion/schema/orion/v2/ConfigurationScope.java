@@ -6,11 +6,12 @@ import java.util.Optional;
 public record ConfigurationScope(
         OrganizationId organizationId,
         Optional<TeamId> teamId,
-        Optional<RepositoryId> repositoryId) {
+        Optional<String> repositoryId) {
     public ConfigurationScope {
         Objects.requireNonNull(organizationId, "organizationId");
         Objects.requireNonNull(teamId, "teamId");
-        Objects.requireNonNull(repositoryId, "repositoryId");
+        repositoryId = Objects.requireNonNull(repositoryId, "repositoryId")
+                .map(value -> IdentifierRules.requireCanonical(value, "repository id"));
         if (repositoryId.isPresent() && teamId.isEmpty()) {
             throw new IllegalArgumentException("repository scope requires a team");
         }

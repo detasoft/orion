@@ -194,7 +194,7 @@ public final class OrionV2Mapper {
         for (OrionV2.Repository repository : sortedRepositories) {
             Objects.requireNonNull(repository, "repository");
             repositories.add(new OrionDocument.Repository(
-                    new RepositoryId(repository.getId()),
+                    repository.getId(),
                     repository.getDisplayName(),
                     repository.getDefaultBranch() == null
                             ? OrionDocument.Repository.DEFAULT_BRANCH
@@ -635,11 +635,11 @@ public final class OrionV2Mapper {
             List<OrionDocument.Repository> source) {
         List<OrionDocument.Repository> sorted = sorted(
                 source,
-                Comparator.comparing(repository -> repository.id().value()));
+                Comparator.comparing(OrionDocument.Repository::id));
         List<OrionV2.Repository> repositories = new ArrayList<>();
         for (OrionDocument.Repository repository : sorted) {
             repositories.add(new OrionV2.Repository(
-                    repository.id().value(),
+                    repository.id(),
                     repository.displayName(),
                     repository.defaultBranch(),
                     fromCurrent(repository.policy()),

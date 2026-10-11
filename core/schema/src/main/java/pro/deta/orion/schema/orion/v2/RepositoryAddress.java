@@ -5,11 +5,11 @@ import java.util.Objects;
 public record RepositoryAddress(
         OrganizationId organizationId,
         TeamId teamId,
-        RepositoryId repositoryId) {
+        String repositoryId) {
     public RepositoryAddress {
         Objects.requireNonNull(organizationId, "organizationId");
         Objects.requireNonNull(teamId, "teamId");
-        Objects.requireNonNull(repositoryId, "repositoryId");
+        repositoryId = IdentifierRules.requireCanonical(repositoryId, "repository id");
     }
 
     public static RepositoryAddress parse(String value) {
@@ -21,7 +21,7 @@ public record RepositoryAddress(
         return new RepositoryAddress(
                 new OrganizationId(segments[0]),
                 new TeamId(segments[1]),
-                new RepositoryId(segments[2]));
+                segments[2]);
     }
 
     @Override
