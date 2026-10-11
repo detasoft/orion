@@ -3,7 +3,8 @@ package pro.deta.orion.acl;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.internal.UserEmailMessage;
+import pro.deta.orion.internal.ChangeMetadata;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.orion.PrincipalAddress;
 import pro.deta.orion.schema.orion.v2.ConfigurationScope;
 import pro.deta.orion.auth.check.ScopedAccess;
@@ -61,11 +62,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final RootPasswordReset rootPasswordReset;
     private final ServerIdentityCapability serverIdentity;
     private final OrionConfigurationEditor editor;
-    private OrionConfigurationStorage.ChangeSubscription preparationSubscription;
+    private OrionVersionedConfigurationStorage.ChangeSubscription preparationSubscription;
     private final Optional<OrionDocumentRevision> initialConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
-    private volatile OrionConfigurationStorage.ChangeSubscription changeSubscription;
+    private volatile OrionVersionedConfigurationStorage.ChangeSubscription changeSubscription;
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -83,8 +84,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         this.initialConfiguration = Objects.requireNonNull(initialConfiguration, "initial configuration");
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
-    public AccessControlAccess createAccess(Optional<String> revision, UserEmailMessage author) {
-        OrionConfigurationModification modification = editor.edit(revision, author);
+    public AccessControlAccess createAccess(Optional<String> revision, ChangeMetadata metadata) {
+        OrionConfigurationModification modification = editor.edit(revision, metadata);
         return new AccessControlAccess(modification, orionPasswordHashingService);
     }
 
@@ -141,7 +142,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void onStop() {
-        OrionConfigurationStorage.ChangeSubscription subscription = changeSubscription;
+        OrionVersionedConfigurationStorage.ChangeSubscription subscription = changeSubscription;
         if (subscription != null) {
             subscription.close();
             changeSubscription = null;
@@ -676,7 +677,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
             AccessControl updated = new AccessControl(users, roles, grants);
             editor.edit(snapshot,
-                    new UserEmailMessage(ROOT_USER_ID, Objects.requireNonNullElse(root.email(), "root@orion.pro"), "root password reset"))
+                    new ChangeMetadata(
+                            new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.email(), "root@orion.pro")),
+                            "root password reset"))
                 .update(document -> document.replaceAccessControl(updated)).apply();
             printAndClearPlainTextPasswordMessage(System.out, rootPassword);
         } finally {

@@ -17,6 +17,7 @@
     <modules>
         <module>schema</module>
         <module>bootstrap-configuration</module>
+        <module>configuration</module>
         <module>parent-reference</module>
         <module>acl</module>
         <module>key-material</module>

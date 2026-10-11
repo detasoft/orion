@@ -1,7 +1,6 @@
 package pro.deta.orion.config;
 
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
-import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
@@ -12,8 +11,7 @@ import pro.deta.orion.git.parser.v2.index.GitRefConflictException;
 import pro.deta.orion.git.proxy.NativeGitRepositoryFactory;
 import pro.deta.orion.internal.CheckedFunction;
 import pro.deta.orion.bootstrap.config.BootstrapConfigurationSourceConfig;
-import pro.deta.orion.internal.UserEmailMessage;
-import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
 
@@ -21,15 +19,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Consumer;
 
-public final class NativeGitOrionConfigurationStorage implements OrionConfigurationStorage {
+/** Persists versioned documents in Git, keeping XML bytes behind the storage boundary. */
+public final class NativeGitOrionConfigurationStorage implements OrionVersionedConfigurationStorage {
+    private final OrionDocumentCodec codec = new OrionDocumentCodec();
     private final NativeGitRepositoryProvider repositoryProvider;
     private final String repositoryName;
     private final String configurationRef;
     private final String path;
-    private final boolean createIfMissing;
 
     public NativeGitOrionConfigurationStorage(NativeGitRepositoryFactory repositoryFactory,
             BootstrapConfigurationSourceConfig source) {
@@ -38,20 +36,18 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "Orion configuration requires a resolved Git repository")),
                 NativeGitRepositoryFactory.sourceRefName(source),
-                NativeGitRepositoryFactory.repositoryPath(source.getPath()), source.isCreateDefaultIfMissing());
+                NativeGitRepositoryFactory.repositoryPath(source.getPath()));
     }
 
     NativeGitOrionConfigurationStorage(
             NativeGitRepositoryProvider repositoryProvider,
             String repositoryName,
             String configurationRef,
-            String path,
-            boolean createIfMissing) {
+            String path) {
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
         this.repositoryName = Objects.requireNonNull(repositoryName, "repositoryName");
         this.configurationRef = Objects.requireNonNull(configurationRef, "configurationRef");
         this.path = Objects.requireNonNull(path, "path");
-        this.createIfMissing = createIfMissing;
     }
 
     @Override
@@ -68,9 +64,9 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
             if (revision == null) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
-            byte[] content = repository.files().readFile(new ObjectId(revision), path,
-                    (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
-            return new Result.Success<>(new ConfigurationFile(content, Optional.of(revision)));
+            OrionDocument document = repository.files().readFile(new ObjectId(revision), path,
+                    (type, size, base, input) -> codec.read(input.newInputStream()));
+            return new Result.Success<>(new OrionDocumentRevision(document, new OrionRevision.Stored(revision)));
         } catch (GitRepositoryFileNotFoundException error) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | RuntimeException error) {
@@ -80,28 +76,35 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
 
     private byte[] serialize(OrionDocument document) {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            OrionXml.write(document, output);
+            codec.write(document, output);
             return output.toByteArray();
         } catch (IOException failure) {
             throw new IllegalStateException("Cannot serialize configuration", failure);
         }
     }
 
-
     @Override
-    synchronized public void save(Optional<String> revision, OrionDocument file, UserEmailMessage author) {
-        Objects.requireNonNull(file, "configuration file");
-        byte[] content = serialize(file);
+    public synchronized OrionRevision save(OrionRevision expectedRevision, OrionDocument document,
+            ChangeMetadata metadata) {
+        Objects.requireNonNull(expectedRevision, "expectedRevision");
+        Objects.requireNonNull(document, "document");
+        Objects.requireNonNull(metadata, "metadata");
+        Objects.requireNonNull(metadata.author(), "author");
+        byte[] content = serialize(document);
+        String revision = switch (expectedRevision) {
+            case OrionRevision.Initial initial -> null;
+            case OrionRevision.Stored stored -> stored.value();
+        };
         try {
-            GitCommitAuthor commitAuthor = new GitCommitAuthor(author.username(), author.email(), author.message());
+            GitCommitAuthor commitAuthor = new GitCommitAuthor(
+                    metadata.author().getUsername(), metadata.author().getEmail(), metadata.message());
             NativeGitRepository repository = repositoryProvider.openForWrite(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
-            CheckedFunction<GitFileAccess, Void> update = access -> {
+            CheckedFunction<GitFileAccess, OrionRevision> update = access -> {
                 byte[] previous = null;
-                if (revision.isPresent()) {
+                if (revision != null) {
                     try {
-                        previous = repository.files().readFile(
-                                new ObjectId(revision.orElseThrow()), path,
+                        previous = repository.files().readFile(new ObjectId(revision), path,
                                 (type, size, base, input) -> input.readBytes(Math.toIntExact(size)));
                     } catch (GitRepositoryFileNotFoundException missing) {
                         // The configuration file has not been created at this revision yet.
@@ -110,15 +113,12 @@ public final class NativeGitOrionConfigurationStorage implements OrionConfigurat
                 if (!Arrays.equals(content, previous)) {
                     access.write(path, content);
                 }
+                OrionRevision savedRevision = new OrionRevision.Stored(
+                        access.refUpdates().getFirst().newId().orElseThrow().toHex());
                 access.apply();
-                return null;
+                return savedRevision;
             };
-            if (revision.isPresent()) {
-                repository.files().withAccess(configurationRef, revision.orElseThrow(),
-                        commitAuthor, update);
-            } else {
-                repository.files().withAccess(configurationRef, commitAuthor, update);
-            }
+            return repository.files().withAccess(configurationRef, revision, commitAuthor, update);
         } catch (GitRefConflictException error) {
             throw new OrionConfigurationConcurrentUpdateException("Orion configuration changed concurrently", error);
         } catch (Exception error) {

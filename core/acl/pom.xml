@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>common</artifactId>
+            <artifactId>configuration</artifactId>
         </dependency>
     </dependencies>
 </project>

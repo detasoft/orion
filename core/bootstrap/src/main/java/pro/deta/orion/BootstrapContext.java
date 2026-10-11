@@ -3,8 +3,9 @@ package pro.deta.orion;
 import pro.deta.orion.keymaterial.KeyMaterialCreation;
 import pro.deta.orion.config.OrionConfigurationConcurrentUpdateException;
 import pro.deta.orion.config.ConfigurationFile;
-import pro.deta.orion.config.OrionConfigurationStorage;
+import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.OrionDocumentCodec;
 import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.config.OrionConfigurationEditor;
@@ -218,7 +219,8 @@ public final class BootstrapContext implements AutoCloseable {
     private static Optional<ConfigurationFile> loadInitialConfiguration(
             NativeGitRepositoryFactory provider,
             BootstrapConfigurationSourceConfig source) {
-        OrionConfigurationStorage storage = new NativeGitOrionConfigurationStorage(provider, source);
+        OrionVersionedConfigurationStorage storage =
+                new NativeGitOrionConfigurationStorage(provider, source);
         return switch (storage.load()) {
             case Result.Success<ConfigurationFile>(var file) -> Optional.of(file);
             case Result.Failure<ConfigurationFile> failure -> {
@@ -230,7 +232,8 @@ public final class BootstrapContext implements AutoCloseable {
         };
     }
 
-    public static Optional<OrionDocument> adoptProxies(OrionConfigurationStorage storage, OrionConfigurationEditor editor,
+    public static Optional<OrionDocument> adoptProxies(OrionVersionedConfigurationStorage storage,
+            OrionConfigurationEditor editor,
             NativeGitRepositoryFactory repositoryProvider, ConfigurationCipherCapability cipher,
             OrionDesiredState.Snapshot approved) {
         Objects.requireNonNull(storage, "configuration storage");

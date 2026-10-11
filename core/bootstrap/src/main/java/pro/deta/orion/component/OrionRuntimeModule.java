@@ -35,8 +35,9 @@ import pro.deta.orion.git.s3.ConfiguredNativeGitRepositoryFactory;
 import pro.deta.orion.decision.ConnectionFailureHandler;
 import java.util.function.BiFunction;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.config.OrionConfigurationStorage;
+import pro.deta.orion.config.OrionVersionedConfigurationStorage;
 import pro.deta.orion.config.NativeGitOrionConfigurationStorage;
+import pro.deta.orion.config.OrionDocumentCodec;
 import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -66,7 +67,7 @@ public class OrionRuntimeModule {
 
     @Provides
     @Named("bootstrap-proxies")
-    static Runnable bootstrapProxies(OrionConfigurationStorage storage,
+    static Runnable bootstrapProxies(OrionVersionedConfigurationStorage storage,
             ConfiguredNativeGitRepositoryFactory configured,
             NativeGitRepositoryFactory provider, ConfigurationCipherCapability cipher,
             ConfigurationSecrets secrets, OrionDesiredState desiredState, OrionConfigurationEditor editor,
@@ -257,9 +258,9 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    static OrionConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
+    static OrionVersionedConfigurationStorage configurationStorage(NativeGitRepositoryFactory repositoryFactory,
             BootstrapConfiguration configuration) {
         return new NativeGitOrionConfigurationStorage(repositoryFactory,
-                configuration.getBootstrap().getAccessControl());
+                configuration.getBootstrap().getAccessControl(), new OrionDocumentCodec());
     }
 }

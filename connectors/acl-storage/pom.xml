@@ -16,11 +16,16 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>acl</artifactId>
+            <artifactId>configuration</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-native-proxy</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>acl</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

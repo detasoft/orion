@@ -2,9 +2,8 @@ package pro.deta.orion.config;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.Data;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.internal.UserEmailMessage;
+import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.keymaterial.*;
 import pro.deta.orion.bootstrap.config.BootstrapConfiguration;
 import pro.deta.orion.schema.orion.*;
@@ -27,13 +26,13 @@ import java.util.function.Function;
 /** Owns configuration candidates and their single persistence boundary. */
 @Singleton
 public final class OrionConfigurationEditor {
-    private final OrionConfigurationStorage storage;
+    private final OrionVersionedConfigurationStorage storage;
     private final ConfigurationCipherCapability configurationCipher;
     private final ConfigurationMaterialCapability configurationMaterial;
     private final KeyMaterialScope materialScope;
 
     @Inject
-    public OrionConfigurationEditor(OrionConfigurationStorage storage,
+    public OrionConfigurationEditor(OrionVersionedConfigurationStorage storage,
             BootstrapConfiguration configuration, ConfigurationCipherCapability configurationCipher,
             ConfigurationMaterialCapability configurationMaterial) {
         this.storage = storage;
@@ -42,7 +41,7 @@ public final class OrionConfigurationEditor {
         this.materialScope = KeyMaterialScope.cluster(configuration.getBootstrap().getKeyMaterial().getClusterId());
     }
 
-    public synchronized OrionConfigurationModification edit(Optional<String> expectedRevision, UserEmailMessage author) {
+    public synchronized OrionConfigurationModification edit(Optional<String> expectedRevision, ChangeMetadata metadata) {
         if (expectedRevision.isPresent()) {
             if (expectedRevision.get().isBlank()) {
                 throw new IllegalArgumentException("Configuration revision is required");
@@ -50,12 +49,13 @@ public final class OrionConfigurationEditor {
         }
         OrionDocumentRevision snapshot = storage.load().valueOrFailure("Cannot load configuration for update");
         if (expectedRevision.isPresent()) {
-            if (!snapshot.revision().equals(expectedRevision)) {
+            if (!snapshot.revision().equals(new OrionRevision.Stored(expectedRevision.orElseThrow()))) {
                 throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
             }
         }
         OrionDocument document = document(snapshot).valueOrFailure("Cannot validate configuration for update");
-        return new OrionConfigurationModification(document, new ModifiedOnSave(snapshot, author));
+        return new OrionConfigurationModification(new OrionDocumentRevision(document, snapshot.revision()),
+                updated -> storage.save(snapshot.revision(), updated, metadata));
     }
 
     public synchronized void onStorageChange() {
@@ -110,33 +110,25 @@ public final class OrionConfigurationEditor {
                 KeyMaterialAlgorithm.RSA, new KeyMaterialVersion(reference.version()), materialScope));
     }
 
-    void withAccess(UserEmailMessage userEmail, String expectedRevision, Consumer<OrionConfigurationModification> operation) throws IOException {
+    void withAccess(ChangeMetadata metadata, String expectedRevision,
+            Consumer<OrionConfigurationModification> operation) throws IOException {
         if (expectedRevision == null || expectedRevision.isBlank()) {
             throw new IllegalArgumentException("Configuration revision is required");
         }
         OrionDocumentRevision snapshot = storage.load().valueOrFailure("Cannot load configuration for update");
-        if (!snapshot.revision().equals(Optional.of(expectedRevision))) {
+        if (!snapshot.revision().equals(new OrionRevision.Stored(expectedRevision))) {
             throw new OrionConfigurationConcurrentUpdateException("Configuration revision changed", null);
         }
 
         OrionDocument document = document(snapshot).valueOrFailure("Cannot validate configuration for update");
-        OrionConfigurationModification orionConfigurationModification = new OrionConfigurationModification(document, new ModifiedOnSave(snapshot, userEmail));
+        OrionConfigurationModification orionConfigurationModification =
+                new OrionConfigurationModification(new OrionDocumentRevision(document, snapshot.revision()),
+                        updated -> storage.save(snapshot.revision(), updated, metadata));
 
         try {
             operation.accept(orionConfigurationModification);
         } finally {
             orionConfigurationModification.discard();
-        }
-    }
-
-    @Data
-    private class ModifiedOnSave implements Consumer<OrionDocument> {
-        private final OrionDocumentRevision snapshot;
-        private final UserEmailMessage author;
-
-        @Override
-        public void accept(OrionDocument orionDocument) {
-            storage.save(snapshot, orionDocument, author);
         }
     }
 }
