@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.parser.v2.data.GitObjectType;
@@ -159,7 +160,7 @@ final class ProxyNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
-    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdateResult> listener) {
+    public Subscription onRefUpdate(Consumer<RefUpdateResult> listener) {
         return repository().onRefUpdate(listener);
     }
 

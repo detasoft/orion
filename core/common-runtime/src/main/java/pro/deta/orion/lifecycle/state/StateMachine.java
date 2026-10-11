@@ -1,5 +1,7 @@
 package pro.deta.orion.lifecycle.state;
 
+import pro.deta.orion.util.Subscription;
+import pro.deta.orion.util.EventListeners;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -12,7 +14,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -30,7 +31,8 @@ import java.util.concurrent.Future;
 @Slf4j
 public final class StateMachine {
     private final StateMachineDefinition definition;
-    private final List<StateMachineEventSubscriber> subscribers = new CopyOnWriteArrayList<>();
+    private final EventListeners<StateMachineEvent> subscribers = new EventListeners<>(
+            (event, failure) -> log.warn("State machine subscriber failed while observing event {}", event, failure));
     private final Map<String, StateMachine> children;
     private volatile StateMachineDefinition.State currentState;
     private volatile StateTransition transitionInProgress;
@@ -225,10 +227,9 @@ public final class StateMachine {
         return value;
     }
 
-    public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
+    public Subscription subscribe(StateMachineEventSubscriber subscriber) {
         Objects.requireNonNull(subscriber, "subscriber");
-        subscribers.add(subscriber);
-        return () -> subscribers.remove(subscriber);
+        return subscribers.subscribe(subscriber::onEvent);
     }
 
     public synchronized <A> StateTransitionResult execute(ActionBinding<A> action, A payload) {
@@ -486,13 +487,7 @@ public final class StateMachine {
     }
 
     private void notifySubscribers(StateMachineEvent event) {
-        for (StateMachineEventSubscriber subscriber : subscribers) {
-            try {
-                subscriber.onEvent(event);
-            } catch (RuntimeException e) {
-                log.warn("State machine subscriber failed while observing event {}", event, e);
-            }
-        }
+        subscribers.publish(event);
     }
 
     private record ChildAction<A>(

@@ -1,5 +1,6 @@
 package pro.deta.orion.acl;
 
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.config.*;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -62,11 +63,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final RootPasswordReset rootPasswordReset;
     private final ServerIdentityCapability serverIdentity;
     private final OrionConfigurationEditor editor;
-    private OrionVersionedConfigurationStorage.ChangeSubscription preparationSubscription;
+    private Subscription preparationSubscription;
     private final Optional<OrionDocumentRevision> initialConfiguration;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
-    private volatile OrionVersionedConfigurationStorage.ChangeSubscription changeSubscription;
+    private volatile Subscription changeSubscription;
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -142,7 +143,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void onStop() {
-        OrionVersionedConfigurationStorage.ChangeSubscription subscription = changeSubscription;
+        Subscription subscription = changeSubscription;
         if (subscription != null) {
             subscription.close();
             changeSubscription = null;

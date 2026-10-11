@@ -9,7 +9,7 @@ import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineEventType;
-import pro.deta.orion.lifecycle.state.StateMachineSubscription;
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
@@ -101,7 +101,7 @@ public class OrionApplicationLifecycle {
         }
 
         CountDownLatch stateReached = new CountDownLatch(1);
-        try (StateMachineSubscription ignored = runtimeStateMachine.subscribe(event -> {
+        try (Subscription ignored = runtimeStateMachine.subscribe(event -> {
             if (event.type() == StateMachineEventType.AFTER_STATE_ENTERED
                     && event.currentState().equals(state)) {
                 stateReached.countDown();

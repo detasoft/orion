@@ -1,5 +1,6 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.git.fileapi.GitCommitAuthor;
 import pro.deta.orion.git.fileapi.GitFileAccess;
 import pro.deta.orion.git.nativestorage.GitOperationException;
@@ -127,15 +128,15 @@ public final class NativeGitOrionConfigurationStorage implements OrionVersionedC
     }
 
     @Override
-    public ChangeSubscription onChange(Consumer<String> listener) {
+    public Subscription onChange(Consumer<String> listener) {
         Consumer<String> registered = Objects.requireNonNull(listener, "listener");
         NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName);
-        NativeGitRepository.RefUpdateSubscription subscription = repository.onRefUpdate(update -> {
+        Subscription subscription = repository.onRefUpdate(update -> {
             if (configurationRef.equals(update.update().ref().value())) {
                 registered.accept("native repository " + repository.name() + " ref " + configurationRef);
             }
         });
-        return subscription::close;
+        return subscription;
     }
 }

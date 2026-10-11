@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.util.Subscription;
+import pro.deta.orion.util.EventListeners;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.local.LocalGitIndex;
@@ -51,7 +53,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
@@ -62,7 +63,9 @@ public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final GitStorageApi storage;
     private final GitIndexApi index;
-    private final CopyOnWriteArrayList<Consumer<RefUpdateResult>> refUpdateListeners = new CopyOnWriteArrayList<>();
+    private final EventListeners<RefUpdateResult> refUpdateListeners = new EventListeners<>(
+            (result, failure) -> log.error("Repository ref listener failed for {} {}",
+                    name(), result.update().ref(), failure));
 
     public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index) {
         this.name = Objects.requireNonNull(name, "name");
@@ -159,10 +162,8 @@ public class NativeGitRepository implements AutoCloseable {
         return publishRefs(List.of(RefUpdate.fromWire(refName, expectedOldId, newId)), true).getFirst();
     }
 
-    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdateResult> listener) {
-        Consumer<RefUpdateResult> registered = Objects.requireNonNull(listener, "listener");
-        refUpdateListeners.add(registered);
-        return () -> refUpdateListeners.remove(registered);
+    public Subscription onRefUpdate(Consumer<RefUpdateResult> listener) {
+        return refUpdateListeners.subscribe(listener);
     }
 
     public ObjectId writeObject(GitObjectType type, byte[] data) {
@@ -267,13 +268,7 @@ public class NativeGitRepository implements AutoCloseable {
                     || result.update().expectedOld().equals(result.update().newId())) {
                 continue;
             }
-            for (Consumer<RefUpdateResult> listener : refUpdateListeners) {
-                try {
-                    listener.accept(result);
-                } catch (RuntimeException failure) {
-                    log.error("Repository ref listener failed for {} {}", name(), result.update().ref(), failure);
-                }
-            }
+            refUpdateListeners.publish(result);
         }
         return results;
     }
@@ -317,9 +312,4 @@ public class NativeGitRepository implements AutoCloseable {
         }
     }
 
-    @FunctionalInterface
-    public interface RefUpdateSubscription extends AutoCloseable {
-        @Override
-        void close();
-    }
 }

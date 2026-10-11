@@ -1,5 +1,6 @@
 package pro.deta.orion.config;
 
+import pro.deta.orion.util.Subscription;
 import pro.deta.orion.internal.ChangeMetadata;
 import pro.deta.orion.schema.orion.v2.OrionDocument;
 import pro.deta.orion.util.Result;
@@ -12,11 +13,6 @@ public interface OrionVersionedConfigurationStorage {
 
     OrionRevision save(OrionRevision expectedRevision, OrionDocument document, ChangeMetadata metadata);
 
-    ChangeSubscription onChange(Consumer<String> listener);
+    Subscription onChange(Consumer<String> listener);
 
-    @FunctionalInterface
-    interface ChangeSubscription extends AutoCloseable {
-        @Override
-        void close();
-    }
 }
