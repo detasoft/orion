@@ -2,7 +2,6 @@ package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.util.Subscription;
 import pro.deta.orion.util.EventListeners;
-import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.fileapi.GitFileApi;
 import pro.deta.orion.git.local.LocalGitIndex;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -58,14 +57,11 @@ import java.util.function.Consumer;
 /**
  * Native Git objects and ref publication. File operations are exposed separately through GitFileApi.
  */
-@Slf4j
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final GitStorageApi storage;
     private final GitIndexApi index;
-    private final EventListeners<RefUpdateResult> refUpdateListeners = new EventListeners<>(
-            (result, failure) -> log.error("Repository ref listener failed for {} {}",
-                    name(), result.update().ref(), failure));
+    private final EventListeners<RefUpdateResult> refUpdateListeners = new EventListeners<>();
 
     public NativeGitRepository(String name, GitStorageApi storage, GitIndexApi index) {
         this.name = Objects.requireNonNull(name, "name");
@@ -306,7 +302,7 @@ public class NativeGitRepository implements AutoCloseable {
 
     @Override
     public void close() {
-        try (storage; index) {
+        try (storage; index; refUpdateListeners) {
         } catch (IOException failure) {
             throw new UncheckedIOException(failure);
         }

@@ -23,7 +23,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /** Persists versioned documents in Git, keeping XML bytes behind the storage boundary. */
-public final class NativeGitOrionConfigurationStorage implements OrionVersionedConfigurationStorage {
+public final class NativeGitOrionConfigurationStorage
+        implements OrionVersionedConfigurationStorage {
     private final OrionDocumentCodec codec = new OrionDocumentCodec();
     private final NativeGitRepositoryProvider repositoryProvider;
     private final String repositoryName;
@@ -128,15 +129,20 @@ public final class NativeGitOrionConfigurationStorage implements OrionVersionedC
     }
 
     @Override
-    public Subscription onChange(Consumer<String> listener) {
-        Consumer<String> registered = Objects.requireNonNull(listener, "listener");
+    public Subscription onChange(Consumer<OrionRevision> listener) {
+        Objects.requireNonNull(listener, "listener");
         NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName);
-        Subscription subscription = repository.onRefUpdate(update -> {
+        return repository.onRefUpdate(update -> {
             if (configurationRef.equals(update.update().ref().value())) {
-                registered.accept("native repository " + repository.name() + " ref " + configurationRef);
+                OrionRevision revision;
+                if (update.update().newId().isPresent()) {
+                    revision = new OrionRevision.Stored(update.update().newId().orElseThrow().toHex());
+                } else {
+                    revision = new OrionRevision.Initial();
+                }
+                listener.accept(revision);
             }
         });
-        return subscription;
     }
 }
